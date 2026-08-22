@@ -16,6 +16,15 @@ set -euo pipefail
 LABEL="com.fluxaudio.mountlibrary"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 HELPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/mount_library.py"
+
+# Resolve python3 now, at install time. Hardcoding /usr/bin/python3 is
+# wrong twice over: it is Apple's stub (which can block on a GUI prompt
+# when Command Line Tools are incomplete), and this project runs on the
+# global framework python3. launchd gets a minimal PATH, so the plist
+# must carry an absolute path either way.
+PYTHON="$(command -v python3 || true)"
+[[ -x "$PYTHON" ]] || { echo "No python3 on PATH" >&2; exit 1; }
+PYTHON="$(cd "$(dirname "$PYTHON")" && pwd)/$(basename "$PYTHON")"
 DOMAIN="gui/$(id -u)"
 
 if [[ "${1:-}" == "uninstall" ]]; then
@@ -38,7 +47,7 @@ cat > "$PLIST" <<PLISTEOF
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/bin/python3</string>
+    <string>${PYTHON}</string>
     <string>${HELPER}</string>
   </array>
 
@@ -60,9 +69,9 @@ PLISTEOF
 # bootout first so re-running this script is idempotent
 launchctl bootout "${DOMAIN}/${LABEL}" 2>/dev/null || true
 launchctl bootstrap "${DOMAIN}" "$PLIST"
-launchctl kickstart -k "${DOMAIN}/${LABEL}"
 
 echo "Installed ${LABEL}"
+echo "  python : ${PYTHON}"
 echo "  helper : ${HELPER}"
 echo "  log    : ~/Library/Logs/FluxAudio/mount_library.log"
 echo
