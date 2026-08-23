@@ -11,7 +11,7 @@ WHY THIS EXISTS
 Two separate failure modes have taken the library offline:
 
   1. macOS drops the SMB mount on update / reboot / sleep-wake, and nothing
-     brings it back. `config.py` hardcodes /Volumes/music/Flux Audio/..., so
+     brings it back. `config.py` hardcodes /Volumes/music/Trellis/..., so
      the whole app goes blind.
 
   2. Browsing Network -> SynologyRB -> music in Finder opens a real SMB
@@ -61,7 +61,13 @@ MOUNTPOINT = os.environ.get("FLUX_MOUNTPOINT", "/Volumes/music")
 
 # The path we actually care about. `mount` succeeding tells us the kernel is
 # happy; only reading this tells us the app will work.
-SENTINEL = os.environ.get("FLUX_SENTINEL", "/Volumes/music/Flux Audio/Library")
+# "Trellis" (Ryan, 2026-08-23) — the NAS folder was renamed from "Flux Audio"
+# on disk; mirrors config.py's LIBRARY_ROOT default. This one matters more
+# than most: this LaunchAgent runs unattended every 5 minutes with no env
+# override, so a stale default here means it perceives a perfectly healthy
+# mount as broken forever, escalating all the way to killing Finder every
+# cycle (see MAX_GENTLE_ATTEMPTS below) — not a cosmetic miss.
+SENTINEL = os.environ.get("FLUX_SENTINEL", "/Volumes/music/Trellis/Library")
 
 # Share name as it appears in `smbutil statshares -a` (last path component).
 SHARE_NAME = SHARE_URL.rstrip("/").rsplit("/", 1)[-1]
@@ -251,7 +257,7 @@ def main():
     # the share mounted somewhere unexpected, or permissions changed on the NAS.
     if is_mounted() and not sentinel_readable():
         log("  MOUNTED BUT SENTINEL UNREADABLE: %s — wrong share, or the "
-            "Flux Audio folder moved on the NAS" % SENTINEL)
+            "Trellis folder moved on the NAS" % SENTINEL)
     else:
         log("  still not mounted after teardown + retry")
 

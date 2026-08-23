@@ -1647,6 +1647,17 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
 # otherwise block cleanup every single time.
 _JUNK_FILENAMES = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized"}
 
+# macOS's SMB client renames a file to ".smbdelete<hex>" when a delete over a
+# network share doesn't fully land, instead of just removing it (Ryan hit
+# this directly, 2026-08-22 — Synology share, Finder refused with "locked"
+# even though nothing was actually locked). The hex suffix is per-occurrence,
+# so this can't be an exact-name match like the set above.
+_JUNK_NAME_PREFIXES = (".smbdelete",)
+
+
+def _is_junk_name(name):
+    return name in _JUNK_FILENAMES or name.startswith(_JUNK_NAME_PREFIXES)
+
 # Standard macOS/user directories that must never be auto-deleted even if
 # they happen to be empty — this cleanup is meant for disposable Bulk Import
 # staging folders (e.g. "Performer Name"), not general-purpose folders a
@@ -1654,6 +1665,19 @@ _JUNK_FILENAMES = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized"}
 _PROTECTED_DIR_NAMES = {
     "Desktop", "Downloads", "Documents", "Music", "Movies",
     "Pictures", "Public", "Applications", "Library",
+
+    # Flux's own top-level siblings under Flux Audio/ — IMPORT_DIR and
+    # TRIAGE_DIRS in config.py, plus Training (Ryan's dev-only BAD-label
+    # corpus folder — deliberately NOT wired into config.py per the
+    # 2026-08-13 folder-structure decision, but still a real sibling on disk
+    # that must never vanish; this name-only safety exclusion doesn't couple
+    # the app to it functionally, so it doesn't reopen that decision).
+    # Explicit ask (Ryan, 2026-08-23): these must never be removed even if
+    # briefly empty between imports — unlike a "Performer Name" staging
+    # folder, they are permanent structure, not disposable. NOTE: "Download"
+    # (singular) is Flux's own folder and distinct from macOS's "Downloads"
+    # above; both are listed, neither substitutes for the other.
+    "Download", "Backlog", "Training", "Workshop",
 }
 
 
@@ -1668,8 +1692,14 @@ def _cleanup_empty_parent(folder):
 
     Best-effort and silent: this is a courtesy cleanup, not something that
     should ever fail — or even be noticed to fail — an otherwise-successful
-    ingest. Refuses to touch anything that isn't unambiguously a disposable
-    staging folder:
+    ingest. Junk it clears now includes ".smbdelete*" ghosts left behind by
+    macOS's SMB client, alongside the pre-existing .DS_Store/etc — see
+    _JUNK_NAME_PREFIXES. Each entry is removed independently, so one file the
+    OS still won't release doesn't block clearing everything else, or block
+    trying again on a later ingest.
+
+    Refuses to touch anything that isn't unambiguously a disposable staging
+    folder:
       - the user's home directory
       - a filesystem/volume root or mount point (e.g. "/Volumes/music")
       - a handful of standard macOS folders by name (Desktop, Downloads,
@@ -1692,13 +1722,24 @@ def _cleanup_empty_parent(folder):
             return
 
         entries = list(parent.iterdir())
-        real = [e for e in entries if not (e.is_file() and e.name in _JUNK_FILENAMES)]
+        real = [e for e in entries if not (e.is_file() and _is_junk_name(e.name))]
         if real:
             return   # still has real content — leave it alone
 
+        # Best-effort PER FILE, not all-or-nothing: an .smbdelete ghost the OS
+        # still considers busy (EBUSY, not "doesn't exist") shouldn't stop a
+        # perfectly removable .DS_Store sitting right next to it from going —
+        # attempt every entry, and only take the directory down once nothing
+        # is left. Whether the busy one ever actually clears is outside what
+        # any client-side code can force; next ingest through here tries again.
+        all_removed = True
         for e in entries:
-            e.unlink()
-        parent.rmdir()
+            try:
+                e.unlink()
+            except OSError:
+                all_removed = False
+        if all_removed:
+            parent.rmdir()
     except OSError:
         pass   # best-effort — never let cleanup failure affect the ingest
 

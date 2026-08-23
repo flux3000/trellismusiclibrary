@@ -3,10 +3,16 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Flux Audio</title>
+  <title>Trellis</title>
   <link rel="stylesheet" href="/css/main.css" />
-  <!-- apply saved theme before first paint to avoid flash -->
-  <script>if(localStorage.getItem('fluxTheme')==='light')document.body.classList.add('theme-light')</script>
+  <!-- apply saved theme + sidebar-collapse state before first paint to avoid
+       a flash/snap once app.js loads (Ryan, 2026-08-23 — same treatment as
+       fluxTheme above, for the same reason: both are per-machine display
+       state that must be correct on the very first frame). -->
+  <script>
+    if(localStorage.getItem('fluxTheme')==='light')document.body.classList.add('theme-light')
+    if(localStorage.getItem('fluxSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
+  </script>
 </head>
 <body>
 
@@ -14,8 +20,13 @@
   <div id="login-screen" class="login-screen hidden">
     <div class="login-card">
       <div class="login-logo">
-        <div class="logo-mark">FA</div>
-        <span class="logo-text">Flux Audio</span>
+        <!-- "Flux Audio" retired 2026-08-23 — Ryan decided on the rebrand
+             (see CONTEXT.md / project_app_naming.md): everyday name Trellis,
+             full name Trellis Music Library. Mark + text updated here first
+             since the login screen is the other place besides the App Header
+             that says the app's name out loud. -->
+        <div class="logo-mark">T</div>
+        <span class="logo-text">Trellis</span>
       </div>
       <form id="login-form" class="login-form" autocomplete="off" novalidate>
         <div class="form-group">
@@ -47,12 +58,28 @@
          nudge the search box off centre. -->
     <header class="app-header" id="app-header">
       <div class="app-header-left">
-        <!-- Placeholder for the real logo. "Thread" is the leading candidate
-             in the rename (Flux Audio is retiring — see CONTEXT.md); this is a
-             wordmark standing in for a designed mark, not a final decision. -->
-        <span class="app-wordmark">Thread</span>
+        <!-- Trellis is the decided name (Ryan, 2026-08-23 — see
+             project_app_naming.md: everyday name "Trellis", full name for the
+             App Store/trademark "Trellis Music Library"; "Flux Audio" is
+             retired). This span is still a plain-text wordmark standing in
+             for a designed mark — the NAME is final, the TYPOGRAPHY isn't. -->
+        <span class="app-wordmark">Trellis</span>
         <div class="app-nav-btns">
-          <button type="button" class="hdr-btn" id="nav-home" title="Home" aria-label="Home">⌂</button>
+          <!-- Home button removed 2026-08-23 — "My Library" in the sidebar is
+               now itself a link to the same place (see renderSidebar), and two
+               controls that both just go Home was the redundant half. -->
+          <!-- Sidebar collapse/expand (2026-08-23, Ryan) — left of Back per his
+               spec. Same icon idiom as the player-bar controls below: inline
+               SVG, not a unicode glyph, so it's crisp and sized on purpose
+               rather than however a given font happens to render a character.
+               State lives in localStorage (see the head script above) and on
+               <body class="sidebar-collapsed"> — wired in wireHeaderNav(). -->
+          <button type="button" class="hdr-btn" id="nav-sidebar-toggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-pressed="false">
+            <svg viewBox="0 0 16 14" width="16" height="14" fill="none" aria-hidden="true">
+              <rect x="0.75" y="0.75" width="14.5" height="12.5" rx="2" stroke="currentColor" stroke-width="1.3"/>
+              <rect x="0.75" y="0.75" width="5.5" height="12.5" rx="1.3" fill="currentColor" fill-opacity="0.55"/>
+            </svg>
+          </button>
           <button type="button" class="hdr-btn" id="nav-back" title="Back" aria-label="Back" disabled>←</button>
           <button type="button" class="hdr-btn" id="nav-fwd" title="Forward" aria-label="Forward" disabled>→</button>
         </div>

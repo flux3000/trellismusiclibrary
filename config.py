@@ -52,9 +52,14 @@ class Config:
     # ── Library ───────────────────────────────────────────────
     # Root directory where all audio recordings are stored.
     # Tracks are referenced by ID; this path never leaves the server.
+    # "Trellis" (Ryan, 2026-08-23) — the NAS folder itself was renamed on disk
+    # from "Flux Audio" to "Trellis"; these defaults follow it. See
+    # project_app_naming.md for the naming decision. (The dev repo/app root at
+    # ~/Workshop/dev/fluxaudio and the DB filename are a separate, deliberately
+    # deferred rename — see that memo's "Rebrand blast radius" section.)
     LIBRARY_ROOT = Path(os.environ.get(
         "LIBRARY_ROOT",
-        "/Volumes/music/Flux Audio/Library"
+        "/Volumes/music/Trellis/Library"
     ))
 
     # Allowlist of base directories the ingest-preview endpoint is permitted
@@ -70,13 +75,13 @@ class Config:
 
     # Where new material lands before ingest. This is the folder every "pick a
     # folder" box should open to. Defined here rather than hardcoded in the
-    # frontend so there is one place to change it — it has moved twice now
-    # (Live Music Archive/Workshop/Import -> Flux Workshop/Download ->
-    # Flux Audio/Download, 2026-08-13) and an old value was once baked into
-    # app.js.
+    # frontend so there is one place to change it — it has moved three times
+    # now (Live Music Archive/Workshop/Import -> Flux Workshop/Download ->
+    # Flux Audio/Download, 2026-08-13 -> Trellis/Download, 2026-08-23) and an
+    # old value was once baked into app.js.
     IMPORT_DIR = os.environ.get(
         "IMPORT_DIR",
-        "/Volumes/music/Flux Audio/Download"
+        "/Volumes/music/Trellis/Download"
     )
 
     # Triage destinations. During Listening Quality triage a show can be moved
@@ -86,9 +91,9 @@ class Config:
     # move, so the show leaves the scanned directory and stops being offered.
     TRIAGE_DIRS = {
         "backlog": os.environ.get(
-            "BACKLOG_DIR", "/Volumes/music/Flux Audio/Backlog"),
+            "BACKLOG_DIR", "/Volumes/music/Trellis/Backlog"),
         "workshop": os.environ.get(
-            "WORKSHOP_DIR", "/Volumes/music/Flux Audio/Workshop"),
+            "WORKSHOP_DIR", "/Volumes/music/Trellis/Workshop"),
     }
 
     # ── App ───────────────────────────────────────────────────
@@ -136,5 +141,7 @@ class Config:
 
     # How this node introduces itself on enroll and /api/share/me. The owner
     # falls back to the first admin's username when unset (see share.py).
-    SHARE_NODE_NAME = os.environ.get("SHARE_NODE_NAME") or "Flux Library"
+    # "Trellis Library" (Ryan, 2026-08-23) — the rebrand's default share name;
+    # was "Flux Library". See project_app_naming.md for the naming decision.
+    SHARE_NODE_NAME = os.environ.get("SHARE_NODE_NAME") or "Trellis Library"
     SHARE_OWNER_NAME = os.environ.get("SHARE_OWNER_NAME") or None

@@ -200,6 +200,15 @@ body {
   position: relative;
 }
 
+/* Sidebar collapse (2026-08-23, Ryan) — the App Header toggle left of Back.
+   Overrides the grid column rather than touching --sidebar-w: that variable
+   is the user's resized WIDTH (persisted separately to fluxSidebarW), and
+   collapsing shouldn't discard it — expanding again should return to
+   whatever width they'd set, not a default. */
+body.sidebar-collapsed .app-shell { grid-template-columns: 0 1fr; }
+body.sidebar-collapsed .sidebar,
+body.sidebar-collapsed .sidebar-resizer { display: none; }
+
 .app-header {
   grid-column: 1 / -1;
   display: grid;
@@ -300,7 +309,23 @@ body {
    sidebar is navigation only. The ◑ theme button went with it — light/dark is
    now a Light/Dark segmented control in the Settings modal (.settings-theme). */
 
+/* `.sidebar-nav` stopped being the scrolling element itself 2026-08-23 — it's
+   now just a non-scrolling flex column holding two children: `.nav-scroll`
+   (My Library / Collections / Favorites, scrollable) and `.nav-dims-foot`
+   (Venues/Performers/Artists/Genres, pinned). Splitting it this way is what
+   lets someone favorite a hundred shows without burying the reference
+   dimensions off the bottom of the sidebar (Ryan, 2026-08-23) — before this,
+   the whole column scrolled together and `.nav-dims-foot` merely refused to
+   shrink, which did nothing once the scroll area itself overflowed. */
 .sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-scroll {
   padding: 10px 8px 4px;
   flex: 1;
   min-height: 0;
@@ -308,23 +333,20 @@ body {
   display: flex;
   flex-direction: column;
 }
+.nav-scroll::-webkit-scrollbar { width: 4px; }
+.nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.nav-scroll::-webkit-scrollbar-thumb { background: var(--bd-2); border-radius: 2px; }
 
-/* Pushes the reference dimensions (Venues, Performers, Artists, Genres) to the
-   foot of the sidebar, just above the user bar (Ryan, 2026-08-08). They are
-   indexes for re-finding something you know exists — useful, but not what the
-   top of the sidebar is for. Collections stays up top with Library and
-   Recently Added because it is working navigation, not a reference index.
-   Collapses to nothing when the nav is short enough not to need it. */
-.nav-spacer { flex: 1 1 auto; min-height: 12px; }
-
+/* Pins the reference dimensions (Venues, Performers, Artists, Genres) to the
+   foot of the sidebar, just above the user bar (Ryan, 2026-08-08) — outside
+   `.nav-scroll` now, so no amount of scrolling in the shelf above ever moves
+   it. They are indexes for re-finding something you know exists — useful,
+   but not what the top of the sidebar is for. */
 .nav-dims-foot {
   border-top: 1px solid var(--bd-0);
-  padding-top: 6px;
+  padding: 6px 8px 4px;
   flex-shrink: 0;
 }
-.sidebar-nav::-webkit-scrollbar { width: 4px; }
-.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
-.sidebar-nav::-webkit-scrollbar-thumb { background: var(--bd-2); border-radius: 2px; }
 
 .nav-item {
   display: flex;
@@ -407,7 +429,7 @@ body {
 /* Expand/collapse caret for canonical artists with linked sub-artists.
    Enlarged 9px → 13px with a 18px hit target (2026-08-02, Ryan): at 9px in
    --t3 these did not read as controls at all. Same treatment applied to every
-   other caret in the app — see .nav-caret and .lq-dir .ic. */
+   other caret in the app — see .nav-caret and .lq-dir-caret. */
 .artist-expand-caret {
   display: inline-flex;
   align-items: center;
@@ -2925,11 +2947,11 @@ input[type="range"].progress-bar {
 
 .batch-expand-btn {
   flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
   background: none;
   border: none;
   color: var(--t2);   /* was --t3: too faint to read as a control (2026-08-02) */
   cursor: pointer;
-  font-size: 17px;
   width: 22px;
   padding: 0;
   line-height: 1;
@@ -3641,9 +3663,12 @@ a.member-chip-name:hover { color: var(--accent); }
 .lib-select-opt:hover { background: var(--bg-4); color: var(--t0); }
 .lib-select-opt.active { color: var(--accent-lit); }
 
-/* Section heading, not a link (Ryan, 2026-08-22). The Library nav item it
-   replaced went to the App Header's Home button; a heading that sometimes
-   navigates was the confusing half of having both. */
+/* Reversed 2026-08-23 (Ryan) — MY LIBRARY is a link again, now that the App
+   Header's Home button is gone rather than duplicating it: one control for
+   "take me to Library Home," not two. `.nav-header--link` is layered on top
+   rather than folded into `.nav-header` itself, since the shared-library
+   branch still renders a bare, non-navigating heading (there's no "home" to
+   link to inside someone else's library — see renderSidebar). */
 .nav-header {
   padding: 14px 16px 6px;
   font-size: 11px;
@@ -3653,21 +3678,48 @@ a.member-chip-name:hover { color: var(--accent); }
   color: var(--t2);
   flex-shrink: 0;
 }
+.nav-header--link { display: block; text-decoration: none; cursor: pointer; transition: color 0.12s; }
+.nav-header--link:hover { color: var(--t0); }
 
-/* Pinned to the bottom of the column: it is the only ACTION in a list of
-   destinations, so it sits apart from them rather than at the top competing
-   with the shelf for first attention. */
+/* Favorites (2026-08-23) — no heading, no caret, flush at MY LIBRARY's own
+   16px indentation ("we will simply display the favorited recordings" —
+   Ryan). Empty entirely renders nothing (see _renderFavoritesFlat), so this
+   just needs to look right as a stack of rows, not as a labelled section. */
+.nav-favorites { display: flex; flex-direction: column; }
+.nav-fav-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 16px; cursor: pointer;
+}
+.nav-fav-row:hover { background: var(--bg-1); }
+.nav-fav-avatar {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  object-fit: cover; background: var(--bg-3);
+}
+/* Initials fallback — same idiom as heroPortraitHtml()'s, shrunk down: with
+   photos on a small minority of performers, no-photo is the normal case here
+   too and should look intentional rather than like a missing image. */
+.nav-fav-avatar--blank {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 600; color: var(--t2);
+}
+.nav-fav-title { font-size: 12px; color: var(--t0); }
+
+/* Moved to the TOP of the column 2026-08-22 (Ryan) — it is the entry point
+   into ingest and now sits first, under the App Header, rather than at the
+   bottom below the shelf. Lightened background + a coloured border (was the
+   same neutral --bd-1 border as every other nav element) so it reads as the
+   one action among the destinations below it, not another list row. */
 .nav-add-btn {
   display: flex; align-items: center; justify-content: center; gap: 7px;
-  margin: 8px 12px 10px; padding: 8px 12px;
+  margin: 10px 12px 6px; padding: 9px 12px;
   flex-shrink: 0;
-  background: var(--bg-2); color: var(--t0);
-  border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  background: var(--bg-3); color: var(--t0);
+  border: 1px solid var(--accent); border-radius: var(--r-sm);
   font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
   text-decoration: none; cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
 }
-.nav-add-btn:hover { background: var(--bg-3); border-color: var(--accent); color: var(--t0); }
+.nav-add-btn:hover { background: var(--bg-4); border-color: var(--accent-lit); color: var(--t0); }
 .nav-add-plus { font-size: 15px; line-height: 1; color: var(--accent); }
 
 /* Add Recording page top bar (Batch Import shortcut) */
@@ -3691,15 +3743,37 @@ a.member-chip-name:hover { color: var(--accent); }
 .nav-action { cursor: pointer; color: var(--t3); font-size: 13px; line-height: 1; }
 .nav-action:hover { color: var(--t0); }
 
+/* Shared expand/contract chevron (2026-08-23) — see chevronIcon() in app.js
+   for the full rationale. One inline SVG, sitewide, replacing the bare ▸/▾
+   unicode triangle. Sized a hair larger than the old glyph's effective
+   on-screen size was ("the tiny caret just isn't big enough" — Ryan), and
+   crisp at any zoom since it's vector, not a font glyph.
+   Two rotation mechanisms coexist by design, matching how each site already
+   tracked its own open/closed state before this change:
+     - Most carets (.nav-caret, .rq-caret, .lq-dir-caret) sit inside a
+       container that already gets an `.open` class — the CSS on THAT
+       container rotates 90°, and this icon just rides along inside it.
+     - A couple of sites (batch import's row expander, the ingest review
+       panel toggle) had no such container and swapped the character itself;
+       those now toggle `.caret-ic--open` directly on the icon.
+   Either way "closed" is the same undecorated right-pointing chevron. */
+.caret-ic { display: block; flex-shrink: 0; transition: transform 0.12s; }
+.caret-ic--open { transform: rotate(90deg); }
+
 /* Sidebar dimension caret. 9px → 13px with a real hit target (2026-08-02). */
 .nav-caret {
   display: inline-flex; align-items: center; justify-content: center;
   width: 18px; height: 18px; flex-shrink: 0;
-  font-size: 13px; color: var(--t2);
+  color: var(--t2);
   transition: transform 0.12s, color 0.1s;
 }
 .nav-caret.open { transform: rotate(90deg); }
 .nav-dim:hover .nav-caret { color: var(--accent-lit); }
+/* Smaller variant for the per-collection expand caret (2026-08-23) — those
+   rows sit one level down from a dim section header and read as a lighter
+   control, not a section toggle. */
+.nav-caret--sm { width: 14px; height: 14px; }
+.nav-caret--sm .caret-ic { width: 8px; height: 8px; }
 
 .nav-record {
   display: flex; align-items: center; gap: 6px;
@@ -3711,13 +3785,22 @@ a.member-chip-name:hover { color: var(--accent); }
 .nav-record.active { color: var(--accent); background: var(--bg-1); }
 .nav-record .truncate { flex: 1; min-width: 0; }
 .nav-record-count { font-size: 10px; color: var(--t3); }
-/* A favourite is a SHOW, so the row names it the way collectors do: the act,
-   then the date. The date is muted but present — for a live recording it is
-   half the identity, not a detail (see CONTEXT.md on the handbill card). */
-.nav-record-sub { font-size: 10px; color: var(--t3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-.nav-record--fav { gap: 8px; }
 .nav-record--empty { color: var(--t3); font-style: italic; cursor: default; }
 .nav-records--sub .nav-record { padding-left: 52px; }
+/* Flush rows (2026-08-23) — Collections' own name-rows and the per-collection
+   recordings under them, both unindented to the padding COLLECTIONS itself
+   sits at (16px, matching .nav-header) rather than the generic 40px every
+   other dimension's rows use — Ryan wanted Collections to read as part of the
+   shelf's structure, not one more indexed dimension list. */
+.nav-record--flush { padding-left: 16px; gap: 8px; }
+.nav-col-recs { padding-bottom: 2px; }
+.nav-col-rec {
+  padding: 4px 16px 4px 34px;   /* "slightly indented" under its collection's flush name */
+  font-size: 11.5px; color: var(--t1); cursor: pointer;
+}
+.nav-col-rec:hover { background: var(--bg-1); color: var(--t0); }
+.nav-col-rec.nav-record--empty { padding-left: 34px; cursor: default; }
+.nav-col-rec.nav-record--empty:hover { background: none; color: var(--t3); }
 
 /* ── Flat compact recording table (library, catalog, collection) ──────────────── */
 .rec-table { padding: 4px 0 20px; }
@@ -4593,11 +4676,11 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 .rev-panel-toggle {
+  display: flex; align-items: center; justify-content: center;
   background: none;
   border: none;
   color: var(--t1);   /* brighter than the label so it's easy to spot */
   cursor: pointer;
-  font-size: 14px;    /* bigger caret */
   padding: 0;
   line-height: 1;
   flex-shrink: 0;
@@ -5426,17 +5509,20 @@ a.member-chip-name:hover { color: var(--accent); }
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* Padding matches .batch-shell (24px 28px) — this page had none, so the title
-   sat flush against the sidebar edge (2026-08-02). */
-.lq-wrap { max-width: 1034px; padding: 24px 28px; }
+   sat flush against the sidebar edge (2026-08-02). No max-width (2026-08-22,
+   Ryan: "make the box full width") — the navigator is meant to read like a
+   real directory pane, and a directory pane fills the window it's given. */
+.lq-wrap { padding: 24px 28px; }
 .lq-h1 { font-size: 21px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.01em; }
 .lq-sub-head { color: var(--t2); font-size: 13px; margin-bottom: 24px; }
 
 /* ── Folder navigator ────────────────────────────────────────────────────────
-   Rebuilt 2026-08-02: the navigator IS the page. The separate address input and
-   the Browse toggle are gone — they showed the same path a second time and hid
-   a panel that was already open. One location (the crumbs), one action (the
-   footer button), and a labelled shortcut row so the quick links read as the
-   fastest route rather than as decoration. */
+   Rebuilt 2026-08-02: the navigator IS the page. Reworked again 2026-08-22
+   (Ryan) to read as a standard navigation pane rather than a port of the
+   standalone quality tool: the "Jump to" shortcut row is gone in favour of one
+   Browse button beside the crumbs; rows carry real subfolder-count and size
+   columns instead of a decorative marker and an "audio" tag; a caret expands
+   a folder's children in place instead of the row only ever navigating. */
 .lq-path-input {
   flex: 1; background: var(--bg-2); border: 1px solid var(--bd-1); color: var(--t0);
   border-radius: var(--r-md); padding: 7px 11px;
@@ -5449,26 +5535,14 @@ a.member-chip-name:hover { color: var(--accent); }
   border-radius: var(--r-md); padding: 13px 15px; margin-bottom: 20px;
 }
 
-/* Shortcut row. The label is the fix for "it does not state the importance of
-   the quick links" — without it the pills look like breadcrumb debris. */
-.lq-nav-head {
-  display: flex; flex-wrap: wrap; gap: 7px; align-items: center;
-  padding-bottom: 11px; border-bottom: 1px solid var(--bd-0);
+/* Address row: breadcrumbs, a Browse button (native folder dialog in the
+   desktop app; falls back to Type a path under run_headless.py, where
+   PyWebView's API doesn't exist), and the rare type-a-path case behind a link
+   that swaps the row in place. */
+.lq-nav-addr {
+  display: flex; align-items: center; gap: 10px; padding-bottom: 11px;
+  border-bottom: 1px solid var(--bd-0);
 }
-.lq-nav-lbl {
-  font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
-  color: var(--t3); margin-right: 2px;
-}
-.lq-shortcut {
-  background: var(--bg-5); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
-  padding: 4px 10px; font-size: 11.5px; color: var(--t1); cursor: pointer;
-  font-family: inherit;
-}
-.lq-shortcut:hover { border-color: var(--accent); color: var(--accent-lit); }
-
-/* Address row: breadcrumbs, with the rare type-a-path case behind a link that
-   swaps them out in place. */
-.lq-nav-addr { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
 .lq-crumbs {
   display: flex; flex-wrap: wrap; gap: 5px; align-items: center; flex: 1; min-width: 0;
   font-family: var(--font-mono); font-size: 12px; color: var(--t2);
@@ -5476,6 +5550,12 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-crumbs a { color: var(--t1); cursor: pointer; text-decoration: none; }
 .lq-crumbs a:hover { color: var(--accent-lit); text-decoration: underline; }
 .lq-crumbs .sep { color: var(--t3); }
+.lq-browse-btn {
+  background: var(--bg-5); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  padding: 4px 10px; font-size: 11.5px; color: var(--t1); cursor: pointer;
+  font-family: inherit; flex: none;
+}
+.lq-browse-btn:hover { border-color: var(--accent); color: var(--accent-lit); }
 .lq-typepath {
   background: none; border: none; color: var(--t3); font-size: 11.5px;
   cursor: pointer; padding: 2px 4px; flex: none; text-decoration: underline;
@@ -5488,6 +5568,9 @@ a.member-chip-name:hover { color: var(--accent); }
   color: var(--t2); font-size: 13px;
 }
 .lq-nav-loading code { font-size: 12px; color: var(--t1); }
+/* Inline variant for an expanding row's children — no full-width takeover,
+   indented to sit under the caret it belongs to. */
+.lq-nav-loading--sm { padding: 8px 9px 8px 27px; }
 .lq-spin {
   width: 13px; height: 13px; flex: none; border-radius: 50%;
   border: 2px solid var(--bd-2); border-top-color: var(--accent);
@@ -5495,22 +5578,68 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 @keyframes lq-spin { to { transform: rotate(360deg); } }
 
-.lq-dirs { max-height: 340px; overflow-y: auto; border-top: 1px solid var(--bd-0); padding-top: 8px; }
+/* Column header over the row grid below. The leading blank span is exactly
+   the caret column's width, so "Name" lines up with names, not with the
+   caret each row starts with. */
+.lq-dirs-head {
+  display: flex; align-items: center; gap: 9px; padding: 8px 9px 6px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--t3);
+}
+.lq-dirs-head-sp { width: 18px; flex: none; }
+.lq-dirs-head-nm { flex: 1; min-width: 0; }
+.lq-dirs-head-count { width: 90px; flex: none; text-align: right; }
+.lq-dirs-head-size { width: 76px; flex: none; text-align: right; }
+
+.lq-dirs { max-height: 420px; overflow-y: auto; border-top: 1px solid var(--bd-0); padding-top: 4px; }
+
+/* An expanded row's children are fetched once (see toggleExpand in app.js)
+   and then just shown/hidden — collapsing never throws the fetch away. */
+.lq-dir-children { display: none; }
+.lq-dir-row--open > .lq-dir-children { display: block; }
+
 .lq-dir {
   display: flex; align-items: center; gap: 9px; padding: 6px 9px;
   border-radius: var(--r-sm); cursor: pointer; font-size: 13px;
 }
 .lq-dir:hover { background: var(--bg-4); }
 .lq-dir:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.lq-dir--empty { color: var(--t3); cursor: default; }
+.lq-dir--empty { color: var(--t3); cursor: default; padding: 6px 9px; }
 .lq-dir--empty:hover { background: none; }
-.lq-dir .ic { color: var(--t2); font-size: 13px; width: 16px; flex: none; text-align: center; }
-.lq-dir:hover .ic { color: var(--accent-lit); }
 .lq-dir .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lq-dir .tag {
-  font-size: 10px; color: var(--green); background: rgba(106,184,128,.13);
-  border-radius: var(--r-sm); padding: 1px 7px;
+
+/* Performer-implied-by-folder-name badge (2026-08-22). Uses the shared
+   .badge base (see the Source badges section) rather than one-off styling —
+   "new" gets the same accent treatment as everything else worth noticing;
+   "existing" stays deliberately quiet since it's the unremarkable case. */
+.lq-perf-badge { flex: none; }
+.lq-perf-badge--new      { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-lit); }
+.lq-perf-badge--existing { background: var(--bg-5); color: var(--t3); }
+
+.lq-dir-count, .lq-dir-size {
+  flex: none; text-align: right; font-size: 11.5px; color: var(--t2);
+  font-variant-numeric: tabular-nums;
 }
+.lq-dir-count { width: 90px; }
+.lq-dir-size { width: 76px; }
+
+/* Same rotating-triangle caret as .nav-caret and .artist-expand-caret: it
+   expands/collapses THIS row's children in place and never navigates —
+   clicking the row itself (name, count, size) still does that, same as
+   before. A leaf folder gets the spacer variant, empty of content, so its
+   name still lines up under its siblings' names rather than under their
+   carets. */
+.lq-dir-caret {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; flex-shrink: 0;
+  font-size: 13px; color: var(--t2); cursor: pointer;
+  transition: transform 0.12s, color 0.1s;
+}
+.lq-dir-caret.open { transform: rotate(90deg); }
+.lq-dir-caret:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 3px; }
+.lq-dir:hover .lq-dir-caret { color: var(--accent-lit); }
+.lq-dir-caret--spacer { cursor: default; }
+.lq-dir-caret--spacer::before { content: ''; }
+
 .lq-pick-foot {
   display: flex; align-items: center; gap: 10px; margin-top: 11px; padding-top: 11px;
   border-top: 1px solid var(--bd-0); font-size: 12px; color: var(--t3);
@@ -5519,6 +5648,7 @@ a.member-chip-name:hover { color: var(--accent); }
   color: var(--red); padding: 14px 16px; background: rgba(217,96,85,.08);
   border-radius: var(--r-md); font-size: 13px;
 }
+.lq-err--sm { padding: 7px 9px 7px 27px; font-size: 12px; background: none; }
 
 /* ── Progress + run bar ──────────────────────────────────────────────────── */
 .lq-progress { display: flex; align-items: center; gap: 12px; margin: 14px 0; font-size: 12.5px; color: var(--t2); }

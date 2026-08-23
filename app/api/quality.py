@@ -30,12 +30,15 @@ part: a restart mid-run loses the progress bar, not the analysis.
 import os
 import threading
 import traceback as _tb
+import unicodedata
 import uuid
 
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required
+from sqlalchemy import func
 
 from app.extensions import db
+from app.models.performer import Performer
 from app.utils import quality_store as qs
 from app.utils.ingest import resolve_shows_in_dir
 
@@ -639,11 +642,12 @@ def browse():
     """
     List sub-folders of a path so the UI can offer a real directory picker.
 
-    Ported from the standalone harness (tools/quality/quality_app.py) so the
-    in-app source step behaves identically — same breadcrumbs, same shortcuts,
-    same "audio" tags. PyWebView's native folder dialog exists, but the picker
-    is faster for the common case of walking one artist folder at a time, and
-    it tells you which folders are analysable BEFORE you click into them.
+    Originally ported from the standalone harness (tools/quality/quality_app.py).
+    The in-app picker has since diverged (2026-08-22: the shortcut row and
+    "audio" tag were dropped from the UI, and PyWebView's native folder dialog
+    — long unused — is now wired to a Browse button), but this endpoint still
+    returns `shortcuts` and `audio` for compatibility; nothing client-side
+    reads them anymore.
 
     Read-only, and constrained to IMPORT_ROOTS like every other filesystem
     endpoint here.
@@ -696,9 +700,21 @@ def browse():
         full = os.path.join(path, name)
         if not os.path.isdir(full):
             continue
-        has_audio, subdirs = _probe_folder(full, AUDIO_EXT)
+        has_audio, subdirs, subdir_count, size_bytes = _probe_folder(full, AUDIO_EXT)
         dirs.append({"name": name, "path": full,
-                     "audio": has_audio, "subdirs": subdirs})
+                     "audio": has_audio, "subdirs": subdirs,
+                     "subdir_count": subdir_count, "size_bytes": size_bytes})
+
+    # Bulk Import's standing convention is one folder per act
+    # (ImportDir/Performer Name/Show Folder/ — see _cleanup_empty_parent's
+    # docstring in utils/ingest.py). Tag every row with whether ITS name
+    # already matches a Performer, so the common top-level listing shows
+    # which acts are already in the library at a glance. Meaningless at
+    # deeper levels (a date-named show folder is never a Performer), but
+    # harmless — it just always reads "new" there.
+    pstatus = _performer_status_map([d["name"] for d in dirs])
+    for d in dirs:
+        d["performer_status"] = pstatus[d["name"]]
 
     parent = os.path.dirname(path.rstrip(os.sep)) or "/"
     return jsonify({
@@ -714,6 +730,36 @@ def browse():
     })
 
 
+def _performer_status_map(names):
+    """
+    {folder_name: "existing"|"new"} — same match rule as
+    resolve_or_create_performer() and the duplicate-name guard in
+    api/performers.py (case-insensitive on Performer.name), so "does this
+    performer already exist" means the same thing everywhere in the app.
+    Deliberately NOT resolve_or_create_performer itself: that function
+    creates on a miss and can fire a synchronous MusicBrainz lookup — fine
+    inside the ingest background job it was written for, a landmine if
+    called from a read-only endpoint that runs on every folder browse.
+
+    Folder names are NFC-normalised before matching: macOS hands out
+    decomposed (NFD) filenames, the DB stores composed (NFC), and comparing
+    the two directly is exactly the "Lucía" bug in CONTEXT.md's traps
+    section. Batched into one query rather than one per row — a Bulk Import
+    root can list a hundred act folders.
+    """
+    if not names:
+        return {}
+    normed = {n: unicodedata.normalize("NFC", n).lower() for n in names}
+    existing_lower = {
+        row[0].lower() for row in
+        db.session.query(Performer.name)
+                   .filter(func.lower(Performer.name).in_(set(normed.values())))
+                   .all()
+    }
+    return {n: ("existing" if lo in existing_lower else "new")
+            for n, lo in normed.items()}
+
+
 # One entry per probed folder: path → (mtime, has_audio, has_subdirs). Browsing
 # is a walk — up, back down, up again — so the same artist folder gets probed
 # several times in one sitting, and the answer only changes when the folder
@@ -724,7 +770,8 @@ _BROWSE_CACHE_MAX = 4000
 
 def _probe_folder(full, audio_ext):
     """
-    (has_audio, has_subdirs) for one folder — the two facts the picker shows.
+    (has_audio, has_subdirs, subdir_count, size_bytes) for one folder — the
+    facts the picker's row shows.
 
     Uses os.scandir, NOT os.listdir + os.path.isdir (2026-08-02). scandir's
     DirEntry carries the directory type from the readdir call itself, so
@@ -738,6 +785,15 @@ def _probe_folder(full, audio_ext):
     recording that keeps its CD1/CD2 subdirs has no audio at its own root, and
     marking it empty would claim a perfectly analysable show has nothing in it.
     That descent stops at the first subfolder containing audio.
+
+    `size_bytes` is DELIBERATELY SHALLOW — the sum of files sitting directly in
+    `full`, not a recursive walk of everything beneath it (Ryan, 2026-08-22).
+    A full recursive size is exactly the per-child-stat cost the scandir
+    rewrite above exists to avoid; a twenty-show artist folder would pay twenty
+    subfolder walks just to paint one row of the picker. One extra stat() per
+    direct child (already-cached DirEntry, so no extra syscall to know it's a
+    file) is the same order of magnitude as the has_audio/subdirs check this
+    function already did, so it rides along for free.
     """
     try:
         mtime = os.stat(full).st_mtime
@@ -745,20 +801,23 @@ def _probe_folder(full, audio_ext):
         mtime = None
     hit = _BROWSE_CACHE.get(full)
     if hit and hit[0] == mtime:
-        return hit[1], hit[2]
+        return hit[1], hit[2], hit[3], hit[4]
 
-    has_audio, subdir_paths = False, []
+    has_audio, subdir_paths, size_bytes = False, [], 0
     try:
         with os.scandir(full) as it:
             for e in it:
-                if not has_audio and e.name.lower().endswith(audio_ext):
+                if e.name.startswith("."):
+                    continue
+                if e.name.lower().endswith(audio_ext):
                     has_audio = True
-                elif not e.name.startswith("."):
-                    try:
-                        if e.is_dir():
-                            subdir_paths.append(e.path)
-                    except OSError:
-                        pass
+                try:
+                    if e.is_dir():
+                        subdir_paths.append(e.path)
+                    else:
+                        size_bytes += e.stat().st_size
+                except OSError:
+                    pass
     except (PermissionError, OSError):
         pass
 
@@ -772,10 +831,11 @@ def _probe_folder(full, audio_ext):
             except (PermissionError, OSError):
                 continue
 
+    subdir_count = len(subdir_paths)
     if len(_BROWSE_CACHE) >= _BROWSE_CACHE_MAX:
         _BROWSE_CACHE.clear()
-    _BROWSE_CACHE[full] = (mtime, has_audio, bool(subdir_paths))
-    return has_audio, bool(subdir_paths)
+    _BROWSE_CACHE[full] = (mtime, has_audio, bool(subdir_paths), subdir_count, size_bytes)
+    return has_audio, bool(subdir_paths), subdir_count, size_bytes
 
 
 def _shortcuts():

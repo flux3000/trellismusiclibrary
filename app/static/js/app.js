@@ -351,6 +351,43 @@ const App = (() => {
 
   function esc(s) { return escHtml(s) }
 
+  // Shared byte formatter — used by the Add Recordings folder navigator's
+  // size column (2026-08-22). One decimal above 1 GB, none below, because a
+  // show folder in single-digit GB and a multi-disc box set in double digits
+  // both want to be scannable at a glance.
+  function fmtBytes(n) {
+    if (!n) return '—'
+    if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB'
+    if (n >= 1e6) return (n / 1e6).toFixed(0) + ' MB'
+    if (n >= 1e3) return (n / 1e3).toFixed(0) + ' KB'
+    return n + ' B'
+  }
+
+  // Shared expand/contract chevron (Ryan, 2026-08-23 — "the tiny caret just
+  // isn't big enough... do this replacement for all uses throughout the
+  // site"). Replaces the bare ▸/▾ unicode triangle everywhere it was used as
+  // a real expand/collapse control. A unicode triangle's visual weight varies
+  // wildly by font/OS — which is why the 2026-08-02 pass that bumped these to
+  // a bigger font-size and an 18px hit target (see .nav-caret) never actually
+  // fixed the complaint. One crisp inline SVG instead, coloured with
+  // currentColor so it inherits whatever the container already sets.
+  //
+  // Drawn pointing right (closed); every call site already rotates its
+  // container 90° on an `.open`/`.expanded` class to mean "expanded", so that
+  // CSS keeps working untouched — only the glyph itself changed. Deliberately
+  // scoped to the tree/list expand-collapse family (.nav-caret, .rq-caret,
+  // .lq-dir-caret, batch import's row expander, the ingest review panel
+  // toggle). NOT applied to .lib-select-caret or "Actions ▾" — those open a
+  // dropdown MENU, a different control with different semantics, and weren't
+  // what "the expand/contract toggle" was describing. Also left alone: the
+  // quality report's lq-tab chevrons and the ingest review "parsed tracks"
+  // toggle, both ▴/▾ swap-based rather than rotate-based and already a
+  // deliberately tuned, different visual idiom (see the 2026-08-09 comment on
+  // _lqTabs) — worth revisiting together if Ryan wants those unified too.
+  function chevronIcon(cls) {
+    return `<svg class="caret-ic${cls ? ' ' + cls : ''}" viewBox="0 0 8 8" width="10" height="10" fill="none" aria-hidden="true"><path d="M1.5 0.5 L6.5 4 L1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  }
+
   // Canonical form for comparing filesystem paths client-side. macOS hands out
   // decomposed (NFD) filenames; the quality API's staging rows are always
   // NFC-normalised server-side (app/utils/quality_store.py), but batch-scan's
@@ -843,12 +880,12 @@ const App = (() => {
           ${icon ? `<span class="nav-icon">${icon}</span>` : ''}
           <span class="nav-dim-label truncate">${label}</span>
           <span class="nav-dim-actions">
-            ${(libraryState.activeId != null || dim === 'favorites') ? '' :
+            ${libraryState.activeId != null ? '' :
               `<span class="nav-action" data-act="new" data-admin
                      title="Create new ${esc(singular)}">＋</span>`}
             <span class="nav-action" data-act="refresh" title="Refresh list">↻</span>
           </span>
-          <span class="nav-caret ${open ? 'open' : ''}">▸</span>
+          <span class="nav-caret ${open ? 'open' : ''}">${chevronIcon()}</span>
         </div>
         <div class="nav-records ${sub ? 'nav-records--sub' : ''}" id="nav-records-${dim}" style="display:${open ? '' : 'none'}"></div>
       </div>`
@@ -858,8 +895,7 @@ const App = (() => {
     if (_dimCache[dim]) return _dimCache[dim]
     let rows = []
     try {
-      if (dim === 'favorites')         rows = await API.recordings.favorites()
-      else if (dim === 'venues')       rows = await API.venues.list()
+      if (dim === 'venues')            rows = await API.venues.list()
       else if (dim === 'performers')   rows = await API.performers.list()
       else if (dim === 'artists')      rows = await API.artists.list()
       else if (dim === 'collections')  rows = await API.collections.list()
@@ -869,34 +905,93 @@ const App = (() => {
     return rows
   }
 
+  // Per-collection expand state (2026-08-23) — separate from state.expandedDims,
+  // which only tracks whether the COLLECTIONS list itself is open. This tracks
+  // which individual collections, inside that list, are themselves expanded to
+  // show their recordings — a second, independent level of disclosure.
+  const _colOpenIds = new Set()
+  const _colRecCache = {}
+
   async function _renderDimRecords(dim) {
     const box = document.getElementById(`nav-records-${dim}`)
     if (!box) return
     const rows = await _loadDim(dim)
-    const target = { favorites: 'recording', venues: 'venue', performers: 'artist',
+    const target = { venues: 'venue', performers: 'artist',
                      artists: 'person', collections: 'collection', genres: 'genre' }[dim]
     if (!rows.length) {
-      // Favorites is empty by default for everyone, so it says what to DO about
-      // it rather than the bare "None yet" a dimension index uses.
-      box.innerHTML = dim === 'favorites'
-        ? `<div class="nav-record nav-record--empty">Star a recording to keep it here</div>`
-        : `<div class="nav-record nav-record--empty">None yet</div>`
+      box.innerHTML = `<div class="nav-record nav-record--empty">None yet</div>`
       return
     }
-    // Favorites rows are recordings, not dimension entries: a show is named by
-    // its act and its date, and the date is load-bearing for a live recording —
-    // it is how collectors name, trade and search shows (see CONTEXT.md).
-    box.innerHTML = rows.map(r => dim === 'favorites'
-      ? `<div class="nav-record nav-record--fav" data-dim="${dim}" data-id="${r.id}"
-              title="${esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))}">
-           <span class="truncate">${esc(r.performer || 'Unknown act')}</span>
-           <span class="nav-record-sub">${esc(r.date || '')}</span>
-         </div>`
-      : `<div class="nav-record" data-dim="${dim}" data-id="${r.id}">
+    // Collections got its own row shape and click behaviour 2026-08-23: a
+    // collection name is now click-to-expand-in-place (showing the recordings
+    // it holds) rather than a navigation link, unindented to sit at the same
+    // level as the COLLECTIONS header itself, and without the recording-count
+    // badge every other dimension row carries ("out of context" — Ryan). Every
+    // other dimension (Venues, Performers, Artists, Genres) is untouched.
+    box.innerHTML = dim === 'collections'
+      ? rows.map(c => {
+          const open = _colOpenIds.has(c.id)
+          return `
+            <div class="nav-col-item">
+              <div class="nav-record nav-record--flush" data-col-id="${c.id}">
+                <span class="nav-caret nav-caret--sm ${open ? 'open' : ''}">${chevronIcon()}</span>
+                <span class="truncate">${esc(c.name)}</span>
+              </div>
+              <div class="nav-col-recs" id="nav-col-recs-${c.id}" style="display:${open ? '' : 'none'}"></div>
+            </div>`
+        }).join('')
+      : rows.map(r => `<div class="nav-record" data-dim="${dim}" data-id="${r.id}">
            <span class="truncate">${esc(r.name)}</span>${r.recording_count ? `<span class="nav-record-count">${r.recording_count}</span>` : ''}
          </div>`).join('')
-    box.querySelectorAll('.nav-record[data-id]').forEach(el =>
-      el.addEventListener('click', () => { window.location.hash = `#/${target}/${el.dataset.id}` }))
+    if (dim === 'collections') {
+      box.querySelectorAll('.nav-record--flush[data-col-id]').forEach(el =>
+        el.addEventListener('click', () => _toggleCollectionRow(parseInt(el.dataset.colId, 10))))
+      _colOpenIds.forEach(id => { if (document.getElementById(`nav-col-recs-${id}`)) _renderCollectionRecs(id) })
+    } else {
+      box.querySelectorAll('.nav-record[data-id]').forEach(el =>
+        el.addEventListener('click', () => { window.location.hash = `#/${target}/${el.dataset.id}` }))
+    }
+  }
+
+  // Expands one collection in place to show the recordings it holds — the
+  // same information the collection's own page shows, just close enough to
+  // reach without leaving the shelf (Ryan, 2026-08-23). Reuses
+  // GET /api/collections/<id>, which already returns a `recordings` array
+  // (card=True rows) for the collection detail page — no new endpoint needed
+  // (checked API.collections and app/api/collections.py before building this;
+  // see get_collection()).
+  async function _toggleCollectionRow(id) {
+    const row   = document.querySelector(`.nav-record--flush[data-col-id="${id}"]`)
+    const box   = document.getElementById(`nav-col-recs-${id}`)
+    const caret = row?.querySelector('.nav-caret')
+    if (_colOpenIds.has(id)) {
+      _colOpenIds.delete(id); if (box) box.style.display = 'none'; caret?.classList.remove('open')
+      return
+    }
+    _colOpenIds.add(id); if (box) box.style.display = ''; caret?.classList.add('open')
+    _renderCollectionRecs(id)
+  }
+
+  async function _renderCollectionRecs(id) {
+    const box = document.getElementById(`nav-col-recs-${id}`)
+    if (!box) return
+    if (!_colRecCache[id]) {
+      box.innerHTML = `<div class="nav-record nav-record--empty nav-col-rec">Loading…</div>`
+      try {
+        const full = await API.collections.get(id)
+        _colRecCache[id] = full.recordings || []
+      } catch (_) {
+        _colRecCache[id] = []
+      }
+    }
+    const recs = _colRecCache[id]
+    box.innerHTML = recs.length
+      ? recs.map(r => `<div class="nav-col-rec truncate" data-id="${r.id}">
+           ${esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))}
+         </div>`).join('')
+      : `<div class="nav-record nav-record--empty nav-col-rec">No recordings yet</div>`
+    box.querySelectorAll('.nav-col-rec[data-id]').forEach(el =>
+      el.addEventListener('click', e => { e.stopPropagation(); window.location.hash = `#/recording/${el.dataset.id}` }))
   }
 
   function _toggleDim(dim, forceOpen) {
@@ -914,8 +1009,44 @@ const App = (() => {
 
   function _refreshDim(dim) {
     _dimCache[dim] = null
+    if (dim === 'collections') { _colRecCache && Object.keys(_colRecCache).forEach(k => delete _colRecCache[k]) }
     _toggleDim(dim, true)   // ensure open, then re-render from DB
     _renderDimRecords(dim)
+  }
+
+  // Favorites (2026-08-23): no longer a collapsible dim-section — Ryan wants
+  // starred shows shown flush in the sidebar, at MY LIBRARY's own indentation,
+  // with no "Favorites" heading/caret at all ("we will simply display the
+  // favorited recordings"). So this renders straight into a plain mount div
+  // renderSidebar() leaves for it, always open, no expand/collapse state and
+  // no _dimCache entry (that cache exists to survive a section being
+  // collapsed and reopened — irrelevant here since there's nothing to
+  // collapse; renderSidebar() re-fetches on every render like the rest of the
+  // sidebar already does).
+  //
+  // card=True on GET /api/recordings/favorites (added alongside this) is what
+  // supplies `image_id` for the small performer thumbnail Ryan asked for.
+  async function _renderFavoritesFlat() {
+    const box = document.getElementById('nav-favorites-flat')
+    if (!box) return
+    let rows = []
+    try { rows = await API.recordings.favorites() } catch (_) {}
+    if (!rows.length) { box.innerHTML = ''; return }   // nothing to announce — see comment above
+    box.innerHTML = rows.map(r => {
+      const full = esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))
+      const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+        .map(w => w[0]).join('').toUpperCase()
+      const avatar = r.image_id
+        ? `<img class="nav-fav-avatar" src="${API.performers.imageUrl(r.image_id)}" alt="">`
+        : `<div class="nav-fav-avatar nav-fav-avatar--blank">${esc(initials)}</div>`
+      return `
+        <div class="nav-fav-row" data-id="${r.id}" title="${full}">
+          ${avatar}
+          <span class="nav-fav-title truncate">${full}</span>
+        </div>`
+    }).join('')
+    box.querySelectorAll('.nav-fav-row[data-id]').forEach(el =>
+      el.addEventListener('click', () => { window.location.hash = `#/recording/${el.dataset.id}` }))
   }
 
   // Invalidate one or more dimension caches and silently re-render any open ones.
@@ -1069,7 +1200,7 @@ const App = (() => {
   async function renderSidebar() {
     const nav = document.getElementById('sidebar-nav')
     if (!nav) return
-    _dimCache.favorites = _dimCache.venues = _dimCache.performers =
+    _dimCache.venues = _dimCache.performers =
       _dimCache.artists = _dimCache.collections = _dimCache.genres = null
 
     // A shared library offers a deliberately narrower sidebar. This is not
@@ -1092,10 +1223,6 @@ const App = (() => {
     // playlists once those exist — not a menu of the app's pages.
     //
     // What left, and where it went:
-    //   Library link      → the App Header's Home button. "My Library" is now a
-    //                       plain heading; two ways to reach one page, one of
-    //                       them a heading that only sometimes did something,
-    //                       was the confusing half.
     //   Recently Added    → it was already a module on the Library view. A nav
     //                       link to a page that duplicates a module you scroll
     //                       past on arrival is a second front door to one room.
@@ -1104,28 +1231,47 @@ const App = (() => {
     //   Library selector  → the App Header, beside the mode toggle. Switching
     //                       library is a whole-app context change; the sidebar
     //                       is for moving around inside one.
-    //   Add Recordings    → the bottom. It is the one thing here that is an
-    //                       action rather than a destination.
+    //   Add Recordings    → was the bottom, moved back to the TOP 2026-08-22
+    //                       (Ryan) — it is the entry point into ingest, and he
+    //                       wants it as the first thing under the App Header,
+    //                       not below a shelf you have to scroll past first.
     //
-    // The dimension indexes keep their footer as-is: they are how you get at
-    // the library along an axis other than "shows I kept", and they were not
-    // part of what needed rethinking.
+    // Left Nav Refinement (Ryan, 2026-08-23) — the App Header's Home button is
+    // gone; "My Library" IS the link back to Library Home now, one control
+    // instead of two that did the same thing. Collections moved up to sit
+    // directly under it, unindented, at My Library's own font size — no longer
+    // a generic "sub" dimension. Favorites stopped being a dimension section
+    // at all: no heading, no caret, no collapse — the starred shows themselves
+    // just appear, flush, right under Collections (see _renderFavoritesFlat).
+    //
+    // The whole upper shelf (Add Recordings / My Library / Collections /
+    // Favorites) now lives in its own `.nav-scroll` wrapper so it can scroll
+    // independently, while `.nav-dims-foot` (Venues/Performers/Artists/Genres
+    // — explicitly out of scope for this rework, Ryan's own words) sits
+    // OUTSIDE that wrapper as a sibling, so it stays pinned to the sidebar's
+    // bottom no matter how many favorites someone piles up. `.nav-spacer` is
+    // gone — it existed only to push the footer down when the scroll region
+    // was short, which `.nav-scroll{flex:1}` now does on its own even with
+    // nothing in it to scroll.
     const remote = libraryState.activeId != null
     const active = activeLibrary()
     nav.innerHTML = remote ? `
-      <div class="nav-header truncate">${esc(active ? active.display_name : 'Shared Library')}</div>
-      ${_dimSection('collections', null, 'Collections', true)}` : `
-      <div class="nav-header">My Library</div>
-      ${_dimSection('favorites', '★', 'Favorites', true)}
-      ${_dimSection('collections', null, 'Collections', true)}
-      <div class="nav-spacer"></div>
+      <div class="nav-scroll">
+        <div class="nav-header truncate">${esc(active ? active.display_name : 'Shared Library')}</div>
+        ${_dimSection('collections', null, 'Collections', false)}
+      </div>` : `
+      <div class="nav-scroll">
+        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">+</span> Add Recordings</a>` : ''}
+        <a class="nav-header nav-header--link" data-nav="home" href="#/">My Library</a>
+        ${_dimSection('collections', null, 'Collections', false)}
+        <div class="nav-favorites" id="nav-favorites-flat"></div>
+      </div>
       <div class="nav-dims-foot">
         ${_dimSection('venues', '◎', 'Venues')}
         ${_dimSection('performers', '✦', 'Performers')}
         ${_dimSection('artists', '♪', 'Artists')}
         ${_dimSection('genres', '♫', 'Genres')}
-      </div>
-      ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">+</span> Add Recordings</a>` : ''}`
+      </div>`
 
     // The library selector lives in the App Header now, but it is rendered from
     // here: this function already runs at every moment the selector could need
@@ -1147,6 +1293,7 @@ const App = (() => {
       })
     })
     state.expandedDims.forEach(dim => _renderDimRecords(dim))
+    if (!remote) _renderFavoritesFlat()   // shared libraries get Library + Collections only — see comment above
     setActiveNav(state._activeNav)
   }
 
@@ -1368,14 +1515,15 @@ const App = (() => {
     const stats = opts.stats || []
     // Playback mode: no editable title, and no hero actions — every page that
     // passes `actions` passes an admin verb there (Delete performer / venue /
-    // genre / collection / artist, + Add peer, + New collection). Enforced in
-    // the shell rather than at each caller so a new entity page cannot forget.
-    // ⚠ This also removes "+ New collection" in Playback. Add to Collection and
-    // Mark as Favorite still work everywhere; MAKING a collection is filed as
-    // editing. Reverse by moving that one call site to its own opt-in.
+    // genre / collection / artist, + Add peer). Enforced in the shell rather
+    // than at each caller so a new entity page cannot forget.
+    // `actionsPlayback` renders in BOTH modes, for a verb that is content
+    // rather than editing. "+ New collection" moved here 2026-08-22 (Ryan) —
+    // making a collection is something a listener does too; deleting one
+    // stays admin-only via `actions`.
     const shellEditable = canEditLibrary()
     const titleEditable = opts.titleEditable && shellEditable
-    const heroActions   = shellEditable ? opts.actions : null
+    const heroActions   = (shellEditable ? (opts.actions || '') : '') + (opts.actionsPlayback || '')
     return `
       <div class="performer-page${opts.pageClass ? ' ' + opts.pageClass : ''}">
 
@@ -1957,7 +2105,7 @@ const App = (() => {
     setMainHTML(entityShellHtml({
       title: 'Collections',
       stats: [[cols.length, cols.length === 1 ? 'Collection' : 'Collections']],
-      actions: `<button class="btn btn-ghost btn-sm" id="btn-new-collection">+ New collection</button>`,
+      actionsPlayback: `<button class="btn btn-ghost btn-sm" id="btn-new-collection">+ New collection</button>`,
       tabs: [{
         id: 'collections', label: 'Collections',
         html: cols.length
@@ -5570,7 +5718,7 @@ const App = (() => {
           <div class="rq-grp-txt">${esc(g.text || '')}</div>
           ${rows.length ? `
             <button class="rq-adv-toggle" aria-expanded="false">
-              <span class="rq-caret">\u25b8</span>${rows.length} metric${rows.length === 1 ? '' : 's'}
+              <span class="rq-caret">${chevronIcon()}</span>${rows.length} metric${rows.length === 1 ? '' : 's'}
             </button>
             <div class="rq-adv">${rows.map(metricRow).join('')}
               <div class="rq-star-note">* measured and shown, but carries no weight in the score.</div>
@@ -5908,7 +6056,7 @@ const App = (() => {
            data-path="${esc(item.path)}">
         <div class="batch-item-main">
           <button class="batch-expand-btn" data-path="${esc(item.path)}" title="${expanded ? 'Collapse' : 'Expand'}">
-            ${expanded ? '▾' : '▸'}
+            ${chevronIcon(expanded ? 'caret-ic--open' : '')}
           </button>
           <div class="batch-item-info">
             <div class="batch-item-name">${esc(item.name)}</div>
@@ -6307,20 +6455,28 @@ const App = (() => {
   // (which also analysed). Now there is one location, shown in the breadcrumbs,
   // and one primary action in the footer.
   //
-  // The picker is a port of tools/quality/quality_app.html rather than a
-  // reinvention: its "audio" tags tell you which folders are analysable BEFORE
-  // you click into them, which the native folder dialog cannot.
-  //
-  // Header and hint copy also fixed — the page said "Listening Quality" and
-  // described the sampling internals of the standalone analysis tool, neither
-  // of which is what this page is for.
+  // Reworked again 2026-08-22 (Ryan) to read as a standard navigation pane
+  // rather than a port of the standalone quality tool:
+  //   - The "Jump to" shortcut row is gone. A single Browse button opens
+  //     PyWebView's native folder dialog (`pick_folder()`, defined in run.py
+  //     since the app's early days but never wired to anything) — falls back
+  //     to "Type a path" in headless/server mode, where that API is absent.
+  //   - The "audio" tag and the static ▸/· marker are gone; the marker was
+  //     never clickable and read as an expand caret it wasn't.
+  //   - Each row now shows the REAL thing: a caret that expands/collapses that
+  //     folder's children in place, plus a subfolder count and a size column.
+  //     Both are shallow (that folder's direct contents only) — see
+  //     `_probe_folder`'s docstring for why a recursive walk is off the table.
   async function renderIngestSource() {
     // Title now matches the sidebar button that gets you here. It previously
     // said "Listening Quality" — the name of the engine, not the task.
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
+    // "Trellis" (Ryan, 2026-08-23) — the NAS folder was renamed from
+    // "Flux Audio"; mirrors config.py's IMPORT_DIR default. Only a fallback —
+    // getPrefs().import_dir wins whenever the backend actually has one.
     const defaultDir = (await getPrefs()).import_dir
-                       || '/Volumes/music/Flux Audio/Download'
+                       || '/Volumes/music/Trellis/Download'
 
     setMainHTML(`
       <div class="lq-wrap">
@@ -6375,6 +6531,69 @@ const App = (() => {
       paint(j)
     }
 
+    const fmtFolders = n => n === 1 ? '1 folder' : `${n || 0} folders`
+
+    // One row. `depth` only controls indentation — the caret and the count/size
+    // columns are the same at every level, so an expanded child looks like a
+    // row, not a demotion.
+    // Bulk Import's convention is one folder per act, so a row's own name
+    // usually IS the performer name — the badge says whether that name is
+    // already in the library or would be new. Still shown at deeper levels
+    // (a date-named show folder), where it's just always "new" — true, if
+    // not useful; not worth a depth check to suppress it.
+    const PERF_BADGE = {
+      existing: '<span class="badge lq-perf-badge lq-perf-badge--existing">In library</span>',
+      new:      '<span class="badge lq-perf-badge lq-perf-badge--new">New performer</span>',
+    }
+
+    function dirRowHtml(d, depth) {
+      const caret = d.subdirs
+        ? `<span class="lq-dir-caret" data-expand="${esc(d.path)}" role="button" tabindex="0"
+                 aria-label="Expand ${esc(d.name)}">${chevronIcon()}</span>`
+        : `<span class="lq-dir-caret lq-dir-caret--spacer"></span>`
+      return `
+        <div class="lq-dir-row" data-depth="${depth}">
+          <div class="lq-dir" data-go="${esc(d.path)}" role="button" tabindex="0"
+               style="padding-left:${depth * 18}px">
+            ${caret}
+            <span class="nm">${esc(d.name)}</span>
+            ${PERF_BADGE[d.performer_status] || ''}
+            <span class="lq-dir-count">${fmtFolders(d.subdir_count)}</span>
+            <span class="lq-dir-size">${fmtBytes(d.size_bytes)}</span>
+          </div>
+          <div class="lq-dir-children"></div>
+        </div>`
+    }
+
+    // Expands/collapses one row's children IN PLACE — the folder you're
+    // looking at ("here") does not change, unlike clicking the row itself.
+    // Fetches via the same /browse endpoint openPicker() uses. `kids.loaded`
+    // is the only cache this needs: the DOM node it's set on lives exactly as
+    // long as its content is valid, and gets torn down (along with everything
+    // else in .lq-dirs) the moment `paint()` draws a genuinely new listing —
+    // so a second Map tracking the same lifetime would just be two sources of
+    // truth for one fact.
+    async function toggleExpand(caretEl) {
+      const row = caretEl.closest('.lq-dir-row')
+      const kids = row.querySelector('.lq-dir-children')
+      const path = caretEl.dataset.expand
+      const depth = Number(row.dataset.depth || 0)
+      const opening = !row.classList.contains('lq-dir-row--open')
+      row.classList.toggle('lq-dir-row--open', opening)
+      caretEl.classList.toggle('open', opening)
+      if (!opening || kids.dataset.loaded) return
+      kids.innerHTML = `<div class="lq-nav-loading lq-nav-loading--sm"><span class="lq-spin"></span></div>`
+      try {
+        const j = await API.quality.browse(path)
+        kids.innerHTML = (j.dirs && j.dirs.length)
+          ? j.dirs.map(d => dirRowHtml(d, depth + 1)).join('')
+          : `<div class="lq-dir-row lq-dir--empty" style="padding-left:${(depth + 1) * 18}px">No sub-folders here</div>`
+        kids.dataset.loaded = '1'
+      } catch (e) {
+        kids.innerHTML = `<div class="lq-err lq-err--sm">Could not read that folder.</div>`
+      }
+    }
+
     // `j === null` repaints the shell after a failure so the user is not left
     // staring at a spinner that will never resolve.
     function paint(j) {
@@ -6392,35 +6611,20 @@ const App = (() => {
         return `<a data-go="${esc(acc)}">${esc(p)}</a>`
       })).join('<span class="sep">/</span>')
 
-      // The shortcut row had no label, so it read as decoration rather than the
-      // fastest way to get anywhere. It is now announced.
-      const LABEL = { '/Volumes': 'All volumes' }
-      const shortcuts = (j.shortcuts || []).map((s, i) => {
-        const label = LABEL[s] || (i === 0 ? 'Import folder'
-                                           : s.split('/').filter(Boolean).pop())
-        return `<button class="lq-shortcut" data-go="${esc(s)}">${esc(label)}</button>`
-      }).join('')
-
-      // "audio" means analysable NOW; a folder with only subfolders is a
-      // container to walk into. Saying which is which is the whole point of
-      // this picker over the native dialog.
-      const dirs = j.dirs.length ? j.dirs.map(d => `
-        <div class="lq-dir" data-go="${esc(d.path)}" role="button" tabindex="0">
-          <span class="ic">${d.subdirs || !d.audio ? '▸' : '·'}</span>
-          <span class="nm">${esc(d.name)}</span>
-          ${d.audio ? '<span class="tag">audio</span>' : ''}
-        </div>`).join('')
-        : '<div class="lq-dir lq-dir--empty">No sub-folders here</div>'
+      const dirs = j.dirs.length ? j.dirs.map(d => dirRowHtml(d, 0)).join('')
+        : '<div class="lq-dir-row lq-dir--empty">No sub-folders here</div>'
 
       pickerEl.innerHTML = `
-        <div class="lq-nav-head">
-          <span class="lq-nav-lbl">Jump to</span>
-          ${j.parent ? `<button class="lq-shortcut" data-go="${esc(j.parent)}">↑ Up one</button>` : ''}
-          ${shortcuts}
-        </div>
         <div class="lq-nav-addr">
           <div class="lq-crumbs">${crumbs}</div>
+          <button class="lq-browse-btn" id="lq-browse">Browse…</button>
           <button class="lq-typepath" id="lq-typepath">Type a path</button>
+        </div>
+        <div class="lq-dirs-head">
+          <span class="lq-dirs-head-sp"></span>
+          <span class="lq-dirs-head-nm">Name</span>
+          <span class="lq-dirs-head-count">Contents</span>
+          <span class="lq-dirs-head-size">Size</span>
         </div>
         <div class="lq-dirs">${dirs}</div>
         <div class="lq-pick-foot">
@@ -6451,17 +6655,38 @@ const App = (() => {
       })
     }
 
+    // Browse opens PyWebView's native folder dialog — `pick_folder()` has
+    // existed in run.py since early on but nothing called it. In headless/
+    // server mode `window.pywebview` doesn't exist at all, so this falls back
+    // to the same in-place path input Type a path already offers, rather than
+    // showing a button that does nothing when clicked.
+    async function browseNative() {
+      const api = window.pywebview && window.pywebview.api
+      if (!api || !api.pick_folder) { openTypePath(); return }
+      let picked
+      try { picked = await api.pick_folder() }
+      catch (e) { say('Could not open the folder dialog: ' + e.message); return }
+      if (picked) openPicker(picked)
+    }
+
     pickerEl.addEventListener('click', e => {
       if (e.target.closest('#lq-typepath')) { openTypePath(); return }
+      if (e.target.closest('#lq-browse')) { browseNative(); return }
+      const expand = e.target.closest('[data-expand]')
+      if (expand) { toggleExpand(expand); return }
       const go  = e.target.closest('[data-go]')
       const use = e.target.closest('[data-use]')
       if (go) openPicker(go.dataset.go)
       else if (use) startAnalysis(use.dataset.use, false)
     })
-    // Folder rows are real controls, so they answer the keyboard too.
+    // Folder rows and expand carets are real controls, so they answer the
+    // keyboard too.
     pickerEl.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      const caret = e.target.closest('.lq-dir-caret[data-expand]')
+      if (caret) { e.preventDefault(); toggleExpand(caret); return }
       const row = e.target.closest('.lq-dir[data-go]')
-      if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openPicker(row.dataset.go) }
+      if (row) { e.preventDefault(); openPicker(row.dataset.go) }
     })
 
     openPicker(here)
@@ -8078,7 +8303,7 @@ const App = (() => {
     const rawTracksSection = rawTrackRows ? `
       <div class="rev-raw-tracks-header">
         <span>Tracks (${tagTracks.length})</span>
-        <button class="rev-panel-toggle" data-panel="panel-flac-tracks">▾</button>
+        <button class="rev-panel-toggle" data-panel="panel-flac-tracks">${chevronIcon()}</button>
       </div>
       <div id="panel-flac-tracks" style="display:none">${rawTrackRows}</div>` : ''
 
@@ -8625,7 +8850,7 @@ const App = (() => {
           if (!panel) return
           const collapsed = panel.style.display === 'none'
           panel.style.display = collapsed ? '' : 'none'
-          btn.textContent = collapsed ? '▾' : '▸'
+          btn.querySelector('.caret-ic')?.classList.toggle('caret-ic--open', collapsed)
         })
       })
     })()
@@ -10192,11 +10417,21 @@ const App = (() => {
   }
 
   function wireHeaderNav() {
-    document.getElementById('nav-home')?.addEventListener('click', () => {
-      window.location.hash = '#/'
-    })
+    // nav-home removed 2026-08-23 — "My Library" in the sidebar is the Home
+    // link now (see renderSidebar). Back/Forward are unchanged.
     document.getElementById('nav-back')?.addEventListener('click', () => _navGo(-1))
     document.getElementById('nav-fwd')?.addEventListener('click', () => _navGo(1))
+
+    // Sidebar collapse toggle (2026-08-23). Plain localStorage flag, same
+    // idiom as setTheme() above — applied before first paint by the inline
+    // head script in index.html so there's no flash, flipped on click here.
+    const sbToggle = document.getElementById('nav-sidebar-toggle')
+    sbToggle?.setAttribute('aria-pressed', String(document.body.classList.contains('sidebar-collapsed')))
+    sbToggle?.addEventListener('click', () => {
+      const collapsed = document.body.classList.toggle('sidebar-collapsed')
+      localStorage.setItem('fluxSidebarCollapsed', collapsed ? '1' : '0')
+      sbToggle.setAttribute('aria-pressed', String(collapsed))
+    })
   }
 
   function route() {

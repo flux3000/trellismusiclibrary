@@ -351,11 +351,13 @@ def favorite_recordings():
     """
     GET /api/recordings/favorites[?limit=N]
 
-    Every starred recording, for the sidebar's Favorites section (2026-08-22).
-    Its own endpoint rather than a `?favorite=1` flag on /recent, because the
-    two answer different questions and want different orders: /recent is "what
-    arrived lately" and is inherently capped, this is "the shelf I keep coming
-    back to" and wants to be complete.
+    Every starred recording, for the sidebar's Favorites list (2026-08-22; no
+    longer a collapsible section as of the 2026-08-23 Left Nav Refinement, but
+    still its own endpoint for the same reason). Its own endpoint rather than
+    a `?favorite=1` flag on /recent, because the two answer different
+    questions and want different orders: /recent is "what arrived lately" and
+    is inherently capped, this is "the shelf I keep coming back to" and wants
+    to be complete.
 
     Ordered by performer then date — a Favorites list is browsed by looking for
     a name, not by when the star happened to be clicked. `is_favorite` carries
@@ -364,6 +366,13 @@ def favorite_recordings():
 
     The limit is a runaway guard, not a feature. 200 favourites in a sidebar is
     already unusable and would want its own page.
+
+    card=True unconditionally, added 2026-08-23 — the sidebar row now shows a
+    small performer thumbnail beside the show's full title, which needs
+    `image_id`. Eager-loaded via `_card_eager` for the same N+1 reason every
+    other card=True caller uses it (see that function's docstring); a
+    favorites list can realistically run to the same size as /recent's card
+    rows, so the same care applies here.
     """
     limit = request.args.get("limit", 200, type=int) or 200
     limit = max(1, min(limit, 500))
@@ -374,16 +383,17 @@ def favorite_recordings():
     # like. This expression is the right one regardless of whether that backfill
     # ever happens.
     sort_key = db.func.coalesce(Performer.sort_name, Performer.name)
-    recs = (Recording.query
-            .filter(Recording.is_favorite.is_(True))
-            .join(Performance, Recording.performance_id == Performance.id)
-            .outerjoin(Performer, Performance.performer_id == Performer.id)
-            .order_by(sort_key.asc(),
-                      Performance.start_year.asc(),
-                      Performance.start_month.asc(),
-                      Performance.start_day.asc())
-            .limit(limit).all())
-    return jsonify([recording_row(r) for r in recs])
+    recs = _card_eager(
+        Recording.query
+        .filter(Recording.is_favorite.is_(True))
+        .join(Performance, Recording.performance_id == Performance.id)
+        .outerjoin(Performer, Performance.performer_id == Performer.id)
+        .order_by(sort_key.asc(),
+                  Performance.start_year.asc(),
+                  Performance.start_month.asc(),
+                  Performance.start_day.asc())
+    ).limit(limit).all()
+    return jsonify([recording_row(r, card=True) for r in recs])
 
 
 # ── POST /api/recordings/scan ─────────────────────────────────────────────────
