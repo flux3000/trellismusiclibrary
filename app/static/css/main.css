@@ -7754,6 +7754,14 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 }
 .brow-grade { font-size: 11px; font-weight: 600; color: var(--accent-lit); }
 
+/* Endless-scroll furniture for the flat list (2026-08-24) — same idiom as
+   Recently Added's (.recent-sentinel), just under the `.brows` list's own
+   28px gutter. No loading text needed here (unlike Recently Added): the
+   next page comes off the already-fetched, already-filtered/sorted rows
+   already in memory, not a network request — the reveal is instant. */
+.browse-more { padding: 0 28px 14px; }
+.browse-sentinel { height: 1px; }
+
 /* Collections, at the foot of the page. */
 .col-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 28px; }
 .col-card {

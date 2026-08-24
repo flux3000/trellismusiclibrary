@@ -3068,9 +3068,26 @@ const App = (() => {
   // `rows` is the same flattened array the List view builds — no extra request.
   const BROWSE_TOP_N = 6
 
+  // The flat list's own endless scroll (2026-08-24, Ryan — was rendering all
+  // ~580 rows to the DOM on every Library load, which is what made it slow).
+  // This pages CLIENT-SIDE over the already-fetched, already-filtered/sorted
+  // `_browseRows` — no extra network round trip on scroll, unlike Recently
+  // Added's server-paged endless scroll (RECENT_INITIAL/RECENT_PAGE above).
+  // That's deliberate here: Browse's filters/sort need the FULL dataset in
+  // memory to compute correct counts and orderings (the "132 of 580
+  // recordings" subtitle, A–Z across the whole library, etc.) — paginating
+  // the fetch itself would mean re-deriving those from a partial set. The
+  // actual fetch was the slow part (see the N+1 fix on `all_recordings()`,
+  // api/performers.py — was ~2000+ per-request DB round trips, now ~7); this
+  // just keeps the DOM small on top of that.
+  const BROWSE_LIST_INITIAL = 16   // first paint
+  const BROWSE_LIST_PAGE    = 16   // each subsequent reveal, scrolled into view
+
   let _browseRows = []
   let _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
   let _browseSort = 'az'
+  let _browseVisibleCount = 0
+  let _browseListIO = null
 
   function _browseFilterOptions(rows) {
     // Options are derived from the DATA, not hardcoded: the source column has
@@ -3137,20 +3154,67 @@ const App = (() => {
       </a>`
   }
 
+  // Renders the first BROWSE_LIST_INITIAL rows of the current filter/sort
+  // result and resets the endless-scroll furniture. Called on every filter,
+  // sort, or Clear change — a changed result set always restarts at the top
+  // of its own list, same as scrolling a fresh page back to the start.
   function _browseDrawList() {
     const listEl = document.getElementById('browse-rows')
     const cntEl  = document.getElementById('browse-count')
     if (!listEl) return
+    _browseListIO?.disconnect()
     const rows = _browseApply(_browseRows)
     cntEl.textContent = `${rows.length} of ${_browseRows.length} recordings`
-    listEl.innerHTML = rows.length
-      ? rows.map(_browseRowHtml).join('')
-      : `<div class="empty-state" style="min-height:120px">
+    if (!rows.length) {
+      listEl.innerHTML = `<div class="empty-state" style="min-height:120px">
            <div class="empty-title">Nothing matches these filters</div>
            <div class="empty-sub">Widen one of them — quality is the narrowest, since only
              ${_browseRows.filter(r => r.quality).length} of ${_browseRows.length} recordings are graded.</div>
          </div>`
+      _browseSetMoreFurniture(false)
+      return
+    }
+    _browseVisibleCount = Math.min(BROWSE_LIST_INITIAL, rows.length)
+    listEl.innerHTML = rows.slice(0, _browseVisibleCount).map(_browseRowHtml).join('')
     wireRecordingRows(listEl)
+    _browseSetMoreFurniture(_browseVisibleCount < rows.length)
+  }
+
+  // Appends the next BROWSE_LIST_PAGE rows from the CURRENT filter/sort
+  // result (recomputed fresh, not cached — a filter/sort change always goes
+  // through _browseDrawList first, which is the only place `rows` here can
+  // legitimately be stale against, and that path resets scroll to the top
+  // anyway). New rows are wired in a detached wrapper before insertion so a
+  // repeat scroll never double-wires the rows already in the DOM.
+  function _browseLoadMoreRows() {
+    const listEl = document.getElementById('browse-rows')
+    if (!listEl) return
+    const rows = _browseApply(_browseRows)
+    const next = rows.slice(_browseVisibleCount, _browseVisibleCount + BROWSE_LIST_PAGE)
+    if (!next.length) { _browseSetMoreFurniture(false); return }
+    const wrap = document.createElement('div')
+    wrap.innerHTML = next.map(_browseRowHtml).join('')
+    wireRecordingRows(wrap)
+    while (wrap.firstChild) listEl.appendChild(wrap.firstChild)
+    _browseVisibleCount += next.length
+    _browseSetMoreFurniture(_browseVisibleCount < rows.length)
+  }
+
+  // Sentinel + IntersectionObserver, same idiom as Recently Added's endless
+  // scroll (see renderRecentView) — root is the scrolling main content pane,
+  // a generous rootMargin so the next batch is ready before the reader
+  // actually reaches the bottom.
+  function _browseSetMoreFurniture(hasMore) {
+    const moreEl = document.getElementById('browse-more')
+    if (!moreEl) return
+    _browseListIO?.disconnect()
+    if (!hasMore) { moreEl.innerHTML = ''; return }
+    moreEl.innerHTML = '<div class="browse-sentinel" id="browse-sentinel"></div>'
+    const sentinel = document.getElementById('browse-sentinel')
+    _browseListIO = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) _browseLoadMoreRows()
+    }, { root: mainContent, rootMargin: '400px' })
+    _browseListIO.observe(sentinel)
   }
 
   let _browseRareSources = new Set()
@@ -3233,6 +3297,7 @@ const App = (() => {
           <span class="browse-count" id="browse-count"></span>
         </div>
         <div class="brows" id="browse-rows"></div>
+        <div class="browse-more" id="browse-more"></div>
       </section>
 
       ${collections.length ? `

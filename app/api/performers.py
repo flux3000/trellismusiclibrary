@@ -16,6 +16,7 @@ import json
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.performer import Performer, PerformerResource
@@ -130,23 +131,54 @@ def list_performers():
 @bp.route("/all-recordings")
 @login_required
 def all_recordings():
-    """Every performer (alpha) with their performances (oldest first). Library view."""
+    """
+    Every performer (alpha) with their performances (oldest first). Library
+    view — feeds Browse's flat list, so this is a full-catalog dump.
+
+    2026-08-24 (Ryan, "loads more quickly" / Browse's endless scroll): this
+    used to run a query PER PERFORMER for performances, then lazy-load each
+    performance's venue, performer (redundant — already have it as `pf`),
+    and recordings, and each recording's tracks and quality_score — on a
+    ~184-performer / ~580-recording library that's 2000+ separate DB round
+    trips for one page load, which is what "loads all records at the
+    outset" was actually slow at (the client-side row count was never the
+    bottleneck; the fetch was). Rewritten as ONE root query with
+    selectinload chains for every relationship walked below — SQLAlchemy
+    batches each level into a single `WHERE ... IN (...)`, so this is now a
+    small constant number of queries (one per relationship level) regardless
+    of library size, not one per row. Sort order (was a SQL ORDER BY per
+    performer) moves to Python since selectinload doesn't preserve a
+    per-parent order across the whole call — same nullslast-ascending
+    semantics, just computed once each on the already-fetched list.
+    """
     performers = (
         db.session.query(Performer)
+        .options(
+            selectinload(Performer.genre),
+            selectinload(Performer.performances).selectinload(Performance.venue),
+            selectinload(Performer.performances)
+                .selectinload(Performance.recordings)
+                .selectinload(Recording.tracks),
+            selectinload(Performer.performances)
+                .selectinload(Performance.recordings)
+                .selectinload(Recording.quality_score),
+        )
         .order_by(func.coalesce(Performer.sort_name, Performer.name))
         .all()
     )
+
+    # nullslast-ascending, same ordering the old per-performer SQL query
+    # produced — a None sorts as "not less than any number", i.e. last.
+    def _perf_sort_key(p):
+        return (
+            (p.start_year  is None, p.start_year  or 0),
+            (p.start_month is None, p.start_month or 0),
+            (p.start_day   is None, p.start_day   or 0),
+        )
+
     result = []
     for pf in performers:
-        performances = (
-            db.session.query(Performance)
-            .filter(Performance.performer_id == pf.id)
-            .order_by(
-                Performance.start_year.asc().nullslast(),
-                Performance.start_month.asc().nullslast(),
-                Performance.start_day.asc().nullslast(),
-            ).all()
-        )
+        performances = sorted(pf.performances, key=_perf_sort_key)
         if not performances:
             continue
         perf_list = []
@@ -154,7 +186,10 @@ def all_recordings():
             v = p.venue
             perf_list.append({
                 "performance_id": p.id,
-                "performer_name": p.performer.name,
+                # `pf.name`, not `p.performer.name` — p.performer_id == pf.id
+                # by construction (this is pf's own performances list), so
+                # it's the same value without a second relationship walk.
+                "performer_name": pf.name,
                 "title":          p.title,
                 "start_year":     p.start_year,
                 "start_month":    p.start_month,
