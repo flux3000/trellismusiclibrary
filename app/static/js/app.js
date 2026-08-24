@@ -422,6 +422,8 @@ const App = (() => {
     'x':            '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     'check':        '<path d="M20 6 9 17l-5-5"/>',
     'arrow-left':   '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    'chevron-left':  '<path d="m15 18-6-6 6-6"/>',
+    'chevron-right': '<path d="m9 18 6-6-6-6"/>',
   }
 
   // `fill` is for the one genuine filled/outline pair we have: a favourited
@@ -564,6 +566,11 @@ const App = (() => {
   // never sees the toggle, so a stale localStorage value from a previous
   // session on a shared machine cannot hand a listener an editing UI.
   function getViewMode() {
+    // A remote library is someone else's -- Playback is not a preference
+    // there, it is the only possible state. We deliberately do NOT write
+    // this to localStorage, so switching back to your own library restores
+    // whatever mode you had it in before.
+    if (libraryState.activeId != null) return 'playback'
     if (!hasEditRole()) return 'playback'
     return localStorage.getItem('fluxViewMode') === 'playback' ? 'playback' : 'admin'
   }
@@ -584,7 +591,9 @@ const App = (() => {
   function paintViewModeToggle() {
     const wrap = document.getElementById('view-mode-toggle')
     if (!wrap) return
-    const show = hasEditRole()
+    // Offering a choice the user cannot have is a lie -- a remote library is
+    // always Playback, so there is nothing to toggle between.
+    const show = hasEditRole() && libraryState.activeId == null
     wrap.classList.toggle('hidden', !show)
     const mode = getViewMode()
     wrap.querySelectorAll('.vm-opt').forEach(b => {
@@ -608,7 +617,59 @@ const App = (() => {
   }
 
   function canEditLibrary() {
-    return hasEditRole() && getViewMode() === 'admin'
+    // Editing a peer's library is impossible regardless of role or mode --
+    // the peer door has no editing endpoints at all, so an affordance here
+    // could only ever produce an error.
+    return hasEditRole() && getViewMode() === 'admin' && libraryState.activeId == null
+  }
+
+  // ── The viewer's star ─────────────────────────────────────────────────────
+  //
+  // A star is the ONE mark a listener may make while browsing someone else's
+  // library, and it is NOT an edit: it writes a row on THIS node about THEIR
+  // recording and never touches their library at all. That is why it survives
+  // the read-only gate above when every other affordance does not.
+  //
+  // Two stores, one question. In my own library the answer is the column on
+  // the recording; in a joined library it is `remote_favorite` here, keyed by
+  // (node, remote recording id). Both are asked through these helpers so no
+  // call site has to know which world it is in — the same reason
+  // canEditLibrary() exists at all.
+  //
+  // ⚠ `rec.is_favorite` from a share payload is ALWAYS false: the sharer's own
+  // star deliberately does not travel (see _peer_row in api/share.py). Reading
+  // it directly in a remote library paints every star empty. Ask
+  // viewerHasFavorited() instead.
+
+  function viewerHasFavorited(rec) {
+    if (!rec) return false
+    return libraryState.activeId != null
+      ? libraryState.favIds.has(rec.id)
+      : !!rec.is_favorite
+  }
+
+  async function setViewerFavorite(recId, on) {
+    const nodeId = libraryState.activeId
+    if (nodeId == null) {
+      await API.recordings.update(recId, { is_favorite: on })
+      return
+    }
+    if (on) await API.remoteFavorites.add(nodeId, recId)
+    else    await API.remoteFavorites.remove(nodeId, recId)
+    if (on) libraryState.favIds.add(recId)
+    else    libraryState.favIds.delete(recId)
+  }
+
+  // Ids only, and local — so stars paint correctly even when the remote is
+  // unreachable. Whether I starred something is a fact about MY node.
+  async function loadRemoteFavorites() {
+    const nodeId = libraryState.activeId
+    if (nodeId == null) { libraryState.favIds = new Set(); return }
+    try {
+      libraryState.favIds = new Set(await API.remoteFavorites.ids(nodeId))
+    } catch (_) {
+      libraryState.favIds = new Set()
+    }
   }
 
 
@@ -940,9 +1001,8 @@ const App = (() => {
           ${iconHtml ? `<span class="nav-icon">${iconHtml}</span>` : ''}
           <span class="nav-dim-label truncate">${label}</span>
           <span class="nav-dim-actions">
-            ${libraryState.activeId != null ? '' :
-              `<span class="nav-action" data-act="new" data-admin
-                     title="Create new ${esc(singular)}">${icon('plus')}</span>`}
+            ${canEditLibrary() ? `<span class="nav-action" data-act="new" data-admin
+                     title="Create new ${esc(singular)}">${icon('plus')}</span>` : ''}
             <span class="nav-action" data-act="refresh" title="Refresh list">${icon('rotate-cw')}</span>
           </span>
           <span class="nav-caret ${open ? 'open' : ''}">${chevronIcon()}</span>
@@ -950,6 +1010,14 @@ const App = (() => {
         <div class="nav-records ${sub ? 'nav-records--sub' : ''}" id="nav-records-${dim}" style="display:${open ? '' : 'none'}"></div>
       </div>`
   }
+
+  // A system collection (Full Library) is a SHARING PRIMITIVE, not a curated
+  // set: its membership is a live query, it cannot be edited by hand, and its
+  // contents are the library you are already looking at. So it appears in
+  // exactly one place — the peer grant UI, where it is the thing you tick — and
+  // nowhere that lists collections as curation. One predicate, used by every
+  // such list, so the rule cannot drift between surfaces.
+  const isCuratedCollection = c => !c.is_system
 
   async function _loadDim(dim) {
     if (_dimCache[dim]) return _dimCache[dim]
@@ -975,7 +1043,11 @@ const App = (() => {
   async function _renderDimRecords(dim) {
     const box = document.getElementById(`nav-records-${dim}`)
     if (!box) return
-    const rows = await _loadDim(dim)
+    let rows = await _loadDim(dim)
+    // Full Library must never render here: it is not curation, and expanding it
+    // in place would pull the entire library into the sidebar (580 card rows
+    // through GET /api/collections/<id>).
+    if (dim === 'collections') rows = rows.filter(isCuratedCollection)
     const target = { venues: 'venue', performers: 'artist',
                      artists: 'person', collections: 'collection', genres: 'genre' }[dim]
     if (!rows.length) {
@@ -1122,7 +1194,11 @@ const App = (() => {
     const box = document.getElementById('nav-favorites-flat')
     if (!box) return
     let rows = []
-    try { rows = await API.recordings.favorites() } catch (_) {}
+    try {
+      rows = libraryState.activeId != null
+        ? await API.remoteFavorites.list(libraryState.activeId, true)
+        : await API.recordings.favorites()
+    } catch (_) {}
     if (!rows.length) { box.innerHTML = ''; return }   // nothing to announce — see comment above
     const head = '<div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Favorites</div>'
     box.innerHTML = head + rows.map(r => navRecRowHtml(r)).join('')
@@ -1170,6 +1246,7 @@ const App = (() => {
   const libraryState = {
     remotes: [],        // [{id, display_name, last_connected_at}]
     activeId: null,     // null = my own library
+    favIds: new Set(),  // MY starred ids inside the ACTIVE remote library
   }
 
   function activeLibrary() {
@@ -1203,7 +1280,21 @@ const App = (() => {
   function renderLibrarySelector() {
     const host = document.getElementById('lib-select-host')
     if (!host) return
-    if (libraryState.remotes.length === 0) { host.innerHTML = ''; return }
+
+    // With no libraries joined this host used to render EMPTY, which made the
+    // only possible entry point invisible until after you had already joined
+    // something. A listener handed an invite had nowhere to paste it. So the
+    // empty state is now the invitation itself.
+    if (libraryState.remotes.length === 0) {
+      host.innerHTML = `
+        <button class="btn btn-ghost btn-sm lib-join-btn" id="lib-join-empty">
+          ${icon('plus', 'lib-join-ic')}Join a library
+        </button>`
+      host.querySelector('#lib-join-empty')
+          .addEventListener('click', openJoinLibraryModal)
+      return
+    }
+
     host.innerHTML = librarySelectorHtml()
     wireLibrarySelector(host)
   }
@@ -1223,14 +1314,35 @@ const App = (() => {
              data-lib-id="${l.id == null ? '' : l.id}">
           <span class="lib-select-icon">${l.id == null ? icon('library') : icon('arrow-left-right')}</span>
           <span class="truncate">${esc(l.display_name)}</span>
+          ${l.id == null ? '' :
+            `<span class="lib-select-leave" data-leave-id="${l.id}"
+                   title="Leave ${esc(l.display_name)}">${icon('x')}</span>`}
         </div>`).join('')
+        + `<div class="lib-select-join" id="lib-select-join">
+             <span class="lib-select-icon">${icon('plus')}</span>
+             <span>Join a library…</span>
+           </div>`
       menu.style.display = 'block'
+
       menu.querySelectorAll('.lib-select-opt').forEach(opt =>
         opt.addEventListener('click', () => {
           const raw = opt.dataset.libId
           switchLibrary(raw === '' ? null : Number(raw))
           close()
         }))
+
+      // Leave sits INSIDE a row whose own click switches library, so it has to
+      // stop propagation or leaving would also navigate into the thing you are
+      // leaving.
+      menu.querySelectorAll('.lib-select-leave').forEach(x =>
+        x.addEventListener('click', e => {
+          e.stopPropagation()
+          close()
+          leaveLibrary(Number(x.dataset.leaveId))
+        }))
+
+      menu.querySelector('#lib-select-join')
+          .addEventListener('click', () => { close(); openJoinLibraryModal() })
     }
     el.addEventListener('click', () => {
       menu.style.display === 'block' ? close() : open()
@@ -1247,16 +1359,117 @@ const App = (() => {
   // theme flips, the sidebar reloads, and the current view is meaningless in
   // the new context. So it resets to the library root rather than trying to
   // map, say, /performer/12 onto a different database's ids.
-  function switchLibrary(id) {
+  async function switchLibrary(id) {
     if (libraryState.activeId === id) return
     libraryState.activeId = id
     // Tell api.js first — everything rendered after this line must resolve
     // against the new library, and route() below re-renders immediately.
     API.setLibraryContext(id)
     applyPeerTheme()
+    // Before anything renders: stars paint from this, and a nav that drew
+    // first would show every one of them empty.
+    await loadRemoteFavorites()
+    // initViewMode() is idempotent (its event wiring is guarded by _wired),
+    // so calling it again here just re-derives playback-mode/the toggle for
+    // whichever library is now active, rather than leaving stale chrome from
+    // the library we just left.
+    initViewMode()
     window.location.hash = '#/'
     renderSidebar()
     route()
+  }
+
+  // ── Joining and leaving libraries ─────────────────────────────────────────
+  //
+  // The front door for the entire consumer side — and it did not exist until
+  // 2026-08-24. `API.remotes.enroll` and `API.remotes.leave` had been in
+  // api.js since the August milestone with NOTHING in the frontend calling
+  // either one: the dev rig enrolled by curl, so the gap was invisible during
+  // development and total for a real user.
+
+  async function openJoinLibraryModal() {
+    const wrap = document.createElement('div')
+    wrap.className = 'modal-overlay'
+    wrap.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="join-title">
+        <div class="modal-header"><h3 id="join-title">Join a library</h3></div>
+        <div class="modal-body">
+          <p class="join-note">Paste the invite you were sent. It is an address
+            and a code joined by a <span class="join-hash">#</span>.</p>
+          <input type="text" class="join-input" id="join-invite" autocomplete="off"
+                 spellcheck="false" placeholder="https://their-library#CODE" />
+          <p class="join-error" id="join-error" hidden></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-sm btn-ghost" id="join-cancel">Cancel</button>
+          <button class="btn btn-sm btn-primary" id="join-go">Join</button>
+        </div>
+      </div>`
+    document.body.appendChild(wrap)
+
+    const input = wrap.querySelector('#join-invite')
+    const err   = wrap.querySelector('#join-error')
+    const go    = wrap.querySelector('#join-go')
+    const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+    const onKey = e => {
+      if (e.key === 'Escape') close()
+      if (e.key === 'Enter' && document.activeElement === input) go.click()
+    }
+    document.addEventListener('keydown', onKey)
+    wrap.querySelector('#join-cancel').addEventListener('click', close)
+    wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+    input.focus()
+
+    const fail = msg => { err.textContent = msg; err.hidden = false; go.disabled = false; go.textContent = 'Join' }
+
+    go.addEventListener('click', async () => {
+      const invite = input.value.trim()
+      err.hidden = true
+      if (!invite) return fail('Paste an invite first.')
+      // Checked here rather than letting the server say it, because this is
+      // the one mistake a human actually makes: pasting the bare code without
+      // the address it came with. The server cannot guess the address, so the
+      // error would otherwise be a confusing "not a usable address".
+      if (!invite.includes('#')) {
+        return fail('That looks like just the code. The invite needs the address too — "https://their-library#CODE".')
+      }
+
+      go.disabled = true; go.textContent = 'Joining…'
+      let node
+      try {
+        node = await API.remotes.enroll(invite)
+      } catch (e) {
+        return fail(e.message || 'Could not join that library.')
+      }
+      // A node that enrolled without a retrievable credential is broken, not
+      // empty — say so here rather than letting it present as a library with
+      // nothing in it.
+      if (node && node.has_token === false) {
+        return fail('Joined, but the access token could not be saved to your keychain. Try again.')
+      }
+      close()
+      await loadRemotes()
+      renderLibrarySelector()
+      if (node && node.id != null) switchLibrary(node.id)
+    })
+  }
+
+  async function leaveLibrary(id) {
+    const lib = libraryState.remotes.find(r => r.id === id)
+    const name = lib ? lib.display_name : 'this library'
+    if (!confirm(`Leave ${name}?\n\nYou will lose access until they invite you again. Nothing of yours is deleted.`)) return
+    try {
+      await API.remotes.leave(id)
+    } catch (e) {
+      alert('Could not leave: ' + e.message)
+      return
+    }
+    // Leaving the library you are standing in has to move you somewhere real,
+    // or every subsequent request proxies to a remote that no longer exists.
+    if (libraryState.activeId === id) switchLibrary(null)
+    await loadRemotes()
+    renderLibrarySelector()
+    renderSidebar()
   }
 
   // Joined remote libraries. Failure is deliberately silent: a remote list that
@@ -1271,9 +1484,15 @@ const App = (() => {
     }
   }
 
-  // Peer mode retints the CHROME only — surfaces and accent. Genre colours are
-  // untouched because those are content: a Funk card must look the same colour
-  // in anyone's library or the colour stops meaning genre.
+  // No longer a "theme" function despite the name (kept for call-site
+  // stability — renaming ~1 call site wasn't worth the churn). The Cool
+  // Slate retint this used to drive is gone (2026-08-24, Ryan: "get rid of
+  // the third theme... have the host library show up the same as the user's
+  // preferences define") — a peer's library now just renders in whichever
+  // of the two real themes the viewer has chosen. `.peer-mode` on <html>
+  // still exists and still matters: it's the flag the non-colour peer rules
+  // in main.css key off (library-selector centre cluster hidden, the
+  // drive-offline banner hidden, the `[data-admin]` backstop).
   function applyPeerTheme() {
     document.documentElement.classList.toggle('peer-mode', libraryState.activeId != null)
   }
@@ -1336,15 +1555,31 @@ const App = (() => {
     // nothing in it to scroll.
     const remote = libraryState.activeId != null
     const active = activeLibrary()
-    nav.innerHTML = remote ? `
-      <div class="nav-scroll">
-        <div class="nav-header truncate">${esc(active ? active.display_name : 'Shared Library')}</div>
-        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Collections</div>
-        <div class="nav-records" id="nav-records-collections"></div>
-      </div>` : `
+
+    // ONE sidebar for both contexts (Ryan, 2026-08-24). A listener browsing a
+    // shared library gets exactly what the owner sees in Playback mode —
+    // Browse / Search / Recently Added, the curator's Collections, the
+    // curator's Favorites, and the dimension foot — because "see the full
+    // information system on the left" is the point of handing someone a
+    // library at all.
+    //
+    // This reverses the narrow peer sidebar of 2026-08-09, which existed
+    // because share.py had no LIST endpoints and rendering sections that could
+    // only ever be empty would advertise doors that were not there. Those
+    // endpoints now exist (venues, artists, favorites, search, collections),
+    // so the reasoning has expired rather than been overruled.
+    //
+    // Nothing here branches on `remote` except the header LABEL. It does not
+    // need to: `canEditLibrary()` is false in a remote library, so Add
+    // Recordings and every "+" drop out on their own. A second template is how
+    // the two drift apart — which is exactly what happened last time.
+    const shelfTitle = remote
+      ? (active ? active.display_name : 'Shared Library')
+      : 'My Library'
+    nav.innerHTML = `
       <div class="nav-scroll">
         ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings</a>` : ''}
-        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static">My Library</div>
+        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate">${esc(shelfTitle)}</div>
         <a class="nav-item" data-nav="library" href="#/">${icon('library', 'nav-ic')}Browse</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
         <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
@@ -1380,7 +1615,20 @@ const App = (() => {
     })
     state.expandedDims.forEach(dim => _renderDimRecords(dim))
     _renderDimRecords('collections')   // always rendered — no longer a toggle
-    if (!remote) _renderFavoritesFlat()   // shared libraries get Library + Collections only — see comment above
+    // Favorites is the VIEWER'S, in both worlds (Ryan, 2026-08-24).
+    //
+    // The OWNER'S stars never travel. The star is deliberately not a quality
+    // scale — "this one is special", one click, no deliberation — and it is
+    // only free to mean that while it stays private; publish it and you start
+    // starring for an audience, which costs you the tool. Same argument that
+    // keeps play_log home. Curation travels through COLLECTIONS, the surface
+    // built to be read by someone else.
+    //
+    // So this section means what it says everywhere else in software: MINE.
+    // In my own library that is Recording.is_favorite; in a joined library it
+    // is the remote_favorite rows on this node. One section, one meaning, two
+    // stores — resolved in _renderFavoritesFlat, not here.
+    _renderFavoritesFlat()
     setActiveNav(state._activeNav)
   }
 
@@ -1405,9 +1653,9 @@ const App = (() => {
         <span class="rec-runtime">${runtime}</span>
         <span class="rec-tracks">${r.track_count}t${inc ? ' ' + inc : ''}</span>
         <span class="rec-date-added">${esc(fmtDateAdded(r.created_at))}</span>
-        <button class="rec-fav-star rec-fav-star--sm${r.is_favorite ? ' is-fav' : ''}" data-rec-id="${r.id}"
-                aria-pressed="${r.is_favorite ? 'true' : 'false'}"
-                title="${r.is_favorite ? 'Remove from favorites' : 'Mark as favorite'}">${icon('star', null, r.is_favorite)}</button>
+        <button class="rec-fav-star rec-fav-star--sm${viewerHasFavorited(r) ? ' is-fav' : ''}" data-rec-id="${r.id}"
+                aria-pressed="${viewerHasFavorited(r) ? 'true' : 'false'}"
+                title="${viewerHasFavorited(r) ? 'Remove from favorites' : 'Mark as favorite'}">${icon('star', null, viewerHasFavorited(r))}</button>
         <button class="rec-play-btn" data-rec-id="${r.id}" title="Play">${icon('play')}</button>
       </div>`
   }
@@ -1497,7 +1745,7 @@ const App = (() => {
         paint(on)
         btn.disabled = true
         try {
-          await API.recordings.update(id, { is_favorite: on })
+          await setViewerFavorite(id, on)
           refreshFavoritesNav()   // the card's star and the shelf are one control
         } catch (err) {
           paint(!on)
@@ -1511,7 +1759,10 @@ const App = (() => {
   async function openAddToCollectionMenu(recId, x, y, onAdded) {
     document.getElementById('collection-menu')?.remove()
     let cols = []
-    try { cols = await API.collections.list() } catch (_) {}
+    // System collections are excluded: their membership is a query, and the API
+    // refuses a hand-add with 409. Offering one here would be a menu item whose
+    // only possible outcome is an error.
+    try { cols = (await API.collections.list()).filter(isCuratedCollection) } catch (_) {}
     const menu = document.createElement('div')
     menu.className = 'track-qmenu'; menu.id = 'collection-menu'
     menu.innerHTML = `
@@ -2007,18 +2258,35 @@ const App = (() => {
           p.contact_note ? esc(p.contact_note) : 'Add a note — who is this?'}</div>
 
         <div class="pp-block">
-          <h2 class="pp-block-title">Shared collections</h2>
-          <div class="pp-block-hint">A peer sees every recording in every collection ticked here. Sharing a collection shares everything in it, including anything you add later.</div>
-          ${collections.length ? `
+          <h2 class="pp-block-title">Access</h2>
+          <div class="pp-block-hint">Sharing gives this person your whole library, read-only. Anything you add later appears for them automatically; anything you move out to Workshop or Backlog disappears.</div>
+          ${(() => {
+            // MVP is share-everything (Ryan, 2026-08-24). Per-collection
+            // checkboxes are DELIBERATELY not rendered: offering them invites
+            // exactly the partial grants that were deferred, and every partial
+            // grant needs every filtered endpoint to be exactly right.
+            //
+            // Underneath this is still an ordinary CollectionGrant against the
+            // Full Library system collection, so nothing about the grant model
+            // changed and selective sharing can return as an advanced option
+            // without a migration. The existing change handler is reused as-is
+            // — it keys on data-col-id and does not care that there is now one
+            // box instead of six.
+            const full = collections.find(c => c.is_system)
+            if (!full) {
+              return `<div class="peer-empty">No Full Library collection in this database — run <span class="join-hash">scripts/migrate_add_system_collections.py</span>.</div>`
+            }
+            const on = granted.has(full.id)
+            return `
             <div class="peer-grants">
-              ${collections.map(c => `
-                <label class="peer-grant${granted.has(c.id) ? ' is-on' : ''}">
-                  <input type="checkbox" data-col-id="${c.id}" ${granted.has(c.id) ? 'checked' : ''} ${p.is_active ? '' : 'disabled'}>
-                  <span class="peer-grant-name truncate">${esc(c.name)}</span>
-                  <span class="peer-grant-count">${c.recording_count}</span>
-                </label>`).join('')}
+              <label class="peer-grant peer-grant--system${on ? ' is-on' : ''}">
+                <input type="checkbox" data-col-id="${full.id}" ${on ? 'checked' : ''} ${p.is_active ? '' : 'disabled'}>
+                <span class="peer-grant-name truncate">Share my library</span>
+                <span class="peer-grant-count">${full.recording_count}</span>
+                <span class="peer-grant-note">They see everything on the shelf — Browse, Search, your collections and your favorites — but cannot change anything.</span>
+              </label>
             </div>`
-            : `<div class="peer-empty">No collections yet — <a href="#/collections">create one</a> to have something to share.</div>`}
+          })()}
         </div>
 
         <div class="pp-block">
@@ -2204,7 +2472,7 @@ const App = (() => {
     setActiveNav('collections'); setActiveArtist(null); setLoading()
     setNavCurrent('Collections')
     let cols = []
-    try { cols = await API.collections.list() } catch (_) {}
+    try { cols = (await API.collections.list()).filter(isCuratedCollection) } catch (_) {}
 
     // Same tile component the Browse dashboard uses, so a collection looks
     // like itself wherever you meet it (Ryan, 2026-08-07 — "playbill style
@@ -2511,42 +2779,12 @@ const App = (() => {
   }
 
   // ── Library Browse view (2026-08-02 design spec) ────────────────────────────
-  // A second presentation for Library / Recently Added / Collection, alongside
-  // the existing flat table ("List"). One global localStorage preference reused
-  // by all three routes — switching in one switches the others too, per Ryan's
-  // explicit call. Browse itself is a FIXED set of 5 modules (Recommended,
-  // Recently Added, Performers, Collections, On This Day) — identical no
-  // matter which of the three routes triggered it; only the page's own header
-  // (h1 + subtitle) differs.
-
-  function getLibraryViewMode() {
-    return localStorage.getItem('fluxLibraryView') === 'list' ? 'list' : 'browse'   // default browse
-  }
-  function setLibraryViewMode(mode) {
-    localStorage.setItem('fluxLibraryView', mode === 'list' ? 'list' : 'browse')
-  }
-
-  // Sits at the right of the page's header row (artist-header for Library/
-  // Recently Added; the collection name row for Collection — see each view).
-  function libToggleHtml() {
-    const mode = getLibraryViewMode()
-    return `
-      <div class="lib-toggle" role="group" aria-label="Library view">
-        <button type="button" class="lib-toggle-btn ${mode === 'browse' ? 'active' : ''}" data-view="browse">Browse</button>
-        <button type="button" class="lib-toggle-btn ${mode === 'list' ? 'active' : ''}" data-view="list">List</button>
-      </div>`
-  }
-  // `onSwitch` re-renders the CALLING view in the new mode (each of the three
-  // views passes its own re-render call) — the toggle doesn't navigate away.
-  function wireLibToggle(root, onSwitch) {
-    root.querySelectorAll('.lib-toggle-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (btn.dataset.view === getLibraryViewMode()) return
-        setLibraryViewMode(btn.dataset.view)
-        onSwitch()
-      })
-    })
-  }
+  // Browse is now the ONLY presentation for Library and Recently Added — the
+  // Browse/List toggle and the flat-table "List" mode it switched to are gone
+  // (Ryan, 2026-08-24: "we don't need list anymore"). getLibraryViewMode /
+  // setLibraryViewMode / libToggleHtml / wireLibToggle and the
+  // fluxLibraryView localStorage key retired with it; a stale value left over
+  // from an old visit is simply never read again.
 
   // Source → CSS color token. Kept separate rather than parsing sourceBadge's
   // HTML back apart. Drives the card's accent rules and source chip.
@@ -2741,6 +2979,58 @@ const App = (() => {
     try { recs = await API.recordings.recommended(BROWSE_TOP_N, _libRecommendedReroll) } catch (_) {}
     if (!recs.length) { document.getElementById('lib-mod-tops')?.remove(); return }
     grid.innerHTML = recs.map(_topTileHtml).join('')
+    grid.scrollLeft = 0
+    _updateTopsNav()
+  }
+
+  // Top Shelf left/right nav (2026-08-24, fixed same day — see below). The
+  // strip scrolls natively (mouse wheel, trackpad, touch); these two buttons
+  // are an explicit affordance for it and the reason cards no longer wrap to
+  // a second row at narrow widths — see .tops-grid in main.css.
+  //
+  // FIX 1: the right button used to start with .hidden and only clear it once
+  // the strip actually overflowed — on a wide enough window all 6 tiles fit
+  // with room to spare, so the button never appeared at all ("I am not
+  // seeing the left-right icons," Ryan). The spec only ever conditioned the
+  // LEFT button on scroll position ("only if the user has scrolled to the
+  // right already"); the right one was always supposed to be there. Right is
+  // now unconditional — rendered without .hidden and never toggled — a click
+  // with nothing left to scroll is just a harmless no-op. Left still starts
+  // hidden and only appears once scrolled.
+  //
+  // FIX 2 (2026-08-24): nav used to scroll by 80% of the visible viewport —
+  // a "paging" jump that could carry 3+ tiles at once depending on how many
+  // fit on screen. Ryan's spec is a one-at-a-time shift: click right, the
+  // leftmost tile slides fully out of view on the left and exactly one
+  // previously-offscreen tile comes into view on the right. The scroll
+  // distance now equals exactly one tile's width plus the grid's gap,
+  // measured live off the DOM (_topsStep) rather than hardcoded, so it stays
+  // correct if the tile width or gap ever changes in CSS.
+  //
+  // Wired fresh on every renderBrowseModules() call; a Shuffle re-uses the
+  // same grid and button elements, so it only needs to recompute the left
+  // button's visibility, not rewire anything.
+  function _updateTopsNav() {
+    const grid = document.getElementById('tops-grid')
+    const navL = document.getElementById('tops-nav-l')
+    if (!grid || !navL) return
+    navL.classList.toggle('hidden', grid.scrollLeft <= 2)
+  }
+  function _topsStep(grid) {
+    const tile = grid.querySelector('.top-tile')
+    if (!tile) return grid.clientWidth
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0
+    return tile.getBoundingClientRect().width + gap
+  }
+  function _wireTopsNav() {
+    const grid = document.getElementById('tops-grid')
+    const navL = document.getElementById('tops-nav-l')
+    const navR = document.getElementById('tops-nav-r')
+    if (!grid || !navL || !navR) return
+    navL.addEventListener('click', () => grid.scrollBy({ left: -_topsStep(grid), behavior: 'smooth' }))
+    navR.addEventListener('click', () => grid.scrollBy({ left: _topsStep(grid), behavior: 'smooth' }))
+    grid.addEventListener('scroll', _updateTopsNav)
+    _updateTopsNav()
   }
 
   // Builds and mounts all five Browse modules into `mountEl`. Each module is
@@ -2767,6 +3057,13 @@ const App = (() => {
   //                        is now, sortable and filterable.
   //   Genre pills        → folded into a real filter bar alongside quality and
   //                        source (Ryan), so the three filters compose.
+  //
+  // 2026-08-24: "Random Top Shows" renamed again → "The Top Shelf" (Ryan). On
+  // This Day removed for now (Ryan: may come back later) — otdHtml and its
+  // fetch are gone, not just hidden; CSS for it is left in main.css since it
+  // costs nothing unused. The shelf itself no longer wraps to a second row at
+  // narrow widths — .tops-grid is a horizontal-scroll strip now, with
+  // explicit left/right nav buttons (_wireTopsNav / _updateTopsNav below).
   //
   // `rows` is the same flattened array the List view builds — no extra request.
   const BROWSE_TOP_N = 6
@@ -2864,45 +3161,41 @@ const App = (() => {
     _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
     _browseSort = 'az'
 
-    const [tops, collections, onThisDay] = await Promise.all([
+    const [tops, collections] = await Promise.all([
       API.recordings.recommended(BROWSE_TOP_N, 0).catch(() => []),
       API.collections.list().catch(() => []),
-      API.recordings.onThisDay().catch(() => []),
     ])
 
     const { common, rare, genres } = _browseFilterOptions(_browseRows)
     _browseRareSources = new Set(rare.map(([v]) => v))
     const graded = _browseRows.filter(r => r.quality).length
 
-    const otdHtml = onThisDay.length ? `
-      <div class="otd-band">
-        <span class="otd-band-l">On This Day</span>
-        <div class="otd-band-items">
-          ${onThisDay.slice(0, 4).map(r => `
-            <a class="otd-band-i" href="#/recording/${r.id}">
-              <b>${esc(r.performer || '')}</b>
-              <span class="otd-band-d">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '')}</span>
-            </a>`).join('')}
-        </div>
-        ${onThisDay.length > 4 ? `<span class="otd-band-more">+${onThisDay.length - 4} more</span>` : ''}
-      </div>` : ''
-
+    // Left nav starts hidden — .hidden comes off in _updateTopsNav() once
+    // scrolled. Right nav is unconditional (see _updateTopsNav's comment).
+    // Both use real Lucide glyphs from ICONS, not chevronIcon() — that's the
+    // separate small-caret helper used for dropdown/tree carets elsewhere in
+    // the app, and reads as a mismatched icon family next to the rest of
+    // this Lucide-built page (Ryan, 2026-08-24: "we do not need to use
+    // inconsistent chevrons that are not from our icon package").
     const topsHtml = tops.length ? `
       <section class="lib-module" id="lib-mod-tops">
         <div class="lib-module-head">
-          <h2>Random Top Shows</h2>
+          <h2>The Top Shelf</h2>
           <button type="button" class="lib-reroll-btn" id="browse-shuffle">
             ${icon('rotate-cw')} Shuffle
           </button>
         </div>
-        <div class="tops-grid" id="tops-grid">${tops.map(_topTileHtml).join('')}</div>
+        <div class="tops-shelf">
+          <button type="button" class="tops-nav tops-nav-l hidden" id="tops-nav-l" aria-label="Scroll left">${icon('chevron-left', 'tops-nav-ic')}</button>
+          <div class="tops-grid" id="tops-grid">${tops.map(_topTileHtml).join('')}</div>
+          <button type="button" class="tops-nav tops-nav-r" id="tops-nav-r" aria-label="Scroll right">${icon('chevron-right', 'tops-nav-ic')}</button>
+        </div>
       </section>` : ''
 
     const opt = (v, label, n) =>
       `<option value="${esc(v)}">${esc(label)}${n != null ? ` (${n})` : ''}</option>`
 
     mountEl.innerHTML = `
-      ${otdHtml}
       ${topsHtml}
 
       <section class="lib-module" id="lib-mod-all">
@@ -2950,6 +3243,7 @@ const App = (() => {
     `
 
     _browseDrawList()
+    _wireTopsNav()
 
     mountEl.querySelector('#browse-shuffle')?.addEventListener('click', _refreshRecommendedModule)
     mountEl.querySelectorAll('#browse-sorts .sortb').forEach(b =>
@@ -2975,10 +3269,20 @@ const App = (() => {
     })
   }
 
-  // Compact tile for Random Top Shows — the performer photo when there is one
-  // (312 of 580 shows have one), a genre-colour field with initials when there
-  // is not. The no-photo case is the NORMAL case for 46% of the library, so it
-  // has to look deliberate rather than like a failed image.
+  // Top Shelf tile (art squared up + overlay text, 2026-08-24, Ryan). The art
+  // area is a square (aspect-ratio 1:1 on .top-art) rather than the old 76px
+  // strip — tall enough to actually show traditional album cover art once
+  // that's supported, not just a performer headshot crop. Performer photo
+  // when there is one (312 of 580 shows have one), a genre-colour field with
+  // initials when there is not — the no-photo case is the NORMAL case for
+  // 46% of the library, so it has to look deliberate rather than like a
+  // failed image, hence the initials rather than a blank/broken square.
+  //
+  // Text (performer, venue, date · grade) now lives in .top-overlay, a
+  // gradient scrim over the BOTTOM of the art rather than a separate white
+  // panel below it — the image is the whole tile now, and the scrim exists
+  // purely for legibility (dark gradient works over both a photo and a
+  // genre-colour field, light or saturated).
   function _topTileHtml(r) {
     const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
@@ -2989,8 +3293,9 @@ const App = (() => {
     return `
       <a class="top-tile" href="#/recording/${r.id}" style="--genre-fg:${esc(c)}">
         <span class="top-art">${art}</span>
-        <span class="top-body">
+        <span class="top-overlay">
           <span class="top-perf">${esc(r.performer || '')}</span>
+          ${r.venue ? `<span class="top-venue">${esc(r.venue)}</span>` : ''}
           <span class="top-meta">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '')}${
             r.quality ? ` · ${esc(r.quality)}` : ''}</span>
         </span>
@@ -3031,19 +3336,19 @@ const App = (() => {
       return
     }
 
-    // The "Library" H1 and the "580 recordings · 184 performers" subtitle are
-    // gone (Ryan, 2026-08-23: "it's not important enough"). You know you are in
-    // the library — the nav says so. The Browse/List toggle stays: it does
-    // something.
+    // The "Library" H1 and the "580 recordings · 184 performers" subtitle were
+    // gone for a while (Ryan, 2026-08-23: "it's not important enough") because
+    // the header was just the Browse/List toggle. The toggle is retired
+    // (2026-08-24), so the page gets an H1 back — "Browse My Library".
     const headerHtml = `
-      <div class="artist-header artist-header--bare">
-        <div class="artist-header-row">${libToggleHtml()}</div>
+      <div class="artist-header">
+        <div class="artist-header-row">
+          <h1>Browse My Library</h1>
+        </div>
       </div>`
 
     // Flatten to one row per recording — performer + date + venue on every line,
     // already ordered by performer (backend) then chronologically old→new.
-    // Done BEFORE the view branch since 2026-08-23: Browse's linear list is the
-    // same array, so neither view needs its own request or its own shape.
     // genre/genre_color ride on the PERFORMER (one genre per act) and colour
     // the spine as well as driving Browse's genre filter.
     const rows = allArtists.flatMap(artist =>
@@ -3059,23 +3364,8 @@ const App = (() => {
         }))
       )
     )
-    if (getLibraryViewMode() === 'browse') {
-      setMainHTML(`${headerHtml}<div class="lib-modules" id="lib-modules-mount"></div>`)
-      wireLibToggle(mainContent, renderLibraryView)
-      await renderBrowseModules(document.getElementById('lib-modules-mount'), rows)
-      return
-    }
-
-    const rowsHtml = rows.map(r => flatRowHtml(r, true)).join('')
-
-    setMainHTML(`
-      ${headerHtml}
-      ${rows.length ? recTableHeadHtml(true) : ''}
-      <div class="rec-table" id="rec-table-library">${rowsHtml}</div>`)
-
-    wireLibToggle(mainContent, renderLibraryView)
-    wireRecordingRows(mainContent)
-    if (rows.length) wireDateAddedSort(document.getElementById('rec-table-library'), rows, true)
+    setMainHTML(`${headerHtml}<div class="lib-modules" id="lib-modules-mount"></div>`)
+    await renderBrowseModules(document.getElementById('lib-modules-mount'), rows)
   }
 
   /** Recently Added — virtual view, the N most recently ingested recordings.
@@ -3107,79 +3397,63 @@ const App = (() => {
       <div class="artist-header">
         <div class="artist-header-row">
           <h1>Recently Added</h1>
-          ${libToggleHtml()}
         </div>
       </div>`
 
-    // Browse mode = a FULL version of the Browse page's Recently Added module
-    // (Ryan, 2026-08-07). It previously rendered `renderBrowseModules()` — the
-    // entire global dashboard, Recommended and Performers and all — which made
-    // "Recently Added" show everything except a longer list of recently added
-    // recordings. Same class of bug as the Collection view's.
-    if (getLibraryViewMode() === 'browse') {
-      setMainHTML(`${headerHtml}
-        <div class="rec-rowcard-list" id="recent-rowcards"></div>
-        <div class="recent-more" id="recent-more"></div>`)
-      wireLibToggle(mainContent, renderRecentView)
+    // This is a full version of the Browse page's Recently Added module
+    // (Ryan, 2026-08-07) — NOT a call to renderBrowseModules(), which is the
+    // entire global dashboard and would make "Recently Added" show everything
+    // except a longer list of recently added recordings. Same class of bug as
+    // the Collection view's.
+    setMainHTML(`${headerHtml}
+      <div class="rec-rowcard-list" id="recent-rowcards"></div>
+      <div class="recent-more" id="recent-more"></div>`)
 
-      // Endless scroll (Ryan, 2026-08-23) — was a hardcoded 50 with a
-      // "Show all" button. A sentinel below the list fetches the next page
-      // when it comes into view; the observer disconnects when the server
-      // returns a short page, which is how we know we have reached the end.
-      const listEl = document.getElementById('recent-rowcards')
-      const moreEl = document.getElementById('recent-more')
-      listEl.innerHTML = rows.map(recentRowCardHtml).join('')
+    // Endless scroll (Ryan, 2026-08-23) — was a hardcoded 50 with a
+    // "Show all" button. A sentinel below the list fetches the next page
+    // when it comes into view; the observer disconnects when the server
+    // returns a short page, which is how we know we have reached the end.
+    const listEl = document.getElementById('recent-rowcards')
+    const moreEl = document.getElementById('recent-more')
+    listEl.innerHTML = rows.map(recentRowCardHtml).join('')
 
-      let loading = false, done = rows.length < RECENT_INITIAL
-      moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
+    let loading = false, done = rows.length < RECENT_INITIAL
+    moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
 
-      const loadMore = async () => {
-        if (loading || done) return
-        loading = true
-        moreEl.innerHTML = '<div class="recent-loading">Loading more…</div>'
-        let next = []
-        try {
-          next = await API.recordings.recent(RECENT_PAGE, { card: true, offset: listEl.children.length })
-        } catch (_) {
-          moreEl.innerHTML = '<div class="recent-loading">Could not load more.</div>'
-          loading = false
-          return
-        }
-        listEl.insertAdjacentHTML('beforeend', next.map(recentRowCardHtml).join(''))
-        // A short page means the end. Checking the RETURNED count rather than
-        // a total avoids a second endpoint and cannot disagree with it.
-        done = next.length < RECENT_PAGE
-        moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
+    const loadMore = async () => {
+      if (loading || done) return
+      loading = true
+      moreEl.innerHTML = '<div class="recent-loading">Loading more…</div>'
+      let next = []
+      try {
+        next = await API.recordings.recent(RECENT_PAGE, { card: true, offset: listEl.children.length })
+      } catch (_) {
+        moreEl.innerHTML = '<div class="recent-loading">Could not load more.</div>'
         loading = false
-        if (!done) observe()
+        return
       }
-
-      let io = null
-      const observe = () => {
-        const sentinel = document.getElementById('recent-sentinel')
-        if (!sentinel) return
-        io?.disconnect()
-        // rootMargin starts the fetch before the sentinel is actually visible,
-        // so the next rows are usually there by the time the reader arrives.
-        io = new IntersectionObserver(entries => {
-          if (entries.some(e => e.isIntersecting)) loadMore()
-        }, { root: mainContent, rootMargin: '400px' })
-        io.observe(sentinel)
-      }
-      observe()
-      return
+      listEl.insertAdjacentHTML('beforeend', next.map(recentRowCardHtml).join(''))
+      // A short page means the end. Checking the RETURNED count rather than
+      // a total avoids a second endpoint and cannot disagree with it.
+      done = next.length < RECENT_PAGE
+      moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
+      loading = false
+      if (!done) observe()
     }
 
-    const rowsHtml = rows.map(r => flatRowHtml(r, true)).join('')
-
-    setMainHTML(`
-      ${headerHtml}
-      ${rows.length ? recTableHeadHtml(true) : ''}
-      <div class="rec-table" id="rec-table-recent">${rowsHtml || '<div class="empty-state" style="min-height:120px"><div class="empty-title">No recordings yet</div></div>'}</div>`)
-
-    wireLibToggle(mainContent, renderRecentView)
-    wireRecordingRows(mainContent)
-    if (rows.length) wireDateAddedSort(document.getElementById('rec-table-recent'), rows, true)
+    let io = null
+    const observe = () => {
+      const sentinel = document.getElementById('recent-sentinel')
+      if (!sentinel) return
+      io?.disconnect()
+      // rootMargin starts the fetch before the sentinel is actually visible,
+      // so the next rows are usually there by the time the reader arrives.
+      io = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) loadMore()
+      }, { root: mainContent, rootMargin: '400px' })
+      io.observe(sentinel)
+    }
+    observe()
   }
 
   /** Performer page — editable info + member Artists + recording catalog. */
@@ -4705,16 +4979,17 @@ const App = (() => {
       <div class="rec-collections" id="rec-collections">
         ${(rec.collections || []).map(collectionTagHtml).join('')}
         ${qualityChip}
-        <button class="collection-add-btn" id="btn-add-collection">+ Add to Collection</button>
+        ${libraryState.activeId == null ? `
+        <button class="collection-add-btn" id="btn-add-collection">+ Add to Collection</button>` : ''}
         <!-- Favorite toggle (moved here 2026-08-09 — was a star icon beside
              the title). Sits next to Add to Collection since both are "mark
              this recording" actions: one files it into a set, the other is a
              single personal flag. Text-led rather than icon-only, per Ryan —
              visible to everyone including listeners, since a highlight is a
              personal reaction, not a library edit. -->
-        <button class="fav-toggle-btn${rec.is_favorite ? ' is-fav' : ''}" id="btn-favorite"
-                aria-pressed="${rec.is_favorite ? 'true' : 'false'}">${
-          rec.is_favorite ? 'Favorited' : 'Mark as Favorite'}</button>
+        <button class="fav-toggle-btn${viewerHasFavorited(rec) ? ' is-fav' : ''}" id="btn-favorite"
+                aria-pressed="${viewerHasFavorited(rec) ? 'true' : 'false'}">${
+          viewerHasFavorited(rec) ? 'Favorited' : 'Mark as Favorite'}</button>
         <!-- Actions menu (Ryan, 2026-08-21). Replaces the .rec-bottom-actions
              row that used to sit under the track list: four admin buttons at
              the far end of a page whose main content scrolls, so reaching
@@ -5657,24 +5932,26 @@ const App = (() => {
     // downstream depends on it, so there is no markStaged() and no change_note.
     document.getElementById('btn-favorite')?.addEventListener('click', async () => {
       const btn = document.getElementById('btn-favorite')
-      const next = !rec.is_favorite
+      const next = !viewerHasFavorited(rec)
       const paint = (on) => {
         btn.classList.toggle('is-fav', on)
         btn.textContent = on ? 'Favorited' : 'Mark as Favorite'
         btn.setAttribute('aria-pressed', on ? 'true' : 'false')
       }
-      rec.is_favorite = next
+      // Optimistic on BOTH stores: setViewerFavorite updates favIds itself on
+      // success, so the local mirror here is only for my own library.
+      if (libraryState.activeId == null) rec.is_favorite = next
       paint(next)
       btn.disabled = true
       try {
-        await API.recordings.update(recordingId, { is_favorite: next })
+        await setViewerFavorite(recordingId, next)
         // The sidebar's Favorites section is this star's other face — starring a
         // show and not seeing it appear on the shelf makes the star feel like it
         // did nothing. Cache dropped either way; re-rendered only if the section
         // is open, so a collapsed one just reloads next time it is expanded.
         refreshFavoritesNav()
       } catch (e) {
-        rec.is_favorite = !next
+        if (libraryState.activeId == null) rec.is_favorite = !next
         paint(!next)
         alert('Could not save favorite: ' + e.message)
       } finally { btn.disabled = false }
@@ -11351,6 +11628,11 @@ const App = (() => {
   // setting location.hash (that would re-enter route() and rebuild everything).
   function searchPageHtml(q) {
     return `
+      <div class="artist-header">
+        <div class="artist-header-row">
+          <h1>Search My Library</h1>
+        </div>
+      </div>
       <div class="search-page">
         <div class="search-page-field">
           ${icon('search', 'search-page-ic')}

@@ -53,10 +53,11 @@ from app.utils.peer_auth import (
 from app.utils.peer_access import (
     peer_granted_collection_ids, peer_can_access_recording, peer_can_access_track,
     peer_visible_recording_ids, peer_visible_performance_ids,
-    peer_visible_performer_ids, peer_can_access_performer, peer_can_access_venue,
+    peer_visible_performer_ids, peer_visible_venue_ids, peer_visible_artist_ids,
+    peer_can_access_performer, peer_can_access_venue,
     peer_can_access_artist,
 )
-from app.utils.serialize import recording_row
+from app.utils.serialize import recording_row, recording_summary
 from app.utils.format import format_partial_date
 from app.api.stream import _serve_file
 from app.utils import transcode as tx
@@ -72,11 +73,21 @@ def _node_identity():
     """This instance's public identity, shown to peers on enroll/‘me’.
     Config-driven with sensible fallbacks; SHARE_NODE_NAME / SHARE_OWNER_NAME
     become real settings in the server-mode config milestone."""
-    node = current_app.config.get("SHARE_NODE_NAME") or "Flux Library"
+    # Owner first — the node name is derived from it when unset.
     owner = current_app.config.get("SHARE_OWNER_NAME")
     if not owner:
         admin = db.session.query(User).filter_by(role="admin", is_active=True).first()
         owner = admin.username if admin else "Unknown"
+
+    # A node with no configured name is "<Owner>'s Library" rather than a
+    # generic product name. The old fallback was a fixed string, which made
+    # every library in a peer's selector read identically — the one thing a
+    # library selector exists to prevent. Capitalised for the derived form
+    # only, so a bare unix username ("flux") reads as a name rather than a
+    # login.
+    node = current_app.config.get("SHARE_NODE_NAME")
+    if not node:
+        node = f"{owner[:1].upper()}{owner[1:]}'s Library"
     return node, owner
 
 
@@ -142,17 +153,24 @@ def me():
 @peer_required
 def list_collections():
     peer = current_peer()
-    granted_ids = peer_granted_collection_ids(peer)
-    if not granted_ids:
-        return jsonify([])
-    collections = db.session.query(Collection).filter(Collection.id.in_(granted_ids)).all()
+    collections = _peer_visible_collections(peer)
+
+    # System collections are hidden from the peer's collection list (2026-08-24).
+    # A Full Library grant means the peer is already browsing the whole library;
+    # listing a collection whose contents are exactly that library is noise
+    # pretending to be navigation — the same argument that dropped the dimension
+    # indexes for 3-show grants, applied the other way round.
+    collections = [c for c in collections if not c.is_system]
+
     collections.sort(key=lambda c: (c.name or "").lower())
     return jsonify([
         {
             "id":              c.id,
             "name":            c.name,
             "description":     c.description,
-            "recording_count": len(c.recordings),
+            # Model-resolved: len(c.recordings) both materialises every row and
+            # reports 0 for a dynamic collection.
+            "recording_count": c.recording_count,
         }
         for c in collections
     ])
@@ -164,11 +182,16 @@ def list_collections():
 @peer_required
 def collection_detail(collection_id):
     peer = current_peer()
-    if collection_id not in peer_granted_collection_ids(peer):
-        abort(403)
     collection = db.session.get(Collection, collection_id)
     if collection is None:
         abort(404)
+    # Visible-set derived, not grant-derived (2026-08-24): a collection is
+    # reachable if the peer can see something in it. Under the MVP's
+    # share-everything policy that is every curated collection; under selective
+    # sharing it narrows on its own, with no second rule to keep in step.
+    visible = peer_visible_recording_ids(peer)
+    if collection.is_system or not (collection.resolved_recording_ids() & visible):
+        abort(403)
     # card=True (2026-08-08): adds genre, genre_color and image_id, which the
     # handbill Browse cards need. Without it a peer's collection renders as
     # colourless cards with initials where every photo should be.
@@ -176,7 +199,10 @@ def collection_detail(collection_id):
         "id":          collection.id,
         "name":        collection.name,
         "description": collection.description,
-        "recordings":  [recording_row(r, card=True) for r in collection.recordings],
+        # Contents filtered to the visible set — the collection may legitimately
+        # hold more than this peer may see once selective sharing returns.
+        "recordings":  [_peer_row(r, card=True)
+                        for r in collection.recordings if r.id in visible],
     })
 
 
@@ -224,7 +250,9 @@ def recording_detail(recording_id):
         # were unfilled rather than the fetch never having happened.
         "performance_id":   rec.performance_id,
         "title":            rec.title,
-        "is_favorite":      bool(rec.is_favorite),
+        # The VIEWER's star, not the owner's (2026-08-24). A peer has no
+        # favourites of their own yet, so this is False — see _peer_row.
+        "is_favorite":      False,
         # Show identity (self-contained, so the peer client needs no other call)
         "performer":        p.performer.name if (p and p.performer) else None,
         # Nav ids (2026-08-08). Milestone 1 sent names only, which was right
@@ -339,6 +367,54 @@ def stream(track_id):
 _SHARE_IMG_URL = "/api/share/performers/images"
 
 
+def _peer_row(rec, card=False):
+    """recording_row, with the owner's star removed.
+
+    `is_favorite` means "the VIEWER starred this" everywhere in the UI — it
+    renders as the star you click. Passing the OWNER's value through would
+    scatter Ryan's private bookmarks across Matt's screen while looking, to
+    Matt, like his own.
+
+    The owner's favourites deliberately do not travel (2026-08-24): the star is
+    only free to mean "this one is special" while it stays private, and
+    Collections is the surface built for curation that IS meant to be read.
+    False is the honest answer here, not a redaction — a peer genuinely has no
+    favourites yet. When peer-side favourites are built, this is where the
+    viewer's own value gets filled in.
+    """
+    row = recording_row(rec, card=card)
+    row["is_favorite"] = False
+    return row
+
+
+def _peer_summary(rec):
+    """recording_summary, same reasoning as _peer_row."""
+    row = recording_summary(rec)
+    if "is_favorite" in row:
+        row["is_favorite"] = False
+    return row
+
+
+def _peer_visible_collections(peer):
+    """Curated collections holding at least one recording this peer can see.
+
+    ONE rule for both worlds (2026-08-24). Under the MVP's share-everything
+    policy this returns every curated collection — Matt sees the curator's
+    shelves, which is the intended experience. When selective sharing returns,
+    the same code narrows correctly, because it asks about the VISIBLE SET
+    rather than about the grant list. Do not special-case "share everything"
+    anywhere; let it fall out of the visible set being everything.
+
+    System collections are excluded: a collection whose contents are exactly
+    the library you are already browsing is noise pretending to be curation.
+    """
+    visible = peer_visible_recording_ids(peer)
+    if not visible:
+        return []
+    return [c for c in db.session.query(Collection).all()
+            if not c.is_system and (c.resolved_recording_ids() & visible)]
+
+
 def _visible_performances(peer, performances):
     """Filter a performance collection to the peer's world, preserving order."""
     visible = peer_visible_performance_ids(peer)
@@ -407,7 +483,6 @@ def performer_detail(performer_id):
 @peer_required
 def performer_recordings(performer_id):
     from app.models.performance import Performance
-    from app.utils.serialize import recording_summary
 
     peer = current_peer()
     if not peer_can_access_performer(peer, performer_id):
@@ -446,7 +521,7 @@ def performer_recordings(performer_id):
             "city":           v.city    if v else perf.city,
             "state":          v.state   if v else perf.state,
             "country":        v.country if v else perf.country,
-            "recordings":     [recording_summary(r) for r in recs],
+            "recordings":     [_peer_summary(r) for r in recs],
         })
     return jsonify(out)
 
@@ -495,7 +570,7 @@ def venue_detail(venue_id):
         _visible_performances(peer, v.performances),
         key=lambda p: (p.start_year or 0, p.start_month or 0, p.start_day or 0),
     )
-    recordings = [recording_row(r, card=True)
+    recordings = [_peer_row(r, card=True)
                   for p in perfs for r in _visible_recordings(peer, p.recordings)]
 
     return jsonify({
@@ -527,7 +602,6 @@ def venue_detail(venue_id):
 def artist_detail(artist_id):
     from app.models.artist import Artist
     from app.models.performance_personnel import PerformancePersonnel
-    from app.utils.serialize import recording_summary
 
     peer = current_peer()
     if not peer_can_access_artist(peer, artist_id):
@@ -568,7 +642,7 @@ def artist_detail(artist_id):
             "instrument": pp.instrument,
             "is_guest":   pp.is_guest,
             "note":       pp.note,
-            "recordings": [recording_summary(r) for r in recs],
+            "recordings": [_peer_summary(r) for r in recs],
         })
     guest_appearances.sort(
         key=lambda g: (g["start_year"] or 0, g["start_month"] or 0, g["start_day"] or 0))
@@ -647,7 +721,6 @@ def genre_detail(genre_id):
     from app.models.genre import Genre
     from app.models.performance import Performance
     from app.models.performer import Performer
-    from app.utils.serialize import recording_summary
     from sqlalchemy import func
 
     peer = current_peer()
@@ -687,7 +760,7 @@ def genre_detail(genre_id):
         for perf in performances:
             v = perf.venue
             for r in _visible_recordings(peer, perf.recordings):
-                row = recording_summary(r)
+                row = _peer_summary(r)
                 row.update({
                     "performer":   p.name,
                     "start_year":  perf.start_year,
@@ -735,7 +808,6 @@ def genre_detail(genre_id):
 def performance_detail(performance_id):
     from app.models.performance import Performance
     from app.utils.personnel import resolve_performance_personnel
-    from app.utils.serialize import recording_summary
 
     peer = current_peer()
     if performance_id not in peer_visible_performance_ids(peer):
@@ -771,7 +843,7 @@ def performance_detail(performance_id):
         "notes":        p.notes,
         # Only the recordings of this show that the peer was actually granted —
         # two tapers of one night can sit in different collections.
-        "recordings":   [recording_summary(r) for r in _visible_recordings(peer, p.recordings)],
+        "recordings":   [_peer_summary(r) for r in _visible_recordings(peer, p.recordings)],
     })
 
 
@@ -811,7 +883,7 @@ def recent_recordings():
     if card:
         query = _card_eager(query)
     recs = query.order_by(Recording.created_at.desc()).limit(limit).all()
-    return jsonify([recording_row(r, card=card) for r in recs])
+    return jsonify([_peer_row(r, card=card) for r in recs])
 
 
 @bp.route("/recordings/recommended", strict_slashes=False)
@@ -852,7 +924,7 @@ def recommended_recordings():
     rnd.shuffle(ordered)
 
     picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_performer)
-    return jsonify([recording_row(r, card=True) for r in picks])
+    return jsonify([_peer_row(r, card=True) for r in picks])
 
 
 @bp.route("/recordings/on-this-day", strict_slashes=False)
@@ -873,7 +945,298 @@ def on_this_day():
                     Performance.start_day == today.day)
             .order_by(Performance.start_year.asc().nullslast())
             .all())
-    return jsonify([recording_row(r) for r in recs])
+    return jsonify([_peer_row(r) for r in recs])
+
+
+@bp.route("/recordings/by-ids", strict_slashes=False)
+@peer_required
+def recordings_by_ids():
+    """
+    Batch lookup: `?ids=3,17,42`. Used by the consumer to render ITS OWN
+    favourites, which are stored as bare ids because nothing about the
+    recording is cached locally (see models/remote_favorite.py).
+
+    One call rather than N — a sidebar rendering a dozen favourites through the
+    proxy one at a time would be a dozen round trips over someone's home
+    internet connection.
+
+    Ids outside the visible set are simply ABSENT from the response, never an
+    error. The caller is asking about rows it believes it can see, and a 403
+    for one id in a batch of twelve would turn a rendering problem into a
+    failure. A favourite whose recording is no longer shared should quietly
+    stop appearing, which is what the sharer's revocation MEANT.
+    """
+    peer = current_peer()
+    visible = peer_visible_recording_ids(peer)
+    if not visible:
+        return jsonify([])
+
+    raw = (request.args.get("ids") or "").strip()
+    if not raw:
+        return jsonify([])
+
+    wanted = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            wanted.add(int(part))
+    # Bounded so a hand-crafted query cannot ask for the whole library in one
+    # go by listing every integer.
+    wanted = set(list(wanted & visible)[:500])
+    if not wanted:
+        return jsonify([])
+
+    card = request.args.get("card", "").lower() in ("1", "true", "yes")
+    from app.api.recordings import _card_eager
+    query = Recording.query.filter(Recording.id.in_(wanted))
+    if card:
+        query = _card_eager(query)
+    recs = query.all()
+    return jsonify([_peer_row(r, card=card) for r in recs])
+
+
+@bp.route("/venues/", strict_slashes=False)
+@peer_required
+def list_venues():
+    """Venues with at least one visible recording. Mirrors local list_venues."""
+    from app.models.venue import Venue
+    from app.models.performance import Performance
+
+    peer = current_peer()
+    venue_ids = peer_visible_venue_ids(peer)
+    if not venue_ids:
+        return jsonify([])
+
+    visible_perfs = peer_visible_performance_ids(peer)
+    venues = (db.session.query(Venue)
+              .filter(Venue.id.in_(venue_ids)).order_by(Venue.name).all())
+
+    # Counted over VISIBLE performances only. `len(v.performances)` would
+    # publish how many shows the owner really holds at that venue.
+    counts = {}
+    for (vid,) in (db.session.query(Performance.venue_id)
+                   .filter(Performance.id.in_(visible_perfs),
+                           Performance.venue_id.isnot(None))):
+        counts[vid] = counts.get(vid, 0) + 1
+
+    return jsonify([
+        {
+            "id":                v.id,
+            "name":              v.name,
+            "city":              v.city,
+            "state":             v.state,
+            "country":           v.country,
+            "performance_count": counts.get(v.id, 0),
+        }
+        for v in venues
+    ])
+
+
+@bp.route("/artists/", strict_slashes=False)
+@peer_required
+def list_artists():
+    """People reachable through a visible act. Mirrors local list_artists.
+
+    Membership-derived, like every other artist surface here: a band's lineup
+    is catalog metadata about the act, and narrowing it to whoever played the
+    visible nights gives incoherent pages.
+    """
+    from sqlalchemy import func as _func
+    from app.models.artist import Artist
+
+    peer = current_peer()
+    artist_ids = peer_visible_artist_ids(peer)
+    if not artist_ids:
+        return jsonify([])
+
+    rows = (db.session.query(Artist)
+            .filter(Artist.id.in_(artist_ids))
+            .order_by(_func.coalesce(Artist.sort_name, Artist.name)).all())
+    return jsonify([
+        {"id": a.id, "name": a.name, "sort_name": a.sort_name} for a in rows
+    ])
+
+
+@bp.route("/search", strict_slashes=False)
+@peer_required
+def search():
+    """
+    Search, scoped to the visible set.
+
+    api/search.py deliberately shipped WITHOUT a peer route, on the grounds
+    that a half-filtered search is worse than none — the peer blueprint's whole
+    premise is being structurally incapable of exposing what it should not. So
+    this does not re-implement the engine. It borrows the one seam that file
+    was built around, `build_search_index()`, and filters the index BEFORE the
+    search runs.
+
+    Filtering the INDEX rather than the RESULTS is what makes it safe: every
+    group, every count and every "and 31 more" total is computed from rows the
+    peer can already see, because nothing else was ever in the index.
+    """
+    from app.api import search as local_search
+    from app.utils import search as se
+
+    q = request.args.get("q", "").strip()
+    group_type = request.args.get("type")
+    if group_type is not None and group_type not in se.GROUP_ORDER:
+        return jsonify({"error": f"unknown type: {group_type}"}), 400
+
+    peer = current_peer()
+    visible_recs = peer_visible_recording_ids(peer)
+    if not visible_recs:
+        return jsonify({"query": q, "text_terms": [], "date_terms": [],
+                        "total": 0, "groups": []})
+
+    visible_performers = peer_visible_performer_ids(peer)
+    visible_artists = peer_visible_artist_ids(peer)
+    visible_venues = peer_visible_venue_ids(peer)
+
+    raw = local_search.build_search_index()
+    recordings = [r for r in raw["recordings"] if r["id"] in visible_recs]
+    performers = [p for p in raw["performers"] if p["id"] in visible_performers]
+    venues = [v for v in raw["venues"] if v["id"] in visible_venues]
+    artists = [
+        # The act list on an artist row is narrowed too, or a person visible
+        # through one band advertises every other band they were ever in.
+        {**a, "performer_ids": [pid for pid in a.get("performer_ids", [])
+                                if pid in visible_performers]}
+        for a in raw["artists"] if a["id"] in visible_artists
+    ]
+    index = se.build_index(performers, artists, venues, recordings)
+
+    result = se.run_search(index, q)
+    counts = local_search._derived_counts(index)
+
+    if group_type:
+        limit = local_search._int_arg("limit", 25, 1, local_search.MAX_LIMIT)
+        offset = local_search._int_arg("offset", 0, 0, 10_000)
+        g = result["groups"][group_type]
+        window = g["items"][offset:offset + limit]
+        return jsonify({
+            "query": result["query"], "text_terms": result["text_terms"],
+            "date_terms": result["date_terms"], "type": group_type,
+            "label": g["label"], "total": g["total"],
+            "offset": offset, "limit": limit,
+            "items": local_search._serialise(group_type, window, index, counts),
+        })
+
+    limit = local_search._int_arg("limit", local_search.DEFAULT_DROPDOWN_LIMIT,
+                                  1, local_search.MAX_LIMIT)
+    groups = []
+    for key in se.GROUP_ORDER:
+        g = result["groups"][key]
+        if not g["total"]:
+            continue
+        groups.append({
+            "type": key, "label": g["label"], "total": g["total"],
+            "items": local_search._serialise(key, g["items"][:limit], index, counts),
+        })
+
+    return jsonify({
+        "query": result["query"], "text_terms": result["text_terms"],
+        "date_terms": result["date_terms"],
+        "total": sum(g["total"] for g in groups),
+        "groups": groups,
+    })
+
+
+@bp.route("/performers/all-recordings", strict_slashes=False)
+@peer_required
+def all_recordings():
+    """
+    The Library/Browse payload: every visible performer with their visible
+    performances and recordings, in one request.
+
+    MIRRORS `GET /api/performers/all-recordings` (api/performers.py) key for
+    key, deliberately. The frontend's `renderLibraryView()` consumes this shape
+    and `contextualise()` rewrites the URL transparently, so any divergence
+    here shows up as a broken Library page on the peer side only — which is
+    exactly how this endpoint came to be missing in the first place. The local
+    route was added during the Browse rebuild (2026-08-23) and the share door
+    never got its counterpart, so a peer's Library said "Failed to load
+    library" while everything else worked.
+
+    Every list AND every count is computed over the visible set. A peer must
+    not learn that an act they can see three shows by actually has forty-one:
+    `performance_count` and `recording_count` below are lengths of the FILTERED
+    lists, never of the performer's real holdings.
+    """
+    from sqlalchemy import func as _func
+    from app.models.performance import Performance
+    from app.models.performer import Performer
+
+    peer = current_peer()
+    visible_performers = peer_visible_performer_ids(peer)
+    if not visible_performers:
+        return jsonify([])
+
+    visible_perfs = peer_visible_performance_ids(peer)
+    visible_recs = peer_visible_recording_ids(peer)
+
+    performers = (
+        db.session.query(Performer)
+        .filter(Performer.id.in_(visible_performers))
+        # coalesce(sort_name, name): sort_name is NULL for every performer in
+        # this database, and ordering on it alone ties every row.
+        .order_by(_func.coalesce(Performer.sort_name, Performer.name))
+        .all()
+    )
+
+    result = []
+    for pf in performers:
+        performances = (
+            db.session.query(Performance)
+            .filter(Performance.performer_id == pf.id,
+                    Performance.id.in_(visible_perfs))
+            .order_by(
+                Performance.start_year.asc().nullslast(),
+                Performance.start_month.asc().nullslast(),
+                Performance.start_day.asc().nullslast(),
+            ).all()
+        )
+        if not performances:
+            continue
+
+        perf_list = []
+        for p in performances:
+            recs = [r for r in p.recordings if r.id in visible_recs]
+            if not recs:
+                # A performance whose every recording is filtered out must not
+                # appear as an empty row — that publishes the existence of a
+                # show the peer was not granted.
+                continue
+            v = p.venue
+            perf_list.append({
+                "performance_id": p.id,
+                "performer_name": p.performer.name,
+                "title":          p.title,
+                "start_year":     p.start_year,
+                "start_month":    p.start_month,
+                "start_day":      p.start_day,
+                "venue_name":     v.name    if v else None,
+                "city":           v.city    if v else p.city,
+                "state":          v.state   if v else p.state,
+                "country":        v.country if v else p.country,
+                "recordings":     [_peer_summary(r) for r in recs],
+            })
+        if not perf_list:
+            continue
+
+        # Genre is catalog metadata about the ACT — safe to send in full, and
+        # needed for Browse's genre filter and the colour spine on every row.
+        g = pf.genre
+        result.append({
+            "performer_id":      pf.id,
+            "performer_name":    pf.name,
+            "genre":             g.name  if g else None,
+            "genre_color":       g.color if g else None,
+            "performance_count": len(perf_list),
+            "recording_count":   sum(len(p["recordings"]) for p in perf_list),
+            "performances":      perf_list,
+        })
+
+    return jsonify(result)
 
 
 @bp.route("/performers/", strict_slashes=False)

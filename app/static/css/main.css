@@ -113,6 +113,27 @@
 }
 
 /* ── Light theme (Parchment) ────────────────────────────────────────────────── */
+/* Scrubbed for contrast 2026-08-24 (Ryan: "too washed out and the text too
+   faint in some places"). Measured against WCAG 2.1's 4.5:1 text threshold
+   before touching anything (a Python script computing relative luminance
+   per-token against every --bg-* this theme actually renders on) — t2 was
+   2.7–3.9:1 and t3 was 1.8–2.6:1 everywhere, badge/semantic colours (green,
+   amber, sbd-fg, etc.) were marginal on --bg-4/--bg-5. t0 and t1 already
+   cleared 4.5:1 with room to spare and are untouched.
+
+   Every darkened token here keeps its original hue and saturation — only
+   lightness moved, via HSL, so the palette still reads as the same warm
+   "Parchment" family. New values clear 4.5:1 against --bg-0 through --bg-3
+   (the surfaces body text and cards actually sit on) and land at 3.4–4.6:1
+   against --bg-4/--bg-5 (hover/pressed states — large-UI-component territory,
+   not running text). Borders (--bd-*) were checked too and left alone: their
+   contrast against a card (~1.2–1.5:1) is essentially identical to the DARK
+   theme's own borders (~1.2–1.7:1) — this app's borders are subtle by design
+   in both themes, not uniquely broken in light mode.
+
+   ⚠ The dark theme (:root) has the SAME t2/t3 proportions (t2 ~2.6–3.8:1, t3
+   ~1.6–2.4:1 there too) — this pass was scoped to light mode only, per what
+   was asked. Flag if Ryan wants dark mode's dim tiers tightened up to match. */
 
 body.theme-light {
   --bg-0:  #f5f0e8;
@@ -128,86 +149,45 @@ body.theme-light {
 
   --t0: #2a2218;
   --t1: #5c4e3e;   /* nav items, secondary text */
-  --t2: #8a7a68;   /* breadcrumbs, labels, tertiary */
-  --t3: #a89880;   /* very dim — hints, placeholders */
+  --t2: #63574a;   /* breadcrumbs, labels, tertiary — darkened from #8a7a68, was 2.7–3.9:1, now 4.6–6.6:1 */
+  --t3: #7a6a54;   /* very dim — hints, placeholders — darkened from #a89880, was 1.8–2.6:1, now 3.4–4.9:1 */
 
-  --accent:      #7b6547;
+  --accent:      #745f43;   /* was #7b6547 */
   --accent-lit:  #5e4c32;
-  --accent-dim:  rgba(123,101,71,0.12);
-  --accent-dim2: rgba(123,101,71,0.20);
+  --accent-dim:  rgba(116,95,67,0.12);
+  --accent-dim2: rgba(116,95,67,0.20);
 
-  --green: #3a8a5e;
-  --amber: #9a7020;
-  --red:   #c04040;
-  --blue:  #3a6898;
-  --purple:#7a5ab0;
+  --green: #2e6e4b;   /* was #3a8a5e */
+  --amber: #7f5c1a;   /* was #9a7020 */
+  --red:   #ae3939;   /* was #c04040 */
+  --blue:  #396594;   /* was #3a6898 */
+  --purple:#7151a9;   /* was #7a5ab0 */
 
-  --sbd-bg:  rgba(58,138,94,0.12);   --sbd-fg:  #2e7a50;
-  --aud-bg:  rgba(154,112,32,0.12);  --aud-fg:  #886015;
-  --mtx-bg:  rgba(58,104,152,0.12);  --mtx-fg:  #3a6898;
-  --fm-bg:   rgba(122,90,176,0.12);  --fm-fg:   #7a5ab0;
-  --other-bg:rgba(154,138,118,0.12); --other-fg:#7a6a5a;
+  --sbd-bg:  rgba(46,110,75,0.12);   --sbd-fg:  #2a6e48;   /* was #2e7a50 */
+  --aud-bg:  rgba(127,92,26,0.12);   --aud-fg:  #825b14;   /* was #886015 */
+  --mtx-bg:  rgba(57,101,148,0.12);  --mtx-fg:  #396594;   /* was #3a6898 */
+  --fm-bg:   rgba(113,81,169,0.12);  --fm-fg:   #7151a9;   /* was #7a5ab0 */
+  --other-bg:rgba(110,96,82,0.12);   --other-fg:#6e6052;   /* was #7a6a5a */
 }
 
 body.theme-light .info-file-textarea:focus { background: rgba(0,0,0,0.02); }
 
 /* ── Peer mode (browsing someone else's library) ─────────────────────────────
-   Ryan, 2026-08-08. The layout is deliberately IDENTICAL to your own library —
-   same cards, same pages, same everything — so what has to change is the
-   chrome, unmistakably and at all times. A badge you stop noticing on day two
-   is exactly the wrong signal for "these recordings are not yours."
+   Ryan, 2026-08-08 — Cool Slate retint, REMOVED 2026-08-24 ("let's just get
+   rid of the third theme for now and just have the host library show up the
+   same as the user's preferences define"). A peer's library now renders in
+   whichever of the two real themes (Warm Ash / Parchment) the viewer has
+   chosen, same as their own library — no third palette. This was the whole
+   point of layering peer-mode on <html> rather than <body>: composing with
+   theme-light was designed in from the start, it just no longer overrides
+   its colours.
 
-   Warm Ash → COOL SLATE. Surfaces lose their warmth and the accent moves from
-   amber-tan to teal. That reads instantly as a different place without
-   requiring you to read anything.
-
-   Genre colours are NOT touched. Those are content, not chrome: a Funk card
-   must be the same colour in everyone's library or the colour stops meaning
-   genre. Same for the source badges and the semantic green/amber/red.
-
-   Applied to <html> rather than <body> so it composes with theme-light, which
-   lives on <body>. The two are independent axes: light/dark is a preference,
-   peer/own is a context, and every combination has to work. */
-html.peer-mode {
-  /* Surfaces — Cool Slate (dark) */
-  --bg-0:  #0f1214;
-  --bg-1:  #151a1e;
-  --bg-2:  #12171a;
-  --bg-3:  #1c2328;
-  --bg-4:  #242d33;
-  --bg-5:  #2c373e;
-
-  --t0: #d4dde2;
-  --t1: #8fa3ad;
-  --t2: #667884;
-  --t3: #4a5a64;
-
-  /* Accent — cool teal, the counterpart to the owned library's amber */
-  --accent:      #5fa8b5;
-  --accent-lit:  #7dc2ce;
-  --accent-dim:  rgba(95,168,181,0.14);
-  --accent-dim2: rgba(95,168,181,0.24);
-}
-
-html.peer-mode body.theme-light {
-  /* Cool Slate (light) — a cool paper rather than the warm Parchment */
-  --bg-0:  #eef2f4;
-  --bg-1:  #e4eaed;
-  --bg-2:  #e9eef1;
-  --bg-3:  #f7fafb;
-  --bg-4:  #dae2e6;
-  --bg-5:  #ccd7dc;
-
-  --t0: #d0c8bd;
-  --t1: #3f5259;
-  --t2: #68797f;
-  --t3: #93a4aa;
-
-  --accent:      #2e7d8c;
-  --accent-lit:  #1f5f6c;
-  --accent-dim:  rgba(46,125,140,0.12);
-  --accent-dim2: rgba(46,125,140,0.20);
-}
+   `html.peer-mode` ITSELF is not gone — it still exists as a structural/
+   permissions flag (the class is still toggled by applyPeerTheme() in
+   app.js) and drives the non-colour rules further down this file: hiding the
+   library-selector centre cluster, the drive-offline banner, and the
+   `[data-admin]` backstop. Only the --bg-*/--t*/--accent* overrides that used
+   to retint the chrome are deleted here. */
 
 /* ── Reset ──────────────────────────────────────────────────────────────────── */
 
@@ -3739,6 +3719,21 @@ a.member-chip-name:hover { color: var(--accent); }
 .peer-grant-name { flex: 1; min-width: 0; }
 .peer-grant-count { font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 
+/* System collections (Full Library) sit above the curated ones and are set
+   apart by a rule, because ticking one is a categorically different act:
+   it shares the whole shelf, and keeps sharing it as the shelf grows. The
+   caption carries that meaning — no badge, no icon. */
+.peer-grant--system {
+  flex-wrap: wrap;
+  padding-bottom: 9px; margin-bottom: 7px;
+  border-bottom: 1px solid var(--bd-0);
+}
+.peer-grant--system .peer-grant-name { font-weight: 500; }
+.peer-grant-note {
+  flex-basis: 100%; padding-left: 24px;   /* clears the checkbox + gap */
+  font-size: 10.5px; color: var(--t3); line-height: 1.45;
+}
+
 /* The invite is shown ONCE — the server keeps only a hash. Loud on purpose,
    because navigating away really does lose it. */
 .peer-invite-box {
@@ -3813,6 +3808,47 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lib-select-opt:hover { background: var(--bg-4); color: var(--t0); }
 .lib-select-opt.active { color: var(--accent-lit); }
+
+/* Join / Leave (2026-08-24) — the consumer side's front door.
+
+   The leave control stays VISIBLE rather than appearing on hover. A hidden
+   affordance is what made this whole feature unreachable in the first place
+   (the selector rendered an empty host until a library was already joined), so
+   muting it is the right amount of restraint; hiding it is not. */
+.lib-select-leave {
+  margin-left: auto; flex-shrink: 0;
+  display: inline-flex; align-items: center;
+  padding: 2px; border-radius: 3px;
+  color: var(--t3); opacity: .7;
+}
+.lib-select-leave:hover { color: var(--danger, var(--amber)); opacity: 1; background: var(--bg-2); }
+.lib-select-leave .tic { width: 12px; height: 12px; }
+
+.lib-select-join {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px; margin-top: 4px; border-radius: 3px;
+  border-top: 1px solid var(--bd-0);
+  font-size: 12px; color: var(--t2); cursor: pointer;
+}
+.lib-select-join:hover { background: var(--bg-4); color: var(--t0); }
+
+/* The empty state: no libraries joined yet, so the header offers the action
+   instead of rendering nothing. */
+.lib-join-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lib-join-ic { width: 12px; height: 12px; }
+
+.join-note { font-size: 12px; color: var(--t2); line-height: 1.5; margin: 0 0 12px; }
+.join-hash { font-family: var(--font-mono); color: var(--t1); }
+.join-input {
+  width: 100%; box-sizing: border-box;
+  padding: 8px 10px;
+  background: var(--bg-1); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  /* Mono because an invite is a raw technical string — a code you check
+     character by character — which is exactly what mono is reserved for. */
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--t0);
+}
+.join-input:focus { outline: none; border-color: var(--accent); }
+.join-error { font-size: 11.5px; color: var(--amber); line-height: 1.5; margin: 10px 0 0; }
 
 /* Reversed 2026-08-23 (Ryan) — MY LIBRARY is a link again, now that the App
    Header's Home button is gone rather than duplicating it: one control for
@@ -6326,21 +6362,10 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-act-failed { white-space: normal; line-height: 1.35; font-size: 11px; }
 
 /* ── Library Browse view (2026-08-02 design spec) ─────────────────────────────
-   Browse/List toggle, the fixed 5-module dashboard, and its three shared
-   components (rec-card, perf-tile, col-tile). Browse is the default; List is
-   the unchanged flat table (.rec-table, styled above) reached via the toggle. */
-
-.lib-toggle {
-  display: inline-flex; align-items: center; flex-shrink: 0;
-  border: 1px solid var(--bd-1); border-radius: var(--r-md);
-  padding: 2px; gap: 2px; margin-left: auto;
-}
-.lib-toggle-btn {
-  background: none; border: none; font: inherit; cursor: pointer;
-  font-size: 12px; color: var(--t2); padding: 5px 12px; border-radius: var(--r-sm);
-}
-.lib-toggle-btn:hover { color: var(--t0); }
-.lib-toggle-btn.active { background: var(--bg-4); color: var(--t0); }
+   The fixed module dashboard and its shared components (rec-card, perf-tile,
+   col-tile). Browse/List toggle removed 2026-08-24 ("we don't need list
+   anymore") — Browse is the only presentation now; .lib-toggle/.lib-toggle-btn
+   are gone with it. */
 
 .lib-modules { padding: 8px 28px 32px; display: flex; flex-direction: column; gap: 32px; }
 
@@ -7047,6 +7072,10 @@ html.peer-mode .app-header-center { visibility: hidden; }
    our drive is irrelevant to it. Same reasoning that hides the Search Bar. */
 html.peer-mode .library-banner { display: none; }
 
+/* Backstop only -- the real gate is canEditLibrary() in app.js. This catches
+   any editing affordance that renders outside that gate on a remote library. */
+html.peer-mode [data-admin] { display: none !important; }
+
 /* ── Disabled affordances ──────────────────────────────────────────────────
    One body class rather than tagging controls across 10k lines of renderers.
    Anything that reads a byte off the share gets dimmed and made inert; the
@@ -7458,7 +7487,10 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   min-width: 420px;
   min-width: 0;
   margin: 0 auto;
-  padding: 34px 0 60px;
+  /* Top padding trimmed 2026-08-24: an .artist-header ("Search My Library")
+     now sits above this box, so the old 34px stacked on top of the header's
+     own bottom padding and read as too much air. */
+  padding: 18px 0 60px;
 }
 
 .search-page-field {
@@ -7515,11 +7547,6 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 .search-page-hint-min { color: var(--t1); margin-bottom: 10px; }
 .search-page-hint b { color: var(--t1); font-weight: 600; }
 
-/* The Library page's header is now just the Browse/List toggle — no title, no
-   counts (2026-08-23). Without the H1 the old top padding left it floating. */
-.artist-header--bare { padding-bottom: 4px; }
-.artist-header--bare .artist-header-row { justify-content: flex-end; }
-
 /* Icons on the three destinations under MY LIBRARY. */
 .nav-ic { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
 
@@ -7528,9 +7555,11 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    its height; Collections sits BELOW the list because four collections do not
    deserve the top of the screen.                                            */
 
-/* On This Day — one line, at the top. Was a full-width block at the bottom
-   ("buried" and "way too wide"). Horizontal scroll rather than wrapping keeps
-   it exactly one row tall no matter how many shows share the date. */
+/* On This Day — REMOVED from the page 2026-08-24 (Ryan: may come back later).
+   Rules kept, unused — costs nothing on disk and the JS is a two-line revert
+   if it returns. Was one line at the top; horizontal scroll rather than
+   wrapping kept it exactly one row tall no matter how many shows share the
+   date, and that's the pattern the Top Shelf strip below reuses. */
 .otd-band {
   display: flex; align-items: center; gap: 16px;
   background: var(--bg-3);
@@ -7553,36 +7582,103 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 .otd-band-d { color: var(--t3); font-variant-numeric: tabular-nums; margin-left: 6px; }
 .otd-band-more { font-size: 11px; color: var(--t3); flex-shrink: 0; }
 
-/* Random Top Shows — six compact tiles. The old Recommended was three cards at
-   roughly 2.5x this height, which is most of a screen for three picks. */
-.tops-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 0 28px; }
+/* The Top Shelf (renamed 2026-08-24, was "Random Top Shows"). Six tiles —
+   the old Recommended was three cards at roughly 2.5x this height.
+   .tops-grid is a horizontal-scroll STRIP, not a wrapping grid: tiles have a
+   fixed width and never reflow to a second row, so a narrow viewport just
+   shows fewer of them rather than a taller, wrapped block. .tops-shelf holds
+   the strip plus the two nav buttons that scroll it; the buttons sit in the
+   strip's own 28px gutter so they never cover a tile.
+
+   2026-08-24 (Ryan): art squared up (was a 76px strip) — tall enough to show
+   traditional album cover art once that's supported, not just a cropped
+   headshot. Performer/venue/date now sit in .top-overlay, a gradient scrim
+   over the bottom of the art, rather than a separate text panel below it —
+   the image is the whole tile now.
+
+   2026-08-24, second pass (bug fix): .top-tile's square was originally
+   `aspect-ratio: 1/1` with no explicit height, sized off .top-art. That
+   collapsed to a ~2px sliver in testing — .top-art and .top-overlay are both
+   `position: absolute`, so .top-tile has NO in-flow content left to size
+   itself by, and a flex item's aspect-ratio-derived height doesn't reliably
+   win against that in every rendering engine (confirmed: falls straight to
+   zero when the interaction doesn't resolve). Tiles rendered as invisible
+   slivers — "scroll is not working" was the tiles not being tall enough to
+   see, not the scroll math (which was firing correctly underneath the whole
+   time). Fix: explicit `height: 168px` instead of aspect-ratio. The width
+   was already a fixed pixel value (flex: 0 0 168px, not responsive), so
+   aspect-ratio was buying nothing an explicit height doesn't do more
+   reliably — this makes the square unconditional, not layout-dependent. */
+.tops-shelf { position: relative; }
+.tops-grid {
+  display: flex; gap: 10px; padding: 0 28px;
+  overflow-x: auto; scroll-behavior: smooth;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.tops-grid::-webkit-scrollbar { display: none; }
 .top-tile {
-  display: flex; flex-direction: column;
+  position: relative; display: block; flex: 0 0 168px; height: 168px;
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-md);
   overflow: hidden; text-decoration: none; color: inherit;
-  transition: border-color .12s, background .12s;
+  transition: border-color .12s;
 }
-.top-tile:hover { border-color: var(--genre-fg, var(--bd-2)); background: var(--bg-2); }
+.top-tile:hover { border-color: var(--genre-fg, var(--bd-2)); }
 .top-art {
-  height: 76px; display: flex; align-items: center; justify-content: center;
-  background: var(--genre-fg, var(--bg-4)); position: relative; overflow: hidden;
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--genre-fg, var(--bg-4));
 }
 .top-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 /* No photo is the NORMAL case for 46% of the library, so the fallback is a
-   genre-colour field with initials — deliberate, not a broken image. */
+   genre-colour field with initials — deliberate, not a broken image. Sized
+   up along with the tile (was 21px against a 76px strip). */
 .top-initials {
-  font-family: var(--font-display); font-size: 21px; font-weight: 700;
+  font-family: var(--font-display); font-size: 44px; font-weight: 700;
   color: rgba(255,255,255,.55);
 }
-.top-body { padding: 8px 9px 10px; }
+/* Transparent-over-image scrim, not a solid panel — fades from opaque near
+   the bottom (where the text sits) to nothing about halfway up the tile, so
+   the art reads as the whole card and the text reads as an overlay on it,
+   over a photo or a genre-colour field alike. */
+.top-overlay {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 1;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 28px 9px 8px;
+  background: linear-gradient(to top, rgba(0,0,0,.85) 0%, rgba(0,0,0,.6) 45%, rgba(0,0,0,0) 100%);
+}
 .top-perf {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  font-family: var(--font-display); font-size: 11.5px; line-height: 1.2; color: var(--t0);
+  font-family: var(--font-display); font-size: 11.5px; line-height: 1.2; color: #fff;
+}
+.top-venue {
+  font-size: 10px; line-height: 1.2; color: rgba(255,255,255,.78);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .top-meta {
-  display: block; font-size: 10px; color: var(--t2); margin-top: 4px;
+  display: block; font-size: 10px; color: rgba(255,255,255,.6); margin-top: 1px;
   font-variant-numeric: tabular-nums;
 }
+
+/* Shelf nav buttons. Icons are real Lucide chevron-left/chevron-right from
+   ICONS (app.js), not the small-caret chevronIcon() helper used for
+   dropdown/tree carets elsewhere — that one is a different, deliberately
+   plainer glyph family and looked inconsistent next to it (Ryan, 2026-08-24).
+   Right is unconditional; only left starts hidden and toggles with scroll
+   position (2026-08-24 fix — see _updateTopsNav's comment in app.js for why
+   right can't be conditioned on overflow: on a wide-enough window all 6
+   tiles fit and it would never appear at all). */
+.tops-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 26px; height: 26px; border-radius: 50%; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-3); border: 1px solid var(--bd-1); color: var(--t2);
+  cursor: pointer; padding: 0;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.tops-nav:hover { background: var(--bg-4); color: var(--t0); border-color: var(--bd-2); }
+.tops-nav.hidden { display: none; }
+.tops-nav-l { left: 4px; }
+.tops-nav-r { right: 4px; }
+.tops-nav-ic { width: 13px; height: 13px; }
 
 /* Sort + filters. Filters replaced the genre pills (Ryan) so quality, source
    and genre compose instead of genre being the only axis. */
@@ -7671,6 +7767,5 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 .col-card-c { font-size: 10.5px; color: var(--t2); }
 
 @media (max-width: 1100px) {
-  .tops-grid { grid-template-columns: repeat(3, 1fr); }
   .col-strip { grid-template-columns: repeat(2, 1fr); }
 }

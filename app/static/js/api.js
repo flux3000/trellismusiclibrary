@@ -29,7 +29,7 @@ const API = (() => {
   // would be a bug worth catching loudly rather than proxying politely.
   const REMOTE_CAPABLE = new Set([
     'collections', 'recordings', 'performances', 'performers', 'venues',
-    'artists', 'genres', 'stream',
+    'artists', 'genres', 'stream', 'search',
   ])
 
   function contextualise(path) {
@@ -122,6 +122,20 @@ const API = (() => {
       list:   ()        => get('/api/remotes/'),
       enroll: (invite)  => post('/api/remotes/enroll', { invite }),
       leave:  (id)      => request('DELETE', `/api/remotes/${id}`),
+    },
+
+    // MY favourites inside a library I joined. Local rows about someone else's
+    // recordings — never proxied, never seen by the sharer.
+    //
+    // `remote-favorites` is deliberately absent from REMOTE_CAPABLE, so
+    // contextualise() leaves these paths alone and the non-GET backstop above
+    // lets the writes through. Starring is not an edit to their library; it
+    // does not touch their node at all.
+    remoteFavorites: {
+      ids:    (nodeId)        => get(`/api/remote-favorites/${nodeId}/ids`),
+      list:   (nodeId, card)  => get(`/api/remote-favorites/${nodeId}${card ? '?card=1' : ''}`),
+      add:    (nodeId, recId) => post(`/api/remote-favorites/${nodeId}`, { recording_id: recId }),
+      remove: (nodeId, recId) => request('DELETE', `/api/remote-favorites/${nodeId}/${recId}`),
     },
 
     // ── System ──────────────────────────────────────────────────────────────

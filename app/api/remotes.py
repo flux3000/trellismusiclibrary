@@ -46,9 +46,16 @@ bp = Blueprint("remotes", __name__)
 
 # First path segment must be one of these. Mirrors api/share.py's surface;
 # anything not listed is refused here rather than sent to the remote.
+# ⚠ THIS LIST, api.js's REMOTE_CAPABLE, AND share.py's ROUTES MUST AGREE.
+# Three lists, three failure modes, all silent: a path missing HERE is refused
+# by the proxy; missing from REMOTE_CAPABLE it is never rewritten and quietly
+# queries the VIEWER's own library instead (which is how peer search returned
+# nothing for a whole afternoon — the consumer's library is empty, so an empty
+# result looked like "no matches"); missing from share.py it 404s and renders
+# as an empty page. tests/test_peer_surface_parity.py asserts all three.
 _ALLOWED_PREFIXES = {
     "me", "collections", "recordings", "performances", "performers",
-    "venues", "artists", "genres", "stream",
+    "venues", "artists", "genres", "stream", "search",
 }
 
 # Header names worth carrying in each direction. Everything else is dropped —
@@ -82,6 +89,59 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 _opener = urllib.request.build_opener(_NoRedirect)
+
+
+def fetch_remote_json(node, subpath, query=None):
+    """GET a share-door path on `node` and return (payload, error_response).
+
+    Extracted so server-side callers can reach a remote without going through
+    the HTTP proxy route — api/remote_favorites.py needs to resolve a list of
+    bare recording ids into rows, and doing that by having the browser call the
+    proxy would mean the frontend orchestrating a fan-out it has no reason to
+    know about.
+
+    Returns exactly one of the two: on success `(payload, None)`, on failure
+    `(None, flask_response)` carrying the same distinctions the proxy draws —
+    401 "no longer recognises you" is not 403 "not shared with you" is not 502
+    "could not reach". Collapsing those is how "they revoked me" and "my wifi
+    is down" become the same empty list.
+    """
+    token = get_remote_token(node.id)
+    if not token:
+        return None, (jsonify({
+            "error": "No stored access token for this library. It may need to "
+                     "be joined again, or the OS keychain may be unavailable."
+        }), 409)
+
+    url = f"{node.base_url}/api/share/{subpath}"
+    if query:
+        url = f"{url}?{query}"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("Authorization", f"Bearer {token}")
+
+    try:
+        with _opener.open(req, timeout=_TIMEOUT) as resp:
+            payload = _json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = None
+        try:
+            detail = _json.loads(e.read()).get("error")
+        except Exception:
+            pass
+        if e.code == 401:
+            return None, (jsonify({"error": "This library no longer recognises "
+                                            "your access.", "remote_status": 401}), 401)
+        return None, (jsonify({"error": detail or f"The library returned {e.code}",
+                               "remote_status": e.code}), 502)
+    except urllib.error.URLError as e:
+        return None, (jsonify({"error": f"Could not reach {node.display_name}: "
+                                        f"{e.reason}"}), 502)
+    except ValueError:
+        return None, (jsonify({"error": "The library sent something unreadable"}), 502)
+
+    node.last_connected_at = _utcnow()
+    db.session.commit()
+    return _rewrite_share_urls(payload, node.id), None
 
 
 def _serialize(node):
@@ -144,7 +204,10 @@ def enroll():
 
     body = _json.dumps({
         "invite_code": code,
-        "device_label": current_app.config.get("SHARE_NODE_NAME") or "Flux",
+        # The label the REMOTE files this device under ("Matt's MacBook").
+        # Falls back to the product name only when this node has none of its
+        # own; "Flux" here was stale branding.
+        "device_label": current_app.config.get("SHARE_NODE_NAME") or "Trellis",
     }).encode()
     req = urllib.request.Request(f"{base_url}/api/share/enroll", data=body, method="POST")
     req.add_header("Content-Type", "application/json")

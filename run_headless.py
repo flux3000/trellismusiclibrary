@@ -41,7 +41,10 @@ def main():
     # before serving a single request.
     print("─" * 60)
     print(f"  Flux Audio (headless)")
-    print(f"  node        : {Config.SHARE_NODE_NAME}")
+    # SHARE_NODE_NAME is None when unset — the real name is derived from the
+    # owner at request time (share._node_identity), so say that rather than
+    # printing "None" in the identity banner.
+    print(f"  node        : {Config.SHARE_NODE_NAME or '(derived from owner)'}")
     print(f"  listening   : http://{Config.HOST}:{Config.PORT}")
     print(f"  database    : {Config.DB_PATH}")
     print(f"  share addr  : {Config.SHARE_BASE_URL or '(unset — invites carry no address)'}")

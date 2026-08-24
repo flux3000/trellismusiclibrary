@@ -89,6 +89,7 @@ def create_app(config_class=Config):
     from app.api.share        import bp as share_bp
     from app.api.peers        import bp as peers_bp
     from app.api.remotes      import bp as remotes_bp
+    from app.api.remote_favorites import bp as remote_favorites_bp
     from app.api.quality      import bp as quality_bp
     from app.api.search       import bp as search_bp
     from app.api.system       import bp as system_bp
@@ -110,6 +111,10 @@ def create_app(config_class=Config):
     app.register_blueprint(share_bp,        url_prefix="/api/share")
     app.register_blueprint(peers_bp,        url_prefix="/api/peers")
     app.register_blueprint(remotes_bp,      url_prefix="/api/remotes")
+    # Local by definition — MY favourites inside libraries I have joined. Its
+    # own prefix so it can never be mistaken for, or shadowed by, the generic
+    # /api/remotes/<id>/<path> proxy.
+    app.register_blueprint(remote_favorites_bp, url_prefix="/api/remote-favorites")
     app.register_blueprint(quality_bp,      url_prefix="/api/quality")
     app.register_blueprint(search_bp,       url_prefix="/api/search")
     app.register_blueprint(system_bp,       url_prefix="/api/system")

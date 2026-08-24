@@ -143,5 +143,11 @@ class Config:
     # falls back to the first admin's username when unset (see share.py).
     # "Trellis Library" (Ryan, 2026-08-23) — the rebrand's default share name;
     # was "Flux Library". See project_app_naming.md for the naming decision.
-    SHARE_NODE_NAME = os.environ.get("SHARE_NODE_NAME") or "Trellis Library"
+    # Deliberately None when unset, NOT a shared default string (2026-08-24).
+    # "Trellis Library" as a fallback meant every install on earth introduced
+    # itself with the identical name, so a collector who joined three friends'
+    # libraries saw three indistinguishable entries in their selector. The name
+    # is now DERIVED from the owner in share._node_identity(), which can reach
+    # the admin user that config cannot.
+    SHARE_NODE_NAME = os.environ.get("SHARE_NODE_NAME") or None
     SHARE_OWNER_NAME = os.environ.get("SHARE_OWNER_NAME") or None
