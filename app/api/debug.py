@@ -1,5 +1,5 @@
 """
-api/debug.py — Debug endpoints. DEV_MODE only.
+api/debug.py — Debug endpoints. ADMIN ONLY.
 
 Routes:
   POST /api/debug/log   receive a JS log entry (in-memory buffer)
@@ -29,9 +29,20 @@ from app.models.recording import Recording
 bp = Blueprint("debug", __name__)
 
 
-def _require_dev():
-    """Abort 404 if not in DEV_MODE — debug routes are invisible in prod."""
-    if not current_app.config.get("DEV_MODE"):
+def _require_admin():
+    """
+    Abort 404 for anyone who is not an admin.
+
+    Was DEV_MODE-only until 2026-08-23 (Ryan). That made the debug panel absent
+    from `python3 run.py` — the app actually being tested — so it was never
+    there at the moment something broke. Gating on the role instead makes it
+    available while testing and still invisible to a listener.
+
+    404 rather than 403 deliberately: a debug surface should not confirm its
+    own existence to someone who has no business with it. This check is the
+    real boundary — hiding the tab in the frontend is only a courtesy.
+    """
+    if not (current_user.is_authenticated and current_user.role == "admin"):
         abort(404)
 
 
@@ -41,7 +52,7 @@ def _require_dev():
 @login_required
 def debug_log():
     """Receive a log entry from the JS layer and append to the in-memory buffer."""
-    _require_dev()
+    _require_admin()
     entry = request.get_json(silent=True) or {}
     log_entry(entry)
     return '', 204
@@ -54,7 +65,7 @@ def debug_log():
 @login_required
 def debug_live():
     """Return the full in-memory log as JSON."""
-    _require_dev()
+    _require_admin()
     return jsonify(all_entries())
 
 
@@ -63,7 +74,7 @@ def debug_live():
 @bp.route("/info")
 @login_required
 def debug_info():
-    _require_dev()
+    _require_admin()
 
     from app.models.performer import Performer
     from app.models.artist import Artist

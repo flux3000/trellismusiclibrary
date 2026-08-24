@@ -384,6 +384,59 @@ const App = (() => {
   // toggle, both ▴/▾ swap-based rather than rotate-based and already a
   // deliberately tuned, different visual idiom (see the 2026-08-09 comment on
   // _lqTabs) — worth revisiting together if Ryan wants those unified too.
+  // ── Icons ─────────────────────────────────────────────────────────────────
+  // Lucide v1.33.0, ISC — app/static/js/LUCIDE-LICENSE.txt.
+  //
+  // Paths are vendored VERBATIM. Do not hand-edit them and do not draw new
+  // ones: copy the <path> elements out of the lucide-static package so the set
+  // stays internally consistent. An icon someone drew by eye is exactly the
+  // kind of tell this replaces.
+  //
+  // Inline SVG rather than an icon font or Unicode characters. The nav used to
+  // use ◎ ✦ ♪ ♫ ＋ ↻ borrowed from the text face, which rendered at a different
+  // size and weight from their own labels — that is what made one sidebar in
+  // one typeface look like several.
+  //
+  // Naming follows the data model, and getting it backwards would be a lie
+  // told in pictures: a Performer is the ACT that took the stage (users), an
+  // Artist is a PERSON (user).
+  //
+  // Only icons actually in use belong here. A grab-bag of unused glyphs is how
+  // icons end up sprinkled on everything.
+  const ICONS = {
+    'map-pin':      '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+    'users':        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/>',
+    'user':         '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    'tag':          '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>',
+    'plus':         '<path d="M5 12h14"/><path d="M12 5v14"/>',
+    'minus':        '<path d="M5 12h14"/>',
+    'library':      '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
+    'search':       '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
+    'clock':        '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
+    'rotate-cw':    '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+    'play':         '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
+    'pause':        '<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>',
+    'square':       '<rect width="18" height="18" x="3" y="3" rx="2"/>',
+    'star':         '<path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/>',
+    'x':            '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    'check':        '<path d="M20 6 9 17l-5-5"/>',
+    'arrow-left':   '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  }
+
+  // `fill` is for the one genuine filled/outline pair we have: a favourited
+  // star reads as filled, an unfavourited one as an outline. Nothing else
+  // should use it — Lucide is a stroke set and filling arbitrary icons breaks
+  // the family's consistency.
+  function icon(name, cls, fill) {
+    const d = ICONS[name]
+    if (!d) return ''
+    return `<svg class="tic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" ` +
+           `fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" ` +
+           `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ` +
+           `aria-hidden="true">${d}</svg>`
+  }
+
   function chevronIcon(cls) {
     return `<svg class="caret-ic${cls ? ' ' + cls : ''}" viewBox="0 0 8 8" width="10" height="10" fill="none" aria-hidden="true"><path d="M1.5 0.5 L6.5 4 L1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>`
   }
@@ -648,7 +701,7 @@ const App = (() => {
   function createMembersWidget(store, ids) {
     const pill = (p, i, role) => `
       <span class="member-chip ${role === 'guest' ? 'member-chip--guest' : ''}">
-        ${esc(p.name)} <span class="member-chip-x" data-role="${role}" data-idx="${i}" title="Remove">×</span>
+        ${esc(p.name)} <span class="member-chip-x" data-role="${role}" data-idx="${i}" title="Remove">${icon('x')}</span>
       </span>`
     const row = (role, label, items) => `
       <div class="mg-row">
@@ -868,22 +921,29 @@ const App = (() => {
 
   // ── Sidebar nav (all top-level in small caps; dimensions expandable) ──────────
 
+  // Collections is expanded on arrival (Ryan, 2026-08-23). It is the shelf's
+  // point — a collapsed list of things you curated is a door with the light
+  // off. The four dimension indexes below stay shut; those are for re-finding
+  // something you already know exists.
+  // Collections is no longer an expandable dimension at all (Ryan,
+  // 2026-08-23) — its list is always shown and the disclosure lives on each
+  // individual collection instead. The four indexes below still expand.
   state.expandedDims = state.expandedDims || new Set()
   const _dimCache = {}
 
-  function _dimSection(dim, icon, label, sub) {
+  function _dimSection(dim, iconHtml, label, sub) {
     const open = state.expandedDims.has(dim)
     const singular = label.replace(/s$/, '')
     return `
       <div class="nav-section">
         <div class="nav-item ${sub ? 'nav-sub' : 'nav-top'} nav-expand nav-dim" data-dim="${dim}">
-          ${icon ? `<span class="nav-icon">${icon}</span>` : ''}
+          ${iconHtml ? `<span class="nav-icon">${iconHtml}</span>` : ''}
           <span class="nav-dim-label truncate">${label}</span>
           <span class="nav-dim-actions">
             ${libraryState.activeId != null ? '' :
               `<span class="nav-action" data-act="new" data-admin
-                     title="Create new ${esc(singular)}">＋</span>`}
-            <span class="nav-action" data-act="refresh" title="Refresh list">↻</span>
+                     title="Create new ${esc(singular)}">${icon('plus')}</span>`}
+            <span class="nav-action" data-act="refresh" title="Refresh list">${icon('rotate-cw')}</span>
           </span>
           <span class="nav-caret ${open ? 'open' : ''}">${chevronIcon()}</span>
         </div>
@@ -934,7 +994,8 @@ const App = (() => {
           return `
             <div class="nav-col-item">
               <div class="nav-record nav-record--flush" data-col-id="${c.id}">
-                <span class="nav-caret nav-caret--sm ${open ? 'open' : ''}">${chevronIcon()}</span>
+                <span class="nav-caret nav-caret--pm nav-pm-box ${open ? 'open' : ''}"
+                      >${icon('plus', 'pm-plus')}${icon('minus', 'pm-minus')}</span>
                 <span class="truncate">${esc(c.name)}</span>
               </div>
               <div class="nav-col-recs" id="nav-col-recs-${c.id}" style="display:${open ? '' : 'none'}"></div>
@@ -986,11 +1047,9 @@ const App = (() => {
     }
     const recs = _colRecCache[id]
     box.innerHTML = recs.length
-      ? recs.map(r => `<div class="nav-col-rec truncate" data-id="${r.id}">
-           ${esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))}
-         </div>`).join('')
+      ? recs.map(r => navRecRowHtml(r, 'nav-col-rec')).join('')
       : `<div class="nav-record nav-record--empty nav-col-rec">No recordings yet</div>`
-    box.querySelectorAll('.nav-col-rec[data-id]').forEach(el =>
+    box.querySelectorAll('[data-id]').forEach(el =>
       el.addEventListener('click', e => { e.stopPropagation(); window.location.hash = `#/recording/${el.dataset.id}` }))
   }
 
@@ -1026,25 +1085,47 @@ const App = (() => {
   //
   // card=True on GET /api/recordings/favorites (added alongside this) is what
   // supplies `image_id` for the small performer thumbnail Ryan asked for.
+  // The FAVORITES header lives INSIDE the rendered block, not in the sidebar
+  // markup, so it disappears with the list. A standing header over nothing
+  // advertises an empty shelf; this way the section is absent until it has
+  // something to hold (which is why the flattened version had no header at
+  // all — Ryan asked for one back on 2026-08-23, with Collections' styling
+  // minus the chevron, since there is nothing here to expand or collapse).
+  // Single entry point for "the favourites shelf is stale". Called from every
+  // place a recording can be starred or unstarred — the Browse card button and
+  // the Recording view's toggle — so the two can never drift apart again.
+  // Deliberately fire-and-forget: a failed sidebar refresh must never surface
+  // as a failed favourite, because the favourite itself already saved.
+  function refreshFavoritesNav() {
+    try { _renderFavoritesFlat() } catch (_) {}
+  }
+
+  // Shared by FAVORITES and by an expanded collection (Ryan, 2026-08-23:
+  // "the style of each recording in the collection should be the same style as
+  // the recording in Favorites"). Both payloads come back with card=True, so
+  // both carry image_id and the photo path works in both places.
+  function navRecRowHtml(r, extraCls) {
+    const full = esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))
+    const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const avatar = r.image_id
+      ? `<img class="nav-fav-avatar" src="${API.performers.imageUrl(r.image_id)}" alt="">`
+      : `<div class="nav-fav-avatar nav-fav-avatar--blank">${esc(initials)}</div>`
+    return `
+      <div class="nav-fav-row${extraCls ? ' ' + extraCls : ''}" data-id="${r.id}" title="${full}">
+        ${avatar}
+        <span class="nav-fav-title truncate">${full}</span>
+      </div>`
+  }
+
   async function _renderFavoritesFlat() {
     const box = document.getElementById('nav-favorites-flat')
     if (!box) return
     let rows = []
     try { rows = await API.recordings.favorites() } catch (_) {}
     if (!rows.length) { box.innerHTML = ''; return }   // nothing to announce — see comment above
-    box.innerHTML = rows.map(r => {
-      const full = esc([r.performer, r.date, r.venue].filter(Boolean).join(' · '))
-      const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-        .map(w => w[0]).join('').toUpperCase()
-      const avatar = r.image_id
-        ? `<img class="nav-fav-avatar" src="${API.performers.imageUrl(r.image_id)}" alt="">`
-        : `<div class="nav-fav-avatar nav-fav-avatar--blank">${esc(initials)}</div>`
-      return `
-        <div class="nav-fav-row" data-id="${r.id}" title="${full}">
-          ${avatar}
-          <span class="nav-fav-title truncate">${full}</span>
-        </div>`
-    }).join('')
+    const head = '<div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Favorites</div>'
+    box.innerHTML = head + rows.map(r => navRecRowHtml(r)).join('')
     box.querySelectorAll('.nav-fav-row[data-id]').forEach(el =>
       el.addEventListener('click', () => { window.location.hash = `#/recording/${el.dataset.id}` }))
   }
@@ -1103,9 +1184,9 @@ const App = (() => {
     return `
       <div class="lib-select${solo ? ' is-solo' : ''}${active ? ' is-remote' : ''}"
            id="lib-select" ${solo ? '' : 'role="button" tabindex="0"'}>
-        <span class="lib-select-icon">${active ? '⇄' : '◈'}</span>
+        <span class="lib-select-icon">${active ? icon('arrow-left-right') : icon('library')}</span>
         <span class="lib-select-name truncate">${esc(label)}</span>
-        ${solo ? '' : '<span class="lib-select-caret">▾</span>'}
+        ${solo ? '' : `<span class="lib-select-caret">${chevronIcon('caret-ic--down')}</span>`}
       </div>
       <div class="lib-select-menu" id="lib-select-menu" style="display:none"></div>`
   }
@@ -1140,7 +1221,7 @@ const App = (() => {
       ].map(l => `
         <div class="lib-select-opt${l.id === libraryState.activeId ? ' active' : ''}"
              data-lib-id="${l.id == null ? '' : l.id}">
-          <span class="lib-select-icon">${l.id == null ? '◈' : '⇄'}</span>
+          <span class="lib-select-icon">${l.id == null ? icon('library') : icon('arrow-left-right')}</span>
           <span class="truncate">${esc(l.display_name)}</span>
         </div>`).join('')
       menu.style.display = 'block'
@@ -1258,19 +1339,24 @@ const App = (() => {
     nav.innerHTML = remote ? `
       <div class="nav-scroll">
         <div class="nav-header truncate">${esc(active ? active.display_name : 'Shared Library')}</div>
-        ${_dimSection('collections', null, 'Collections', false)}
+        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Collections</div>
+        <div class="nav-records" id="nav-records-collections"></div>
       </div>` : `
       <div class="nav-scroll">
-        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">+</span> Add Recordings</a>` : ''}
-        <a class="nav-header nav-header--link" data-nav="home" href="#/">My Library</a>
-        ${_dimSection('collections', null, 'Collections', false)}
+        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings</a>` : ''}
+        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static">My Library</div>
+        <a class="nav-item" data-nav="library" href="#/">${icon('library', 'nav-ic')}Browse</a>
+        <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
+        <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
+        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Collections</div>
+        <div class="nav-records" id="nav-records-collections"></div>
         <div class="nav-favorites" id="nav-favorites-flat"></div>
       </div>
       <div class="nav-dims-foot">
-        ${_dimSection('venues', '◎', 'Venues')}
-        ${_dimSection('performers', '✦', 'Performers')}
-        ${_dimSection('artists', '♪', 'Artists')}
-        ${_dimSection('genres', '♫', 'Genres')}
+        ${_dimSection('venues', icon('map-pin'), 'Venues')}
+        ${_dimSection('performers', icon('users'), 'Performers')}
+        ${_dimSection('artists', icon('user'), 'Artists')}
+        ${_dimSection('genres', icon('tag'), 'Genres')}
       </div>`
 
     // The library selector lives in the App Header now, but it is rendered from
@@ -1293,6 +1379,7 @@ const App = (() => {
       })
     })
     state.expandedDims.forEach(dim => _renderDimRecords(dim))
+    _renderDimRecords('collections')   // always rendered — no longer a toggle
     if (!remote) _renderFavoritesFlat()   // shared libraries get Library + Collections only — see comment above
     setActiveNav(state._activeNav)
   }
@@ -1320,8 +1407,8 @@ const App = (() => {
         <span class="rec-date-added">${esc(fmtDateAdded(r.created_at))}</span>
         <button class="rec-fav-star rec-fav-star--sm${r.is_favorite ? ' is-fav' : ''}" data-rec-id="${r.id}"
                 aria-pressed="${r.is_favorite ? 'true' : 'false'}"
-                title="${r.is_favorite ? 'Remove from favorites' : 'Mark as favorite'}">${r.is_favorite ? '★' : '☆'}</button>
-        <button class="rec-play-btn" data-rec-id="${r.id}" title="Play">▶</button>
+                title="${r.is_favorite ? 'Remove from favorites' : 'Mark as favorite'}">${icon('star', null, r.is_favorite)}</button>
+        <button class="rec-play-btn" data-rec-id="${r.id}" title="Play">${icon('play')}</button>
       </div>`
   }
 
@@ -1403,7 +1490,7 @@ const App = (() => {
         const on = btn.getAttribute('aria-pressed') !== 'true'
         const paint = (isFav) => {
           btn.classList.toggle('is-fav', isFav)
-          btn.textContent = isFav ? '★' : '☆'
+          btn.innerHTML = icon('star', null, isFav)
           btn.setAttribute('aria-pressed', isFav ? 'true' : 'false')
           btn.title = isFav ? 'Remove from favorites' : 'Mark as favorite'
         }
@@ -1411,6 +1498,7 @@ const App = (() => {
         btn.disabled = true
         try {
           await API.recordings.update(id, { is_favorite: on })
+          refreshFavoritesNav()   // the card's star and the shelf are one control
         } catch (err) {
           paint(!on)
           alert('Could not save favorite: ' + err.message)
@@ -1456,7 +1544,7 @@ const App = (() => {
 
   // Collection tags on the recording detail (styled like flag pills).
   function collectionTagHtml(c) {
-    return `<span class="collection-tag" data-id="${c.id}">${esc(c.name)}<span class="collection-tag-x" title="Remove from collection">×</span></span>`
+    return `<span class="collection-tag" data-id="${c.id}">${esc(c.name)}<span class="collection-tag-x" title="Remove from collection">${icon('x')}</span></span>`
   }
   function wireCollectionTag(tagEl, recId) {
     tagEl.querySelector('.collection-tag-x')?.addEventListener('click', async () => {
@@ -1473,7 +1561,7 @@ const App = (() => {
         if (box.querySelector(`.collection-tag[data-id="${id}"]`)) return
         const span = document.createElement('span')
         span.className = 'collection-tag'; span.dataset.id = id
-        span.innerHTML = `${esc(name)}<span class="collection-tag-x" title="Remove from collection">×</span>`
+        span.innerHTML = `${esc(name)}<span class="collection-tag-x" title="Remove from collection">${icon('x')}</span>`
         box.insertBefore(span, document.getElementById('btn-add-collection'))
         wireCollectionTag(span, recId)
       })
@@ -1509,6 +1597,27 @@ const App = (() => {
   // Tabs are show/hide over already-rendered panes, never a re-fetch: that is
   // what keeps a half-typed description or a running AI Assist job alive across
   // a tab switch, and it is why tab state is deliberately NOT in the hash.
+  // Wire a control that entityShellHtml() only renders for an editor.
+  //
+  // `actions` is dropped in Playback mode inside the shell — correctly, and
+  // deliberately, so a new entity page cannot forget. But every caller then
+  // wired its button with a bare getElementById(...).addEventListener, which
+  // is null for a listener. All six entity pages threw on load in Playback
+  // mode (found 2026-08-23 via the debug drawer, on the Artist page:
+  // "null is not an object … 'pn-delete'"). Inside an async render the throw
+  // surfaced as an unhandled rejection and nothing showed it, so it had been
+  // silently breaking every one of those pages.
+  //
+  // CONTEXT.md's rule is that gating belongs in the shared helper rather than
+  // at ~25 call sites. This is the wiring half of that same rule.
+  //
+  // Use this ONLY where absence is expected. Elsewhere a missing element is a
+  // real bug and should keep throwing.
+  function onAdminClick(id, handler) {
+    const el = document.getElementById(id)
+    if (el) el.addEventListener('click', handler)
+  }
+
   function entityShellHtml(opts) {
     const tabs = (opts.tabs || []).filter(Boolean)
     const activeId = (tabs.find(t => t.active) || tabs[0] || {}).id
@@ -1600,7 +1709,7 @@ const App = (() => {
               </div>` : ''}
             </div>`).join('')}
           ${galEditable ? `<div class="pp-drop" data-drop="1">
-            <span class="pp-drop-plus">＋</span>
+            <span class="pp-drop-plus">${icon('plus')}</span>
             <span>Drop photos here<br>or click to browse</span>
             <div class="pp-drop-veil">Drop to upload</div>
           </div>` : ''}
@@ -1987,7 +2096,7 @@ const App = (() => {
             </div>`
           document.getElementById('peer-invite-copy').addEventListener('click', () => {
             navigator.clipboard?.writeText(inv.invite || inv.code)
-            document.getElementById('peer-invite-copy').textContent = '✓ Copied'
+            document.getElementById('peer-invite-copy').textContent = 'Copied'
           })
           const row = peers.find(x => x.id === p.id)
           if (row) { row.pending_invites += 1; renderList() }
@@ -2018,7 +2127,7 @@ const App = (() => {
       } catch (_) { /* activity is nice-to-have, never blocks the page */ }
     }
 
-    document.getElementById('peer-new').addEventListener('click', async () => {
+    onAdminClick('peer-new', async () => {
       const name = prompt('Peer name — your own label for this person:')
       if (!name || !name.trim()) return
       try {
@@ -2219,7 +2328,7 @@ const App = (() => {
       onSave: async v => { v = v.trim(); c.description = v; await saveField({ description: v || null }) },
     })
 
-    document.getElementById('col-delete').addEventListener('click', async () => {
+    onAdminClick('col-delete', async () => {
       if (!confirm(`Delete collection "${c.name}"? Recordings are not affected.`)) return
       try { await API.collections.remove(id); refreshSidebar(); window.location.hash = '#/collections' }
       catch (e) { alert(e.message) }
@@ -2373,7 +2482,7 @@ const App = (() => {
     function renderPerformers() {
       const box = document.getElementById('pn-performers')
       box.innerHTML =
-        performers.map((p, i) => `<span class="member-chip">${esc(p.name)} <span class="member-chip-x" data-i="${i}" title="Remove from this act">×</span></span>`).join('') +
+        performers.map((p, i) => `<span class="member-chip">${esc(p.name)} <span class="member-chip-x" data-i="${i}" title="Remove from this act">${icon('x')}</span></span>`).join('') +
         `<span class="artist-picker-wrap pp-add-wrap">
            <input type="text" class="member-input pp-add-input" autocomplete="off" placeholder="Add to a performer…" />
            <div class="artist-dropdown" id="pn-add-dd" style="display:none"></div>
@@ -2394,7 +2503,7 @@ const App = (() => {
     }
     renderPerformers()
 
-    document.getElementById('pn-delete').addEventListener('click', async () => {
+    onAdminClick('pn-delete', async () => {
       if (!confirm(`Delete artist "${a.name}"? This can't be undone.`)) return
       try { await API.artists.remove(id); refreshSidebar(); window.location.hash = '#/' }
       catch (e) { alert(e.message) }
@@ -2466,8 +2575,10 @@ const App = (() => {
       .trim()
   }
 
-  const _BILL_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-                        'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+  // Title case since 2026-08-23 (Ryan): the card date is a standard date
+  // line, "Apr 22, 1974", not a poster's shouted caps.
+  const _BILL_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
   // Handbill date line — the card's most prominent element after the act.
   //
@@ -2482,7 +2593,7 @@ const App = (() => {
   function handbillDate(y, m, d) {
     if (!y) return ''
     const mon = (m >= 1 && m <= 12) ? _BILL_MONTHS[m - 1] : null
-    if (mon && d) return `${mon} ${d} · ${y}`
+    if (mon && d) return `${mon} ${d}, ${y}`
     if (mon)      return `${mon} ${y}`
     return String(y)
   }
@@ -2600,14 +2711,6 @@ const App = (() => {
       </a>`
   }
 
-  function perfTileHtml(p) {
-    const count = p.recording_count || 0
-    return `
-      <a class="perf-tile" href="#/performer/${p.id}">
-        <div class="perf-tile-name truncate">${esc(p.name)}</div>
-        <div class="perf-tile-count">${count} recording${count === 1 ? '' : 's'}</div>
-      </a>`
-  }
 
   function colTileHtml(c) {
     const count = c.recording_count || 0
@@ -2619,27 +2722,7 @@ const App = (() => {
       </a>`
   }
 
-  function onThisDayRowHtml(r) {
-    const loc = fmtLocation(r.city, r.state, r.country)
-    return `
-      <a class="otd-row" href="#/recording/${r.id}">
-        <span class="otd-year">${r.start_year ? esc(String(r.start_year)) : '—'}</span>
-        <span class="otd-performer truncate">${esc(r.performer || '')}</span>
-        <span class="otd-venue truncate">${esc(r.venue || '(unknown venue)')}${loc ? ', ' + esc(loc) : ''}</span>
-        ${sourceBadge(r.source)}
-      </a>`
-  }
 
-  function libModuleHtml(id, title, headExtraHtml, bodyHtml) {
-    return `
-      <section class="lib-module" id="${id}">
-        <div class="lib-module-head">
-          <h2>${esc(title)}</h2>
-          ${headExtraHtml || ''}
-        </div>
-        ${bodyHtml}
-      </section>`
-  }
 
   // Reroll counter for Recommended's "Show me three more" — deliberately kept
   // in memory only (module scope), not persisted: the default draw is stable
@@ -2647,77 +2730,283 @@ const App = (() => {
   // that same stable default, not wherever the reroll was left.
   let _libRecommendedReroll = 0
 
+  // Shuffle. Replaces only the TILES, not the whole section — re-rendering the
+  // heading and its button meant re-wiring the button every time, which is how
+  // the old version worked and one listener leak away from not working.
   async function _refreshRecommendedModule() {
-    const el = document.getElementById('lib-mod-recommended')
-    if (!el) return
+    const grid = document.getElementById('tops-grid')
+    if (!grid) return
     _libRecommendedReroll++
     let recs = []
-    try { recs = await API.recordings.recommended(3, _libRecommendedReroll) } catch (_) {}
-    if (!recs.length) { el.remove(); return }   // module hides entirely if now empty
-    const html = libModuleHtml('lib-mod-recommended', 'Recommended',
-      `<button type="button" class="lib-reroll-btn">Show me three more</button>`,
-      `<div class="lib-module-grid">${recs.map(recCardHtml).join('')}</div>`)
-    el.outerHTML = html
-    document.getElementById('lib-mod-recommended')
-      .querySelector('.lib-reroll-btn').addEventListener('click', _refreshRecommendedModule)
+    try { recs = await API.recordings.recommended(BROWSE_TOP_N, _libRecommendedReroll) } catch (_) {}
+    if (!recs.length) { document.getElementById('lib-mod-tops')?.remove(); return }
+    grid.innerHTML = recs.map(_topTileHtml).join('')
   }
 
   // Builds and mounts all five Browse modules into `mountEl`. Each module is
   // fetched independently and simply omitted if empty or its request fails —
   // "every module hides entirely when it has nothing to show" is what makes a
   // fixed, un-configurable module set work on a sparse library (design spec).
-  async function renderBrowseModules(mountEl) {
+  // ── Browse (rebuilt 2026-08-23, "Direction A — The Shelf") ─────────────────
+  //
+  // The linear list IS the page. Everything above it is a thin band that has to
+  // earn its height, and Collections moved BELOW the list (Ryan) — it is four
+  // collections, and putting it up top gave the sparsest section the best real
+  // estate.
+  //
+  // What this replaced and why:
+  //   Recommended        → "Random Top Shows". "Recommended" implied a
+  //                        recommender; nothing here models taste. These are a
+  //                        random draw from the graded shows, and the name now
+  //                        says so. 6 tiles at roughly 40% of the old handbill
+  //                        height instead of 3 large ones.
+  //   "Show me three more" → a Shuffle control. Ryan: the literal phrasing was
+  //                        the problem; a refresh should read as a refresh.
+  //   Performers grid    → gone entirely ("unusable"). Collectors expect a
+  //                        linear list of recordings, so that is what the page
+  //                        is now, sortable and filterable.
+  //   Genre pills        → folded into a real filter bar alongside quality and
+  //                        source (Ryan), so the three filters compose.
+  //
+  // `rows` is the same flattened array the List view builds — no extra request.
+  const BROWSE_TOP_N = 6
+
+  let _browseRows = []
+  let _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
+  let _browseSort = 'az'
+
+  function _browseFilterOptions(rows) {
+    // Options are derived from the DATA, not hardcoded: the source column has
+    // 22 distinct values, 14 of which appear exactly once ("MR", "AM", "OSM"…).
+    // A select listing all of them is unusable, so anything rare collapses into
+    // Other. Deriving it also means the list maintains itself as the library
+    // grows — and it surfaces the near-duplicates worth cleaning up
+    // ("DVB-S" and "DVBS" are both present today).
+    const RARE = 5
+    const count = (get) => {
+      const m = new Map()
+      rows.forEach(r => { const v = get(r); if (v) m.set(v, (m.get(v) || 0) + 1) })
+      return m
+    }
+    const sources = [...count(r => r.source).entries()]
+      .sort((a, b) => b[1] - a[1])
+    const common = sources.filter(([, n]) => n >= RARE)
+    const rare   = sources.filter(([, n]) => n < RARE)
+    const genres = [...count(r => r.genre).entries()].sort((a, b) => b[1] - a[1])
+    return { common, rare, genres }
+  }
+
+  function _browseApply(rows) {
+    const f = _browseFilters
+    const rare = _browseRareSources || new Set()
+    let out = rows.filter(r => {
+      if (f.quality === 'top'   && !['A', 'A+'].includes(r.quality)) return false
+      if (f.quality === 'graded' && !r.quality) return false
+      if (f.genre !== 'any' && r.genre !== f.genre) return false
+      if (f.source === 'any') return true
+      if (f.source === '__none')  return !r.source
+      if (f.source === '__other') return !!r.source && rare.has(r.source)
+      return r.source === f.source
+    })
+    const byDate = (a, b) =>
+      (a.start_year || 0) - (b.start_year || 0) ||
+      (a.start_month || 0) - (b.start_month || 0) ||
+      (a.start_day || 0) - (b.start_day || 0)
+    if (_browseSort === 'az')      out = out.slice().sort((a, b) =>
+      (a.performer || '').localeCompare(b.performer || '') || byDate(a, b))
+    if (_browseSort === 'newest')  out = out.slice().sort((a, b) => byDate(b, a))
+    if (_browseSort === 'oldest')  out = out.slice().sort(byDate)
+    if (_browseSort === 'added')   out = out.slice().sort((a, b) =>
+      String(b.created_at || '').localeCompare(String(a.created_at || '')))
+    return out
+  }
+
+  function _browseRowHtml(r) {
+    const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const loc = fmtLocation(r.city, r.state, r.country)
+    const c = r.genre_color || 'var(--t2)'
+    return `
+      <a class="brow" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
+        <span class="brow-spine"></span>
+        <span class="brow-av">${esc(initials)}</span>
+        <span class="brow-date">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '—')}</span>
+        <span class="brow-perf">${esc(r.performer || '')}</span>
+        <span class="brow-venue">${esc([r.venue, loc].filter(Boolean).join(', ') || '(unknown venue)')}</span>
+        <span class="brow-tail">
+          ${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}
+          ${r.quality ? `<span class="brow-grade">${esc(r.quality)}</span>` : ''}
+        </span>
+      </a>`
+  }
+
+  function _browseDrawList() {
+    const listEl = document.getElementById('browse-rows')
+    const cntEl  = document.getElementById('browse-count')
+    if (!listEl) return
+    const rows = _browseApply(_browseRows)
+    cntEl.textContent = `${rows.length} of ${_browseRows.length} recordings`
+    listEl.innerHTML = rows.length
+      ? rows.map(_browseRowHtml).join('')
+      : `<div class="empty-state" style="min-height:120px">
+           <div class="empty-title">Nothing matches these filters</div>
+           <div class="empty-sub">Widen one of them — quality is the narrowest, since only
+             ${_browseRows.filter(r => r.quality).length} of ${_browseRows.length} recordings are graded.</div>
+         </div>`
+    wireRecordingRows(listEl)
+  }
+
+  let _browseRareSources = new Set()
+
+  async function renderBrowseModules(mountEl, rows) {
     _libRecommendedReroll = 0
-    const [recommended, recentCards, performers, collections, onThisDay] = await Promise.all([
-      API.recordings.recommended(3, 0).catch(() => []),
-      // No waveform: both card layouts render from metadata only (2026-08-07).
-      // The endpoint's ?waveform=1 opt-in stays available and tested — the
-      // eager-load it triggers is a real cost and nothing needs it right now.
-      // `card:true` DOES fetch genre colour + performer photo, which the row
-      // cards use. Server returns these newest-first by ingest time.
-      API.recordings.recent(12, { card: true }).catch(() => []),
-      API.performers.list().catch(() => []),
+    _browseRows = rows || []
+    _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
+    _browseSort = 'az'
+
+    const [tops, collections, onThisDay] = await Promise.all([
+      API.recordings.recommended(BROWSE_TOP_N, 0).catch(() => []),
       API.collections.list().catch(() => []),
       API.recordings.onThisDay().catch(() => []),
     ])
 
-    const sections = []
-    if (recommended.length) {
-      sections.push(libModuleHtml('lib-mod-recommended', 'Recommended',
-        `<button type="button" class="lib-reroll-btn">Show me three more</button>`,
-        `<div class="lib-module-grid">${recommended.map(recCardHtml).join('')}</div>`))
-    }
-    if (recentCards.length) {
-      // Row cards, not handbills — see recentRowCardHtml. Already in
-      // reverse-chronological ingest order from the server.
-      sections.push(libModuleHtml('lib-mod-recent', 'Recently Added', '',
-        `<div class="rec-rowcard-list">${recentCards.map(recentRowCardHtml).join('')}</div>`))
-    }
-    if (performers.length) {
-      const LEAD = 12
-      const lead = performers.slice(0, LEAD)
-      const seeAll = performers.length > LEAD
-        ? `<a class="perf-tile perf-tile--see-all" href="#/artists">See all ${performers.length} →</a>` : ''
-      sections.push(libModuleHtml('lib-mod-performers', 'Performers', '',
-        `<div class="lib-module-grid lib-module-grid--tiles">${lead.map(perfTileHtml).join('')}${seeAll}</div>`))
-    }
-    if (collections.length) {
-      sections.push(libModuleHtml('lib-mod-collections', 'Collections', '',
-        `<div class="lib-module-grid lib-module-grid--tiles">${collections.map(colTileHtml).join('')}</div>`))
-    }
-    if (onThisDay.length) {
-      sections.push(libModuleHtml('lib-mod-otd', 'On This Day', '',
-        `<div class="otd-list">${onThisDay.map(onThisDayRowHtml).join('')}</div>`))
-    }
+    const { common, rare, genres } = _browseFilterOptions(_browseRows)
+    _browseRareSources = new Set(rare.map(([v]) => v))
+    const graded = _browseRows.filter(r => r.quality).length
 
-    mountEl.innerHTML = sections.join('')
-    mountEl.querySelector('#lib-mod-recommended .lib-reroll-btn')
-      ?.addEventListener('click', _refreshRecommendedModule)
+    const otdHtml = onThisDay.length ? `
+      <div class="otd-band">
+        <span class="otd-band-l">On This Day</span>
+        <div class="otd-band-items">
+          ${onThisDay.slice(0, 4).map(r => `
+            <a class="otd-band-i" href="#/recording/${r.id}">
+              <b>${esc(r.performer || '')}</b>
+              <span class="otd-band-d">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '')}</span>
+            </a>`).join('')}
+        </div>
+        ${onThisDay.length > 4 ? `<span class="otd-band-more">+${onThisDay.length - 4} more</span>` : ''}
+      </div>` : ''
+
+    const topsHtml = tops.length ? `
+      <section class="lib-module" id="lib-mod-tops">
+        <div class="lib-module-head">
+          <h2>Random Top Shows</h2>
+          <button type="button" class="lib-reroll-btn" id="browse-shuffle">
+            ${icon('rotate-cw')} Shuffle
+          </button>
+        </div>
+        <div class="tops-grid" id="tops-grid">${tops.map(_topTileHtml).join('')}</div>
+      </section>` : ''
+
+    const opt = (v, label, n) =>
+      `<option value="${esc(v)}">${esc(label)}${n != null ? ` (${n})` : ''}</option>`
+
+    mountEl.innerHTML = `
+      ${otdHtml}
+      ${topsHtml}
+
+      <section class="lib-module" id="lib-mod-all">
+        <div class="browse-bar">
+          <div class="browse-sorts" id="browse-sorts">
+            <button class="sortb on" data-sort="az">A–Z</button>
+            <button class="sortb" data-sort="newest">Newest</button>
+            <button class="sortb" data-sort="oldest">Oldest</button>
+            <button class="sortb" data-sort="added">Recently added</button>
+          </div>
+          <div class="browse-filters">
+            <label class="bfilter">Quality
+              <select id="bf-quality">
+                ${opt('any', 'Any')}
+                ${opt('top', 'A and A+', _browseRows.filter(r => ['A','A+'].includes(r.quality)).length)}
+                ${opt('graded', 'Graded only', graded)}
+              </select>
+            </label>
+            <label class="bfilter">Source
+              <select id="bf-source">
+                ${opt('any', 'Any')}
+                ${common.map(([v, n]) => opt(v, v, n)).join('')}
+                ${rare.length ? opt('__other', 'Other', rare.reduce((n, x) => n + x[1], 0)) : ''}
+                ${opt('__none', 'Unknown', _browseRows.filter(r => !r.source).length)}
+              </select>
+            </label>
+            <label class="bfilter">Genre
+              <select id="bf-genre">
+                ${opt('any', 'Any')}
+                ${genres.map(([v, n]) => opt(v, v, n)).join('')}
+              </select>
+            </label>
+            <button type="button" class="bfilter-clear" id="bf-clear">Clear</button>
+          </div>
+          <span class="browse-count" id="browse-count"></span>
+        </div>
+        <div class="brows" id="browse-rows"></div>
+      </section>
+
+      ${collections.length ? `
+      <section class="lib-module" id="lib-mod-collections">
+        <div class="lib-module-head"><h2>Collections</h2></div>
+        <div class="col-strip">${collections.map(_colStripHtml).join('')}</div>
+      </section>` : ''}
+    `
+
+    _browseDrawList()
+
+    mountEl.querySelector('#browse-shuffle')?.addEventListener('click', _refreshRecommendedModule)
+    mountEl.querySelectorAll('#browse-sorts .sortb').forEach(b =>
+      b.addEventListener('click', () => {
+        _browseSort = b.dataset.sort
+        mountEl.querySelectorAll('#browse-sorts .sortb').forEach(x => x.classList.toggle('on', x === b))
+        _browseDrawList()
+      }))
+    const onFilter = (id, key) =>
+      mountEl.querySelector(id)?.addEventListener('change', e => {
+        _browseFilters[key] = e.target.value
+        _browseDrawList()
+      })
+    onFilter('#bf-quality', 'quality')
+    onFilter('#bf-source', 'source')
+    onFilter('#bf-genre', 'genre')
+    mountEl.querySelector('#bf-clear')?.addEventListener('click', () => {
+      _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
+      ;['#bf-quality', '#bf-source', '#bf-genre'].forEach(sel => {
+        const el = mountEl.querySelector(sel); if (el) el.value = 'any'
+      })
+      _browseDrawList()
+    })
   }
 
-  // ── Views ──────────────────────────────────────────────────────────────────
+  // Compact tile for Random Top Shows — the performer photo when there is one
+  // (312 of 580 shows have one), a genre-colour field with initials when there
+  // is not. The no-photo case is the NORMAL case for 46% of the library, so it
+  // has to look deliberate rather than like a failed image.
+  function _topTileHtml(r) {
+    const initials = String(r.performer || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const c = r.genre_color || 'var(--bg-4)'
+    const art = r.image_id
+      ? `<img class="top-img" src="${API.performers.imageUrl(r.image_id)}" alt="" loading="lazy">`
+      : `<span class="top-initials">${esc(initials)}</span>`
+    return `
+      <a class="top-tile" href="#/recording/${r.id}" style="--genre-fg:${esc(c)}">
+        <span class="top-art">${art}</span>
+        <span class="top-body">
+          <span class="top-perf">${esc(r.performer || '')}</span>
+          <span class="top-meta">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '')}${
+            r.quality ? ` · ${esc(r.quality)}` : ''}</span>
+        </span>
+      </a>`
+  }
 
-  /** Default library view — all artists, all shows, alpha → oldest first */
+  // Collections carry the genre colours of what they hold, so a four-item
+  // section still reads as deliberate rather than sparse.
+  function _colStripHtml(c) {
+    return `
+      <a class="col-card" href="#/collection/${c.id}">
+        <span class="col-card-n">${esc(c.name)}</span>
+        <span class="col-card-c">${c.recording_count || 0} recording${c.recording_count === 1 ? '' : 's'}</span>
+      </a>`
+  }
+
   async function renderLibraryView() {
     setActiveNav('library')
     setActiveArtist(null)
@@ -2736,36 +3025,32 @@ const App = (() => {
     if (!allArtists.length) {
       setMainHTML(`
         <div class="empty-state">
-          <div class="empty-icon" style="color:var(--t2)">◈</div>
-          <div class="empty-title">No recordings yet</div>
+            <div class="empty-title">No recordings yet</div>
           <div class="empty-sub">Add a recording to get started</div>
         </div>`)
       return
     }
 
-    const totalRecordings = allArtists.reduce((n, a) => n + a.recording_count, 0)
+    // The "Library" H1 and the "580 recordings · 184 performers" subtitle are
+    // gone (Ryan, 2026-08-23: "it's not important enough"). You know you are in
+    // the library — the nav says so. The Browse/List toggle stays: it does
+    // something.
     const headerHtml = `
-      <div class="artist-header">
-        <div class="artist-header-row">
-          <h1>Library</h1>
-          ${libToggleHtml()}
-        </div>
-        <div class="subtitle">${totalRecordings} recording${totalRecordings !== 1 ? 's' : ''} · ${allArtists.length} performer${allArtists.length !== 1 ? 's' : ''}</div>
+      <div class="artist-header artist-header--bare">
+        <div class="artist-header-row">${libToggleHtml()}</div>
       </div>`
-
-    if (getLibraryViewMode() === 'browse') {
-      setMainHTML(`${headerHtml}<div class="lib-modules" id="lib-modules-mount"></div>`)
-      wireLibToggle(mainContent, renderLibraryView)
-      await renderBrowseModules(document.getElementById('lib-modules-mount'))
-      return
-    }
 
     // Flatten to one row per recording — performer + date + venue on every line,
     // already ordered by performer (backend) then chronologically old→new.
+    // Done BEFORE the view branch since 2026-08-23: Browse's linear list is the
+    // same array, so neither view needs its own request or its own shape.
+    // genre/genre_color ride on the PERFORMER (one genre per act) and colour
+    // the spine as well as driving Browse's genre filter.
     const rows = allArtists.flatMap(artist =>
       artist.performances.flatMap(p =>
         p.recordings.map(r => ({
           id: r.id, performer: artist.performer_name,
+          genre: artist.genre, genre_color: artist.genre_color,
           start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
           venue: p.venue_name, city: p.city, state: p.state, country: p.country,
           source: r.source, quality: r.quality,
@@ -2774,6 +3059,13 @@ const App = (() => {
         }))
       )
     )
+    if (getLibraryViewMode() === 'browse') {
+      setMainHTML(`${headerHtml}<div class="lib-modules" id="lib-modules-mount"></div>`)
+      wireLibToggle(mainContent, renderLibraryView)
+      await renderBrowseModules(document.getElementById('lib-modules-mount'), rows)
+      return
+    }
+
     const rowsHtml = rows.map(r => flatRowHtml(r, true)).join('')
 
     setMainHTML(`
@@ -2790,8 +3082,8 @@ const App = (() => {
    *  Not a collection; just a live query, always exactly correct. */
   // Recently Added page size. 20 is about a screenful of row cards; the full
   // 50 is one click away and already in memory.
-  const RECENT_INITIAL = 20
-  const RECENT_MAX = 50
+  const RECENT_INITIAL = 25   // first page (Ryan, 2026-08-23)
+  const RECENT_PAGE    = 25   // each subsequent page, fetched on scroll
 
   async function renderRecentView() {
     setActiveNav('recent')
@@ -2802,19 +3094,21 @@ const App = (() => {
 
     let rows
     try {
-      rows = await API.recordings.recent(RECENT_MAX, { card: true })
+      rows = await API.recordings.recent(RECENT_INITIAL, { card: true })
     } catch (e) {
       setMainHTML(`<div class="empty-state"><div class="empty-title">Failed to load recent recordings</div></div>`)
       return
     }
 
+    // No count in the subtitle any more: it used to say "50 most recently
+    // added", which was only ever the size of the fetch, not a fact about the
+    // library. With paging it would be a number that changes as you scroll.
     const headerHtml = `
       <div class="artist-header">
         <div class="artist-header-row">
           <h1>Recently Added</h1>
           ${libToggleHtml()}
         </div>
-        <div class="subtitle">${rows.length} most recently added recording${rows.length !== 1 ? 's' : ''}</div>
       </div>`
 
     // Browse mode = a FULL version of the Browse page's Recently Added module
@@ -2828,23 +3122,51 @@ const App = (() => {
         <div class="recent-more" id="recent-more"></div>`)
       wireLibToggle(mainContent, renderRecentView)
 
-      // Start short, expand on request. The whole 50 is already fetched, so
-      // this is a display cut, not a second request — "show more" should feel
-      // instant, and the payload for 50 rows is trivial.
-      let shown = RECENT_INITIAL
+      // Endless scroll (Ryan, 2026-08-23) — was a hardcoded 50 with a
+      // "Show all" button. A sentinel below the list fetches the next page
+      // when it comes into view; the observer disconnects when the server
+      // returns a short page, which is how we know we have reached the end.
       const listEl = document.getElementById('recent-rowcards')
       const moreEl = document.getElementById('recent-more')
-      const draw = () => {
-        listEl.innerHTML = rows.slice(0, shown).map(recentRowCardHtml).join('')
-        moreEl.innerHTML = rows.length > shown
-          ? `<button type="button" class="btn btn-ghost btn-sm" id="recent-more-btn">Show all ${rows.length}</button>`
-          : ''
-        document.getElementById('recent-more-btn')?.addEventListener('click', () => {
-          shown = rows.length
-          draw()
-        })
+      listEl.innerHTML = rows.map(recentRowCardHtml).join('')
+
+      let loading = false, done = rows.length < RECENT_INITIAL
+      moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
+
+      const loadMore = async () => {
+        if (loading || done) return
+        loading = true
+        moreEl.innerHTML = '<div class="recent-loading">Loading more…</div>'
+        let next = []
+        try {
+          next = await API.recordings.recent(RECENT_PAGE, { card: true, offset: listEl.children.length })
+        } catch (_) {
+          moreEl.innerHTML = '<div class="recent-loading">Could not load more.</div>'
+          loading = false
+          return
+        }
+        listEl.insertAdjacentHTML('beforeend', next.map(recentRowCardHtml).join(''))
+        // A short page means the end. Checking the RETURNED count rather than
+        // a total avoids a second endpoint and cannot disagree with it.
+        done = next.length < RECENT_PAGE
+        moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
+        loading = false
+        if (!done) observe()
       }
-      draw()
+
+      let io = null
+      const observe = () => {
+        const sentinel = document.getElementById('recent-sentinel')
+        if (!sentinel) return
+        io?.disconnect()
+        // rootMargin starts the fetch before the sentinel is actually visible,
+        // so the next rows are usually there by the time the reader arrives.
+        io = new IntersectionObserver(entries => {
+          if (entries.some(e => e.isIntersecting)) loadMore()
+        }, { root: mainContent, rootMargin: '400px' })
+        io.observe(sentinel)
+      }
+      observe()
       return
     }
 
@@ -3121,7 +3443,7 @@ const App = (() => {
             <span class="pp-member-tenure${tenure ? '' : ' is-unset'}" data-id="${m.id}"
                   title="Edit tenure dates">${tenure ? esc(tenure) : 'Tenure not set'}</span>
             <span class="pp-member-edit" data-id="${m.id}" title="Edit tenure dates">${open ? 'Close' : 'Edit'}</span>
-            <span class="member-chip-x pp-member-x" data-i="${i}" title="Remove member">×</span>
+            <span class="member-chip-x pp-member-x" data-i="${i}" title="Remove member">${icon('x')}</span>
           </div>`
         }).join('') +
         // No "no members recorded" message — an empty list is self-evident
@@ -3184,7 +3506,7 @@ const App = (() => {
       box.innerHTML = `
         <div class="pp-stint-editor-head">
           <span class="pp-stint-editor-title">Stint dates — <b>${esc(member.name)}</b></span>
-          <span class="pp-stint-editor-close" title="Close">×</span>
+          <span class="pp-stint-editor-close" title="Close">${icon('x')}</span>
         </div>
         <div class="pp-stint-rows">
           ${member.stints.map(s => `
@@ -3197,7 +3519,7 @@ const App = (() => {
               <input type="number" class="pp-stint-input pp-s-y2" placeholder="End yr" value="${s.end_year ?? ''}" style="width:64px" />
               <input type="number" class="pp-stint-input pp-s-m2" placeholder="mo" value="${s.end_month ?? ''}" min="1" max="12" style="width:38px" />
               <input type="number" class="pp-stint-input pp-s-d2" placeholder="day" value="${s.end_day ?? ''}" min="1" max="31" style="width:38px" />
-              <span class="pp-stint-del" title="Remove this stint" ${single ? 'style="display:none"' : ''}>×</span>
+              <span class="pp-stint-del" title="Remove this stint" ${single ? 'style="display:none"' : ''}>${icon('x')}</span>
             </div>`).join('')}
         </div>
         <button class="btn btn-ghost btn-xs pp-stint-add-btn" type="button">+ Add another stint (e.g. a second tenure)</button>`
@@ -3262,7 +3584,7 @@ const App = (() => {
           <div class="pp-resource-row" data-i="${i}">
             <a class="pp-resource-link" href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.label || r.url)}</a>
             <span class="pp-resource-url">${esc(r.url)}</span>
-            <span class="pp-resource-x" data-i="${i}" title="Remove">×</span>
+            <span class="pp-resource-x" data-i="${i}" title="Remove">${icon('x')}</span>
           </div>`).join('') +
         `<div class="pp-member-add">
            <button type="button" class="mg-add-btn" id="pp-res-add-btn" title="Add source">+</button>
@@ -3383,7 +3705,7 @@ const App = (() => {
               </div>
             </div>`).join('')}
           <div class="pp-drop" id="pp-image-drop">
-            <span class="pp-drop-plus">＋</span>
+            <span class="pp-drop-plus">${icon('plus')}</span>
             <span>Drop photos here<br>or click to browse</span>
             <div class="pp-drop-veil">Drop to upload</div>
           </div>
@@ -3796,7 +4118,7 @@ const App = (() => {
         // textContent rendered the literal <span …> markup on the page.
         msg.innerHTML = 'Description updated' +
           (result.usage ? ' · ' + formatAiCost(result.usage) : '')
-        btn.textContent = '↻ AI Assist'
+        btn.textContent = 'AI Assist'
         btn.disabled = false
       } catch (e) {
         clearInterval(tick)
@@ -3822,10 +4144,10 @@ const App = (() => {
       // A previous run exists on the record. Nothing is rendered from it any
       // more — the description it produced is already saved — but the label
       // should say this isn't the first pass.
-      document.getElementById('pp-dossier-run').textContent = '↻ AI Assist'
+      document.getElementById('pp-dossier-run').textContent = 'AI Assist'
     }
 
-    document.getElementById('pp-delete').addEventListener('click', async () => {
+    onAdminClick('pp-delete', async () => {
       if (!confirm(`Delete performer "${performer.name}"? This can't be undone.`)) return
       try { await API.performers.remove(performerId); refreshSidebar(); window.location.hash = '#/' }
       catch (e) { alert(e.message) }
@@ -3917,7 +4239,7 @@ const App = (() => {
     } catch (e) {
       const secs = Math.round((Date.now() - t0) / 1000)
       const msg = /no_api_key/.test(e.message)
-        ? 'No Anthropic API key set — add one in Settings (⚙).'
+        ? 'No Anthropic API key set — add one in Settings.'
         : `AI Assist failed after ${secs}s: ${esc(e.message)}`
       body.innerHTML = `<div class="ai-assist-cta">
         <p class="ai-res-note" style="color:var(--red)">${msg}</p>
@@ -3931,7 +4253,7 @@ const App = (() => {
   // Track.checksum is {type, expected, status, verified_at} or null (no
   // fingerprint file could be matched to that track). "status" is one of
   // match / mismatch / unverified, set by app/utils/checksums.py.
-  const CKSUM_STATUS_LABEL = { match: '✓ Match', mismatch: '✗ Mismatch', unverified: '— Unverified' }
+  const CKSUM_STATUS_LABEL = { match: 'Match', mismatch: 'Mismatch', unverified: 'Unverified' }
 
   function buildChecksumsPaneHtml(tracks) {
     tracks = tracks || []
@@ -3941,8 +4263,8 @@ const App = (() => {
     }
     const mismatches = withData.filter(t => t.checksum.status === 'mismatch').length
     const summary = mismatches
-      ? `<div class="cksum-summary cksum-summary--warn">⚠ ${mismatches} track${mismatches === 1 ? '' : 's'} did not match ${mismatches === 1 ? 'its' : 'their'} recorded checksum.</div>`
-      : `<div class="cksum-summary cksum-summary--ok">✓ All checked tracks match their recorded checksum.</div>`
+      ? `<div class="cksum-summary cksum-summary--warn">${mismatches} track${mismatches === 1 ? '' : 's'} did not match ${mismatches === 1 ? 'its' : 'their'} recorded checksum.</div>`
+      : `<div class="cksum-summary cksum-summary--ok">All checked tracks match their recorded checksum.</div>`
     const rows = tracks.map(t => {
       const c = t.checksum
       const num = esc(String(t.track_number).padStart(2, '0'))
@@ -4039,7 +4361,7 @@ const App = (() => {
       ? `<div class="ai-res-section"><div class="ai-res-title">Sources</div>${r.sources.map(s => `<p class="ai-res-note"><a class="ai-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></p>`).join('')}</div>` : ''
 
     const rerunBtn = opts.showRerun
-      ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run AI Assist again">↻ Run again</button>` : ''
+      ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run AI Assist again">Run again</button>` : ''
 
     return `
       <div class="ai-res-section">
@@ -4150,7 +4472,7 @@ const App = (() => {
       if (btn) { btn.disabled = true; btn.textContent = '…' }
       try {
         await applyRecProposal(p.field, p.proposed, perf, recordingId, venueRef)
-        if (btn) { btn.textContent = '✓ Applied'; btn.classList.add('applied') }
+        if (btn) { btn.textContent = 'Applied'; btn.classList.add('applied') }
       } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Apply' }
         alert('Failed to apply: ' + e.message)
@@ -4258,7 +4580,7 @@ const App = (() => {
     const trackRows = (rec.tracks || []).map(t => {
       const isPlaying  = t.id === state.playingTrackId
       const playingCls = isPlaying ? ' playing' : ''
-      const playIcon   = isPlaying ? '▶' : '▷'
+      const playIcon   = icon(isPlaying ? 'pause' : 'play')
       return `
         <div class="track-row${playingCls}" data-track-id="${t.id}" data-flags="${(t.flags||[]).join(',')}"${editHint}>
           <span class="track-play">${playIcon}</span>
@@ -4392,7 +4714,7 @@ const App = (() => {
              personal reaction, not a library edit. -->
         <button class="fav-toggle-btn${rec.is_favorite ? ' is-fav' : ''}" id="btn-favorite"
                 aria-pressed="${rec.is_favorite ? 'true' : 'false'}">${
-          rec.is_favorite ? '★ Favorited' : '☆ Mark as Favorite'}</button>
+          rec.is_favorite ? 'Favorited' : 'Mark as Favorite'}</button>
         <!-- Actions menu (Ryan, 2026-08-21). Replaces the .rec-bottom-actions
              row that used to sit under the track list: four admin buttons at
              the far end of a page whose main content scrolls, so reaching
@@ -4404,11 +4726,11 @@ const App = (() => {
         ${canEdit ? `
         <div class="rec-actions-wrap">
           <button class="actions-btn" id="btn-rec-actions" aria-expanded="false"
-                  aria-haspopup="true">Actions ▾</button>
+                  aria-haspopup="true">Actions ${chevronIcon('caret-ic--down')}</button>
           <div class="actions-menu" id="rec-actions-menu" hidden role="menu">
             <button class="actions-item" role="menuitem" data-act="reveal">Open in Containing Folder</button>
             <button class="actions-item" role="menuitem" data-act="official">${
-              rec.is_official ? '✓ Official Release' : 'Mark as Official Release'}</button>
+              rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>
             <!-- Move to — same two destinations as the triage queue's Move,
                  deliberately: Workshop and Backlog are the two real folders a
                  show goes back to, and having a different vocabulary before
@@ -4416,7 +4738,7 @@ const App = (() => {
                  that makes people hesitate. -->
             ${rec.is_published === false ? `
             <div class="actions-note">Out of the library — in Workshop or Backlog</div>` : `
-            <button class="actions-item" role="menuitem" data-act="move-toggle" aria-expanded="false">Move to ›</button>
+            <button class="actions-item" role="menuitem" data-act="move-toggle" aria-expanded="false">Move to ${chevronIcon()}</button>
             <div class="actions-submenu" id="rec-move-sub" hidden>
               <button class="actions-item actions-item--indent" role="menuitem" data-act="move" data-dest="workshop">Workshop</button>
               <button class="actions-item actions-item--indent" role="menuitem" data-act="move" data-dest="backlog">Backlog</button>
@@ -4482,7 +4804,7 @@ const App = (() => {
           <div class="rec-artists-row" id="rec-artists"></div>
           ${sourceLineageRow}
           ${(rec.is_official || rec.is_published === false) ? `<div class="badge-row">
-            ${rec.is_published === false ? `<span class="badge-unpublished" title="This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact; playback will not work until it comes back.">⚑ Out of Library</span>` : ''}
+            ${rec.is_published === false ? `<span class="badge-unpublished" title="This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact; playback will not work until it comes back.">Out of Library</span>` : ''}
             ${rec.is_official ? `<span class="badge-official" title="Contains officially released material">© Official</span>` : ''}
           </div>` : ''}
           <div class="rec-header-notes${canEdit ? ' pp-editable' : ''}${rec.notes ? '' : ' pp-empty'}" id="rec-notes"${canEdit ? ' title="Click to edit notes"' : ''}>${rec.notes ? esc(rec.notes) : (canEdit ? 'Add notes…' : '')}</div>
@@ -4492,7 +4814,7 @@ const App = (() => {
       </div>
       <div class="action-bar">
         <!-- Playback actions only — editing/admin actions live at the bottom -->
-        <button class="btn btn-ghost btn-sm" id="btn-play-all">▶ Play All</button>
+        <button class="btn btn-ghost btn-sm" id="btn-play-all">Play All</button>
         <label class="skip-toggle skip-toggle--action" title="Skip announcements, banter &amp; tuning from queue">
           <input type="checkbox" class="skip-filter-cb" id="skip-filter-action" ${state.skipNonMusic ? 'checked' : ''} />
           <span class="skip-toggle-track"></span>
@@ -4589,7 +4911,7 @@ const App = (() => {
               <button class="pane-act${stagedCount > 0 ? ' pane-act--staged' : ''}" id="btn-write-tags" data-for="filetags"
                       title="Write the database's metadata into the FLAC files' Vorbis comments">Write Tags to Files</button>` : ''}
               <button class="pane-act" id="btn-cksum-revalidate" data-for="checksums"
-                      title="Re-check against the files on disk">↻ Re-validate</button>
+                      title="Re-check against the files on disk">Re-validate</button>
               ${canEdit ? `
               <button class="pane-act pane-act--primary" id="btn-ai-assist" data-for="ai">✨ AI Assist</button>` : ''}
           </div>
@@ -4660,7 +4982,7 @@ const App = (() => {
         if (!panel) return
         const collapsed = panel.style.display === 'none'
         panel.style.display = collapsed ? '' : 'none'
-        this.textContent = collapsed ? '▾' : '▸'
+        this.innerHTML = chevronIcon(collapsed ? 'caret-ic--down' : '')
       })
     })
 
@@ -4748,7 +5070,7 @@ const App = (() => {
           ${p.artist_id
             ? `<a class="member-chip-name rec-pill-name" href="#/person/${p.artist_id}" title="Open ${esc(p.name)}">${esc(p.name)}</a>`
             : `<span class="member-chip-name">${esc(p.name)}</span>`}
-          ${editable ? `<span class="member-chip-x" data-role="${role}" data-i="${i}" title="Remove">×</span>` : ''}
+          ${editable ? `<span class="member-chip-x" data-role="${role}" data-i="${i}" title="Remove">${icon('x')}</span>` : ''}
         </span>`
       const row = (role, label, items) => {
         // Read-only: an empty row is a prompt to an editor that isn't there, so
@@ -5131,7 +5453,7 @@ const App = (() => {
             // where?" is exactly what you want to read. "Done" relocks.
             refreshSaveBtn()
             infoStatus.textContent = res?.wrote_file
-              ? `Saved to ${res.filename} ✓`
+              ? `Saved to ${res.filename}`
               : `Saved — ${res?.reason || 'database only'}`
           } catch (e) {
             infoStatus.textContent = 'Save failed: ' + e.message
@@ -5323,7 +5645,7 @@ const App = (() => {
       try {
         await API.recordings.update(recordingId, { is_official: next, change_note: 'Official flag' })
         rec.is_official = next
-        item.textContent = next ? '✓ Official Release' : 'Mark as Official Release'
+        item.textContent = next ? 'Official Release' : 'Mark as Official Release'
         markStaged()
       } catch (e) { alert('Failed: ' + e.message) }
       finally { item.disabled = false }
@@ -5338,7 +5660,7 @@ const App = (() => {
       const next = !rec.is_favorite
       const paint = (on) => {
         btn.classList.toggle('is-fav', on)
-        btn.textContent = on ? '★ Favorited' : '☆ Mark as Favorite'
+        btn.textContent = on ? 'Favorited' : 'Mark as Favorite'
         btn.setAttribute('aria-pressed', on ? 'true' : 'false')
       }
       rec.is_favorite = next
@@ -5350,8 +5672,7 @@ const App = (() => {
         // show and not seeing it appear on the shelf makes the star feel like it
         // did nothing. Cache dropped either way; re-rendered only if the section
         // is open, so a collapsed one just reloads next time it is expanded.
-        _dimCache.favorites = null
-        if (state.expandedDims.has('favorites')) _renderDimRecords('favorites')
+        refreshFavoritesNav()
       } catch (e) {
         rec.is_favorite = !next
         paint(!next)
@@ -5996,7 +6317,7 @@ const App = (() => {
     // bot) or Review (open the full wizard, pre-scanned), regardless of score.
     let actionBtn = ''
     if (ingested) {
-      actionBtn = `<span class="batch-done-check">✓ Ingested</span>
+      actionBtn = `<span class="batch-done-check">Ingested</span>
                    <a class="batch-rec-link" href="#/recording/${ingestedId}">View →</a>`
     } else {
       actionBtn = `<button class="btn btn-primary btn-sm batch-ingest-btn" data-path="${esc(item.path)}">Auto-Ingest</button>
@@ -6031,9 +6352,8 @@ const App = (() => {
             const tagLine = tagged > 0 ? `${tagged}/${audio} titled in tags` : `0 titled in tags`
             if (infoCount > 0) {
               const match = infoCount === audio
-              const matchIcon = match ? '✓' : '⚠'
-              const matchCls  = match ? '' : 'batch-val-uncertain'
-              return `${audio} audio · ${tagLine} · <span class="${matchCls}">${matchIcon} ${infoCount} in info file${match ? '' : ' — count mismatch'}</span>`
+                            const matchCls  = match ? '' : 'batch-val-uncertain'
+              return `${audio} audio · ${tagLine} · <span class="${matchCls}">${infoCount} in info file${match ? '' : ' — count mismatch'}</span>`
             }
             return `${audio} audio · ${tagLine} · no info file track list`
           })()}</span></div>
@@ -6146,7 +6466,7 @@ const App = (() => {
           </div>
         </div>
         <div class="batch-list">${allRows}</div>
-        ${items.length === 0 ? `<div class="empty-state">No accepted recordings to review. <a href="#/ingest">← Back to Listening Quality</a></div>` : ''}
+        ${items.length === 0 ? `<div class="empty-state">No accepted recordings to review. <a href="#/ingest">Back to Listening Quality</a></div>` : ''}
       </div>`)
 
     // ── Events ──────────────────────────────────────────────────────────────
@@ -6188,10 +6508,10 @@ const App = (() => {
         try {
           const recId = await _batchIngestOne(item)
           batch.ingestedIds.set(item.path, recId)
-          if (statusEl) statusEl.textContent = '✓'
-          if (rowBtn) rowBtn.textContent = '✓ Done'
+          if (statusEl) statusEl.textContent = 'Done'
+          if (rowBtn) rowBtn.textContent = 'Done'
         } catch (err) {
-          if (statusEl) statusEl.textContent = '✗ failed'
+          if (statusEl) statusEl.textContent = 'Failed'
           if (rowBtn) { rowBtn.disabled = false; rowBtn.textContent = 'Auto-Ingest' }
           console.error('Bulk ingest failed for', item.name, err)
           // Continue to next item rather than aborting the whole run
@@ -6234,7 +6554,7 @@ const App = (() => {
           // Show inline (ID now uses raw path — no esc() mismatch)
           const sid = 'batch-status-' + path.replace(/[^a-zA-Z0-9]/g,'_')
           const el  = document.getElementById(sid)
-          if (el) el.textContent = '✗ ' + msg
+          if (el) el.textContent = msg
           // Always alert as fallback so errors are never silently swallowed
           else alert('Ingest failed: ' + msg)
           console.error('Ingest failed:', err)
@@ -6318,7 +6638,7 @@ const App = (() => {
       // Show inline error
       const sid = 'batch-status-' + item.path.replace(/[^a-zA-Z0-9]/g,'_')
       const el  = document.getElementById(sid)
-      if (el) el.textContent = '✗ scan failed'
+      if (el) el.textContent = 'Scan failed'
     }
   }
 
@@ -6965,15 +7285,11 @@ const App = (() => {
   // ONLY things that should stop you: a possible duplicate, a failed checksum,
   // no audio at all, a phase or clipping fault. Empty when there are none, so
   // its presence is the signal.
-  const _CONCERN_ICON = { duplicate: '⧉', checksum: '⚠', no_audio: '∅',
-                          technical: '⚠', missing: '✕' }
-
   function _lqConcerns(row) {
     const cs = row.concerns || []
     if (!cs.length) return ''
     return `<div class="lq-concerns">${cs.map(c => `
       <div class="lq-concern lq-concern--${c.level || 'warn'}">
-        <span class="ic">${_CONCERN_ICON[c.kind] || '⚠'}</span>
         <span class="tx">${esc(c.text)}</span>
         ${c.recording_id ? `<a class="lk" href="#/recording/${c.recording_id}">View</a>` : ''}
       </div>`).join('')}</div>`
@@ -7150,7 +7466,7 @@ const App = (() => {
       <div class="lq-trk">
         <button class="lq-trk-play" title="Play from the start"
                 data-folder="${esc(row.folder_path)}" data-file="${esc(file)}"
-                data-slot="${esc(slot)}" data-seek="0">▶</button>
+                data-slot="${esc(slot)}" data-seek="0">${icon('play')}</button>
         <span class="lq-trk-name">${esc(t.track)}</span>
         <span class="lq-trk-win">
           ${(t.offsets || []).map(o =>
@@ -7218,7 +7534,7 @@ const App = (() => {
       <button class="lq-tab ${open === key ? 'on' : ''}" type="button"
               data-path="${esc(row.folder_path)}" data-tab="${key}"
               aria-expanded="${open === key}">
-        <span class="chev">${open === key ? '▴' : '▾'}</span>
+        <span class="chev">${chevronIcon(open === key ? 'caret-ic--up' : 'caret-ic--down')}</span>
         <span class="lq-tab-txt">
           <span class="lq-tab-k">${label}</span>
           <span class="lq-tab-sub">${sub}</span>
@@ -7265,7 +7581,7 @@ const App = (() => {
     const recId = done?.status === 'done' ? done.recording_id : row.recording_id
     if (recId) {
       return `<div class="lq-actions">
-        <span class="lq-act-done">✓ Ingested</span>
+        <span class="lq-act-done">Ingested</span>
         <a class="lq-act lq-act--view" href="#/recording/${recId}">View</a>
       </div>`
     }
@@ -7278,7 +7594,7 @@ const App = (() => {
     }
     if (done?.status === 'error') {
       return `<div class="lq-actions">
-        <span class="lq-act-failed" title="${esc(done.error || '')}">✗ ${esc(done.error || 'Failed')}</span>
+        <span class="lq-act-failed" title="${esc(done.error || '')}">${esc(done.error || 'Failed')}</span>
         <button class="lq-act lq-act--ingest" data-path="${esc(row.folder_path)}">Retry</button>
       </div>`
     }
@@ -7294,7 +7610,7 @@ const App = (() => {
       <button class="lq-act lq-act--review" data-path="${esc(row.folder_path)}"
               title="Open the full Add Recording page">Review</button>
       <div class="lq-move-wrap">
-        <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ›</button>
+        <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${chevronIcon()}</button>
         <div class="lq-move-menu" hidden>
           <button class="lq-move-opt" data-dest="backlog" data-path="${esc(row.folder_path)}">Backlog</button>
           <button class="lq-move-opt" data-dest="workshop" data-path="${esc(row.folder_path)}">Workshop</button>
@@ -7325,7 +7641,7 @@ const App = (() => {
     // The single action. Cancel replaces it mid-run rather than sitting next to
     // it, so there is never a question about which button is live.
     const runBar = lq.running
-      ? `<button class="btn btn-danger" id="lq-cancel-btn">■ Cancel</button>
+      ? `<button class="btn btn-danger" id="lq-cancel-btn">Cancel</button>
          <span class="lq-run-note" id="lq-run-note"></span>`
       : `<button class="btn btn-primary" id="lq-ingest-all-btn" ${queue.length ? '' : 'disabled'}>
            ⇉ Ingest ${queue.length} recording${queue.length === 1 ? '' : 's'}
@@ -7408,7 +7724,7 @@ const App = (() => {
           const on = now === t.dataset.tab
           t.classList.toggle('on', on)
           t.setAttribute('aria-expanded', String(on))
-          t.querySelector('.chev').textContent = on ? '▴' : '▾'
+          t.querySelector('.chev').innerHTML = chevronIcon(on ? 'caret-ic--up' : 'caret-ic--down')
         })
       })
     })
@@ -7588,7 +7904,7 @@ const App = (() => {
     return `
       <div class="lq-donestrip">
         ${done.length ? `
-          <span class="lq-donestrip-n">✓ ${done.length} added this session</span>
+          <span class="lq-donestrip-n">${done.length} added this session</span>
           <span class="lq-donestrip-list">${done.slice(-6).map(l =>
             l.recording_id
               ? `<a href="#/recording/${l.recording_id}">${esc(l.name)}</a>`
@@ -8179,7 +8495,7 @@ const App = (() => {
       const secs = Math.round((Date.now() - t0) / 1000)
       console.error('AI Assist error after', secs, 's:', e)
       if (/no_api_key/.test(e.message)) {
-        body.innerHTML = `<p class="ai-res-note">No Anthropic API key set — add one in Settings (⚙).</p>`
+        body.innerHTML = `<p class="ai-res-note">No Anthropic API key set — add one in Settings.</p>`
       } else {
         body.innerHTML = `<p class="ai-res-note" style="color:var(--red)">AI Assist failed after ${secs}s: ${esc(e.message)}</p>`
       }
@@ -8327,7 +8643,7 @@ const App = (() => {
     const parsedRows = parsedFields.map(f => `
       <div class="rev-parsed-row">
         <button class="btn-parsed-apply" data-action="${f.action}" data-val="${esc(f.val)}"
-                data-year="${info.year||''}" data-month="${info.month||''}" data-day="${info.day||''}">←</button>
+                data-year="${info.year||''}" data-month="${info.month||''}" data-day="${info.day||''}">${icon('arrow-left')}</button>
         <span class="rev-parsed-key">${f.label}</span>
         <span class="rev-parsed-val">${esc(f.val)}</span>
       </div>`).join('')
@@ -8339,11 +8655,11 @@ const App = (() => {
 
     const parsedTracksRow = parsedTrackCount ? `
       <div class="rev-parsed-row">
-        <button class="btn-parsed-apply" data-action="apply-tracks">←</button>
+        <button class="btn-parsed-apply" data-action="apply-tracks">${icon('arrow-left')}</button>
         <span class="rev-parsed-key">Tracks</span>
         <span class="rev-parsed-val">
           ${parsedTrackCount} found
-          <button class="btn-parsed-tracks-toggle" id="btn-parsed-tracks-toggle">▴</button>
+          <button class="btn-parsed-tracks-toggle" id="btn-parsed-tracks-toggle">${chevronIcon('caret-ic--up')}</button>
         </span>
       </div>
       <div class="rev-parsed-tracklist" id="rev-parsed-tracklist">
@@ -8383,7 +8699,7 @@ const App = (() => {
     const hasMismatch    = infoTrackCount > 0 && audioCount !== infoTrackCount
     const mismatchBanner = hasMismatch ? `
       <div class="track-mismatch-warn">
-        ⚠ ${audioCount} audio file${audioCount !== 1 ? 's' : ''} on disk · ${infoTrackCount} track${infoTrackCount !== 1 ? 's' : ''} in info file — use playback to verify
+        ${audioCount} audio file${audioCount !== 1 ? 's' : ''} on disk · ${infoTrackCount} track${infoTrackCount !== 1 ? 's' : ''} in info file — use playback to verify
       </div>` : ''
 
     // Track table rows — play preview, title, and the same flag-chip layout
@@ -8427,7 +8743,7 @@ const App = (() => {
         <tr class="track-review-row" data-idx="${i}" title="Right-click for flags">
           <td class="num">${t.track_number}</td>
           <td class="play-cell">
-            <button class="btn-preview-track" data-filename="${esc(t.filename || '')}" title="${esc(t.filename || 'no file')}">▶</button>
+            <button class="btn-preview-track" data-filename="${esc(t.filename || '')}" title="${esc(t.filename || 'no file')}">${icon('play')}</button>
           </td>
           <td class="title-cell">
             <input type="text" class="t-title" data-idx="${i}" value="${esc(t.title)}" />
@@ -8444,8 +8760,8 @@ const App = (() => {
       <div class="ingest-review-outer">
       <div class="ingest-review-topbar">
         <a href="#" id="ingest-back-link" class="ingest-back-link">${
-          ingest.fromTriage ? '← Back to Ingest Queue'
-          : ingest.fromBatch ? '← Back to Bulk Import' : '← Back'}</a>
+          ingest.fromTriage ? 'Back to Ingest Queue'
+          : ingest.fromBatch ? 'Back to Bulk Import' : 'Back'}</a>
         <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}</span></h2>
       </div>
       <div class="ingest-review-shell">
@@ -8488,7 +8804,7 @@ const App = (() => {
                  (checked once both are known — see wireDupCheck). Multiple
                  recordings per show are legitimate, so this never blocks Confirm. -->
             <div class="dup-warn" id="dup-warn" style="display:none">
-              <div class="dup-warn-title">⚠ Already in your library</div>
+              <div class="dup-warn-title">Already in your library</div>
               <div class="dup-warn-body" id="dup-warn-body"></div>
             </div>
 
@@ -8688,8 +9004,8 @@ const App = (() => {
           }
 
           // Quick flash to confirm
-          btn.textContent = '✓'
-          setTimeout(() => { btn.textContent = '←' }, 800)
+          btn.innerHTML = icon('check')
+          setTimeout(() => { btn.innerHTML = icon('arrow-left') }, 800)
 
           // These buttons set field values programmatically (no real focus
           // change), so the usual focusout-triggered reScore() below never
@@ -8711,15 +9027,15 @@ const App = (() => {
       const previewBtns = mainContent.querySelectorAll('.btn-preview-track')
 
       function loadTrack(btn, filename, autoplay) {
-        if (activeBtn && activeBtn !== btn) activeBtn.textContent = '▶'
+        if (activeBtn && activeBtn !== btn) activeBtn.innerHTML = icon('play')
         const url = `/api/stream/ingest-preview?folder=${encodeURIComponent(ingest.folderPath)}&file=${encodeURIComponent(filename)}`
         audioEl.src = url
         activeBtn = btn
         if (autoplay) {
           audioEl.play()
-          btn.textContent = '■'
+          btn.innerHTML = icon('square')
         } else {
-          btn.textContent = '▶'
+          btn.innerHTML = icon('play')
         }
       }
 
@@ -8732,7 +9048,7 @@ const App = (() => {
           // Toggle off if clicking the currently playing track
           if (activeBtn === btn && !audioEl.paused) {
             audioEl.pause()
-            btn.textContent = '▶'
+            btn.innerHTML = icon('play')
             return
           }
 
@@ -8753,7 +9069,7 @@ const App = (() => {
       }
 
       audioEl.addEventListener('ended', () => {
-        if (activeBtn) activeBtn.textContent = '▶'
+        if (activeBtn) activeBtn.innerHTML = icon('play')
       })
     })()
 
@@ -8906,8 +9222,8 @@ const App = (() => {
           ingest.scan.text_file_candidates = [{ filename: res.filename, content: ingest.scan.info_file_content }]
           ingest._activeTextIdx = 0
         }
-        status.textContent = 'Saved ✓'
-        setTimeout(() => { if (status.textContent === 'Saved ✓') status.textContent = '' }, 2500)
+        status.textContent = 'Saved'
+        setTimeout(() => { if (status.textContent === 'Saved') status.textContent = '' }, 2500)
       } catch (e) {
         status.textContent = 'Save failed: ' + e.message
       } finally {
@@ -8935,7 +9251,7 @@ const App = (() => {
         e.stopPropagation()  // don't bubble to panel toggle
         const visible = trackList.style.display !== 'none'
         trackList.style.display = visible ? 'none' : ''
-        toggleBtn.textContent = visible ? '▾' : '▴'  // ▴=visible, ▾=collapsed
+        toggleBtn.innerHTML = chevronIcon(visible ? 'caret-ic--down' : 'caret-ic--up')  // ▴=visible, ▾=collapsed
       })
     })()
 
@@ -9368,7 +9684,7 @@ const App = (() => {
         ingest._lastResult = result
         if (result.recording_id) {
           if (result.checksum_mismatches > 0) {
-            alert(`⚠ ${result.checksum_mismatches} track checksum${result.checksum_mismatches === 1 ? '' : 's'} did not match the fingerprint file for this show. Check the Checksums pane before trusting this copy.`)
+            alert(`${result.checksum_mismatches} track checksum${result.checksum_mismatches === 1 ? '' : 's'} did not match the fingerprint file for this show. Check the Checksums pane before trusting this copy.`)
           }
           await loadArtistList()   // new performer/venue/artist may exist
           batch.ingestedIds.set(ingest.folderPath, result.recording_id)
@@ -9453,7 +9769,7 @@ const App = (() => {
     setMainHTML(`
       <div class="ingest-view">
         <div class="success-state">
-          <div class="success-icon">✓</div>
+          <div class="success-icon">${icon('check')}</div>
           <div class="success-title">Recording added to library</div>
           <div class="success-sub">${esc(ingest.form.artist_name)} · ${fmtDate(ingest.form.start_year, ingest.form.start_month, ingest.form.start_day)}</div>
           <div style="display:flex; gap:10px; margin-top:20px">
@@ -9547,7 +9863,7 @@ const App = (() => {
     document.querySelectorAll('.track-row').forEach(el => {
       const isActive = parseInt(el.dataset.trackId) === trackId
       el.classList.toggle('playing', isActive)
-      el.querySelector('.track-play').textContent = isActive ? '▶' : '▷'
+      el.querySelector('.track-play').innerHTML = icon(isActive ? 'pause' : 'play')
     })
 
     // Same, but for the track table in the Edit Recording view
@@ -9555,7 +9871,7 @@ const App = (() => {
       const isActive = parseInt(el.dataset.id) === trackId
       el.classList.toggle('playing', isActive)
       const playBtn = el.querySelector('.et-play')
-      if (playBtn) playBtn.textContent = isActive ? '▶' : '▷'
+      if (playBtn) playBtn.innerHTML = icon(isActive ? 'pause' : 'play')
     })
 
     // Switch the wavesurfer waveform to the new track's peaks if we have
@@ -9677,7 +9993,7 @@ const App = (() => {
       onSave: async val => { val = val.trim(); v.bio = val; await saveField({ bio: val || null }) },
     })
 
-    document.getElementById('vn-delete').addEventListener('click', async () => {
+    onAdminClick('vn-delete', async () => {
       if (!confirm(`Delete venue "${v.name}"? This can't be undone.`)) return
       try { await API.venues.remove(id); refreshSidebar(); window.location.hash = '#/venues' }
       catch (e) { alert(e.message) }
@@ -9955,7 +10271,7 @@ const App = (() => {
       onSave: async val => { val = val.trim(); g.description = val; await saveField({ description: val || null }) },
     })
 
-    document.getElementById('gn-delete').addEventListener('click', async () => {
+    onAdminClick('gn-delete', async () => {
       if (!confirm(`Delete genre "${g.name}"? This can't be undone.`)) return
       try { await API.genres.remove(id); refreshSidebar(); window.location.hash = '#/genres' }
       catch (e) { alert(e.message) }
@@ -10253,7 +10569,7 @@ const App = (() => {
           try {
             await API.performers.update(p.id, { genre_id: id })
             p.genre_id = id; p.genre_name = name
-            statusEl.textContent = '✓'
+            statusEl.textContent = 'Done'
             invalidateDims('genres')
             if (!showAll) {
               // The row falls out of the unassigned-only view — re-render and
@@ -10625,7 +10941,7 @@ const App = (() => {
     overlay.innerHTML = `
       <div class="modal-card settings-modal">
         <div class="modal-header"><h3>Settings</h3>
-          <button class="btn-icon" id="settings-close">✕</button></div>
+          <button class="btn-icon" id="settings-close">${icon('x')}</button></div>
         <div class="modal-body">
           <!-- Appearance first: it is the one setting every user has an opinion
                about, and the only one that applies the moment it is clicked
@@ -10641,7 +10957,7 @@ const App = (() => {
             <input type="password" id="settings-key" placeholder="${keySet ? '•••••••••• (key saved)' : 'sk-ant-…'}" autocomplete="off" />
             ${keySet ? '<button class="btn btn-ghost btn-sm" id="settings-clear-key">Clear</button>' : ''}
           </div>
-          ${noKeychain ? '<div class="settings-warn">⚠ OS keychain unavailable on this system — key cannot be saved.</div>' : ''}
+          ${noKeychain ? '<div class="settings-warn">OS keychain unavailable on this system — key cannot be saved.</div>' : ''}
 
           <label class="settings-label" style="margin-top:14px">AI model</label>
           <select id="settings-model">
@@ -10726,6 +11042,12 @@ const App = (() => {
   // before first paint instead of flickering into view and back out.
 
   const SEARCH_DEBOUNCE_MS   = 200
+  // Below this, a query is noise: one character matches most of the library and
+  // costs a round trip to say so (Ryan, 2026-08-23). Verified against the live
+  // DB before choosing 3 — no performer, venue or artist name is shorter than
+  // that, so nothing real is currently unreachable. If a two-letter act ever
+  // lands (a "U2" case), this is the one number to change.
+  const SEARCH_MIN_CHARS     = 3
   const SEARCH_DROPDOWN_MAX  = 5      // per group in the dropdown
   const SEARCH_OVERVIEW_MAX  = 25     // per group on the results page
   const SEARCH_PAGE_SIZE     = 50     // per "Load more" on a single-group page
@@ -10778,7 +11100,7 @@ const App = (() => {
       // An honest empty state, not a fuzzy guess. With 178 acts in the
       // library a "did you mean" would confidently suggest nonsense.
       searchDropdown.innerHTML =
-        `<div class="search-dropdown-empty">No acts, people, venues or dates match
+        `<div class="search-dropdown-empty">No performers, artists, venues or dates match
          <b>${esc(body.query)}</b>.</div>`
       openSearchDropdown()
       return
@@ -10852,7 +11174,7 @@ const App = (() => {
 
   function submitSearch() {
     const q = searchInput.value.trim()
-    if (!q) return
+    if (q.length < SEARCH_MIN_CHARS) return
     closeSearchDropdown()
     searchInput.blur()
     window.location.hash = searchResultsHash(q)
@@ -10865,7 +11187,7 @@ const App = (() => {
       const q = searchInput.value.trim()
       setSearchFieldFilled(searchInput.value)
       clearTimeout(_searchTimer)
-      if (!q) {
+      if (q.length < SEARCH_MIN_CHARS) {
         _searchSeq++            // cancel anything in flight
         closeSearchDropdown()
         return
@@ -10971,7 +11293,7 @@ const App = (() => {
       return `<div class="search-row" data-hash="${esc(item.hash)}">
                 <div class="search-row-main">
                   <div class="search-row-name">${esc(item.name)}</div>
-                  <div class="search-row-meta">${esc((item.member_of || []).join(', ') || 'No acts recorded')}</div>
+                  <div class="search-row-meta">${esc((item.member_of || []).join(', ') || 'No performers recorded')}</div>
                 </div>
               </div>`
     }
@@ -10989,14 +11311,13 @@ const App = (() => {
     return `<div class="search-zero">
       <div class="search-zero-title">Nothing matches “${esc(q)}”.</div>
       <div class="search-zero-body">
-        Search covers acts, the people in them, venues and show dates —
-        not song titles or taping notes. Try a shorter name, or a year on its
-        own like <b>1983</b>.
+        Search covers performers, the artists in them, venues and show dates.
+        Try a shorter name, or a year on its own like <b>1983</b>.
       </div>
       <div class="search-zero-doors">
         <button class="btn btn-ghost btn-sm" data-hash="#/">Browse the library</button>
         <button class="btn btn-ghost btn-sm" data-hash="#/recent">Recently added</button>
-        <button class="btn btn-ghost btn-sm" data-hash="#/artists">All acts</button>
+        <button class="btn btn-ghost btn-sm" data-hash="#/artists">All performers</button>
         <button class="btn btn-ghost btn-sm" data-hash="#/venues">All venues</button>
       </div>
     </div>`
@@ -11017,34 +11338,63 @@ const App = (() => {
     return bits.join(' · ')
   }
 
-  async function renderSearchView(hash) {
-    const { q, type } = parseSearchHash(hash)
-    setActiveNav(null)
-    setActiveArtist(null)
-    setNavCurrent('Search')          // omitting this breaks nav-back everywhere
-    searchInput.value = q
-    setSearchFieldFilled(q)
-    closeSearchDropdown()
+  // ── Search page ────────────────────────────────────────────────────────────
+  // A full-page search box (Ryan, 2026-08-23). Same engine, same hash and the
+  // same row markup as the App Header's field — but the results render
+  // UNDERNEATH as you type rather than into a dropdown. A dropdown floating
+  // over the page you are already looking at would be covering its own
+  // results; the header field needs one because it has no page of its own.
+  //
+  // The box is rendered ONCE and never re-rendered while typing. Re-rendering
+  // it would take the caret with it — which is why only #search-page-results
+  // is replaced, and why keystrokes use history.replaceState rather than
+  // setting location.hash (that would re-enter route() and rebuild everything).
+  function searchPageHtml(q) {
+    return `
+      <div class="search-page">
+        <div class="search-page-field">
+          ${icon('search', 'search-page-ic')}
+          <input type="text" id="search-page-input" class="search-page-input"
+                 placeholder="Search performers, artists, venues, cities, years"
+                 autocomplete="off" spellcheck="false" value="${esc(q)}" />
+          <button class="search-page-clear${q ? '' : ' hidden'}" id="search-page-clear"
+                  title="Clear" tabindex="-1">${icon('x')}</button>
+        </div>
+        <div class="search-page-results" id="search-page-results"></div>
+      </div>`
+  }
 
-    if (!q) { setMainHTML(searchZeroStateHtml('')); wireSearchRows(mainContent); return }
-    setLoading()
+  function searchPageHintHtml(q) {
+    const short = q && q.length > 0 && q.length < SEARCH_MIN_CHARS
+    return `<div class="search-page-hint">
+      ${short ? `<div class="search-page-hint-min">Keep typing — searches start at ${SEARCH_MIN_CHARS} characters.</div>` : ''}
+      Search covers performers, the artists in them, venues, cities and show dates.
+      A year on its own works too, like <b>1983</b>.
+    </div>`
+  }
 
-    if (type) return renderSearchGroupPage(q, type)
+  let _searchPageTimer = null
+
+  async function renderPageResults(q) {
+    const box = document.getElementById('search-page-results')
+    if (!box) return
+    // Short queries are not searched at all — no request, no flicker of
+    // results for "j" that vanish at "jo". The hint stays put instead.
+    if (q.length < SEARCH_MIN_CHARS) { box.innerHTML = searchPageHintHtml(q); return }
 
     let body
     try {
       body = await API.search.all(q, SEARCH_OVERVIEW_MAX)
     } catch (e) {
-      setMainHTML(`<div class="empty-state"><div class="empty-title">Search failed</div>
-                   <div class="empty-sub">${esc(e.message)}</div></div>`)
+      box.innerHTML = `<div class="empty-state"><div class="empty-title">Search failed</div>
+                       <div class="empty-sub">${esc(e.message)}</div></div>`
       return
     }
+    // The box is live, so a stale response must not overwrite a newer query.
+    const live = document.getElementById('search-page-input')
+    if (live && live.value.trim() !== q) return
 
-    if (!body.groups.length) {
-      setMainHTML(searchZeroStateHtml(q))
-      wireSearchRows(mainContent)
-      return
-    }
+    if (!body.groups.length) { box.innerHTML = searchZeroStateHtml(q); wireSearchRows(box); return }
 
     const terms = searchTermsSummary(body)
     let html = `<div class="search-results">
@@ -11052,7 +11402,6 @@ const App = (() => {
         <div class="search-results-title">${body.total} result${body.total === 1 ? '' : 's'} for <b>${esc(q)}</b></div>
         ${terms ? `<div class="search-results-sub">Matching ${esc(terms)}</div>` : ''}
       </div>`
-
     for (const g of body.groups) {
       html += `<div class="search-section">
         <div class="search-section-head">
@@ -11062,14 +11411,64 @@ const App = (() => {
         ${g.items.map(searchRowHtml).join('')}
         ${g.total > g.items.length
           ? `<button class="btn btn-ghost btn-sm search-more-btn"
-                     data-hash="${esc(searchResultsHash(q, g.type))}">Show all ${g.total} →</button>`
+                     data-hash="${esc(searchResultsHash(q, g.type))}">Show all ${g.total}</button>`
           : ''}
       </div>`
     }
     html += `</div>`
+    box.innerHTML = html
+    wireSearchRows(box)
+  }
 
-    setMainHTML(html)
-    wireSearchRows(mainContent)
+  function wireSearchPage() {
+    const input = document.getElementById('search-page-input')
+    const clear = document.getElementById('search-page-clear')
+    if (!input) return
+    input.focus()
+    input.setSelectionRange(input.value.length, input.value.length)
+
+    const run = () => {
+      const q = input.value.trim()
+      clear?.classList.toggle('hidden', !q)
+      // replaceState, not location.hash: the URL stays shareable and correct
+      // without re-entering route() on every keystroke.
+      try { history.replaceState(null, '', q ? searchResultsHash(q) : '#/search') } catch (_) {}
+      renderPageResults(q)
+    }
+    input.addEventListener('input', () => {
+      clearTimeout(_searchPageTimer)
+      _searchPageTimer = setTimeout(run, 180)
+    })
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        clearTimeout(_searchPageTimer)
+        // A real navigation on Enter, so this search lands in history and Back
+        // returns to where the user came from.
+        const q = input.value.trim()
+        if (q.length >= SEARCH_MIN_CHARS) window.location.hash = searchResultsHash(q)
+        else run()
+      } else if (e.key === 'Escape') {
+        input.value = ''; run()
+      }
+    })
+    clear?.addEventListener('click', () => { input.value = ''; run(); input.focus() })
+  }
+
+  async function renderSearchView(hash) {
+    const { q, type } = parseSearchHash(hash)
+    setActiveNav('search')
+    setActiveArtist(null)
+    setNavCurrent('Search')          // omitting this breaks nav-back everywhere
+    searchInput.value = q
+    setSearchFieldFilled(q)
+    closeSearchDropdown()
+
+    // "Show all N" drill-downs keep their own full-page layout.
+    if (type) { setLoading(); return renderSearchGroupPage(q, type) }
+
+    setMainHTML(searchPageHtml(q))
+    wireSearchPage()
+    renderPageResults(q)
   }
 
   async function renderSearchGroupPage(q, type) {
@@ -11085,7 +11484,7 @@ const App = (() => {
     setMainHTML(`<div class="search-results">
       <div class="search-results-head">
         <div class="search-results-title">${body.total} ${esc(body.label.toLowerCase())} for <b>${esc(q)}</b></div>
-        <div class="search-results-sub"><span class="breadcrumb" data-hash="${esc(searchResultsHash(q))}">← All results</span></div>
+        <div class="search-results-sub"><span class="breadcrumb" data-hash="${esc(searchResultsHash(q))}">All results</span></div>
       </div>
       <div id="search-group-rows">${body.items.map(searchRowHtml).join('')}</div>
       <div id="search-group-more"></div>
@@ -11212,11 +11611,43 @@ const App = (() => {
     }
   })()
 
+  // Boot in TWO stages, deliberately.
+  //
+  // Stage 1 is the only authentication question. Stage 2 is everything that
+  // can fail for a hundred unrelated reasons. They used to share one try/catch
+  // whose handler said "Not logged in — show login screen", so ANY error after
+  // the auth check — a render bug, a bad endpoint, an unmounted drive — logged
+  // you out of a session that was perfectly valid, swallowed the real error,
+  // and sent whoever was debugging it into the auth code. That cost an hour on
+  // 2026-08-23; the actual fault was a shadowed variable in renderSidebar().
+  //
+  // The rule: never report a failure as a different, more familiar failure.
   async function init() {
+    let user
     try {
-      const user = await API.auth.me()
+      user = await API.auth.me()
+    } catch (e) {
+      if (e && e.status && e.status !== 401) {
+        // The server answered, and it was not "who are you?" — a 500 or a 503
+        // is not a credentials problem and must not be dressed up as one.
+        bootFailure(e, 'Could not reach the server')
+        return
+      }
+      // 401, or the fetch never completed. Both land the user at the login
+      // screen, which is correct: one needs credentials, the other cannot
+      // prove they have any.
+      showLogin()
+      document.getElementById('login-screen').classList.remove('hidden')
+      return
+    }
+
+    try {
       state.user = user
       setUserUI(user)
+      // Announced rather than polled: debug.js loads before login and needs to
+      // know the moment a user exists, without asking repeatedly whether one
+      // does. Any other boot-time listener can use the same event.
+      window.dispatchEvent(new CustomEvent('flux:user', { detail: user }))
       showApp()
       libraryDrive.start()
       // Before the sidebar renders: the library selector reads
@@ -11226,10 +11657,32 @@ const App = (() => {
       await loadArtistList()
       route()
     } catch (e) {
-      // Not logged in — show login screen
-      showLogin()
-      document.getElementById('login-screen').classList.remove('hidden')
+      // Authenticated, but the app failed to come up. Say THAT.
+      bootFailure(e, 'The app failed to start')
     }
+  }
+
+  // A boot failure the user can actually act on: the real message, the real
+  // stack, on screen. Silent failure is what made this class of bug expensive
+  // — the error existed, was caught, and was then thrown away.
+  function bootFailure(err, headline) {
+    console.error('[boot]', headline, err)
+    try { showApp() } catch (_) {}
+    const msg   = (err && err.message) || String(err)
+    const stack = (err && err.stack)   || ''
+    const el = document.createElement('div')
+    el.className = 'boot-error'
+    el.innerHTML = `
+      <div class="boot-error-head">${esc(headline)}</div>
+      <div class="boot-error-msg">${esc(msg)}</div>
+      ${stack ? `<pre class="boot-error-stack">${esc(stack)}</pre>` : ''}
+      <div class="boot-error-foot">
+        <button class="btn btn-ghost btn-xs" id="boot-error-reload">Reload</button>
+        <button class="btn btn-ghost btn-xs" id="boot-error-dismiss">Dismiss</button>
+      </div>`
+    document.body.appendChild(el)
+    el.querySelector('#boot-error-reload').onclick  = () => location.reload()
+    el.querySelector('#boot-error-dismiss').onclick = () => el.remove()
   }
 
   init()

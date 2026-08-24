@@ -80,6 +80,11 @@ def _card_eager(query):
 def recent_recordings():
     limit = request.args.get("limit", 50, type=int) or 50
     limit = max(1, min(limit, 200))
+    # Paging, added 2026-08-23 so Recently Added can scroll indefinitely
+    # instead of stopping at a hardcoded 50 (Ryan). Offset over keyset is fine
+    # here: the ordering column is created_at, which does not change under the
+    # reader, so a page boundary cannot skip or repeat a row mid-scroll.
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
     waveform = request.args.get("waveform", "").lower() in ("1", "true", "yes")
     # `card=1` adds genre colour + primary image for Browse's Recently Added
     # row cards. Opt-in for the same reason as waveform: this endpoint also
@@ -93,7 +98,7 @@ def recent_recordings():
     # Reverse chronological by ingest time — most recently added first. This is
     # the module's whole premise, so it is the query's order, not something the
     # client re-sorts.
-    recs = query.order_by(Recording.created_at.desc()).limit(limit).all()
+    recs = query.order_by(Recording.created_at.desc()).offset(offset).limit(limit).all()
     return jsonify([recording_row(r, waveform=waveform, card=card) for r in recs])
 
 
@@ -238,12 +243,22 @@ def recommended_recordings():
 @bp.route("/on-this-day")
 @login_required
 def on_this_day():
-    today = datetime.now(timezone.utc).date()
+    # The client passes its OWN month/day. Using the server's UTC date was
+    # wrong for anyone west of Greenwich: after 17:00 Pacific, UTC is already
+    # tomorrow, so the module showed tomorrow's shows (Ryan, 2026-08-23 —
+    # "it's off by a day according to my local clock"). There is no correct
+    # server-side answer, because "today" is a property of where the reader is
+    # standing. UTC stays as the fallback for a caller that says nothing.
+    month = request.args.get("month", type=int)
+    day   = request.args.get("day", type=int)
+    if not (month and day and 1 <= month <= 12 and 1 <= day <= 31):
+        today = datetime.now(timezone.utc).date()
+        month, day = today.month, today.day
     recs = (
         Recording.query
         .join(Performance, Recording.performance_id == Performance.id)
-        .filter(Performance.start_month == today.month,
-                Performance.start_day == today.day)
+        .filter(Performance.start_month == month,
+                Performance.start_day == day)
         .order_by(Performance.start_year.asc().nullslast())
         .all()
     )

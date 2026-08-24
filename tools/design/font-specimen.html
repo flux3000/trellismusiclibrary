@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis — UI Face Specimen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Source+Sans+3:wght@400..700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRELLIS — UI FACE SPECIMEN  (round 2)
+   Dev tool, not shipped.
+
+   Round 1 settled two of three: ARCHIVO for display, JETBRAINS MONO for
+   technical readouts. Both are LOCKED here and do not change between options.
+   The only variable is --font-ui, because that is the open question.
+
+   Colour tokens are copied verbatim from main.css :root. The handbill card,
+   nav strip and recording header markup is lifted from app.js / main.css.
+   The track list is representative rather than lifted — it exists because
+   the UI face has to survive forty rows of small text, which is the real
+   test and which no other section here applies.
+
+   Fonts load from Google's CDN for evaluation only. The winner gets
+   self-hosted into app/static/fonts/ — the app runs local and over LAN to
+   peer nodes and must never depend on a CDN for its type.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces — Warm Ash (default / dark) */
+  --bg-0:#141210; --bg-1:#1c1916; --bg-2:#1a1714;
+  --bg-3:#252220; --bg-4:#2e2a25; --bg-5:#38322c;
+  --bd-0:rgba(255,255,255,0.05); --bd-1:rgba(255,255,255,0.09); --bd-2:rgba(255,255,255,0.16);
+  --t0:#e0d8ce; --t1:#a89880; --t2:#7a6e64; --t3:#5a5048;
+  --accent:#c4956a; --accent-lit:#d4aa82;
+  --accent-dim:rgba(196,149,106,0.14); --accent-dim2:rgba(196,149,106,0.24);
+  --green:#6ab880; --amber:#c89b50; --red:#d96055; --blue:#6898c8; --purple:#a07dc8;
+  --sidebar-w:300px; --header-h:46px;
+  /* Running text — the base paragraph size (Ryan, 2026-08-23: "paragraph text
+     should be based at 12.5px instead of 11.5"). Everything that is prose
+     rather than a label or a data cell reads this. */
+  --fs-body:12.5px;
+  --r-sm:4px; --r-md:8px; --r-lg:12px;
+
+  /* LOCKED — decided in round 1 */
+  --font-display: 'Archivo', sans-serif;
+  --font-mono:    'JetBrains Mono', monospace;
+  --display-tracking: -.01em;
+  --display-weight: 700;
+
+  /* THE VARIABLE */
+  --font-ui: 'Inter', sans-serif;
+}
+
+body[data-ui="plex"]   { --font-ui: 'IBM Plex Sans', sans-serif; }
+body[data-ui="source"] { --font-ui: 'Source Sans 3', sans-serif; }
+
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg-0); color:var(--t0); font-family:var(--font-ui); -webkit-font-smoothing:antialiased; }
+
+/* ── Specimen chrome (not part of the app) ─────────────────────────────────── */
+.sp-bar { position:sticky; top:0; z-index:10; background:var(--bg-1); border-bottom:1px solid var(--bd-1); padding:11px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.sp-bar h1 { margin:0; font-size:12px; font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--t2); }
+.sp-locked { font-size:11px; color:var(--t3); border-left:1px solid var(--bd-1); padding-left:14px; }
+.sp-locked b { color:var(--t2); font-weight:600; }
+.sp-switch { display:flex; gap:5px; flex-wrap:wrap; }
+.sp-btn { background:var(--bg-3); border:1px solid var(--bd-1); color:var(--t1); border-radius:var(--r-sm); padding:6px 11px; cursor:pointer; font-family:var(--font-ui); font-size:12px; transition:border-color .12s,color .12s,background .12s; text-align:left; }
+.sp-btn:hover { background:var(--bg-4); color:var(--t0); }
+.sp-btn.on { background:var(--accent-dim); border-color:var(--accent); color:var(--accent-lit); }
+.sp-btn small { display:block; font-size:9px; opacity:.65; letter-spacing:.04em; margin-top:2px; }
+.sp-hint { font-size:11px; color:var(--t3); }
+.sp-hint kbd { background:var(--bg-3); border:1px solid var(--bd-1); border-radius:3px; padding:1px 5px; font-family:var(--font-mono); font-size:10px; color:var(--t1); }
+.sp-wrap { padding:26px 20px 80px; max-width:1180px; margin:0 auto; }
+.sp-sec { margin-bottom:44px; }
+.sp-sec > h2 { font-size:10.5px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--t3); margin:0 0 4px; padding-bottom:8px; border-bottom:1px solid var(--bd-0); }
+.sp-note { font-size:var(--fs-body); color:var(--t2); margin:10px 0 18px; line-height:1.5; max-width:74ch; }
+.sp-stage { background:var(--bg-2); border:1px solid var(--bd-0); border-radius:var(--r-lg); padding:24px; }
+
+/* Display-face zone highlighter — everything outlined is Archivo, the rest is the UI face. */
+body.zones .wm, body.zones .rec-card-performer, body.zones .rec-title, body.zones .d1, body.zones .d2 {
+  outline:1px dashed var(--accent); outline-offset:3px; background:var(--accent-dim);
+}
+.sp-legend { font-size:11px; color:var(--t2); display:flex; gap:12px; align-items:center; }
+.sp-legend i { font-style:normal; display:inline-flex; align-items:center; gap:6px; }
+.sp-swatch { width:20px; height:10px; border-radius:2px; display:inline-block; }
+.sp-swatch--d { background:var(--accent-dim); outline:1px dashed var(--accent); }
+.sp-swatch--u { background:var(--bg-4); outline:1px solid var(--bd-2); }
+
+/* ── Wordmark (Archivo, fixed) ─────────────────────────────────────────────── */
+.wm-row { display:flex; align-items:baseline; gap:34px; flex-wrap:wrap; }
+.wm { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-tracking); color:var(--t0); line-height:1; }
+.wm--xl { font-size:52px; } .wm--lg { font-size:28px; } .wm--sm { font-size:17px; }
+.wm-sub { font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--t2); margin-top:8px; }
+
+/* ── Handbill card — lifted from main.css .rec-card ────────────────────────── */
+.card-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.rec-card { display:flex; flex-direction:column; position:relative; overflow:hidden; text-decoration:none; color:inherit; background:var(--bg-3); border:1px solid var(--bd-0); border-radius:var(--r-md); padding:18px 14px 13px; text-align:center; transition:border-color .12s,background .12s; }
+.rec-card:hover { border-color:var(--genre-fg,var(--bd-2)); background:var(--bg-2); }
+.rec-card-spine { position:absolute; top:0; left:0; right:0; height:3px; background:var(--genre-fg,var(--t2)); }
+.rec-card-photo { width:52px; height:52px; border-radius:50%; object-fit:cover; margin:2px auto 10px; display:block; border:2px solid var(--genre-fg,var(--bd-1)); background:var(--bg-2); }
+.rec-card-photo--initials { display:flex; align-items:center; justify-content:center; color:var(--t2); font-weight:500; letter-spacing:.02em; background:var(--bg-2); font-size:17px; }
+/* Standard date form, standard tracking (Ryan, 2026-08-23): "Apr 22, 1974".
+   Tabular numerals stay — a column of cards has to align. */
+.rec-card-date { font-size:14px; font-weight:600; color:var(--t0); letter-spacing:normal; font-variant-numeric:tabular-nums; }
+.rec-card-rule { height:1px; background:var(--genre-fg,var(--bd-1)); opacity:.45; margin:9px 0; }
+/* Database casing, default tracking. The -.005em was tuned for all-caps and
+   went with it (Ryan, 2026-08-23). */
+.rec-card-performer { font-family:var(--font-display); font-size:15px; font-weight:var(--display-weight); line-height:1.15; color:var(--t0); letter-spacing:normal; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.rec-card-venue { font-size:var(--fs-body); font-style:normal; color:var(--t1); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.rec-card-loc { font-size:10.5px; letter-spacing:.02em; color:var(--t2); margin-top:5px; }
+.rec-card-genre { display:inline-block; margin:9px auto 0; padding:2px 8px; border-radius:10px; font-size:9.5px; font-weight:650; letter-spacing:.1em; text-transform:uppercase; color:var(--genre-fg); border:1px solid var(--genre-fg); background:color-mix(in srgb,var(--genre-fg) 14%,transparent); }
+.rec-card-foot { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:5px; font-size:10.5px; color:var(--t2); margin-top:auto; padding-top:12px; }
+.rec-card-dot { opacity:.5; }
+.rec-card-src { border:1px solid var(--genre-fg,var(--t2)); color:var(--genre-fg,var(--t2)); border-radius:3px; padding:1px 5px; font-size:9px; font-weight:700; letter-spacing:.12em; }
+.q-grade { color:var(--accent-lit); font-weight:600; }
+
+/* ── Nav + recording header ────────────────────────────────────────────────── */
+.demo-split { display:grid; grid-template-columns:var(--sidebar-w) 1fr; border-radius:var(--r-lg); overflow:hidden; border:1px solid var(--bd-1); }
+.sidebar { background:var(--bg-1); border-right:1px solid var(--bd-1); display:flex; flex-direction:column; padding-bottom:10px; }
+.app-header { height:var(--header-h); background:var(--bg-1); border-bottom:1px solid var(--bd-1); display:flex; align-items:center; padding:0 16px; }
+.app-header .wm { font-size:17px; }
+.nav-scroll { padding:10px 8px 4px; display:flex; flex-direction:column; }
+/* TWO treatments only. --nav-item-fs is the single size every row in the
+   sidebar uses; nothing inside the nav may set its own font-size. */
+.sidebar { --nav-item-fs:12px; --nav-header-fs:11px; }
+.nav-header { padding:14px 16px 6px; font-size:var(--nav-header-fs); font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--t2); }
+.nav-header--link { color:var(--t2); text-decoration:none; display:block; }
+.nav-item { display:flex; align-items:center; gap:10px; padding:7px 16px; border-radius:var(--r-sm); font-size:var(--nav-item-fs); color:var(--t1); cursor:pointer; text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nav-item:hover { background:var(--bg-4); color:var(--t0); }
+.nav-item.active { background:var(--accent-dim); color:var(--accent-lit); }
+.nav-icon { width:15px; height:15px; flex-shrink:0; opacity:.85; }
+.nav-fav-row { display:flex; align-items:center; gap:8px; padding:5px 16px; cursor:pointer; }
+.nav-fav-row:hover { background:var(--bg-2); }
+.nav-fav-avatar { width:20px; height:20px; border-radius:50%; flex-shrink:0; background:var(--bg-3); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:600; color:var(--t2); }
+.nav-fav-title { font-size:var(--nav-item-fs); color:var(--t0); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nav-dims-foot { border-top:1px solid var(--bd-0); padding:6px 8px 4px; margin-top:10px; }
+/* Collections rows: indented, NOT shrunk. Was 10px — Ryan: "too small". */
+.nav-item.nav-sub { padding-left:38px; }
+
+.rec-pane { background:var(--bg-2); padding:22px 26px; }
+.rec-header-main { display:flex; gap:16px; align-items:flex-start; }
+.rec-header-photo--initials { width:54px; height:54px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; background:var(--bg-3); border:2px solid var(--bd-1); color:var(--t2); font-size:17px; font-weight:500; }
+.rec-header-lines { flex:1; min-width:0; }
+.rec-title { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-tracking); font-size:26px; line-height:1.12; color:var(--t0); margin:0 0 5px; }
+.rec-sub { font-size:13px; color:var(--t1); font-style:italic; }
+.rec-sub-loc { font-size:11px; letter-spacing:.02em; color:var(--t2); margin-top:6px; }
+.prov-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+.chip { font-size:10px; letter-spacing:.1em; text-transform:uppercase; font-weight:600; border-radius:3px; padding:3px 7px; border:1px solid var(--bd-2); color:var(--t1); }
+.chip--aud { border-color:var(--amber); color:var(--amber); background:rgba(200,155,80,.15); }
+.chip--grade { border-color:var(--accent); color:var(--accent-lit); background:var(--accent-dim); }
+.lineage { font-size:var(--fs-body); color:var(--t1); background:var(--bg-0); border:1px solid var(--bd-0); border-radius:var(--r-sm); padding:11px 13px; margin-top:14px; display:grid; grid-template-columns:auto 1fr; gap:4px 14px; align-items:baseline; }
+.ln-k { color:var(--t3); font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:600; }
+.ln-v { min-width:0; overflow-wrap:anywhere; }
+
+/* Recording notes — prose, so it reads the base paragraph size. */
+.rec-notes { font-size:var(--fs-body); line-height:1.6; color:var(--t1); margin:14px 0 0; max-width:66ch; }
+
+/* ── Track list — the density test ─────────────────────────────────────────── */
+.tl { border:1px solid var(--bd-0); border-radius:var(--r-md); overflow:hidden; background:var(--bg-3); }
+.tl-head, .tl-row { display:grid; grid-template-columns:38px 1fr 92px 74px; align-items:center; gap:12px; padding:0 16px; }
+.tl-head { height:32px; border-bottom:1px solid var(--bd-1); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--t3); font-weight:600; }
+.tl-row { height:36px; border-bottom:1px solid var(--bd-0); font-size:12.5px; color:var(--t0); }
+.tl-row:last-child { border-bottom:0; }
+.tl-row:hover { background:var(--bg-4); }
+.tl-num { font-variant-numeric:tabular-nums; color:var(--t2); font-size:11.5px; }
+.tl-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tl-dur { font-variant-numeric:tabular-nums; color:var(--t1); font-size:11.5px; text-align:right; }
+.tl-ck { font-size:10px; color:var(--green); letter-spacing:.02em; text-align:right; }
+
+/* ── Optical size normalisation ────────────────────────────────────────────
+   body.norm scales every UI-face element to a common x-height. Archivo, the
+   mono and the specimen's own chrome opt out. */
+body.norm { font-size-adjust: var(--xh-target, none); }
+body.norm .wm, body.norm .rec-card-performer, body.norm .rec-title,
+body.norm .d1, body.norm .d2, body.norm .infofile, body.norm .ladder .lbl,
+body.norm .sp-bar, body.norm .sp-note, body.norm .sp-sec > h2 { font-size-adjust: none; }
+.xh-readout { font-size:10.5px; color:var(--t3); font-family:var(--font-mono); }
+.xh-readout b { color:var(--t2); font-weight:400; }
+
+/* ── Info file pane ────────────────────────────────────────────────────────
+   The taper's own text file, shown verbatim. Monospace by default because
+   ROIO info files are frequently column-aligned by hand — setlists with track
+   times, lineage trees, personnel blocks. body.ifprop swaps it to the UI face
+   so the tradeoff is visible rather than argued about. */
+.infofile {
+  font-family:var(--font-mono); font-size:var(--fs-body); line-height:1.6; color:var(--t1);
+  background:var(--bg-0); border:1px solid var(--bd-0); border-radius:var(--r-sm);
+  padding:16px 18px; margin:0; white-space:pre-wrap; overflow-x:auto;
+  max-height:340px; overflow-y:auto; tab-size:4;
+}
+body.ifprop .infofile { font-family:var(--font-ui); }
+.if-flag { font-size:var(--fs-body); color:var(--t3); margin-top:9px; }
+
+/* ── Type ladder ───────────────────────────────────────────────────────────── */
+.ladder > div { padding:9px 0; border-bottom:1px dashed var(--bd-0); display:flex; align-items:baseline; gap:18px; }
+.ladder > div:last-child { border-bottom:0; }
+.ladder .lbl { font-family:var(--font-mono); font-size:10px; color:var(--t3); width:132px; flex-shrink:0; letter-spacing:.04em; }
+.ladder .smp { color:var(--t0); min-width:0; }
+.d1 { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-tracking); font-size:30px; }
+.d2 { font-family:var(--font-display); font-weight:var(--display-weight); letter-spacing:var(--display-tracking); font-size:21px; }
+.u-lg{font-size:16px;} .u-md{font-size:13px;} .u-sm{font-size:12px;}
+.u-xs{font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--t2);}
+.mono{font-family:var(--font-mono); font-size:12px; color:var(--t1);}
+.nums{font-variant-numeric:tabular-nums;}
+
+@media (max-width:900px){ .card-grid{grid-template-columns:1fr;} .demo-split{grid-template-columns:1fr;} .sidebar{border-right:0;border-bottom:1px solid var(--bd-1);} }
+</style>
+</head>
+<body data-ui="source">
+
+<div class="sp-bar">
+  <h1>Trellis · UI Face</h1>
+  <span class="sp-locked">Locked: <b>Archivo</b> display · <b>JetBrains Mono</b> technical</span>
+  <div class="sp-switch" id="switch">
+    <button class="sp-btn" data-set="plex">1 · IBM Plex Sans<small>humanist, technical</small></button>
+    <button class="sp-btn on" data-set="source">2 · Source Sans 3<small>humanist, warm</small></button>
+  </div>
+  <button class="sp-btn" id="zonebtn">Zones<small>press Z</small></button>
+  <button class="sp-btn on" id="normbtn">Normalise size<small>press N</small></button>
+  <button class="sp-btn" id="ifbtn">Info file: mono<small>press M</small></button>
+  <span class="xh-readout" id="xh">measuring…</span>
+  <span class="sp-hint"><kbd>1</kbd>/<kbd>2</kbd> to flip</span>
+  <span class="sp-legend">
+    <i><span class="sp-swatch sp-swatch--d"></span>Archivo</i>
+    <i><span class="sp-swatch sp-swatch--u"></span>UI face</i>
+  </span>
+</div>
+
+<div class="sp-wrap">
+
+  <section class="sp-sec">
+    <h2>Wordmark — Archivo, settled</h2>
+    <p class="sp-note">Unchanged between options. Here as a fixed reference so you can see how each UI face sits
+      next to it — a display face and a UI face have to share a page without arguing.</p>
+    <div class="sp-stage">
+      <div class="wm-row">
+        <div><div class="wm wm--xl">Trellis</div><div class="wm-sub">Music Library</div></div>
+        <div class="wm wm--lg">Trellis</div>
+        <div><div class="wm wm--sm">Trellis</div><div class="wm-sub" style="letter-spacing:.16em">header size</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-sec">
+    <h2>Handbill cards</h2>
+    <p class="sp-note">Dates now read <b>Apr 22, 1974</b> — standard form, standard tracking, tabular figures kept so
+      a column of cards aligns. Act names carry database casing at default kerning. Only the act name is Archivo;
+      date, venue, city and the footer are all the UI face.</p>
+    <div class="sp-stage">
+      <div class="card-grid">
+
+        <a class="rec-card" href="#" style="--genre-fg:#9a8f5e">
+          <div class="rec-card-spine"></div>
+          <span class="rec-card-photo rec-card-photo--initials">JM</span>
+          <div class="rec-card-date">Apr 22, 1974</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-performer">Joni Mitchell</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-venue">New Vic Theatre</div>
+          <div class="rec-card-loc">London</div>
+          <div class="rec-card-genre">Folk</div>
+          <div class="rec-card-foot"><span class="rec-card-src">FM</span><span class="rec-card-dot">·</span><span>12 tracks</span><span class="rec-card-dot">·</span><span>52:18</span><span class="rec-card-dot">·</span><span class="q-grade">A</span></div>
+        </a>
+
+        <a class="rec-card" href="#" style="--genre-fg:#6a7fb5">
+          <div class="rec-card-spine"></div>
+          <span class="rec-card-photo rec-card-photo--initials">AD</span>
+          <div class="rec-card-date">Oct 24, 1996</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-performer">Al Di Meola, John McLaughlin and Paco de Lucía</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-venue">Royal Festival Hall</div>
+          <div class="rec-card-loc">London</div>
+          <div class="rec-card-genre">Jazz</div>
+          <div class="rec-card-foot"><span class="rec-card-src">AUD</span><span class="rec-card-dot">·</span><span>11 tracks</span><span class="rec-card-dot">·</span><span>1:14:06</span><span class="rec-card-dot">·</span><span class="q-grade">B+</span></div>
+        </a>
+
+        <a class="rec-card" href="#" style="--genre-fg:#7a9a5b">
+          <div class="rec-card-spine"></div>
+          <span class="rec-card-photo rec-card-photo--initials">JC</span>
+          <div class="rec-card-date">Nov 22, 1968</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-performer">J.D. Crowe and the Kentucky Mountain Boys</div>
+          <div class="rec-card-rule"></div>
+          <div class="rec-card-venue">Red Slipper Lounge</div>
+          <div class="rec-card-loc">Lexington, KY</div>
+          <div class="rec-card-genre">Bluegrass &amp; Traditional</div>
+          <div class="rec-card-foot"><span class="rec-card-src">REEL</span><span class="rec-card-dot">·</span><span>27 tracks</span><span class="rec-card-dot">·</span><span>1:38:41</span></div>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-sec">
+    <h2>Track list — the density test</h2>
+    <p class="sp-note">Real tracks from the Joni Mitchell show. This is where a UI face is actually decided: forty
+      rows of 12.5px mixed-case text, tabular numerals in two columns, and a mono checksum flag riding alongside.
+      A face that charms on the cards and gets muddy here is the wrong face.</p>
+    <div class="sp-stage">
+      <div class="tl">
+        <div class="tl-head"><span>#</span><span>Title</span><span style="text-align:right">Duration</span><span style="text-align:right">FFP</span></div>
+        <div class="tl-row"><span class="tl-num">1</span><span class="tl-title">Big Yellow Taxi</span><span class="tl-dur">3:20</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">2</span><span class="tl-title">Just Like This Train</span><span class="tl-dur">4:05</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">3</span><span class="tl-title">In France They Kiss On Main Street</span><span class="tl-dur">4:02</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">4</span><span class="tl-title">Coyote</span><span class="tl-dur">4:57</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">5</span><span class="tl-title">Edith And The Kingpin</span><span class="tl-dur">4:27</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">6</span><span class="tl-title">Free Man In Paris</span><span class="tl-dur">3:21</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">7</span><span class="tl-title">Goodbye Porkpie Hat</span><span class="tl-dur">6:05</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">8</span><span class="tl-title">Jaco's Solo</span><span class="tl-dur">8:43</span><span class="tl-ck">✓ match</span></div>
+        <div class="tl-row"><span class="tl-num">9</span><span class="tl-title">Amelia</span><span class="tl-dur">6:46</span><span class="tl-ck">✓ match</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-sec">
+    <h2>Info file — mono or primary face</h2>
+    <p class="sp-note">A real info file out of the library (Brian Wilson, BBC Radio 2, 1998). Press <b>M</b> to
+      swap it between JetBrains Mono and the primary face. Worth deciding with your eyes open: this is the taper's
+      own text, and collectors hand-align these — the track/time columns below are tab-aligned, and a proportional
+      face re-flows them. Mono preserves whatever the author built; the primary face reads better as prose.
+      <b>Everything else is now off mono</b> — the FFP column in the track list and the lineage block both moved to
+      the primary face, and the lineage rebuilt as a real two-column grid rather than labels padded out with
+      spaces, which only ever aligned because it was monospaced.</p>
+    <div class="sp-stage">
+      <pre class="infofile">Brian Wilson
+BBC Radio 2 interview
+Great Britain
+July 1998
+
+All songs listed below play in the background under interviews and narration or are short excerpts, except for Tracks 11 and 13, which were recorded live in St. Charles, Illinois, May 9, 1998. (This is the only source I'm aware of for this version of California Girls.)
+
+Interviews were likely recorded in the United States. The program was broadcast across Britain on the BBC's Radio 2 network.
+
+Quality is excellent.
+
+1	Narration &gt; I Get Around &gt; Dance Dance Dance &gt; Surfin' USA &gt; Little Deuce Coupe	5:19
+2	Narration &gt; All Summer Long &gt; Don't Worry Baby &gt; Help Me Rhonda &gt; Sloop John B	4:36
+3	Brian Wilson interview &gt; Norwegian Wood &gt; God Only Knows	3:32
+4	Let It Shine (cuts)	4:06
+5	South American (fades in) &gt;	2:22
+6	Joe Thomas interview &gt; Brian Wilson interview &gt; Joe Thomas interview	3:15
+7	Dream Angel	2:53
+8	Brian Wilson interview &gt; Your Imagination	3:41</pre>
+      <div class="if-flag">Info file content is stored verbatim in <code>recording.info_file_content</code> and never rewritten.</div>
+    </div>
+  </section>
+
+  <section class="sp-sec">
+    <h2>Left nav and Recording header</h2>
+    <p class="sp-note">Rebuilt. It had five type treatments — 8, 10, 11, 12 and 12px across three weights and
+      three colours — which is why it read as five different fonts when it was only ever one. Now there are two:
+      an uppercase section header at 11px, and a single 12px item size shared by Browse, the Collections rows, the
+      favourites and the dimension links — so Collections is no longer the 10px runt. Depth is carried by indentation and colour, never by shrinking text.
+      The sidebar is 300px wide, up from 264, so show titles get further before they truncate.</p>
+    <div class="sp-stage" style="padding:0; overflow:hidden">
+      <div class="demo-split">
+        <div class="sidebar">
+          <div class="app-header" style="border-right:1px solid var(--bd-1)"><span class="wm">Trellis</span></div>
+          <div class="nav-scroll">
+            <a class="nav-header nav-header--link" href="#">My Library</a>
+            <a class="nav-item active" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Browse</a>
+            <a class="nav-item" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Search</a>
+            <a class="nav-item" href="#"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v13"/><path d="M12 8a4 4 0 1 0-4-4"/><path d="M12 8a4 4 0 1 1 4-4"/><rect x="3" y="8" width="18" height="4" rx="1"/></svg>Recently Added</a>
+            <div class="nav-header">Collections</div>
+            <a class="nav-item nav-sub" href="#">Late-Night Bluegrass</a>
+            <a class="nav-item nav-sub" href="#">Soundboards Only</a>
+            <a class="nav-item nav-sub" href="#">1974</a>
+            <div style="height:8px"></div>
+            <div class="nav-fav-row"><span class="nav-fav-avatar">JM</span><span class="nav-fav-title">Joni Mitchell — Apr 22, 1974</span></div>
+            <div class="nav-fav-row"><span class="nav-fav-avatar">BM</span><span class="nav-fav-title">Brad Mehldau Trio — Apr 28, 2013</span></div>
+            <div class="nav-fav-row"><span class="nav-fav-avatar">AK</span><span class="nav-fav-title">Alison Krauss &amp; Union Station</span></div>
+            <div class="nav-dims-foot">
+              <a class="nav-item" href="#">Venues</a><a class="nav-item" href="#">Performers</a>
+              <a class="nav-item" href="#">Artists</a><a class="nav-item" href="#">Genres</a>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="app-header"></div>
+          <div class="rec-pane">
+            <div class="rec-header-main">
+              <span class="rec-header-photo--initials">BM</span>
+              <div class="rec-header-lines">
+                <h3 class="rec-title">Brad Mehldau Trio</h3>
+                <div class="rec-sub">Miner Auditorium — SFJazz Center</div>
+                <div class="rec-sub-loc">San Francisco, CA · Apr 28, 2013</div>
+                <div class="prov-row">
+                  <span class="chip chip--aud">AUD</span><span class="chip chip--grade">A−</span>
+                  <span class="chip">8 tracks</span><span class="chip">FLAC 16/44.1</span><span class="chip">FFP verified</span>
+                </div>
+                <div class="lineage">
+                  <span class="ln-k">Lineage</span><span class="ln-v">Schoeps MK4V &gt; Naiant PFA &gt; Sound Devices 744T (24/48)</span>
+                  <span class="ln-k">Transfer</span><span class="ln-v">WAV &gt; Audacity (fades, tracking) &gt; FLAC 8</span>
+                  <span class="ln-k">FFP</span><span class="ln-v">d41d8cd98f00b204e9800998ecf8427e</span>
+                  <span class="ln-k">Taper</span><span class="ln-v">unknown · not for sale · trade freely</span>
+                </div>
+                <p class="rec-notes">Second set only; the opening two numbers were lost to a card swap. Taper was
+                  seated house left, roughly ten rows back — the piano is slightly forward of the bass in the mix
+                  and the room applause is close. Levels untouched apart from a fade at the head of track 1.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sp-sec">
+    <h2>Type ladder</h2>
+    <p class="sp-note">Every size the app uses. Watch the figures row especially — dates and durations are half of
+      what Trellis displays, and figures are where a face gives itself away.</p>
+    <div class="sp-stage">
+      <div class="ladder">
+        <div><span class="lbl">archivo / 30</span><span class="smp d1">Alison Krauss &amp; Union Station</span></div>
+        <div><span class="lbl">archivo / 21</span><span class="smp d2">J.D. Crowe and the New South</span></div>
+        <div><span class="lbl">ui / 16</span><span class="smp u-lg">Wintergrass Festival, Tacoma WA</span></div>
+        <div><span class="lbl">ui / body 12.5</span><span class="smp" style="font-size:var(--fs-body)">Paragraph text — recording notes, performer bios, venue descriptions and anything else that runs as prose.</span></div>
+        <div><span class="lbl">ui / 13</span><span class="smp u-md">A soundboard capture with the vocal mics slightly hot in the second set; otherwise clean throughout.</span></div>
+        <div><span class="lbl">ui / 12</span><span class="smp u-sm">Berryville Bluegrass Festival · 17 tracks · 1:12:44</span></div>
+        <div><span class="lbl">ui / 10.5 caps</span><span class="smp u-xs">Bluegrass &amp; Traditional · Reel · Unverified</span></div>
+        <div><span class="lbl">figures</span><span class="smp u-md nums">Apr 22, 1974 · Nov 22, 1968 · Oct 24, 1996 · 0123456789</span></div>
+        <div><span class="lbl">info file only</span><span class="smp mono">gd1974-04-19.aud.schoeps.t01.flac · FFP 9e107d9d372bb6826bd81d3542a419d6</span></div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  var bar = document.getElementById('switch'), btns = bar.querySelectorAll('.sp-btn');
+  function set(name) {
+    document.body.setAttribute('data-ui', name);
+    btns.forEach(function (b) { b.classList.toggle('on', b.dataset.set === name); });
+  }
+  bar.addEventListener('click', function (e) { var b = e.target.closest('.sp-btn'); if (b) set(b.dataset.set); });
+  var keys = { '1':'plex', '2':'source' };
+  var zb = document.getElementById('zonebtn');
+  function zones() { zb.classList.toggle('on', document.body.classList.toggle('zones')); }
+  zb.addEventListener('click', zones);
+
+  var ib = document.getElementById('ifbtn');
+  function iface() {
+    var prop = document.body.classList.toggle('ifprop');
+    ib.classList.toggle('on', prop);
+    ib.innerHTML = 'Info file: ' + (prop ? 'primary' : 'mono') + '<small>press M</small>';
+  }
+  ib.addEventListener('click', iface);
+
+  // ── Optical size normalisation ──────────────────────────────────────────
+  // Measure each candidate's x-height/em from the actual loaded font rather
+  // than trusting remembered metrics, then normalise every UI-face element to
+  // Source Sans 3's ratio — so Source Sans is unchanged and the other face
+  // moves to match it. Faces set at identical px still read as different sizes
+  // because the eye reads x-height, not em; this cancels that out.
+  var FACES = { plex:'IBM Plex Sans', source:'Source Sans 3' };
+  var ctx = document.createElement('canvas').getContext('2d');
+  function ratio(fam) {
+    ctx.font = '200px "' + fam + '", sans-serif';
+    var m = ctx.measureText('x');
+    return m.actualBoundingBoxAscent / 200;
+  }
+  var nb = document.getElementById('normbtn'), xh = document.getElementById('xh');
+  function measure() {
+    var r = {}, k;
+    for (k in FACES) r[k] = ratio(FACES[k]);
+    if (!r.source) return;
+    document.documentElement.style.setProperty('--xh-target', r.source.toFixed(3));
+    var cur = document.body.getAttribute('data-ui');
+    xh.innerHTML = 'x-height ratio — target <b>' + r.source.toFixed(3) + '</b> (Source Sans 3) · this face <b>'
+                 + r[cur].toFixed(3) + '</b>';
+  }
+  function norm() { nb.classList.toggle('on', document.body.classList.toggle('norm')); }
+  nb.addEventListener('click', norm);
+  document.body.classList.add('norm');          // on by default
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+  else window.addEventListener('load', measure);
+  var _set = set;
+  set = function (n) { _set(n); measure(); };
+
+  document.addEventListener('keydown', function (e) {
+    if (keys[e.key]) set(keys[e.key]);
+    if (e.key === 'z' || e.key === 'Z') zones();
+    if (e.key === 'm' || e.key === 'M') iface();
+    if (e.key === 'n' || e.key === 'N') norm();
+  });
+})();
+</script>
+</body>
+</html>

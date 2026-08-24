@@ -385,10 +385,10 @@ def build_index(performers, artists, venues, recordings):
 # ── The search itself ──────────────────────────────────────────────────────
 
 GROUP_LABELS = {
-    "performers": "Acts",
-    "recordings": "Shows",
+    "performers": "Performers",
+    "recordings": "Recordings",
     "venues":     "Venues",
-    "artists":    "People",
+    "artists":    "Artists",
 }
 
 # Fixed group order rather than reordering by best match. A dropdown whose
@@ -428,7 +428,7 @@ def run_search(index, q, today_year=None):
     unsliced — paging and payload shaping belong to the API layer, so the
     dropdown and the results page can slice the same result differently.
 
-    Entity groups (Acts, Venues, People) are matched on TEXT terms only; a
+    Entity groups (Performers, Venues, Artists) are matched on TEXT terms only; a
     date term does not exclude them, it simply isn't something an act can
     satisfy. So "hot rize 1983" still offers the act itself alongside that
     year's shows, which is what a user reaching for a band wants. The

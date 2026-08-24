@@ -1,5 +1,49 @@
 /* ── Flux Audio — Design System ─────────────────────────────────────────────── */
 
+/* ── Typefaces (2026-08-23) ─────────────────────────────────────────────────
+   Chosen against real library screens in tools/design/font-specimen.html.
+   Archivo for display, Source Sans 3 for UI, JetBrains Mono for the info
+   file. IBM Plex Sans was picked first and reversed the same day once Ryan
+   saw it running: it aliased badly on his display. Source Sans 3 had been the
+   close second, so that was a swap to an already-vetted face — but Plex is
+   still in play and stays declared and on disk. Do not remove it. All three are OFL-1.1 variable
+   fonts, latin subset, self-hosted in app/static/fonts/ — 180KB total.
+   Self-hosted deliberately: Flux runs local and over LAN to peer nodes, so a
+   Google Fonts CDN link would mean unstyled type exactly when the network is
+   the thing that is broken.                                                 */
+@font-face {
+  font-family: 'Archivo'; font-style: normal; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/archivo-latin-wght-normal.woff2') format('woff2-variations');
+}
+/* IBM Plex Sans — NOT currently active, deliberately kept. Ryan chose it, then
+   reversed on aliasing, and is still considering it (2026-08-23). Note that
+   -webkit-font-smoothing: antialiased was removed from body immediately after,
+   so Plex has never actually been seen with the app's current rendering.
+   To switch: change --font-ui below. Nothing else has to move, and these
+   declarations cost nothing while unused — a face is only downloaded when
+   something renders in it. */
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/ibm-plex-sans-latin-wght-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'IBM Plex Sans'; font-style: italic; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/ibm-plex-sans-latin-wght-italic.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'Source Sans 3'; font-style: normal; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/source-sans-3-latin-wght-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'Source Sans 3'; font-style: italic; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/source-sans-3-latin-wght-italic.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono'; font-style: normal; font-weight: 400 700;
+  font-display: swap; src: url('/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+}
+
 :root {
   /* Surfaces — Warm Ash (default / dark) */
   --bg-0:  #141210;   /* page / deepest bg */
@@ -40,18 +84,29 @@
   --fm-bg:   rgba(160,125,200,0.15); --fm-fg:   #a07dc8;
   --other-bg:rgba(122,110,100,0.15); --other-fg:#7a6e64;
 
-  /* Type */
-  --font:      -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
-  --font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', monospace;
+  /* Type. --font is kept as an ALIAS for --font-ui so the ~60 existing
+     `font-family: var(--font)` rules keep resolving — do not delete it.
+     --font-display is identity only (wordmark, act names, page titles);
+     --font-mono is narrowing to the info file, see the audit note below. */
+  --font-display: 'Archivo', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* The UI face. Both candidates are declared above; swapping this one line
+     is the whole switch. 'IBM Plex Sans' is the live alternative. */
+  --font-ui:      'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  --font:         var(--font-ui);
+
+  /* Running text — prose, not labels and not data cells. First piece of a real
+     size scale; more to follow rather than sizes hardcoded per rule. */
+  --fs-body: 12.5px;
 
   /* Layout */
-  --sidebar-w: 264px;
+  --sidebar-w: 300px;
   /* Shared by the Recording view's meta block and Side Panel — defined here as
      well as on .rec-view-shell so a stray .slide-panel outside that shell still
      resolves calc() rather than collapsing to width:auto. */
   --rec-panel-w: 42%;
   --player-h:  68px;
-  --header-h:   46px;
+  --header-h:   58px;   /* +12px, Ryan 2026-08-23 */
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 12px;
@@ -143,7 +198,7 @@ html.peer-mode body.theme-light {
   --bg-4:  #dae2e6;
   --bg-5:  #ccd7dc;
 
-  --t0: #1b262b;
+  --t0: #d0c8bd;
   --t1: #3f5259;
   --t2: #68797f;
   --t3: #93a4aa;
@@ -165,7 +220,7 @@ html, body {
   font-family: var(--font);
   font-size: 13px;
   line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
+  /*-webkit-font-smoothing: antialiased; */
   user-select: none;
   overflow: hidden;
 }
@@ -227,14 +282,21 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* 620 → 460 (2026-08-22): the right cell now carries the library selector, the
    mode toggle AND the user chip, and the search field was taking room they
    need. It is a jump-to box, not a place you read results. */
-.app-header-center { position: relative; width: 460px; max-width: 100%; }
+/* 460 -> 506 (+10%, Ryan 2026-08-23). The header's 1fr|auto|1fr grid keeps
+   this centred in the WINDOW, so widening it stays symmetrical. */
+.app-header-center { position: relative; width: 506px; max-width: 100%; }
 .app-header-right  {
   display: flex; align-items: center; justify-content: flex-end;
   gap: 10px; min-width: 0;
 }
 
 /* Empty and invisible until a remote library exists — see renderLibrarySelector. */
-.lib-select-host { position: relative; display: flex; align-items: center; }
+.lib-select-host {
+  position: relative; display: flex; align-items: center;
+  /* Sits after .app-nav-btns in the left cluster now — its own breathing room
+     rather than the cluster's gap, so it reads as a separate control. */
+  margin-left: 6px;
+}
 
 .hdr-user {
   display: flex; align-items: center; gap: 6px;
@@ -245,9 +307,21 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .hdr-user .user-chip { flex: 0 1 auto; }
 .hdr-user .user-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Placeholder wordmark for the rename (Flux Audio is retiring). Deliberately
-   plain — it is standing in for a designed mark, and dressing up a placeholder
-   makes it harder to replace. */
+/* ── Display-face surfaces (2026-08-23) ────────────────────────────────────
+   Archivo is IDENTITY ONLY — the handful of places that name something. The
+   list lives here in one block rather than as font-family declarations
+   scattered through the file, because that is what stops it spreading; a
+   display face used broadly just makes an interface shout.
+   (.rec-card-performer declares it in its own rule, beside the card's other
+   type, since the whole card is defined there.)                            */
+.app-wordmark,
+.login-logo .logo-text,
+.rec-perf-name,
+.pp-name,
+.artist-header h1 { font-family: var(--font-display); }
+
+/* Wordmark. The TYPEFACE is now decided (Archivo) but the mark itself is still
+   placeholder — a designed lockup has not been drawn. */
 .app-wordmark {
   font-size: 15px;
   font-weight: 600;
@@ -297,6 +371,12 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* ── Sidebar ────────────────────────────────────────────────────────────────── */
 
 .sidebar {
+  grid-column: 1;   /* explicit, for the reason in .content-column above */
+  /* TWO type treatments in the whole sidebar. Nothing inside the nav may set
+     its own font-size — add a rule that does and the "five fonts" problem
+     grows straight back. */
+  --nav-item-fs: 12px;
+  --nav-header-fs: 11px;
   background: var(--bg-1);
   border-right: 1px solid var(--bd-1);
   display: flex;
@@ -346,17 +426,43 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   border-top: 1px solid var(--bd-0);
   padding: 6px 8px 4px;
   flex-shrink: 0;
+  /* Expanding Venues (or Performers, or Genres) drops hundreds of rows INTO
+     this pinned footer. It had no overflow and no height cap, and its parent
+     .sidebar-nav is overflow:hidden — so every row past the fold was clipped
+     and simply unreachable (Ryan, 2026-08-23: "scrollbar is non functional").
+     min-height:0 is the load-bearing half: without it a flex child refuses to
+     shrink below its content and overflow-y never engages.
+     55vh rather than a percentage: a percentage height resolves against the
+     parent's, which is itself flex-derived; vh always resolves. The cap leaves
+     the shelf above usable instead of letting one expanded dimension take the
+     whole sidebar. */
+  min-height: 0;
+  max-height: 55vh;
+  overflow-y: auto;
 }
+/* Same 4px thumb as .nav-scroll, .artist-list and .main-content — one
+   scrollbar idiom for the whole app. */
+.nav-dims-foot::-webkit-scrollbar { width: 4px; }
+.nav-dims-foot::-webkit-scrollbar-track { background: transparent; }
+.nav-dims-foot::-webkit-scrollbar-thumb { background: var(--bd-2); border-radius: 2px; }
+
+/* The expanded record list inside any dimension. No height of its own — it is
+   scrolled by whichever region it sits in (.nav-scroll for Collections,
+   .nav-dims-foot for the four below) — but it must not force either of them
+   wider, or a long venue name turns the sidebar into a horizontal scroller. */
+.nav-records { min-width: 0; }
 
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 10px;
+  /* Spacing lifted from the specimen (Ryan, 2026-08-23: "build in the design
+     from the UI test"). The old 6px/10px was tuned around glyph icons. */
+  gap: 10px;
+  padding: 7px 16px;
   border-radius: var(--r-sm);
   color: var(--t1);
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--nav-item-fs);
   transition: background 0.12s, color 0.12s;
   cursor: pointer;
 }
@@ -364,16 +470,37 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .nav-item:hover { background: var(--bg-4); color: var(--t0); }
 .nav-item.active { background: var(--accent-dim); color: var(--accent-lit); }
 
+/* Icon slot. Was sized for a TEXT GLYPH (font-size + text-align:center) back
+   when the nav's icons were Unicode characters — ◎ ✦ ♪ ♫ — which is exactly
+   why they read at a different size and weight from their own labels. It is a
+   box now, so whatever eventually goes in it is sized as a graphic. */
 .nav-icon {
-  font-size: 13px;
-  width: 16px;
-  text-align: center;
+  width: 16px; height: 16px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Shared inline-icon base — every icon() call renders one of these. Size is
+   set by the CONTEXT, never by the icon itself, so one glyph can appear at
+   several sizes without a variant per size. */
+/* `.tic`, not `.ic`: .lq-concern .ic already exists and a bare `.ic` rule
+   setting width/height would have stretched every concern marker. */
+/* Sized in `em`, deliberately: every one of these replaces a text glyph that
+   was sized by font-size, so an icon inherits whatever the old character had
+   and no call site needs its own sizing rule. vertical-align matches the
+   optical baseline of the glyph it replaced. */
+.tic {
+  width: 1em; height: 1em;
+  display: inline-block; vertical-align: -0.125em;
   flex-shrink: 0;
 }
+.nav-icon .tic   { width: 100%; height: 100%; display: block; opacity: .8; }
+.nav-action .tic { width: 13px; height: 13px; }
+.nav-add-plus   { width: 14px; height: 14px; display: inline-flex; }
 
 .sidebar-label {
   padding: 12px 18px 5px;
-  font-size: 10px;
+  font-size: var(--nav-header-fs);
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--t2);
@@ -527,6 +654,14 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
    would otherwise push the whole column past the viewport instead of
    scrolling inside it. */
 .content-column {
+  /* Pinned to column 2 EXPLICITLY. It used to rely on grid auto-placement,
+     which meant its position depended on .sidebar still being in the flow —
+     and collapsing the sidebar sets `display: none`, removing it. The content
+     then auto-placed into column 1, which the collapse rule had just set to
+     0 wide, and the whole window went blank (Ryan, 2026-08-23).
+     Auto-placement that depends on a sibling existing is a trap; both shell
+     children now say where they go. */
+  grid-column: 2;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1120,7 +1255,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-row:hover .rec-play-btn { opacity: 1; }
 
 .rec-date {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   font-size: 12px;
   color: var(--t0);
   letter-spacing: -0.02em;
@@ -1195,7 +1331,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   display: inline-block;
   font-size: 10px;
   font-weight: 700;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   letter-spacing: 0.06em;
   padding: 2px 5px;
   border-radius: 3px;
@@ -1212,7 +1348,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 .quality {
   font-size: 12px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-weight: 700;
   color: var(--t1);
 }
@@ -1380,7 +1516,12 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .hm-val--chip .quality { font-size: 13px; }
 
 .hm-metric {
-  font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  /* Was a hardcoded stack that bypassed --font-mono entirely. NOTE: Ryan's
+     2026-08-23 call is that mono belongs to the info file alone; this surface
+     is on the pending mono audit list, so the token is correct but the CHOICE
+     of mono here is not yet settled. */
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   color: var(--accent);
   font-size: 11px;
 }
@@ -1942,7 +2083,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .track-num {
   font-size: 11px;
   color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   text-align: right;
 }
 
@@ -1957,7 +2099,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .track-dur {
   font-size: 11px;
   color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   text-align: right;
   min-width: 40px;
 }
@@ -1983,7 +2126,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .track-note-inline {
   font-size: 11px;
   color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   margin-left: 6px;
 }
 
@@ -2219,7 +2362,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 .player-time {
   font-size: 10px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   color: var(--t2);
   flex-shrink: 0;
   min-width: 28px;
@@ -2574,10 +2718,17 @@ input[type="range"].progress-bar {
   justify-content: flex-end;
 }
 
+/* Holds an inline SVG now, not the 🔊 emoji it used to (2026-08-23). Sized as
+   a box rather than by font-size, since there is no longer any text in it. */
 .vol-icon {
-  font-size: 12px;
+  display: flex; align-items: center;
   color: var(--t2);
 }
+/* The transport controls are Lucide strokes now — the old hand-drawn polygons
+   were solid fills, so the button colours had to stop meaning "fill". */
+.player-btn svg { display: block; }
+.player-btn:hover { color: var(--t0); background: var(--bg-4); }
+.player-btn-play svg { stroke: currentColor; }
 
 .vol-sep {
   width: 1px;
@@ -3671,7 +3822,7 @@ a.member-chip-name:hover { color: var(--accent); }
    link to inside someone else's library — see renderSidebar). */
 .nav-header {
   padding: 14px 16px 6px;
-  font-size: 11px;
+  font-size: var(--nav-header-fs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -3700,9 +3851,9 @@ a.member-chip-name:hover { color: var(--accent); }
    too and should look intentional rather than like a missing image. */
 .nav-fav-avatar--blank {
   display: flex; align-items: center; justify-content: center;
-  font-size: 8px; font-weight: 600; color: var(--t2);
+  font-size: 9px; font-weight: 600; color: var(--t2);
 }
-.nav-fav-title { font-size: 12px; color: var(--t0); }
+.nav-fav-title { font-size: var(--nav-item-fs); color: var(--t0); }
 
 /* Moved to the TOP of the column 2026-08-22 (Ryan) — it is the entry point
    into ingest and now sits first, under the App Header, rather than at the
@@ -3726,11 +3877,46 @@ a.member-chip-name:hover { color: var(--accent); }
 .ingest-topbar { display: flex; margin-bottom: 14px; }
 
 .nav-item.nav-top, .nav-item.nav-sub {
-  text-transform: uppercase;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  /* Was: uppercase, 11px, .06em tracking. All three removed 2026-08-23.
+     The font-size was the live bug — this selector is MORE SPECIFIC than
+     .nav-item, so it silently beat --nav-item-fs and these rows stayed at
+     11px while the rest of the sidebar moved to 12px, including the
+     Collections rows Ryan called too small.
+     The caps went with it to match the approved design: "Venues", not
+     "VENUES". Caps stay on .nav-header (MY LIBRARY / COLLECTIONS), which is
+     a section label rather than a destination. */
 }
-.nav-item.nav-sub { padding-left: 36px; font-size: 10px; }
+.nav-item.nav-sub { padding-left: 38px; }
+
+/* Collections is the ONE .nav-top row that is a section header rather than a
+   destination — it was deliberately given My Library's treatment on
+   2026-08-23 ("no longer a generic sub dimension"), and the approved mock
+   shows it as COLLECTIONS in caps beside MY LIBRARY while Venues/Performers/
+   Artists/Genres are sentence-case links. Dropping caps from every .nav-top
+   would have taken this with it, so it opts back in by its data-dim rather
+   than by needing a new class. */
+/* The shelf headers: MY LIBRARY, COLLECTIONS, FAVORITES. One rule, so they
+   cannot drift apart again — My Library was a .nav-header and Collections a
+   .nav-item, which is why they read as two different things (Ryan,
+   2026-08-23: "match My Library to it").
+   Collections opts in by data-dim rather than needing a class threaded through
+   _dimSection(); the other two carry .nav-shelf-head directly. */
+.nav-item.nav-top[data-dim="collections"],
+.nav-shelf-head {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--nav-header-fs);
+  font-weight: 600;
+  color: var(--t2);
+}
+.nav-shelf-head:hover { color: var(--t0); }
+
+/* FAVORITES has no chevron and nothing to expand, so it must not offer the
+   affordances of a control it is not: no pointer, no hover fill. Identical in
+   every other respect, which is what was asked for. */
+.nav-shelf-head--static { cursor: default; }
+.nav-shelf-head--spaced { margin-top: 12px; }
+.nav-shelf-head--static:hover { background: none; color: var(--t2); }
 .nav-expand { cursor: pointer; }
 
 /* Dimension header: label fills, hover actions + caret sit at the right */
@@ -3759,6 +3945,16 @@ a.member-chip-name:hover { color: var(--accent); }
    Either way "closed" is the same undecorated right-pointing chevron. */
 .caret-ic { display: block; flex-shrink: 0; transition: transform 0.12s; }
 .caret-ic--open { transform: rotate(90deg); }
+/* Static directions, for the surfaces that SWAP a chevron rather than rotate
+   one: dropdown menus (which never rotate) and the ▴/▾ toggles that used to
+   swap two characters. .caret-ic's existing transform transition means the
+   swap now animates instead of snapping. */
+.caret-ic--down { transform: rotate(90deg); }
+.caret-ic--up   { transform: rotate(-90deg); }
+/* Inline with a label ("Actions", "Move to") rather than alone in a hit box. */
+.actions-item .caret-ic,
+.lq-act .caret-ic,
+.pp-actions-btn .caret-ic { margin-left: 4px; vertical-align: -1px; }
 
 /* Sidebar dimension caret. 9px → 13px with a real hit target (2026-08-02). */
 .nav-caret {
@@ -3768,6 +3964,28 @@ a.member-chip-name:hover { color: var(--accent); }
   transition: transform 0.12s, color 0.1s;
 }
 .nav-caret.open { transform: rotate(90deg); }
+
+/* Collections opens with +/- rather than a chevron (Ryan, 2026-08-23). Both
+   marks are in the DOM and CSS picks one, so _toggleDim's existing `.open`
+   toggle drives it with no extra JS — one place decides how a row opens.
+   The rotation is cancelled here: a plus turned 90° is still a plus, and a
+   minus turned 90° becomes a vertical bar. */
+.nav-caret--pm, .nav-caret--pm.open { transform: none; }
+.nav-caret--pm .tic { width: 13px; height: 13px; }
+
+/* Bordered variant, used on each collection's own disclosure. The border is
+   what makes it read as a button rather than a mark beside the label. */
+.nav-pm-box {
+  width: 15px; height: 15px;
+  border: 1px solid var(--bd-2);
+  border-radius: 3px;
+  color: var(--t2);
+}
+.nav-pm-box .tic { width: 11px; height: 11px; }
+.nav-record--flush:hover .nav-pm-box { border-color: var(--t2); color: var(--t0); }
+.nav-caret--pm .pm-minus { display: none; }
+.nav-caret--pm.open .pm-plus { display: none; }
+.nav-caret--pm.open .pm-minus { display: inline-block; }
 .nav-dim:hover .nav-caret { color: var(--accent-lit); }
 /* Smaller variant for the per-collection expand caret (2026-08-23) — those
    rows sit one level down from a dim section header and read as a lighter
@@ -3778,13 +3996,20 @@ a.member-chip-name:hover { color: var(--accent); }
 .nav-record {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 16px 5px 40px; cursor: pointer;
-  font-size: 12px; color: var(--t0);
+  /* Was a hardcoded 12px — the same rule the rest of the sidebar follows:
+     nothing in the nav sets its own size, or the "five fonts" problem grows
+     straight back. Same value, now from the token. */
+  font-size: var(--nav-item-fs); color: var(--t0);
   text-transform: none; letter-spacing: 0;
+  /* Venue and performer names run long. Without this a single wide row makes
+     the whole sidebar scroll sideways, which is worse than an ellipsis. */
+  min-width: 0; overflow: hidden;
 }
+.nav-record > .truncate { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-record:hover { background: var(--bg-1); }
 .nav-record.active { color: var(--accent); background: var(--bg-1); }
 .nav-record .truncate { flex: 1; min-width: 0; }
-.nav-record-count { font-size: 10px; color: var(--t3); }
+.nav-record-count { font-size: var(--nav-item-fs); color: var(--t3); flex-shrink: 0; }
 .nav-record--empty { color: var(--t3); font-style: italic; cursor: default; }
 .nav-records--sub .nav-record { padding-left: 52px; }
 /* Flush rows (2026-08-23) — Collections' own name-rows and the per-collection
@@ -3792,13 +4017,19 @@ a.member-chip-name:hover { color: var(--accent); }
    sits at (16px, matching .nav-header) rather than the generic 40px every
    other dimension's rows use — Ryan wanted Collections to read as part of the
    shelf's structure, not one more indexed dimension list. */
-.nav-record--flush { padding-left: 16px; gap: 8px; }
-.nav-col-recs { padding-bottom: 2px; }
-.nav-col-rec {
-  padding: 4px 16px 4px 34px;   /* "slightly indented" under its collection's flush name */
-  font-size: 11.5px; color: var(--t1); cursor: pointer;
+.nav-record--flush {
+  padding-left: 16px; gap: 8px;
+  /* Heavier than a recording row so a collection NAME is distinguishable from
+     the favourites beneath it; --t1 to match the nav-item rows above.
+     500, not 600 — one pip down (Ryan, 2026-08-23). */
+  font-weight: 500;
+  color: var(--t1);
 }
-.nav-col-rec:hover { background: var(--bg-1); color: var(--t0); }
+.nav-record--flush:hover { color: var(--t0); }
+.nav-col-recs { padding-bottom: 2px; }
+/* Same row as FAVORITES (see navRecRowHtml) — indentation is the ONLY
+   difference, so everything else comes from .nav-fav-row and cannot drift. */
+.nav-col-rec { padding-left: 34px; }
 .nav-col-rec.nav-record--empty { padding-left: 34px; cursor: default; }
 .nav-col-rec.nav-record--empty:hover { background: none; color: var(--t3); }
 
@@ -4169,7 +4400,8 @@ a.member-chip-name:hover { color: var(--accent); }
    the number column was wider than it needed to be). */
 .track-review-table td.num {
   color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   font-size: 11px;
   width: 20px;
   text-align: center;
@@ -4179,7 +4411,8 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .track-review-table td.dur {
   color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   font-size: 11px;
   width: 44px;
   text-align: right;
@@ -5121,9 +5354,11 @@ a.member-chip-name:hover { color: var(--accent); }
   align-items: baseline;
 }
 .confirm-track-row:last-child { border-bottom: none; }
-.confirm-track-num  { font-family: var(--font-mono); font-size: 11px; color: var(--t2); text-align: right; }
+.confirm-track-num  { font-family: var(--font-ui);
+ font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */ font-size: 11px; color: var(--t2); text-align: right; }
 .confirm-track-title { color: var(--t0); }
-.confirm-track-dur  { font-family: var(--font-mono); font-size: 11px; color: var(--t2); text-align: right; }
+.confirm-track-dur  { font-family: var(--font-ui);
+ font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */ font-size: 11px; color: var(--t2); text-align: right; }
 
 .behavior-toggle {
   display: flex;
@@ -5390,7 +5625,9 @@ a.member-chip-name:hover { color: var(--accent); }
   height: 100%;
   display: flex;
   flex-direction: column;
-  font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  /* Was a hardcoded stack bypassing the token (second of two, both fixed
+     2026-08-23). On the pending mono audit list like .hm-metric. */
+  font-family: var(--font-mono);
 }
 
 .lab-panel-empty {
@@ -5695,7 +5932,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-qline {
   display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
   margin: 6px 0 0; font-size: 12px; color: var(--t2);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
 }
 .lq-qline .sep { color: var(--bd-2); }
 .lq-qcut { border-bottom: 1px dotted var(--t3); cursor: help; }
@@ -5747,7 +5984,7 @@ a.member-chip-name:hover { color: var(--accent); }
    control, not buried in a tooltip. */
 .lq-tab-sub { display: block; font-size: 9.5px; color: var(--t3); margin-top: 2px; }
 .lq-tab-score {
-  font-family: var(--font-mono); font-size: 19px; font-weight: 600;
+  font-family: var(--font-ui); font-size: 19px; font-weight: 600;
   line-height: 1; font-variant-numeric: tabular-nums; flex: none;
 }
 /* Leads the button now (2026-08-09, was trailing after the value) and sized
@@ -5793,7 +6030,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-grp:first-of-type { margin-top: 10px; }
 .lq-grp-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 5px; }
 .lq-grp-name { font-weight: 600; font-size: 12.5px; min-width: 66px; border-bottom: 1px dotted var(--t3); cursor: help; }
-.lq-grp-score { font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.lq-grp-score { font-family: var(--font-ui); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .lq-grp-weight { color: var(--t3); font-size: 10.5px; margin-left: auto; }
 .lq-meter { height: 5px; background: var(--bg-5); border-radius: 3px; overflow: hidden; margin-bottom: 5px; }
 .lq-meter-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
@@ -5837,7 +6074,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-tipbox .rg { display: flex; justify-content: space-between; gap: 10px; padding: 1.5px 0; color: var(--t1); }
 .lq-tipbox .rg.on { color: var(--t0); font-weight: 500; }
-.lq-tipbox .rg .b { font-family: var(--font-mono); font-size: 10.5px; color: var(--t2); }
+.lq-tipbox .rg .b { font-family: var(--font-ui); font-size: 10.5px; color: var(--t2); }
 .lq-tipbox .rg.on .b { color: var(--accent-lit); }
 
 /* Technical issues */
@@ -5913,7 +6150,8 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-trk-win { display: flex; gap: 5px; align-items: center; flex: none; }
 .lq-win {
   background: var(--bg-5); border: 1px solid var(--bd-1); color: var(--t2);
-  font-size: 10.5px; font-family: var(--font-mono); border-radius: var(--r-sm);
+  font-size: 10.5px; font-family: var(--font-ui);
+ font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */ border-radius: var(--r-sm);
   padding: 2px 8px; cursor: pointer;
 }
 .lq-win:hover { border-color: var(--accent); color: var(--accent-lit); }
@@ -6008,7 +6246,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-mrow:last-child { border-bottom: none; }
 .lq-mrow:hover { background: var(--bg-4); }
 .lq-mlabel { flex: 0 0 132px; font-size: 12px; color: var(--t1); }
-.lq-mval { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; flex: 0 0 96px; }
+.lq-mval { font-family: var(--font-ui); font-size: 12px; font-variant-numeric: tabular-nums; flex: 0 0 96px; }
 .lq-mverdict { flex: 1; font-size: 11.5px; color: var(--t2); min-width: 0; }
 /* Zero-weight readings carry an asterisk and a footnote at the bottom of the
    panel (Ryan, 2026-08-02) rather than a "not scored" tag on every row — five
@@ -6170,8 +6408,11 @@ a.member-chip-name:hover { color: var(--accent); }
    live recording the date IS the identity — it's how collectors name, trade
    and search for shows. Tabular numerals so stacked cards align. */
 .rec-card-date {
-  font-size: 12.5px; font-weight: 600; color: var(--t0);
-  letter-spacing: .14em; font-variant-numeric: tabular-nums;
+  /* Was 12.5px at .14em tracking — Ryan, 2026-08-23: the letters read as
+     spacing rather than as a date. Standard tracking, up to 14px. Tabular
+     numerals stay: a column of cards has to align. */
+  font-size: 14px; font-weight: 600; color: var(--t0);
+  letter-spacing: normal; font-variant-numeric: tabular-nums;
 }
 
 .rec-card-rule {
@@ -6179,8 +6420,13 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 .rec-card-performer {
+  /* The display face's main job in the app: the act name as poster billing.
+     No text-transform — the name renders exactly as the database holds it
+     (Ryan, 2026-08-23). The old -.005em tracking existed to compensate for
+     all-caps and went with it. */
+  font-family: var(--font-display);
   font-size: 15px; font-weight: 700; line-height: 1.15; color: var(--t0);
-  text-transform: uppercase; letter-spacing: -.005em;
+  letter-spacing: normal;
   /* Act names run long ("Alison Brown and Her Fairweather Friends"), so clamp
      to three lines rather than truncate — a poster wraps, it doesn't ellipsis. */
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
@@ -6188,12 +6434,14 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 .rec-card-venue {
-  font-size: 11.5px; font-style: italic; color: var(--t1); line-height: 1.3;
+  font-size: var(--fs-body); font-style: normal; color: var(--t1); line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
 }
 .rec-card-loc {
-  font-size: 10.5px; letter-spacing: .11em; text-transform: uppercase;
+  /* Caps and wide tracking both dropped 2026-08-23 (Ryan): city names carry
+     their own casing — "San Francisco", not "SAN FRANCISCO". */
+  font-size: 10.5px; letter-spacing: .02em;
   color: var(--t2); margin-top: 5px;
 }
 .rec-card-genre {
@@ -6297,7 +6545,7 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .rec-rowcard-date {
   font-size: 12px; font-weight: 600; color: var(--t0);
-  letter-spacing: .08em; font-variant-numeric: tabular-nums;
+  letter-spacing: .05em; font-variant-numeric: tabular-nums;
 }
 .rec-rowcard-main { min-width: 0; }
 .rec-rowcard-performer { font-size: 13.5px; font-weight: 600; color: var(--t0); }
@@ -6407,7 +6655,7 @@ a.member-chip-name:hover { color: var(--accent); }
   color: var(--t1);
 }
 .rq-grp-score {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
@@ -6451,7 +6699,7 @@ a.member-chip-name:hover { color: var(--accent); }
   font-size: 11px;
 }
 .rq-mlabel { color: var(--t2); }
-.rq-mval { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.rq-mval { font-family: var(--font-ui); font-variant-numeric: tabular-nums; text-align: right; }
 .rq-mverdict { color: var(--t3); font-size: 10.5px; }
 /* Five of the eleven readings carry ZERO weight. Showing them at equal visual
    standing implied they all move the number, which is how the 2026-07-30 Gatton
@@ -6599,7 +6847,7 @@ html.peer-mode .app-header-center { visibility: hidden; }
   border: 1px solid var(--bd-1);
   border-radius: var(--r-sm);
   color: var(--t3);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -6667,7 +6915,8 @@ html.peer-mode .app-header-center { visibility: hidden; }
   text-overflow: ellipsis;
 }
 .search-item-date {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   font-size: 11px;
   color: var(--t1);
   letter-spacing: 0.02em;
@@ -6731,7 +6980,8 @@ html.peer-mode .app-header-center { visibility: hidden; }
 .search-row-date {
   flex: none;
   width: 92px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   font-size: 12px;
   color: var(--t1);
   letter-spacing: 0.03em;
@@ -6992,3 +7242,435 @@ html.playback-mode .hm-val--editable:hover { background: none; }
 
 /* "Tenure not set" is a prompt to an editor that is no longer reachable. */
 html.playback-mode .pp-member-tenure.is-unset { display: none; }
+
+/* ── Boot failure ───────────────────────────────────────────────────────────
+   Shown when the app is authenticated but failed to start. Deliberately ugly
+   and deliberately in the way: it exists because the previous behaviour was to
+   catch the error, throw it away, and show a login screen instead — which is
+   how a shadowed variable in renderSidebar() got debugged as an auth problem
+   (2026-08-23). An error nobody sees costs more than an error that interrupts.
+   Fixed to the viewport rather than inside the app shell: whatever failed may
+   be the thing that renders the shell.                                      */
+.boot-error {
+  position: fixed; z-index: 9999;
+  left: 50%; top: 40px; transform: translateX(-50%);
+  width: min(680px, calc(100vw - 40px));
+  background: var(--bg-3);
+  border: 1px solid var(--red);
+  border-radius: var(--r-md);
+  box-shadow: 0 18px 50px rgba(0,0,0,.55);
+  padding: 16px 18px;
+  font-family: var(--font-ui);
+}
+.boot-error-head {
+  font-size: 13px; font-weight: 600; color: var(--red);
+  letter-spacing: .02em; margin-bottom: 6px;
+}
+.boot-error-msg {
+  font-size: var(--fs-body); color: var(--t0); line-height: 1.5;
+}
+.boot-error-stack {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  color: var(--t2); background: var(--bg-0);
+  border: 1px solid var(--bd-0); border-radius: var(--r-sm);
+  padding: 10px 12px; margin: 11px 0 0;
+  max-height: 220px; overflow: auto; white-space: pre-wrap;
+}
+.boot-error-foot { display: flex; gap: 8px; margin-top: 12px; }
+
+/* ── Debug drawer (2026-08-23 rebuild) ──────────────────────────────────────
+   Replaces the .dbg-* floating overlay. Admin-only, present in every view.
+   Deliberately plain: this is an instrument, not a feature. No icons, no
+   ornament — it should read as part of the workbench, not part of the product.
+   The old .dbg-* rules are now dead and can be removed in one pass; they are
+   scattered rather than contiguous, so they were left alone here.           */
+
+/* The tab. Bottom-left, small enough to forget, present enough to find. */
+.dev-tab {
+  position: fixed; z-index: 900;
+  right: 0; bottom: 0;
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 10px 5px 12px;
+  background: var(--bg-3);
+  /* Bottom-RIGHT (Ryan, 2026-08-23). Borders and the rounded corner follow it
+     across: the tab reads as tucked into the corner it sits in. */
+  border: 1px solid var(--bd-1); border-right: 0; border-bottom: 0;
+  border-radius: var(--r-sm) 0 0 0;
+  color: var(--t2);
+  font-family: var(--font-ui); font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; font-weight: 600;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.dev-tab:hover { background: var(--bg-4); color: var(--t0); }
+.dev-tab.is-hidden { display: none; }
+/* Errors are the one thing allowed to raise its voice from the closed state. */
+.dev-tab.has-errors { color: var(--red); border-color: var(--red); }
+.dev-tab-badge { display: none; }
+.dev-tab-badge.is-on {
+  display: inline-block;
+  background: var(--red); color: #fff;
+  border-radius: 8px; padding: 0 5px;
+  font-size: 9.5px; line-height: 15px; letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The drawer. Full width so stack traces and URLs have room — the old panel
+   was a narrow top-right overlay and wrapped every useful line into noise. */
+.dev-drawer {
+  position: fixed; z-index: 901;
+  left: 0; right: 0; bottom: 0;
+  display: none; flex-direction: column;
+  background: var(--bg-1);
+  border-top: 1px solid var(--bd-2);
+  box-shadow: 0 -14px 40px rgba(0,0,0,.45);
+  font-family: var(--font-ui);
+}
+.dev-drawer.is-open { display: flex; }
+
+.dev-resize {
+  height: 6px; margin-top: -3px; cursor: ns-resize; flex-shrink: 0;
+}
+.dev-resize:hover { background: var(--accent-dim2); }
+
+.dev-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 0 14px;
+  height: 38px; flex-shrink: 0;
+  border-bottom: 1px solid var(--bd-1);
+  background: var(--bg-2);
+}
+.dev-panes { display: flex; gap: 2px; }
+.dev-pane-btn {
+  background: none; border: 0; cursor: pointer;
+  color: var(--t2); font-family: var(--font-ui);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600;
+  padding: 7px 12px; border-radius: var(--r-sm);
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.dev-pane-btn:hover { color: var(--t0); background: var(--bg-3); }
+.dev-pane-btn.is-on { color: var(--accent-lit); background: var(--accent-dim); }
+.dev-count {
+  font-size: 10px; letter-spacing: 0; font-weight: 600;
+  color: var(--t3); font-variant-numeric: tabular-nums;
+}
+.dev-count.is-bad { color: var(--red); }
+
+.dev-head-right { display: flex; align-items: center; gap: 12px; }
+.dev-check {
+  font-size: 11px; color: var(--t2); display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none;
+}
+.dev-act {
+  background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  color: var(--t1); font-family: var(--font-ui); font-size: 11px;
+  padding: 4px 10px; cursor: pointer;
+}
+.dev-act:hover { background: var(--bg-4); color: var(--t0); }
+
+.dev-body { flex: 1; min-height: 0; overflow: auto; }
+
+/* Shared row furniture. Timestamps are tabular so the left edge is a column
+   you can scan rather than a ragged margin. */
+.dev-time {
+  color: var(--t3); font-size: 11px; font-variant-numeric: tabular-nums;
+  flex-shrink: 0; width: 62px;
+}
+
+/* ── Errors ───────────────────────────────────────────────────────────────
+   The message is the loudest thing in the row. Everything else — time, kind,
+   source — is context and is dimmed to match. */
+.dev-err { border-bottom: 1px solid var(--bd-0); }
+.dev-err-top {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 9px 14px; cursor: pointer;
+}
+.dev-err.no-stack .dev-err-top { cursor: default; }
+.dev-err:hover { background: var(--bg-2); }
+.dev-kind {
+  font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; font-weight: 600;
+  padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+  border: 1px solid currentColor;
+}
+.dev-kind--error   { color: var(--red); }
+.dev-kind--promise { color: var(--amber); }
+.dev-kind--console { color: var(--t2); }
+.dev-err-msg {
+  color: var(--t0); font-size: var(--fs-body); line-height: 1.45;
+  flex: 1; min-width: 0; overflow-wrap: anywhere;
+}
+.dev-err-src { color: var(--t2); font-size: 11px; flex-shrink: 0; }
+.dev-err-more {
+  color: var(--t3); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  flex-shrink: 0;
+}
+.dev-err-stack {
+  display: none;
+  margin: 0; padding: 10px 14px 14px 86px;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
+  color: var(--t2); background: var(--bg-0);
+  white-space: pre-wrap; overflow-x: auto;
+}
+.dev-err.is-open .dev-err-stack { display: block; }
+
+/* ── Network / Server rows ────────────────────────────────────────────────
+   A grid, not a flex row: the columns have to line up down the list or the
+   status codes are unreadable at a glance. */
+.dev-net-row {
+  display: grid;
+  grid-template-columns: 62px 52px 46px minmax(0, 1fr) 68px auto;
+  align-items: baseline; gap: 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--bd-0);
+  font-size: 11.5px; color: var(--t1);
+}
+.dev-net-row:hover { background: var(--bg-2); }
+.dev-net-method {
+  font-size: 10px; letter-spacing: .08em; font-weight: 600; color: var(--t2);
+}
+.dev-net-status { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dev-net-row.is-ok      .dev-net-status { color: var(--green); }
+.dev-net-row.is-bad     .dev-net-status { color: var(--red); }
+.dev-net-row.is-pending .dev-net-status { color: var(--amber); }
+.dev-net-row.is-pending { color: var(--t2); }
+.dev-net-url {
+  color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dev-net-ms {
+  color: var(--t2); text-align: right; font-variant-numeric: tabular-nums; font-size: 11px;
+}
+.dev-net-note { color: var(--red); font-size: 11px; }
+
+.dev-empty { padding: 34px 20px; text-align: center; }
+.dev-empty-t { color: var(--t1); font-size: var(--fs-body); margin-bottom: 5px; }
+.dev-empty-s { color: var(--t3); font-size: 11.5px; }
+
+/* ── Search page (2026-08-23) ───────────────────────────────────────────────
+   The main-area search box. Same engine and same result rows as the App
+   Header's field, at a size that suits a page you came to on purpose rather
+   than a control you reach past. Reachable from the sidebar's Search row.   */
+.search-page {
+  /* width is EXPLICIT and load-bearing. .main-content is a flex column, and
+     `margin: 0 auto` alone cancels the default stretch — the box then sized to
+     its content and changed width on every keystroke (Ryan, 2026-08-23). */
+  width: 62%;
+  max-width: 780px;
+  min-width: 420px;
+  min-width: 0;
+  margin: 0 auto;
+  padding: 34px 0 60px;
+}
+
+.search-page-field {
+  display: flex; align-items: center; gap: 11px;
+  background: var(--bg-3);
+  border: 1px solid var(--bd-1);
+  border-radius: var(--r-lg);
+  padding: 0 14px;
+  height: 52px;
+  transition: border-color .12s, background .12s;
+}
+.search-page-field:focus-within {
+  border-color: var(--accent);
+  background: var(--bg-2);
+}
+.search-page-ic { width: 18px; height: 18px; color: var(--t2); flex-shrink: 0; }
+.search-page-field:focus-within .search-page-ic { color: var(--accent-lit); }
+
+.search-page-input {
+  flex: 1; min-width: 0;
+  background: none; border: 0; outline: none;
+  color: var(--t0);
+  font-family: var(--font-ui);
+  /* Bigger than the header field on purpose — this is the page's subject, not
+     a control tucked into the chrome. */
+  font-size: 17px;
+}
+.search-page-input::placeholder { color: var(--t3); }
+
+.search-page-clear {
+  background: none; border: 0; cursor: pointer; padding: 4px;
+  color: var(--t3); display: flex; align-items: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+}
+.search-page-clear:hover { color: var(--t0); }
+.search-page-clear.hidden { display: none; }
+
+.search-page-results { margin-top: 22px; }
+
+/* Endless-scroll furniture for Recently Added. The sentinel is invisible and
+   has height only so an IntersectionObserver has something to observe. */
+.recent-sentinel { height: 1px; }
+.recent-loading {
+  padding: 18px 28px 30px; color: var(--t3);
+  font-size: var(--fs-body);
+}
+/* The results already sit inside .search-page's gutter. */
+.search-page-results .search-results { padding: 0; }
+
+.search-page-hint {
+  color: var(--t2); font-size: var(--fs-body); line-height: 1.65;
+  padding: 26px 2px; max-width: 62ch;
+}
+.search-page-hint-min { color: var(--t1); margin-bottom: 10px; }
+.search-page-hint b { color: var(--t1); font-weight: 600; }
+
+/* The Library page's header is now just the Browse/List toggle — no title, no
+   counts (2026-08-23). Without the H1 the old top padding left it floating. */
+.artist-header--bare { padding-bottom: 4px; }
+.artist-header--bare .artist-header-row { justify-content: flex-end; }
+
+/* Icons on the three destinations under MY LIBRARY. */
+.nav-ic { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
+
+/* ── Browse, rebuilt 2026-08-23 ("Direction A — The Shelf") ─────────────────
+   The linear list is the page. Everything above it is a band that has to earn
+   its height; Collections sits BELOW the list because four collections do not
+   deserve the top of the screen.                                            */
+
+/* On This Day — one line, at the top. Was a full-width block at the bottom
+   ("buried" and "way too wide"). Horizontal scroll rather than wrapping keeps
+   it exactly one row tall no matter how many shows share the date. */
+.otd-band {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--bg-3);
+  border: 1px solid var(--bd-0); border-left: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  padding: 10px 14px; margin: 0 28px 18px;
+}
+.otd-band-l {
+  font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent); font-weight: 600; flex-shrink: 0;
+}
+.otd-band-items { display: flex; gap: 20px; flex: 1; min-width: 0; overflow-x: auto; }
+.otd-band-items::-webkit-scrollbar { height: 0; }
+.otd-band-i {
+  font-size: var(--fs-body); color: var(--t1); white-space: nowrap;
+  text-decoration: none; flex-shrink: 0;
+}
+.otd-band-i:hover b { color: var(--accent-lit); }
+.otd-band-i b { color: var(--t0); font-weight: 500; }
+.otd-band-d { color: var(--t3); font-variant-numeric: tabular-nums; margin-left: 6px; }
+.otd-band-more { font-size: 11px; color: var(--t3); flex-shrink: 0; }
+
+/* Random Top Shows — six compact tiles. The old Recommended was three cards at
+   roughly 2.5x this height, which is most of a screen for three picks. */
+.tops-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; padding: 0 28px; }
+.top-tile {
+  display: flex; flex-direction: column;
+  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-md);
+  overflow: hidden; text-decoration: none; color: inherit;
+  transition: border-color .12s, background .12s;
+}
+.top-tile:hover { border-color: var(--genre-fg, var(--bd-2)); background: var(--bg-2); }
+.top-art {
+  height: 76px; display: flex; align-items: center; justify-content: center;
+  background: var(--genre-fg, var(--bg-4)); position: relative; overflow: hidden;
+}
+.top-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* No photo is the NORMAL case for 46% of the library, so the fallback is a
+   genre-colour field with initials — deliberate, not a broken image. */
+.top-initials {
+  font-family: var(--font-display); font-size: 21px; font-weight: 700;
+  color: rgba(255,255,255,.55);
+}
+.top-body { padding: 8px 9px 10px; }
+.top-perf {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  font-family: var(--font-display); font-size: 11.5px; line-height: 1.2; color: var(--t0);
+}
+.top-meta {
+  display: block; font-size: 10px; color: var(--t2); margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sort + filters. Filters replaced the genre pills (Ryan) so quality, source
+   and genre compose instead of genre being the only axis. */
+.browse-bar {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 4px 28px 12px; border-bottom: 1px solid var(--bd-1); margin-bottom: 2px;
+}
+.browse-sorts { display: flex; gap: 2px; }
+.sortb {
+  font-family: var(--font-ui); font-size: 11px; letter-spacing: .05em;
+  text-transform: uppercase; font-weight: 600; color: var(--t2);
+  background: none; border: 0; padding: 5px 10px; border-radius: var(--r-sm); cursor: pointer;
+}
+.sortb:hover { color: var(--t0); background: var(--bg-3); }
+.sortb.on { color: var(--accent-lit); background: var(--accent-dim); }
+
+.browse-filters { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bfilter {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  font-weight: 600; color: var(--t3);
+}
+.bfilter select {
+  font-family: var(--font-ui); font-size: 12px; letter-spacing: 0; text-transform: none;
+  font-weight: 400; color: var(--t0);
+  background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  padding: 4px 7px; cursor: pointer; max-width: 210px;
+}
+.bfilter select:hover { background: var(--bg-4); }
+.bfilter-clear {
+  font-family: var(--font-ui); font-size: 11px; color: var(--t2);
+  background: none; border: 0; cursor: pointer; padding: 4px 6px;
+}
+.bfilter-clear:hover { color: var(--t0); text-decoration: underline; }
+.browse-count {
+  margin-left: auto; font-size: 11px; color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The list itself. Genre colour on every row is the page's main source of
+   vibrance — 566 of 580 recordings have one, against 312 with a photo. */
+.brows { display: flex; flex-direction: column; padding: 0 28px 8px; }
+.brow {
+  display: grid;
+  grid-template-columns: 3px 26px 116px minmax(0, 1.1fr) minmax(0, 1.4fr) auto;
+  gap: 12px; align-items: center;
+  height: 44px; padding-right: 10px;
+  border-bottom: 1px solid var(--bd-0);
+  text-decoration: none; color: inherit;
+}
+.brow:hover { background: var(--bg-3); }
+.brow-spine { align-self: stretch; background: var(--genre-fg, var(--t3)); }
+.brow-av {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 600; color: var(--t2);
+  background: var(--bg-4); border: 1.5px solid var(--genre-fg, var(--bd-1));
+}
+.brow-date { font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
+.brow-perf {
+  font-family: var(--font-display); font-size: 13px; color: var(--t0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.brow-venue {
+  font-size: 11.5px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.brow-tail { display: flex; gap: 7px; align-items: center; justify-content: flex-end; }
+.brow-src {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .1em;
+  border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
+  border-radius: 3px; padding: 1px 4px;
+}
+.brow-grade { font-size: 11px; font-weight: 600; color: var(--accent-lit); }
+
+/* Collections, at the foot of the page. */
+.col-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 0 28px; }
+.col-card {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 10px;
+  min-height: 74px; padding: 13px 14px;
+  background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: var(--r-md);
+  text-decoration: none; color: inherit;
+}
+.col-card:hover { background: var(--bg-4); border-color: var(--bd-2); }
+.col-card-n { font-family: var(--font-display); font-size: 14px; color: var(--t0); }
+.col-card-c { font-size: 10.5px; color: var(--t2); }
+
+@media (max-width: 1100px) {
+  .tops-grid { grid-template-columns: repeat(3, 1fr); }
+  .col-strip { grid-template-columns: repeat(2, 1fr); }
+}

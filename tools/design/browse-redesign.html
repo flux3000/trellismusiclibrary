@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis — Browse Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-0:#141210;--bg-1:#1c1916;--bg-2:#1a1714;--bg-3:#252220;--bg-4:#2e2a25;--bg-5:#38322c;
+  --bd-0:rgba(255,255,255,.05);--bd-1:rgba(255,255,255,.09);--bd-2:rgba(255,255,255,.16);
+  --t0:#e0d8ce;--t1:#a89880;--t2:#7a6e64;--t3:#5a5048;
+  --accent:#c4956a;--accent-lit:#d4aa82;--accent-dim:rgba(196,149,106,.14);
+  --green:#6ab880;--amber:#c89b50;--red:#d96055;--blue:#6898c8;
+  --r-sm:4px;--r-md:8px;--r-lg:12px;
+  --fd:'Archivo',sans-serif; --fu:'IBM Plex Sans',sans-serif; --fs-body:12.5px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-0);color:var(--t0);font-family:var(--fu)}
+.wrap{max-width:1180px;margin:0 auto;padding:30px 22px 90px}
+h1{font-family:var(--fd);font-size:27px;margin:0 0 6px;letter-spacing:-.01em}
+.lede{font-size:var(--fs-body);color:var(--t2);line-height:1.65;max-width:76ch;margin:0 0 8px}
+h2{font-family:var(--fd);font-size:19px;margin:44px 0 3px;letter-spacing:-.01em}
+h2 .tag{font-family:var(--fu);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+        color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:2px 7px;
+        margin-left:10px;vertical-align:3px;font-weight:600}
+h3{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin:26px 0 10px}
+.note{font-size:var(--fs-body);color:var(--t2);line-height:1.65;max-width:78ch;margin:8px 0 18px}
+.note b{color:var(--t1);font-weight:600}
+.stage{background:var(--bg-2);border:1px solid var(--bd-0);border-radius:var(--r-lg);padding:0;overflow:hidden;margin-bottom:8px}
+.stage-in{padding:20px 22px 24px}
+
+/* measured-facts panel */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1px;background:var(--bd-0);
+       border:1px solid var(--bd-0);border-radius:var(--r-md);overflow:hidden;margin:18px 0 6px}
+.fact{background:var(--bg-2);padding:14px 16px}
+.fact-n{font-family:var(--fd);font-size:23px;color:var(--t0);line-height:1.1}
+.fact-l{font-size:11px;color:var(--t2);margin-top:5px;line-height:1.45}
+
+/* ── shared bits ───────────────────────────────────────────── */
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 11px}
+.sec-title{font-family:var(--fd);font-size:15px;color:var(--t0);letter-spacing:-.005em}
+.sec-act{font-size:11px;color:var(--t2);display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+         border:1px solid var(--bd-1);background:var(--bg-3);border-radius:var(--r-sm);padding:4px 9px}
+.sec-act:hover{color:var(--t0);background:var(--bg-4)}
+.ic{width:12px;height:12px;display:inline-block;vertical-align:-1px}
+
+/* Random Top Shows — compact tile */
+.tops{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+.top{background:var(--bg-3);border:1px solid var(--bd-0);border-radius:var(--r-md);overflow:hidden;
+     text-decoration:none;color:inherit;display:flex;flex-direction:column}
+.top-art{height:74px;position:relative;display:flex;align-items:center;justify-content:center}
+.top-art .ph{font-family:var(--fd);font-size:20px;font-weight:700;color:rgba(255,255,255,.5)}
+.top-art .photo-tag{position:absolute;bottom:4px;right:5px;font-size:8px;letter-spacing:.1em;
+   text-transform:uppercase;color:rgba(255,255,255,.6);background:rgba(0,0,0,.35);padding:1px 4px;border-radius:2px}
+.top-b{padding:8px 9px 10px}
+.top-perf{font-family:var(--fd);font-size:11.5px;line-height:1.2;color:var(--t0);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.top-meta{font-size:10px;color:var(--t2);margin-top:4px;font-variant-numeric:tabular-nums}
+
+/* genre chips */
+.genres{display:flex;flex-wrap:wrap;gap:7px}
+.gchip{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 5px 8px;border-radius:20px;
+  font-size:11.5px;color:var(--t1);background:var(--bg-3);border:1px solid var(--bd-1);cursor:pointer}
+.gchip:hover{color:var(--t0);background:var(--bg-4)}
+.gdot{width:9px;height:9px;border-radius:50%}
+.gcount{font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums}
+
+/* linear list */
+.sortbar{display:flex;align-items:center;gap:14px;padding:9px 0 12px;border-bottom:1px solid var(--bd-1);margin-bottom:2px}
+.sorts{display:flex;gap:2px}
+.sortb{font-size:11px;letter-spacing:.05em;text-transform:uppercase;font-weight:600;color:var(--t2);
+  background:none;border:0;padding:5px 10px;border-radius:var(--r-sm);cursor:pointer;font-family:var(--fu)}
+.sortb.on{color:var(--accent-lit);background:var(--accent-dim)}
+.sortb:hover{color:var(--t0)}
+.reccount{font-size:11px;color:var(--t3);margin-left:auto;font-variant-numeric:tabular-nums}
+
+.rows{display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:3px 30px 116px minmax(0,1fr) 150px 74px;gap:12px;
+     align-items:center;padding:0 10px 0 0;height:44px;border-bottom:1px solid var(--bd-0);
+     text-decoration:none;color:inherit}
+.row:hover{background:var(--bg-3)}
+.spine{align-self:stretch}
+.av{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:9px;font-weight:600;color:var(--t2);background:var(--bg-4);border:1.5px solid}
+.r-date{font-size:11.5px;color:var(--t1);font-variant-numeric:tabular-nums}
+.r-perf{font-family:var(--fd);font-size:13px;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-venue{font-size:11.5px;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r-tail{display:flex;gap:6px;justify-content:flex-end;align-items:center}
+.src{font-size:8.5px;font-weight:700;letter-spacing:.1em;border:1px solid;border-radius:3px;padding:1px 4px}
+.grade{font-size:11px;font-weight:600;color:var(--accent-lit)}
+.dechead{font-family:var(--fd);font-size:12px;letter-spacing:.1em;color:var(--t3);
+  padding:14px 0 6px;border-bottom:1px solid var(--bd-1);margin-bottom:2px}
+
+/* On This Day band */
+.otd{display:flex;align-items:center;gap:16px;background:var(--bg-3);border:1px solid var(--bd-0);
+  border-left:3px solid var(--accent);border-radius:var(--r-md);padding:10px 14px;margin-bottom:18px}
+.otd-l{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:600;flex-shrink:0}
+.otd-items{display:flex;gap:18px;overflow:hidden;flex:1;min-width:0}
+.otd-i{font-size:11.5px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.otd-i b{color:var(--t0);font-weight:500}
+.otd-d{color:var(--t3);font-variant-numeric:tabular-nums}
+
+/* collections */
+.cols{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.col{border-radius:var(--r-md);padding:14px;min-height:78px;display:flex;flex-direction:column;
+     justify-content:space-between;border:1px solid var(--bd-1);position:relative;overflow:hidden}
+.col-n{font-family:var(--fd);font-size:14px;color:var(--t0);position:relative}
+.col-c{font-size:10.5px;color:var(--t2);position:relative}
+.col-stripes{position:absolute;inset:0;display:flex;opacity:.5}
+.col-stripes span{flex:1}
+
+/* Direction B hero */
+.heroband{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.hero{border-radius:var(--r-md);overflow:hidden;position:relative;height:150px;display:flex;
+  align-items:flex-end;border:1px solid var(--bd-1)}
+.hero-scrim{position:absolute;inset:0;background:linear-gradient(to top,rgba(10,9,8,.92) 12%,rgba(10,9,8,.15) 70%)}
+.hero-b{position:relative;padding:11px 12px}
+.hero-p{font-family:var(--fd);font-size:14px;color:#fff;line-height:1.15}
+.hero-m{font-size:10.5px;color:rgba(255,255,255,.72);margin-top:4px;font-variant-numeric:tabular-nums}
+.hero-ph{position:absolute;top:8px;left:9px;font-size:8px;letter-spacing:.1em;text-transform:uppercase;
+  color:rgba(255,255,255,.55)}
+.gbands{display:flex;flex-direction:column;gap:6px}
+.gband{display:grid;grid-template-columns:5px 1fr auto;gap:12px;align-items:center;height:38px;
+  background:var(--bg-3);border:1px solid var(--bd-0);border-radius:var(--r-sm);
+  padding-right:12px;cursor:pointer}
+.gband:hover{background:var(--bg-4)}
+.gband-n{font-size:12.5px;color:var(--t0)}
+.gband-c{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+.gband-bar{height:5px;border-radius:3px}
+
+.verdict{background:var(--bg-1);border:1px solid var(--bd-1);border-left:3px solid var(--accent);
+  border-radius:var(--r-md);padding:16px 18px;margin-top:18px}
+.verdict h4{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.verdict p{margin:0 0 9px;font-size:var(--fs-body);color:var(--t1);line-height:1.65}
+.verdict p:last-child{margin-bottom:0}
+ul.pts{margin:10px 0 0;padding-left:18px}
+ul.pts li{font-size:var(--fs-body);color:var(--t2);line-height:1.7;margin-bottom:5px}
+ul.pts li b{color:var(--t1);font-weight:600}
+@media(max-width:1000px){.tops{grid-template-columns:repeat(3,1fr)}.heroband,.cols{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Browse — two redesigns</h1>
+<p class="lede">Both directions answer the same eight complaints. They differ in what carries the page:
+  <b>A</b> makes the linear list the page and keeps everything else to thin bands above it.
+  <b>B</b> leads with images and genre colour, and puts the list underneath.
+  Every row below is real data from your library.</p>
+
+<div class="facts">
+  <div class="fact"><div class="fact-n">312 / 580</div><div class="fact-l">shows whose performer has a photo — <b>54%</b>. Photo-forward is viable; it cannot be the only visual.</div></div>
+  <div class="fact"><div class="fact-n">566 / 580</div><div class="fact-l">shows with a genre colour. This is the most complete visual signal you own.</div></div>
+  <div class="fact"><div class="fact-n">2000s</div><div class="fact-l">largest decade at 158 shows; 1990s 125, 1970s 105. A decade rail has real shape.</div></div>
+  <div class="fact"><div class="fact-n">4</div><div class="fact-l">collections, largest holds 9. Any design giving them a big grid will look empty.</div></div>
+</div>
+<p class="note">The photo number is the one that changes the answer. I first read <code>performer.image_ext</code> and got
+  1 of 184 — that column is vestigial. The real store is <code>performer_image</code>: <b>72 of 184 performers, covering
+  312 of 580 shows</b>. Esbjörn Svensson Trio alone accounts for 51, Tony Rice Unit 31, Joni Mitchell 20. So images
+  concentrate on the acts you have most of, which is exactly where a browse page looks.</p>
+
+<!-- ════════ DIRECTION A ════════ -->
+<h2>Direction A — The Shelf <span class="tag">list-first</span></h2>
+<p class="note">The premise: collectors flip. The list <em>is</em> the page, and everything else is a thin band that
+  earns its height. Nothing here is more than 90px tall except the list itself.</p>
+
+<div class="stage"><div class="stage-in">
+
+  <div class="otd">
+    <span class="otd-l">On This Day</span>
+    <div class="otd-items">
+      <span class="otd-i"><b>Doc &amp; Merle Watson</b> <span class="otd-d">· Aug 23, 1980</span></span>
+      <span class="otd-i"><b>Ahmad Jamal Trio</b> <span class="otd-d">· Aug 23, 1976</span></span>
+      <span class="otd-i"><b>Hot Rize</b> <span class="otd-d">· Aug 23, 1990</span></span>
+    </div>
+    <span class="sec-act">See all 6</span>
+  </div>
+
+  <div class="sec-head">
+    <span class="sec-title">Random Top Shows</span>
+    <span class="sec-act">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      Shuffle
+    </span>
+  </div>
+  <div class="tops">
+    <a class="top"><div class="top-art" style="background:#6a7fb5"><span class="ph">AJ</span><span class="photo-tag">photo</span></div>
+      <div class="top-b"><div class="top-perf">Ahmad Jamal Trio</div><div class="top-meta">Sep 5, 1958 · A+</div></div></a>
+    <a class="top"><div class="top-art" style="background:#7a9a5b"><span class="ph">TR</span><span class="photo-tag">photo</span></div>
+      <div class="top-b"><div class="top-perf">Tony Rice Unit</div><div class="top-meta">Jul 4, 1984 · A</div></div></a>
+    <a class="top"><div class="top-art" style="background:#9a8f5e"><span class="ph">JM</span><span class="photo-tag">photo</span></div>
+      <div class="top-b"><div class="top-perf">Joni Mitchell</div><div class="top-meta">Apr 22, 1974 · A</div></div></a>
+    <a class="top"><div class="top-art" style="background:#5fa39a"><span class="ph">DG</span></div>
+      <div class="top-b"><div class="top-perf">David Grisman Quintet</div><div class="top-meta">Oct 16, 1976 · A</div></div></a>
+    <a class="top"><div class="top-art" style="background:#c9605a"><span class="ph">EJ</span></div>
+      <div class="top-b"><div class="top-perf">Elton John</div><div class="top-meta">Dec 5, 1970 · A</div></div></a>
+    <a class="top"><div class="top-art" style="background:#c08a4a"><span class="ph">GO</span></div>
+      <div class="top-b"><div class="top-perf">Grand Ole Opry</div><div class="top-meta">1965 · A</div></div></a>
+  </div>
+
+  <h3>Browse by genre</h3>
+  <div class="genres">
+    <span class="gchip"><span class="gdot" style="background:#7a9a5b"></span>Bluegrass &amp; Traditional <span class="gcount">257</span></span>
+    <span class="gchip"><span class="gdot" style="background:#6a7fb5"></span>Jazz <span class="gcount">100</span></span>
+    <span class="gchip"><span class="gdot" style="background:#5fa39a"></span>Acoustic Jazz &amp; Newgrass <span class="gcount">56</span></span>
+    <span class="gchip"><span class="gdot" style="background:#c08a4a"></span>Americana &amp; Country <span class="gcount">40</span></span>
+    <span class="gchip"><span class="gdot" style="background:#c9605a"></span>Rock &amp; Pop <span class="gcount">37</span></span>
+    <span class="gchip"><span class="gdot" style="background:#9a8f5e"></span>Folk <span class="gcount">20</span></span>
+    <span class="gchip"><span class="gdot" style="background:#d08a2e"></span>Funk <span class="gcount">19</span></span>
+    <span class="gchip"><span class="gdot" style="background:#3f7fa8"></span>Blues <span class="gcount">15</span></span>
+  </div>
+
+  <h3>Collections</h3>
+  <div class="cols">
+    <div class="col"><div class="col-stripes"><span style="background:#6a7fb5"></span><span style="background:#5fa39a"></span><span style="background:#6898c8"></span></div>
+      <div class="col-n">Classic Jazz</div><div class="col-c">9 recordings</div></div>
+    <div class="col"><div class="col-stripes"><span style="background:#7a9a5b"></span><span style="background:#5fa39a"></span></div>
+      <div class="col-n">Best of Béla</div><div class="col-c">8 recordings</div></div>
+    <div class="col"><div class="col-stripes"><span style="background:#7d7f88"></span><span style="background:#a05a3c"></span></div>
+      <div class="col-n">Hip Hop/R&amp;B</div><div class="col-c">5 recordings</div></div>
+    <div class="col"><div class="col-stripes"><span style="background:#6a7fb5"></span></div>
+      <div class="col-n">Best of E.S.T.</div><div class="col-c">3 recordings</div></div>
+  </div>
+
+  <h3>All recordings</h3>
+  <div class="sortbar">
+    <div class="sorts">
+      <button class="sortb on">A–Z</button><button class="sortb">Newest</button>
+      <button class="sortb">Oldest</button><button class="sortb">Recently added</button>
+    </div>
+    <span class="reccount">580 recordings</span>
+  </div>
+  <div class="rows">
+    <a class="row"><span class="spine" style="background:#7a9a5b"></span><span class="av" style="border-color:#7a9a5b">AK</span><span class="r-date">Jun 10, 2005</span><span class="r-perf">Alison Krauss &amp; Union Station</span><span class="r-venue">Bonnaroo, Manchester TN</span><span class="r-tail"><span class="src" style="color:#c89b50;border-color:#c89b50">AUD</span></span></a>
+    <a class="row"><span class="spine" style="background:#5fa39a"></span><span class="av" style="border-color:#5fa39a">DG</span><span class="r-date">Oct 16, 1976</span><span class="r-perf">David Grisman Quintet</span><span class="r-venue">McCabe's Guitar Shop, Santa Monica CA</span><span class="r-tail"><span class="src" style="color:#6ab880;border-color:#6ab880">SBD</span></span></a>
+    <a class="row"><span class="spine" style="background:#7a9a5b"></span><span class="av" style="border-color:#7a9a5b">DW</span><span class="r-date">Jul 12, 1980</span><span class="r-perf">Doc &amp; Merle Watson</span><span class="r-venue">Great Gorge Bluegrass Festival, Vernon Valley NJ</span><span class="r-tail"><span class="src" style="color:#6ab880;border-color:#6ab880">SBD</span></span></a>
+    <a class="row"><span class="spine" style="background:#c9605a"></span><span class="av" style="border-color:#c9605a">EJ</span><span class="r-date">Dec 5, 1970</span><span class="r-perf">Elton John</span><span class="r-venue">Swing Auditorium, San Bernardino CA</span><span class="r-tail"><span class="src" style="color:#7a6e64;border-color:#7a6e64">MR</span><span class="grade">B</span></span></a>
+    <a class="row"><span class="spine" style="background:#c08a4a"></span><span class="av" style="border-color:#c08a4a">GO</span><span class="r-date">1965</span><span class="r-perf">Grand Ole Opry</span><span class="r-venue">Ryman Auditorium, Nashville TN</span><span class="r-tail"><span class="src" style="color:#c89b50;border-color:#c89b50">AUD</span></span></a>
+    <a class="row"><span class="spine" style="background:#7a9a5b"></span><span class="av" style="border-color:#7a9a5b">JC</span><span class="r-date">Mar 8, 2003</span><span class="r-perf">J.D. Crowe and the New South</span><span class="r-venue">McDowell Auditorium, Ashland OH</span><span class="r-tail"><span class="src" style="color:#c89b50;border-color:#c89b50">AUD</span></span></a>
+    <a class="row"><span class="spine" style="background:#9a8f5e"></span><span class="av" style="border-color:#9a8f5e">JM</span><span class="r-date">Apr 24, 1983</span><span class="r-perf">Joni Mitchell</span><span class="r-venue">Wembley Arena, London</span><span class="r-tail"><span class="src" style="color:#a07dc8;border-color:#a07dc8">FM</span></span></a>
+    <a class="row"><span class="spine" style="background:#7a9a5b"></span><span class="av" style="border-color:#7a9a5b">NB</span><span class="r-date">Oct 4, 1986</span><span class="r-perf">Norman Blake</span><span class="r-venue">Somerville Movie Theater, Somerville MA</span><span class="r-tail"><span class="src" style="color:#c89b50;border-color:#c89b50">AUD</span></span></a>
+  </div>
+
+</div></div>
+
+<div class="verdict">
+  <h4>What A fixes</h4>
+  <ul class="pts">
+    <li><b>Performers grid → gone.</b> One linear list, sorted A–Z by default, Newest / Oldest / Recently added one click away. This is the layout you asked for and the one collectors expect.</li>
+    <li><b>"Recommended" → "Random Top Shows"</b>, six across instead of three, each tile ~40% the height of today's handbill. The refresh reads as <em>Shuffle</em> with a rotate icon — a refresh affordance, not "show me three more".</li>
+    <li><b>On This Day promoted to the top</b> as a single 42px band with full dates, and it is <em>narrow by construction</em> — one line, horizontally scrolling, "See all" for the rest.</li>
+    <li><b>Genre browse</b> as colour chips with counts. Cheap, and it is the one dimension where your data is nearly complete (566/580).</li>
+    <li><b>Collections</b> get colour: each card is striped with the genre colours of what it holds, so four collections still look intentional rather than sparse.</li>
+    <li><b>Vibrance</b> comes from the genre spine on every row plus the photo ring on the avatar — colour on all 580 rows, not just the 312 with faces.</li>
+  </ul>
+</div>
+
+<!-- ════════ DIRECTION B ════════ -->
+<h2>Direction B — The Wall <span class="tag">image-first</span></h2>
+<p class="note">The premise: use the 54%. A four-across image band leads the page, genre becomes full-width colour
+  bands rather than chips, and the linear list runs underneath grouped by decade.</p>
+
+<div class="stage"><div class="stage-in">
+
+  <div class="sec-head">
+    <span class="sec-title">Random Top Shows</span>
+    <span class="sec-act">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      Shuffle
+    </span>
+  </div>
+  <div class="heroband">
+    <div class="hero" style="background:linear-gradient(140deg,#6a7fb5,#3d4a6b)"><span class="hero-ph">photo</span><div class="hero-scrim"></div>
+      <div class="hero-b"><div class="hero-p">Esbjörn Svensson Trio</div><div class="hero-m">Nov 12, 2005 · Stockholm · A+</div></div></div>
+    <div class="hero" style="background:linear-gradient(140deg,#7a9a5b,#42552f)"><span class="hero-ph">photo</span><div class="hero-scrim"></div>
+      <div class="hero-b"><div class="hero-p">Tony Rice Unit</div><div class="hero-m">Jul 4, 1984 · Telluride CO · A</div></div></div>
+    <div class="hero" style="background:linear-gradient(140deg,#9a8f5e,#544d32)"><span class="hero-ph">photo</span><div class="hero-scrim"></div>
+      <div class="hero-b"><div class="hero-p">Joni Mitchell</div><div class="hero-m">Apr 22, 1974 · London · A</div></div></div>
+    <div class="hero" style="background:linear-gradient(140deg,#5fa39a,#2f544f)"><div class="hero-scrim"></div>
+      <div class="hero-b"><div class="hero-p">David Grisman Quintet</div><div class="hero-m">Oct 16, 1976 · Santa Monica CA · A</div></div></div>
+  </div>
+  <p class="note" style="margin:12px 0 0">The fourth tile has no photo — that is the honest 46% case. It falls back to a
+    genre-colour field, so the row still reads as deliberate rather than broken.</p>
+
+  <h3>Browse by genre</h3>
+  <div class="gbands">
+    <div class="gband"><span style="background:#7a9a5b;align-self:stretch"></span><span class="gband-n">Bluegrass &amp; Traditional</span><span class="gband-c">257</span></div>
+    <div class="gband"><span style="background:#6a7fb5;align-self:stretch"></span><span class="gband-n">Jazz</span><span class="gband-c">100</span></div>
+    <div class="gband"><span style="background:#5fa39a;align-self:stretch"></span><span class="gband-n">Acoustic Jazz &amp; Newgrass</span><span class="gband-c">56</span></div>
+    <div class="gband"><span style="background:#c08a4a;align-self:stretch"></span><span class="gband-n">Americana &amp; Country</span><span class="gband-c">40</span></div>
+  </div>
+
+  <h3>All recordings — by decade</h3>
+  <div class="sortbar">
+    <div class="sorts"><button class="sortb">A–Z</button><button class="sortb on">Chronological</button><button class="sortb">Recently added</button></div>
+    <span class="reccount">580 recordings</span>
+  </div>
+  <div class="dechead">1960s · 76 shows</div>
+  <div class="rows">
+    <a class="row"><span class="spine" style="background:#7a9a5b"></span><span class="av" style="border-color:#7a9a5b">CB</span><span class="r-date">Apr 1962</span><span class="r-perf">The Country Boys</span><span class="r-venue">The Ash Grove, Los Angeles CA</span><span class="r-tail"><span class="src" style="color:#6ab880;border-color:#6ab880">SBD</span></span></a>
+    <a class="row"><span class="spine" style="background:#c08a4a"></span><span class="av" style="border-color:#c08a4a">GO</span><span class="r-date">1965</span><span class="r-perf">Grand Ole Opry</span><span class="r-venue">Ryman Auditorium, Nashville TN</span><span class="r-tail"><span class="src" style="color:#c89b50;border-color:#c89b50">AUD</span></span></a>
+  </div>
+  <div class="dechead">1970s · 105 shows</div>
+  <div class="rows">
+    <a class="row"><span class="spine" style="background:#c9605a"></span><span class="av" style="border-color:#c9605a">EJ</span><span class="r-date">Dec 5, 1970</span><span class="r-perf">Elton John</span><span class="r-venue">Swing Auditorium, San Bernardino CA</span><span class="r-tail"><span class="src" style="color:#7a6e64;border-color:#7a6e64">MR</span><span class="grade">B</span></span></a>
+    <a class="row"><span class="spine" style="background:#9a8f5e"></span><span class="av" style="border-color:#9a8f5e">JM</span><span class="r-date">Apr 22, 1974</span><span class="r-perf">Joni Mitchell</span><span class="r-venue">New Vic Theatre, London</span><span class="r-tail"><span class="src" style="color:#a07dc8;border-color:#a07dc8">FM</span><span class="grade">A</span></span></a>
+    <a class="row"><span class="spine" style="background:#5fa39a"></span><span class="av" style="border-color:#5fa39a">DG</span><span class="r-date">Oct 16, 1976</span><span class="r-perf">David Grisman Quintet</span><span class="r-venue">McCabe's Guitar Shop, Santa Monica CA</span><span class="r-tail"><span class="src" style="color:#6ab880;border-color:#6ab880">SBD</span></span></a>
+  </div>
+
+  <h3>On This Day <span style="font-size:10px;color:var(--t3);letter-spacing:0;text-transform:none;font-weight:400">— a narrow right-rail card, not a full-width block</span></h3>
+  <div style="display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start">
+    <div style="color:var(--t3);font-size:11.5px;padding:14px;border:1px dashed var(--bd-1);border-radius:var(--r-md)">
+      … the recordings list continues here …
+    </div>
+    <div style="background:var(--bg-3);border:1px solid var(--bd-0);border-radius:var(--r-md);padding:14px">
+      <div class="otd-l" style="margin-bottom:10px">On This Day · Aug 23</div>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div class="otd-i" style="white-space:normal"><b>Doc &amp; Merle Watson</b><br><span class="otd-d">Aug 23, 1980 · Vernon Valley NJ</span></div>
+        <div class="otd-i" style="white-space:normal"><b>Ahmad Jamal Trio</b><br><span class="otd-d">Aug 23, 1976 · Vancouver</span></div>
+        <div class="otd-i" style="white-space:normal"><b>Hot Rize</b><br><span class="otd-d">Aug 23, 1990 · Boulder CO</span></div>
+      </div>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="verdict">
+  <h4>What B does differently</h4>
+  <ul class="pts">
+    <li><b>Images lead.</b> Four tiles at 150px tall, photo with a scrim so the type stays readable. This is the most vibrant option and it depends on the 54% — it will look best on Esbjörn Svensson, Tony Rice, Joni Mitchell, and plainest on the long tail.</li>
+    <li><b>Genre as full-width bands</b> rather than chips — heavier presence, reads as a way in rather than a filter.</li>
+    <li><b>Decade grouping</b> on the list. Your spread supports it: 2000s 158, 1990s 125, 1970s 105, 1960s 76. A–Z stays available.</li>
+    <li><b>On This Day in a 300px right rail</b> — the direct fix for "way too wide", and it stops being buried without stealing the top of the page.</li>
+    <li><b>Cost:</b> more vertical space before the list starts, and it leans on photo coverage you would want to keep improving.</li>
+  </ul>
+</div>
+
+<div class="verdict" style="border-left-color:var(--green)">
+  <h4>My recommendation</h4>
+  <p><b>A, with B's hero band as an option later.</b> A fixes every complaint using data you have complete coverage
+    for — genre colour on 566 of 580 — and it puts the linear list first, which is what you actually asked for and
+    what a collector opens the page to do.</p>
+  <p>B is the better-looking page and the weaker product right now. Its hero band is the first thing you see, and for
+    46% of the library it degrades to a coloured rectangle. That is a fine fallback in a six-across strip where a few
+    plain tiles sit among photographed ones; it is more exposed at 150px, four across, above the fold.</p>
+  <p>If photo coverage climbs — the Performer page already has the Commons fetch — B's hero band drops into A without
+    disturbing anything else. Worth treating as a content project with its own payoff rather than a design blocker.</p>
+</div>
+
+<div class="verdict" style="border-left-color:var(--amber)">
+  <h4>Two things I need you to decide</h4>
+  <ul class="pts">
+    <li><b>"Random Top Shows" — what qualifies?</b> Today's Recommended is A/A+ only, weighted toward unplayed, one per performer, seeded stable-per-day. Only 118 recordings have a letter grade at all, so "top" currently means "one of ~118 graded shows". Either keep that and accept the pool, or widen it to include the automated listening-quality score.</li>
+    <li><b>Default sort on the list.</b> A–Z by performer, or chronological by show date? A–Z is easier to aim at when you know what you want; chronological reads like a collection. I have drawn A default in A and chronological in B.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>

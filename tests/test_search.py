@@ -364,7 +364,7 @@ def test_seeded_act_is_found_with_exact_shape(client, seeded_ids):
     body = r.get_json()
     groups = {g["type"]: g for g in body["groups"]}
 
-    assert groups["performers"]["label"] == "Acts"
+    assert groups["performers"]["label"] == "Performers"
     assert groups["performers"]["total"] == 1
     item = groups["performers"]["items"][0]
     assert item == {
@@ -430,7 +430,7 @@ def test_typed_query_pages_one_group(client):
     assert r.status_code == 200
     body = r.get_json()
     assert body["type"] == "recordings"
-    assert body["label"] == "Shows"
+    assert body["label"] == "Recordings"
     assert body["total"] == 1
     assert body["limit"] == 1
     assert body["offset"] == 0

@@ -73,7 +73,17 @@ const API = (() => {
       window.dispatchEvent(new CustomEvent('flux:library-disconnected', { detail: data }))
     }
 
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+    if (!res.ok) {
+      // Carry the status ON the error. A bare Error message forces callers to
+      // string-match or, worse, assume — init() assumed every failure meant
+      // "logged out", so a TypeError in the sidebar presented as a login
+      // screen (2026-08-23). `status` lets a caller ask the only question
+      // that actually matters: was this 401, or was it something else?
+      const err = new Error(data.error || `HTTP ${res.status}`)
+      err.status = res.status
+      err.payload = data
+      throw err
+    }
 
     // Folder-rename-on-metadata-edit (app/utils/folder_naming.py) is
     // deliberately non-fatal — a filesystem problem must never block a
@@ -262,6 +272,7 @@ const API = (() => {
       recent:     (limit, opts) => {
         const o = opts || {}
         const qs = [`limit=${limit || 50}`]
+        if (o.offset)   qs.push(`offset=${o.offset}`)
         if (o.waveform) qs.push('waveform=1')
         if (o.card)     qs.push('card=1')
         return get(`/api/recordings/recent?${qs.join('&')}`)
@@ -274,7 +285,13 @@ const API = (() => {
         get(`/api/recordings/recommended?limit=${limit || 3}&reroll=${reroll || 0}`),
       // Browse's On This Day module — recordings whose date matches today's
       // month/day, any year. Empty most days; the module hides itself then.
-      onThisDay:  ()          => get('/api/recordings/on-this-day'),
+      // Sends the BROWSER's month/day. "Today" depends on where the reader is
+      // standing, and the server's UTC date is already tomorrow for most of a
+      // US evening.
+      onThisDay:  () => {
+        const d = new Date()
+        return get(`/api/recordings/on-this-day?month=${d.getMonth() + 1}&day=${d.getDate()}`)
+      },
       // Sidebar Favorites. Complete rather than capped — see the endpoint.
       favorites:  ()          => get('/api/recordings/favorites'),
       scan:       (folder)   => post('/api/recordings/scan', { folder_path: folder }),

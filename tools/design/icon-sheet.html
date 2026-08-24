@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis — Icon Pass 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   TRELLIS — ICON PASS 1.  Dev tool, not shipped.
+
+   Every Unicode character the app currently uses as an icon, what it actually
+   does at its call sites, and a proposal. Colours and type are the real ones
+   so the icons are judged at the size and weight they will actually appear.
+
+   The proposals are NOT uniformly "replace with an icon". Three verdicts:
+     REPLACE  — a glyph standing alone as a control. An icon belongs here.
+     DROP     — a glyph pinned to the front of a text label. The words already
+                say it; the glyph is decoration, and decoration next to a word
+                is the exact tell we are removing. Do not swap in an SVG.
+     LEAVE    — not an icon at all. Literal punctuation in copy, or an arrow
+                inside a code comment.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg-0:#141210; --bg-1:#1c1916; --bg-2:#1a1714; --bg-3:#252220; --bg-4:#2e2a25;
+  --bd-0:rgba(255,255,255,.05); --bd-1:rgba(255,255,255,.09); --bd-2:rgba(255,255,255,.16);
+  --t0:#e0d8ce; --t1:#a89880; --t2:#7a6e64; --t3:#5a5048;
+  --accent:#c4956a; --accent-lit:#d4aa82; --accent-dim:rgba(196,149,106,.14);
+  --green:#6ab880; --amber:#c89b50; --red:#d96055;
+  --r-sm:4px; --r-md:8px; --r-lg:12px;
+  --font-display:'Archivo',-apple-system,sans-serif;
+  --font-ui:'IBM Plex Sans',-apple-system,sans-serif;
+  --fs-body:12.5px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-0);color:var(--t0);font-family:var(--font-ui)}
+.wrap{max-width:1080px;margin:0 auto;padding:30px 22px 90px}
+h1{font-family:var(--font-display);font-size:26px;margin:0 0 6px;letter-spacing:-.01em}
+.lede{font-size:var(--fs-body);color:var(--t2);line-height:1.6;max-width:74ch;margin:0 0 30px}
+h2{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);
+   margin:38px 0 4px;padding-bottom:8px;border-bottom:1px solid var(--bd-0)}
+h2 b{color:var(--accent);font-weight:600}
+.h2note{font-size:var(--fs-body);color:var(--t2);line-height:1.6;max-width:76ch;margin:10px 0 18px}
+
+table{width:100%;border-collapse:collapse;background:var(--bg-2);border:1px solid var(--bd-0);
+      border-radius:var(--r-lg);overflow:hidden}
+th{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);font-weight:600;
+   text-align:left;padding:10px 14px;border-bottom:1px solid var(--bd-1)}
+td{padding:12px 14px;border-bottom:1px solid var(--bd-0);font-size:var(--fs-body);color:var(--t1);
+   vertical-align:middle;line-height:1.5}
+tr:last-child td{border-bottom:0}
+tr:hover td{background:var(--bg-3)}
+.glyph{font-size:19px;color:var(--t0);width:44px;text-align:center}
+.n{font-variant-numeric:tabular-nums;color:var(--t3);font-size:11px;width:40px;text-align:right}
+.what{color:var(--t1);width:31%}
+.what code{color:var(--t2);font-size:11px}
+.arrow{color:var(--t3);width:22px;text-align:center}
+.prop{width:120px}
+.ic{width:17px;height:17px;display:block;color:var(--t0)}
+.icwrap{display:flex;align-items:center;gap:9px}
+.icname{font-size:11px;color:var(--t2)}
+.why{color:var(--t2);font-size:11.5px}
+
+/* Live control comparison */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--bd-1);
+     border-radius:var(--r-lg);overflow:hidden;margin-top:16px}
+.cmp>div{padding:20px 22px}
+.cmp>div:first-child{background:var(--bg-1);border-right:1px solid var(--bd-1)}
+.cmp>div:last-child{background:var(--bg-2)}
+.cmp h3{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t3);
+        font-weight:600;margin:0 0 16px}
+.ctrls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.btn-icon{width:30px;height:30px;border-radius:var(--r-sm);border:1px solid var(--bd-1);
+          background:var(--bg-3);color:var(--t1);display:flex;align-items:center;justify-content:center;
+          cursor:pointer;font-size:14px;font-family:var(--font-ui)}
+.btn-icon:hover{background:var(--bg-4);color:var(--t0);border-color:var(--bd-2)}
+.btn-icon .ic{width:15px;height:15px}
+.btn-icon.fav{color:var(--accent-lit);border-color:var(--accent)}
+.lbl-btn{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:var(--r-sm);
+         border:1px solid var(--bd-1);background:var(--bg-3);color:var(--t1);font-size:12px;
+         cursor:pointer;font-family:var(--font-ui)}
+.lbl-btn.danger{border-color:var(--red);color:var(--red)}
+.chipline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px;font-size:11.5px}
+.st{display:inline-flex;align-items:center;gap:6px}
+.st.ok{color:var(--green)} .st.warn{color:var(--amber)} .st.dim{color:var(--t2)}
+.st .ic{width:13px;height:13px}
+.foot{margin-top:34px;font-size:var(--fs-body);color:var(--t2);line-height:1.65;max-width:76ch}
+.foot b{color:var(--t1);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Icon Pass 1</h1>
+<p class="lede">Every Unicode character <code>app.js</code> currently uses as an icon, with counts from the live
+  file. The proposal is deliberately not "replace all of them" — a glyph sitting in front of a word is decoration,
+  and swapping it for an SVG keeps the decoration while making it look more designed. Three verdicts below.
+  Lucide v1.33.0, ISC.</p>
+
+<!-- ══ REPLACE ══════════════════════════════════════════════════════════ -->
+<h2><b>Replace</b> — a glyph standing alone as a control</h2>
+<p class="h2note">These are buttons whose entire visible content is one character. There is nothing else carrying
+  the meaning, so an icon is doing real work rather than ornamenting a label. This is where Lucide earns its place.</p>
+
+<table>
+<tr><th class="glyph">Now</th><th class="n">×</th><th class="what">Where and what it does</th><th class="arrow"></th><th class="prop">Proposed</th><th class="why">Note</th></tr>
+
+<tr><td class="glyph">▶ ▷</td><td class="n">14</td>
+  <td class="what">Play / stop on the card button, the Record header, and every track row.
+    <code>isPlaying ? '▶' : '▷'</code></td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg><span class="icname">play<br>pause</span></div></td>
+  <td class="why">Filled ▶ vs hollow ▷ is a weak signal. <b>Playing should show pause</b>, which is what the button will do next.</td></tr>
+
+<tr><td class="glyph">★ ☆</td><td class="n">8</td>
+  <td class="what">The favourite toggle. Filled when favourited.</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg><span class="icname">star<br>filled / outline</span></div></td>
+  <td class="why">The one genuine filled/outline pair. Keeps working exactly as today.</td></tr>
+
+<tr><td class="glyph">✕ ×</td><td class="n">11</td>
+  <td class="what">Two different jobs: close a modal (<code>settings-close</code>) and remove a chip (member, collection tag).</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg><span class="icname">x</span></div></td>
+  <td class="why">One icon for both, at two sizes. Today they are two <em>different characters</em> for the same idea.</td></tr>
+
+<tr><td class="glyph">↻</td><td class="n">5</td>
+  <td class="what">Refresh a nav dimension list; also fronts the "AI Assist" and "Re-validate" buttons.</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg><span class="icname">rotate-cw</span></div></td>
+  <td class="why">Replace only the standalone nav one. The labelled buttons are in the DROP list below.</td></tr>
+
+<tr><td class="glyph">＋ +</td><td class="n">5</td>
+  <td class="what">Create-new in a dimension row, the Add Recordings button, the performer drop target.</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg><span class="icname">plus</span></div></td>
+  <td class="why"><code>＋</code> is the <em>fullwidth</em> plus — a CJK character, noticeably wider and heavier than the Latin one beside it.</td></tr>
+
+<tr><td class="glyph">←</td><td class="n">3</td>
+  <td class="what">The date-nudge button in ingest review. (The other 4 are inside code comments.)</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg><span class="icname">arrow-left</span></div></td>
+  <td class="why">Already replaced ‹ once for being too small to read as a button (2026-08-22).</td></tr>
+
+<tr><td class="glyph">▴ ▾</td><td class="n">10</td>
+  <td class="what">Disclosure carets — the quality report tabs, the library selector, ingest "parsed tracks".</td>
+  <td class="arrow">→</td>
+  <td class="prop"><div class="icwrap"><svg class="ic" viewBox="0 0 8 8" fill="none" style="width:12px;height:12px"><path d="M1.5 0.5 L6.5 4 L1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="icname">chevronIcon()<br>already exists</span></div></td>
+  <td class="why"><b>Not a Lucide job.</b> The sitewide rotating chevron was built 2026-08-23; these are the surfaces it deliberately skipped.</td></tr>
+</table>
+
+<div class="cmp">
+  <div>
+    <h3>Now</h3>
+    <div class="ctrls">
+      <button class="btn-icon">▶</button>
+      <button class="btn-icon">▷</button>
+      <button class="btn-icon fav">★</button>
+      <button class="btn-icon">☆</button>
+      <button class="btn-icon">✕</button>
+      <button class="btn-icon">↻</button>
+      <button class="btn-icon">＋</button>
+      <button class="btn-icon">←</button>
+    </div>
+    <div class="chipline">
+      <span class="st ok">✓ Match</span>
+      <span class="st warn">⚠ 3 tracks did not match</span>
+      <span class="st dim">— Unverified</span>
+    </div>
+  </div>
+  <div>
+    <h3>Proposed</h3>
+    <div class="ctrls">
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/></svg></button>
+      <button class="btn-icon fav"><svg class="ic" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg></button>
+      <button class="btn-icon"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg></button>
+    </div>
+    <div class="chipline">
+      <span class="st ok">Match</span>
+      <span class="st warn">3 tracks did not match</span>
+      <span class="st dim">Unverified</span>
+    </div>
+  </div>
+</div>
+
+<!-- ══ DROP ═════════════════════════════════════════════════════════════ -->
+<h2><b>Drop</b> — a glyph pinned to the front of a word</h2>
+<p class="h2note">Here the label already says it. <code>✓ Match</code> is not clearer than <code>Match</code>; the
+  colour is doing the work and the tick is a second, weaker copy of the same signal. Replacing these with SVGs
+  would keep the ornament and make it look more deliberate, which is the opposite of what we want. My
+  recommendation is to delete the character and change nothing else.</p>
+
+<table>
+<tr><th class="glyph">Now</th><th class="n">×</th><th class="what">Call site</th><th class="arrow"></th><th class="prop">Proposed</th><th class="why">Note</th></tr>
+<tr><td class="glyph">✓</td><td class="n">19</td><td class="what"><code>'✓ Match'</code>, <code>'✓ Copied'</code>, checksum status</td><td class="arrow">→</td><td class="prop">Match · Copied</td><td class="why">Already green. The tick adds nothing but a second signal in a weaker channel.</td></tr>
+<tr><td class="glyph">⚠</td><td class="n">9</td><td class="what"><code>⚠ 3 tracks did not match…</code></td><td class="arrow">→</td><td class="prop">the sentence alone</td><td class="why">Already amber and already a sentence describing the problem.</td></tr>
+<tr><td class="glyph">■</td><td class="n">2</td><td class="what"><code>■ Cancel</code> on the LQ cancel button</td><td class="arrow">→</td><td class="prop">Cancel</td><td class="why">A filled square does not mean cancel anywhere. It is a stop symbol on a cancel button.</td></tr>
+<tr><td class="glyph">↻</td><td class="n">3</td><td class="what"><code>↻ AI Assist</code>, <code>↻ Run again</code>, <code>↻ Re-validate</code></td><td class="arrow">→</td><td class="prop">the label alone</td><td class="why">"Run again" and "Re-validate" already say repeat.</td></tr>
+<tr><td class="glyph">›</td><td class="n">2</td><td class="what"><code>Move to ›</code>, <code>Move ›</code> — opens a submenu</td><td class="arrow">→</td><td class="prop">chevronIcon()</td><td class="why">The only one here worth keeping as a mark, because it signals <em>more UI follows</em>. Use the shared chevron.</td></tr>
+<tr><td class="glyph">▾</td><td class="n">1</td><td class="what"><code>Actions ▾</code></td><td class="arrow">→</td><td class="prop">chevronIcon()</td><td class="why">Same reason. A menu affordance, not decoration.</td></tr>
+<tr><td class="glyph">⚑</td><td class="n">1</td><td class="what">The unpublished badge</td><td class="arrow">→</td><td class="prop">the badge alone</td><td class="why">One use, already inside a labelled badge.</td></tr>
+</table>
+
+<!-- ══ LEAVE ════════════════════════════════════════════════════════════ -->
+<h2><b>Leave</b> — not icons</h2>
+<p class="h2note">These turn up in a glyph scan and should not be touched. Worth writing down so the next pass
+  does not "fix" them.</p>
+<table>
+<tr><th class="glyph">Char</th><th class="n">×</th><th class="what">What it actually is</th><th class="why" colspan="3">Note</th></tr>
+<tr><td class="glyph">…</td><td class="n">72</td><td class="what"><code>Loading…</code>, <code>Add role…</code>, truncated text</td><td class="why" colspan="3">Literal punctuation in copy. A real ellipsis character, correctly used.</td></tr>
+<tr><td class="glyph">→</td><td class="n">15</td><td class="what"><code>// trackId → waveform data</code></td><td class="why" colspan="3">Inside code comments. Never rendered.</td></tr>
+<tr><td class="glyph">—</td><td class="n">—</td><td class="what"><code>'— Unverified'</code></td><td class="why" colspan="3">Em dash as a null marker. Drop it with the ✓ and ⚠ for consistency, or keep all three. One decision, not three.</td></tr>
+</table>
+
+<p class="foot"><b>What is already built:</b> the four left-nav dimension icons (map-pin / users / user / tag), the
+  nav create and refresh controls, and the Add Recordings plus. The <code>icon(name, cls, fill)</code> helper and
+  a deliberately small <code>ICONS</code> map live in <code>app.js</code> beside <code>chevronIcon()</code>.
+  <br><br>
+  <b>Nothing in the tables above is applied yet.</b> Mark up whatever you disagree with and I will sweep the call
+  sites in one pass. The counts come from the live file, so they are also the size of the job: about 55 real
+  changes, not 180.</p>
+
+</div>
+</body>
+</html>

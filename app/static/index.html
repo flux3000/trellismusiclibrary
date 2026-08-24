@@ -9,12 +9,19 @@
        a flash/snap once app.js loads (Ryan, 2026-08-23 — same treatment as
        fluxTheme above, for the same reason: both are per-machine display
        state that must be correct on the very first frame). -->
+</head>
+<body>
+  <!-- MOVED out of <head> 2026-08-23. It ran there for years touching
+       document.body — which does not exist yet while <head> is parsing, so
+       every load threw "null is not an object" and NEITHER the saved theme nor
+       the saved sidebar state was ever restored. The error was invisible
+       because an uncaught inline-script error does not stop parsing.
+       Here, body exists and this still runs before any content paints, which
+       was the whole point of putting it inline. -->
   <script>
     if(localStorage.getItem('fluxTheme')==='light')document.body.classList.add('theme-light')
     if(localStorage.getItem('fluxSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
   </script>
-</head>
-<body>
 
   <!-- ── Login ──────────────────────────────────────────────────────────────── -->
   <div id="login-screen" class="login-screen hidden">
@@ -80,20 +87,27 @@
               <rect x="0.75" y="0.75" width="5.5" height="12.5" rx="1.3" fill="currentColor" fill-opacity="0.55"/>
             </svg>
           </button>
-          <button type="button" class="hdr-btn" id="nav-back" title="Back" aria-label="Back" disabled>←</button>
-          <button type="button" class="hdr-btn" id="nav-fwd" title="Forward" aria-label="Forward" disabled>→</button>
+          <button type="button" class="hdr-btn" id="nav-back" title="Back" aria-label="Back" disabled><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg></button>
+          <button type="button" class="hdr-btn" id="nav-fwd" title="Forward" aria-label="Forward" disabled><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
         </div>
+
+        <!-- Library selector, moved here from the right cluster 2026-08-23
+             (Ryan). Switching library is a context change — which library am I
+             looking at — so it sits with the controls that move you around
+             rather than beside the account chrome. Rendered by
+             renderLibrarySelector(); empty and invisible with no remotes. -->
+        <div class="lib-select-host" id="lib-select-host"></div>
       </div>
 
       <div class="app-header-center" id="search-bar">
         <div class="search-field">
-          <span class="search-icon" aria-hidden="true">⌕</span>
+          <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span>
           <input type="text" id="search-input" class="search-input"
-                 placeholder="Search acts, people, venues, dates…"
+                 placeholder="Search performers, artists, venues, dates…"
                  autocomplete="off" spellcheck="false"
                  role="combobox" aria-expanded="false" aria-autocomplete="list"
                  aria-controls="search-dropdown" />
-          <button class="search-clear hidden" id="search-clear" title="Clear" tabindex="-1">✕</button>
+          <button class="search-clear hidden" id="search-clear" title="Clear" tabindex="-1"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
           <kbd class="search-hint" id="search-hint">/</kbd>
         </div>
         <div class="search-dropdown hidden" id="search-dropdown" role="listbox"></div>
@@ -105,8 +119,6 @@
              changes meaning), which puts it with the other context controls up
              here, not among the navigation links. Rendered by
              renderLibrarySelector(); empty and invisible with no remotes. -->
-        <div class="lib-select-host" id="lib-select-host"></div>
-
         <!-- Admin / Playback (Ryan, 2026-08-21). Rendered hidden and revealed by
              JS only for roles that can edit — a listener has no mode to choose
              and never sees it. Playback is what a listener always gets, so the
@@ -124,8 +136,8 @@
             <div class="user-avatar" id="user-avatar">?</div>
             <span class="user-name" id="user-name">Loading...</span>
           </div>
-          <button class="btn-icon" id="settings-btn" title="Settings">⚙</button>
-          <button class="btn-icon" id="logout-btn" title="Sign out">⎋</button>
+          <button class="btn-icon" id="settings-btn" title="Settings"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></button>
+          <button class="btn-icon" id="logout-btn" title="Sign out"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/></svg></button>
         </div>
       </div>
     </header>
@@ -146,15 +158,14 @@
       <!-- Library drive status. Hidden while the drive is healthy, which is
            almost always, so it costs no vertical space in normal use. -->
       <div class="library-banner hidden" id="library-banner" role="status" aria-live="polite">
-        <span class="library-banner-icon" aria-hidden="true">⚠</span>
+        <span class="library-banner-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
         <span class="library-banner-text" id="library-banner-text"></span>
         <button type="button" class="library-banner-btn" id="library-banner-recheck">Check again</button>
       </div>
 
       <main class="main-content" id="main-content">
         <div class="empty-state">
-          <div class="empty-icon">◈</div>
-          <div class="empty-title">Select an artist to browse recordings</div>
+            <div class="empty-title">Select an artist to browse recordings</div>
         </div>
       </main>
 
@@ -172,14 +183,14 @@
     <div class="player-center">
       <div class="player-controls">
         <button class="player-btn" id="btn-prev" title="Previous">
-          <svg viewBox="0 0 18 14" fill="currentColor"><rect x="0" y="0" width="2.5" height="14"/><polygon points="18,0 5,7 18,14"/></svg>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z"/><path d="M3 20V4"/></svg>
         </button>
         <button class="player-btn player-btn-play" id="btn-play" title="Play / Pause">
-          <svg class="icon-play" viewBox="0 0 12 14" fill="currentColor"><polygon points="0,0 12,7 0,14"/></svg>
-          <svg class="icon-pause" viewBox="0 0 12 14" fill="currentColor" style="display:none"><rect x="0" y="0" width="4" height="14"/><rect x="8" y="0" width="4" height="14"/></svg>
+          <svg class="icon-play" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" width="15" height="15" style="display:none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/></svg>
         </button>
         <button class="player-btn" id="btn-next" title="Next">
-          <svg viewBox="0 0 18 14" fill="currentColor"><polygon points="0,0 13,7 0,14"/><rect x="15.5" y="0" width="2.5" height="14"/></svg>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/></svg>
         </button>
       </div>
       <div class="player-progress">
@@ -195,7 +206,12 @@
         <span class="skip-toggle-label">Skip non-music</span>
       </label>
       <span class="vol-sep"></span>
-      <span class="vol-icon">&#128266;</span>
+      <!-- Lucide volume-2. Was the U+1F50A speaker emoji, drawn by the OS colour
+           emoji font at its own weight, baseline and palette. Nothing else in the
+           app is a colour emoji, which is exactly why it stood out. -->
+      <span class="vol-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>
+      </span>
       <input type="range" class="volume-bar" id="volume-bar" min="0" max="1" value="0.8" step="0.01" />
     </div>
   </div>

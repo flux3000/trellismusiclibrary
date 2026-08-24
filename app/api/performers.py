@@ -165,9 +165,17 @@ def all_recordings():
                 "country":        v.country if v else p.country,
                 "recordings":     [recording_summary(r) for r in p.recordings],
             })
+        # Genre rides along per PERFORMER, not per recording — the model is
+        # one genre per act (see the Genre dimension work, 2026-08-02). Added
+        # 2026-08-23 for Browse's genre filter and the colour spine on every
+        # row: without it the Library view would need a second request just to
+        # colour a list it already has.
+        g = pf.genre
         result.append({
             "performer_id":      pf.id,
             "performer_name":    pf.name,
+            "genre":             g.name  if g else None,
+            "genre_color":       g.color if g else None,
             "performance_count": len(perf_list),
             "recording_count":   sum(len(p["recordings"]) for p in perf_list),
             "performances":      perf_list,
