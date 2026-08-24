@@ -14,6 +14,7 @@ from .recording import Recording, RecordingFingerprint
 from .collection import Collection, CollectionRecording
 from .peer import Peer, CollectionGrant, PeerInvite, PeerToken, PeerAccessLog
 from .remote_node import RemoteNode
+from .remote_favorite import RemoteFavorite
 from .recording_event import RecordingEvent
 from .track import Track
 from .play_log import PlayLog

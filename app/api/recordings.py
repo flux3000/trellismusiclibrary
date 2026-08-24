@@ -313,6 +313,12 @@ def get_recording(recording_id):
         "info_file_content":    rec.info_file_content,
         "notes":                rec.notes,
         "ai_research":          _json.loads(rec.ai_research_json) if rec.ai_research_json else None,
+        # Junction rows ONLY, deliberately (2026-08-24). System collections are
+        # dynamic and Full Library covers every published recording, so
+        # resolving them here would stamp the same chip on all 580 recording
+        # pages — noise, and it would read as a curation the user did not make.
+        # This is the one membership reader that should NOT learn about system
+        # collections; every other one lives on the Collection model.
         "collections": [
             {"id": l.collection.id, "name": l.collection.name}
             for l in db.session.query(CollectionRecording).filter_by(recording_id=rec.id).all()

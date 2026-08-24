@@ -10,6 +10,13 @@ so they can never disagree.
 Reminder (Design Spec v1): a recording visible in ANY granted collection is
 accessible, even if it also sits in collections the peer wasn't granted —
 sharing a collection shares every recording in it. That's intended.
+
+SYSTEM COLLECTIONS (2026-08-24): a granted collection may be dynamic — its
+membership resolved by query rather than by `collection_recording` rows (see
+models/collection.py). Whole-library sharing is exactly this: a "Full Library"
+collection covering every published recording. Both authorization paths below
+therefore have to understand them, and both are taught SEPARATELY on purpose —
+see the note on _system_collection_ids_containing.
 """
 
 from flask import g, has_request_context
@@ -23,11 +30,48 @@ def peer_granted_collection_ids(peer):
     return {g.collection_id for g in peer.grants if g.is_active}
 
 
+def _system_collection_ids_containing(recording_id):
+    """System (dynamic) collections whose membership includes this recording.
+
+    ⚠ Deliberately answers the question PER RECORDING — "does this row satisfy
+    the collection's predicate?" — rather than resolving each system
+    collection's whole set and testing for membership.
+
+    Why it matters: this is the milestone-1 authorization path. A test asserts
+    it agrees with `peer_visible_recording_ids` (the milestone-2 path) on every
+    recording in the database. That test is only worth having while the two
+    remain INDEPENDENT implementations; routing this one through the other's
+    helper would make it agree by construction and quietly stop checking
+    anything.
+
+    An unrecognised system_key grants nothing — fail closed. The equivalence
+    test is what surfaces the resulting divergence.
+    """
+    from app.models.collection import Collection, SYSTEM_FULL_LIBRARY
+    from app.models.recording import Recording
+
+    system_cols = (db.session.query(Collection)
+                   .filter(Collection.system_key.isnot(None)).all())
+    if not system_cols:
+        return set()
+
+    rec = db.session.get(Recording, recording_id)
+    if rec is None:
+        return set()
+
+    out = set()
+    for c in system_cols:
+        if c.system_key == SYSTEM_FULL_LIBRARY and rec.is_published:
+            out.add(c.id)
+    return out
+
+
 def recording_collection_ids(recording_id):
-    """Set of collection IDs a recording belongs to."""
+    """Set of collection IDs a recording belongs to — junction rows PLUS any
+    system collection whose query covers it."""
     rows = db.session.query(CollectionRecording.collection_id).filter_by(
         recording_id=recording_id).all()
-    return {cid for (cid,) in rows}
+    return {cid for (cid,) in rows} | _system_collection_ids_containing(recording_id)
 
 
 def peer_can_access_recording_id(peer, recording_id):
@@ -93,10 +137,27 @@ def peer_visible_recording_ids(peer):
     if not granted:
         result = set()
     else:
-        rows = (db.session.query(CollectionRecording.recording_id)
-                .filter(CollectionRecording.collection_id.in_(granted))
-                .distinct().all())
-        result = {rid for (rid,) in rows}
+        # A granted collection is either junction-backed or dynamic. Dynamic
+        # ones resolve through the model (one query each, and there is one of
+        # them); the ordinary ones still collapse into a single junction query
+        # rather than N.
+        from app.models.collection import Collection
+
+        cols = (db.session.query(Collection)
+                .filter(Collection.id.in_(granted)).all())
+        result = set()
+        junction_ids = set()
+        for c in cols:
+            if c.is_system:
+                result |= c.resolved_recording_ids()
+            else:
+                junction_ids.add(c.id)
+
+        if junction_ids:
+            rows = (db.session.query(CollectionRecording.recording_id)
+                    .filter(CollectionRecording.collection_id.in_(junction_ids))
+                    .distinct().all())
+            result |= {rid for (rid,) in rows}
 
     if has_request_context():
         setattr(g, cache_key, result)
