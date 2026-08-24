@@ -65,3 +65,8 @@ import/
 
 # Sublime per-user workspace state
 *.sublime-workspace
+
+# Peer-sharing transcode cache — disposable by design (utils/transcode.py
+# regenerates on demand). ~10MB per streamed track, so this is not something
+# to carry in the repo.
+cache/

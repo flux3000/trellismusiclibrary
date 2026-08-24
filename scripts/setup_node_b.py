@@ -82,6 +82,7 @@ def seed(force):
     from app.extensions import db
     from app.models.collection import Collection
     from app.models.peer import Peer, CollectionGrant, PeerInvite, PeerToken, PeerAccessLog
+    from app.models.remote_node import RemoteNode
     from app.utils.peer_auth import generate_invite_code, hash_secret
     from config import Config
 
@@ -100,6 +101,21 @@ def seed(force):
                 print(f"  cleared {deleted:>4} × {model.__name__}")
         db.session.commit()
 
+        # 1b. Wipe INHERITED remote_node rows (the outbound half). The copy
+        # carries node A's joined libraries, one of which points at node B —
+        # so without this, node B boots believing it has joined ITSELF, and its
+        # library selector offers a bogus entry beside the real one.
+        #
+        # ⚠ Rows only — the keychain is deliberately NOT touched. Tokens are
+        # stored as `remote_token:<node_id>` with no namespacing by node, so on
+        # a single dev machine node A and node B SHARE those entries. Deleting
+        # `remote_token:1` here would silently break node A's own enrollment.
+        # Orphaned keychain items are harmless; a broken node A is not.
+        stale = db.session.query(RemoteNode).delete()
+        if stale:
+            print(f"  cleared {stale:>4} × RemoteNode (inherited; keychain left alone)")
+        db.session.commit()
+
         # 2. Mark node B's collections so their provenance is visible on screen.
         collections = db.session.query(Collection).order_by(Collection.id).all()
         if not collections:
@@ -115,8 +131,19 @@ def seed(force):
         db.session.add(peer)
         db.session.flush()
 
-        target = collections[0]
-        db.session.add(CollectionGrant(peer_id=peer.id, collection_id=target.id))
+        # Grant BOTH a system collection (if this DB has one) and a curated
+        # one, because UC1 needs both behaviours proved in a single run:
+        #   - Full Library must resolve to every published recording, so the
+        #     peer's library is the whole shelf rather than a handful of rows;
+        #   - the system collection must NOT appear in the peer's Collections
+        #     list, while the curated one must — a peer already browsing the
+        #     whole library does not also need a "collection" containing it.
+        # Granting only one of the two leaves half of that untested.
+        system = [c for c in collections if c.system_key]
+        curated = [c for c in collections if not c.system_key]
+        targets = system[:1] + curated[:1]
+        for t in targets:
+            db.session.add(CollectionGrant(peer_id=peer.id, collection_id=t.id))
 
         # expires_at is nullable=False with no model default — mint_invite sets
         # it, and a script bypassing that endpoint has to set it too. 90 days
@@ -129,8 +156,17 @@ def seed(force):
         ))
         db.session.commit()
 
-        recording_count = len(target.recordings)
-        print(f"✓ Peer 'Node A' granted “{target.name}” ({recording_count} recordings)")
+        # .recording_count, not len(.recordings): the latter materialises every
+        # row, which for Full Library means building 580 ORM objects to print
+        # one number.
+        for t in targets:
+            kind = "system" if t.system_key else "curated"
+            print(f"✓ Peer 'Node A' granted “{t.name}” "
+                  f"({t.recording_count} recordings, {kind})")
+        if not system:
+            print("  ! No system collection in this database — run "
+                  "scripts/migrate_add_system_collections.py first if you "
+                  "meant to test Full Library sharing.")
 
     print()
     print("─" * 68)
