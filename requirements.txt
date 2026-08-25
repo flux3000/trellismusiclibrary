@@ -21,5 +21,8 @@ scipy>=1.11            # STFT, filtering
 soundfile>=0.12        # windowed FLAC decode without loading whole files
 pyloudnorm>=0.1        # LUFS integrated loudness
 
+waitress>=3.0          # production WSGI server for run_headless.py / SERVER_MODE
+
 # ── Dev / test ──
 pytest>=8              # run: python3 -m pytest tests/
+pyinstaller>=6         # packaged app — see trellis.spec / tools/build_macos.sh

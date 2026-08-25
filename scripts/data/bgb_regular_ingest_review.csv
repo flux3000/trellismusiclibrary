@@ -1,0 +1,108 @@
+artist_action,existing_artist_id,artist_name,legal_name_if_different,instruments,stint_start,stint_end,start_year,start_month,start_day,end_year,end_month,end_day,source_name,source_date_token
+CREATE_NEW,,Cleo Davis,,"guitar, mandolin",8/1938,9/1940,1938,8,,1940,9,,"Davis, Cleo",8/1938-9/1940
+CREATE_NEW,,Tommy Millard,,"jug, bones, spoons",1/1939,4/1939,1939,1,,1939,4,,"Millard, Tommy",1/1939-4/1939
+CREATE_NEW,,Art Wooten,,fiddle,1939,1940,1939,,,1940,,,"Wooten, Art","1939-1940, 1941-1942"
+CREATE_NEW,,Art Wooten,,fiddle,1941,1942,1941,,,1942,,,"Wooten, Art","1939-1940, 1941-1942"
+CREATE_NEW,,Amos Garren,,bass,4/1939,7/1940,1939,4,,1940,7,,"Garren, Amos",4/1939-7/1940
+CREATE_NEW,,Tommy Magness,,fiddle,1940,1941,1940,,,1941,,,"Magness, Tommy","1940-1941, 1942-1943"
+CREATE_NEW,,Tommy Magness,,fiddle,1942,1943,1942,,,1943,,,"Magness, Tommy","1940-1941, 1942-1943"
+CREATE_NEW,,Cousin Wilbur,Bill Wesbrooks,bass,7/1940,1944,1940,7,,1944,,,"Wesbrooks, Bill ""Cousin Wilbur""",7/1940-1944
+CREATE_NEW,,Clyde Moody,,"guitar, mandolin",9/6/1940,1941,1940,9,6,1941,,,"Moody, Clyde","9/6/1940-1941, 1942-12/1944"
+CREATE_NEW,,Clyde Moody,,"guitar, mandolin",1942,12/1944,1942,,,1944,12,,"Moody, Clyde","9/6/1940-1941, 1942-12/1944"
+CREATE_NEW,,Pete Pyle,,guitar,1941,1942,1941,,,1942,,,"Pyle, Pete","1941-1942, 1953"
+CREATE_NEW,,Pete Pyle,,guitar,1953,1953,1953,,,1953,,,"Pyle, Pete","1941-1942, 1953"
+CREATE_NEW,,Howdy Forrester,Howard Forrester,fiddle,6/1942,10/1942,1942,6,,1942,10,,"Forrester, Howard ""Howdy""","6/1942-10/1942, 12/1945-3/1946"
+CREATE_NEW,,Howdy Forrester,Howard Forrester,fiddle,12/1945,3/1946,1945,12,,1946,3,,"Forrester, Howard ""Howdy""","6/1942-10/1942, 12/1945-3/1946"
+CREATE_NEW,,Stringbean,David Akeman,banjo,7/1942,9/1945,1942,7,,1945,9,,"Akeman, David ""Stringbean""",7/1942-9/1945
+CREATE_NEW,,Carl Story,,fiddle,10/1942,11/1943,1942,10,,1943,11,,"Story, Carl",10/1942-11/1943
+CREATE_NEW,,Floyd Ethridge,,fiddle,1943,1943,1943,,,1943,,,"Ethridge, Floyd","1943, 1949"
+CREATE_NEW,,Floyd Ethridge,,fiddle,1949,1949,1949,,,1949,,,"Ethridge, Floyd","1943, 1949"
+CREATE_NEW,,Sally Ann Forrester,Wilene Forrester,accordion,1943,3/1946,1943,,,1946,3,,"Forrester, Wilene ""Sally Ann""",1943-3/1946
+CREATE_NEW,,Chubby Wise,,"fiddle, guitar",3/1943,4/1945,1943,3,,1945,4,,"Wise, Chubby","3/1943-4/1945, 3/1946-1/1948, 9/1949-1/1950"
+CREATE_NEW,,Chubby Wise,,"fiddle, guitar",3/1946,1/1948,1946,3,,1948,1,,"Wise, Chubby","3/1943-4/1945, 3/1946-1/1948, 9/1949-1/1950"
+CREATE_NEW,,Chubby Wise,,"fiddle, guitar",9/1949,1/1950,1949,9,,1950,1,,"Wise, Chubby","3/1943-4/1945, 3/1946-1/1948, 9/1949-1/1950"
+CREATE_NEW,,Curley Bradshaw,,"harmonica, guitar",1944,1945,1944,,,1945,,,"Bradshaw, Curley",1944-1945
+CREATE_NEW,,Cedric Rainwater,Howard Watts,bass,1944,4/1945,1944,,,1945,4,,"Watts, Howard ""Cedric Rainwater""","1944-4/1945, 7/1945-8/1945, 3/1946-3/1948, 1951"
+CREATE_NEW,,Cedric Rainwater,Howard Watts,bass,7/1945,8/1945,1945,7,,1945,8,,"Watts, Howard ""Cedric Rainwater""","1944-4/1945, 7/1945-8/1945, 3/1946-3/1948, 1951"
+CREATE_NEW,,Cedric Rainwater,Howard Watts,bass,3/1946,3/1948,1946,3,,1948,3,,"Watts, Howard ""Cedric Rainwater""","1944-4/1945, 7/1945-8/1945, 3/1946-3/1948, 1951"
+CREATE_NEW,,Cedric Rainwater,Howard Watts,bass,1951,1951,1951,,,1951,,,"Watts, Howard ""Cedric Rainwater""","1944-4/1945, 7/1945-8/1945, 3/1946-3/1948, 1951"
+CREATE_NEW,,Jim Andrews,,tenor banjo,1945,1945,1945,,,1945,,,"Andrews, Jim",1945
+CREATE_NEW,,Andy Boyett,"Andy ""Bijou"" Boyett","bass, guitar",1945,1945,1945,,,1945,,,"Boyett, Andy ""Bijou""",1945
+CREATE_NEW,,Birch Monroe,,"bass, fiddle",1945,1947,1945,,,1947,,,"Monroe, Birch",1945-1947
+CREATE_NEW,,Lester Flatt,,guitar,3/1945,2/1948,1945,3,,1948,2,,"Flatt, Lester",3/1945-2/1948
+CREATE_NEW,,Earl Scruggs,,banjo,12/1945,2/1948,1945,12,,1948,2,,"Scruggs, Earl",12/1945-2/1948
+CREATE_NEW,,Jim Eanes,,guitar,3/1948,11/1948,1948,3,,1948,11,,"Eanes, Jim",3/1948-11/1948
+CREATE_NEW,,Don Reno,,"banjo, guitar",3/1948,7/1949,1948,3,,1949,7,,"Reno, Don",3/1948-7/1949
+CREATE_NEW,,Gene Christian,,"fiddle, bass",1949,1950,1949,,,1950,,,"Christian, Gene",1949-1950
+REUSE_EXISTING,29,Vassar Clements,,"fiddle, bass",1949,1950,1949,,,1950,,,"Clements, Vassar","1949-1950, 1955, 1961-1962, 1967"
+REUSE_EXISTING,29,Vassar Clements,,"fiddle, bass",1955,1955,1955,,,1955,,,"Clements, Vassar","1949-1950, 1955, 1961-1962, 1967"
+REUSE_EXISTING,29,Vassar Clements,,"fiddle, bass",1961,1962,1961,,,1962,,,"Clements, Vassar","1949-1950, 1955, 1961-1962, 1967"
+REUSE_EXISTING,29,Vassar Clements,,"fiddle, bass",1967,1967,1967,,,1967,,,"Clements, Vassar","1949-1950, 1955, 1961-1962, 1967"
+CREATE_NEW,,Mac Wiseman,,guitar,4/1949,12/1949,1949,4,,1949,12,,"Wiseman, Mac",4/1949-12/1949
+REUSE_EXISTING,141,Jimmy Martin,,guitar,12/1949,6/1951,1949,12,,1951,6,,"Martin, Jimmy","12/1949-6/1951, 7/1952-1954"
+REUSE_EXISTING,141,Jimmy Martin,,guitar,7/1952,1954,1952,7,,1954,,,"Martin, Jimmy","12/1949-6/1951, 7/1952-1954"
+CREATE_NEW,,Gordon Terry,,"fiddle, guitar",1951,1951,1951,,,1951,,,"Terry, Gordon","1951, 1954"
+CREATE_NEW,,Gordon Terry,,"fiddle, guitar",1954,1954,1954,,,1954,,,"Terry, Gordon","1951, 1954"
+CREATE_NEW,,Carter Stanley,,guitar,7/1951,10/1951,1951,7,,1951,10,,"Stanley, Carter",7/1951-10/1951
+CREATE_NEW,,Old Joe Clark,Manuel Clark,comedy,8/1951,8/1951,1951,8,,1951,8,,"Clark, Manuel ""Old Joe""",8/1951
+CREATE_NEW,,Sonny Osborne,Roland Osborne,banjo,7/1952,9/1952,1952,7,,1952,9,,"Osborne, Roland ""Sonny""","7/1952-9/1952, 5/1953-8/8/1953"
+CREATE_NEW,,Sonny Osborne,Roland Osborne,banjo,5/1953,8/8/1953,1953,5,,1953,8,8,"Osborne, Roland ""Sonny""","7/1952-9/1952, 5/1953-8/8/1953"
+CREATE_NEW,,Bessie Lee Mauldin,,bass,1953,1964,1953,,,1964,,,"Mauldin, Bessie Lee",1953-1964
+CREATE_NEW,,Bobby Atkins,,banjo,1954,1954,1954,,,1954,,,"Atkins, Bobby","1954, 1958, 6/1961-11/1961"
+CREATE_NEW,,Bobby Atkins,,banjo,1958,1958,1958,,,1958,,,"Atkins, Bobby","1954, 1958, 6/1961-11/1961"
+CREATE_NEW,,Bobby Atkins,,banjo,6/1961,11/1961,1961,6,,1961,11,,"Atkins, Bobby","1954, 1958, 6/1961-11/1961"
+REUSE_EXISTING,92,Bobby Hicks,,"fiddle, banjo, bass, mandolin",1954,9/26/1956,1954,,,1956,9,26,"Hicks, Bobby","1954-9/26/1956, 9/1958-1959"
+REUSE_EXISTING,92,Bobby Hicks,,"fiddle, banjo, bass, mandolin",9/1958,1959,1958,9,,1959,,,"Hicks, Bobby","1954-9/26/1956, 9/1958-1959"
+CREATE_NEW,,Joe Stuart,,"fiddle, banjo, guitar, bass, mandolin",8/18/1955,1957,1955,8,18,1957,,,"Stuart, Joe","8/18/1955-1957, 1962-1963, 8/1963-11/1963, 6/1970-1973"
+CREATE_NEW,,Joe Stuart,,"fiddle, banjo, guitar, bass, mandolin",1962,1963,1962,,,1963,,,"Stuart, Joe","8/18/1955-1957, 1962-1963, 8/1963-11/1963, 6/1970-1973"
+CREATE_NEW,,Joe Stuart,,"fiddle, banjo, guitar, bass, mandolin",8/1963,11/1963,1963,8,,1963,11,,"Stuart, Joe","8/18/1955-1957, 1962-1963, 8/1963-11/1963, 6/1970-1973"
+CREATE_NEW,,Joe Stuart,,"fiddle, banjo, guitar, bass, mandolin",6/1970,1973,1970,6,,1973,,,"Stuart, Joe","8/18/1955-1957, 1962-1963, 8/1963-11/1963, 6/1970-1973"
+CREATE_NEW,,Roger Smith,,"banjo, fiddle",1956,1957,1956,,,1957,,,"Smith, Roger",1956-1957
+CREATE_NEW,,Tater Tate,Clarence Tate,"bass, fiddle",9/1956,1957,1956,9,,1957,,,"Tate, Clarence ""Tater""","9/1956-1957, 6/29/1984-1996"
+CREATE_NEW,,Tater Tate,Clarence Tate,"bass, fiddle",6/29/1984,1996,1984,6,29,1996,,,"Tate, Clarence ""Tater""","9/1956-1957, 6/29/1984-1996"
+CREATE_NEW,,Kenny Baker,,fiddle,1957,1958,1957,,,1958,,,"Baker, Kenny","1957-1958, 1962-6/1963, 3/23/1968-7/1977, 9/1977-10/12/1984"
+CREATE_NEW,,Kenny Baker,,fiddle,1962,6/1963,1962,,,1963,6,,"Baker, Kenny","1957-1958, 1962-6/1963, 3/23/1968-7/1977, 9/1977-10/12/1984"
+CREATE_NEW,,Kenny Baker,,fiddle,3/23/1968,7/1977,1968,3,23,1977,7,,"Baker, Kenny","1957-1958, 1962-6/1963, 3/23/1968-7/1977, 9/1977-10/12/1984"
+CREATE_NEW,,Kenny Baker,,fiddle,9/1977,10/12/1984,1977,9,,1984,10,12,"Baker, Kenny","1957-1958, 1962-6/1963, 3/23/1968-7/1977, 9/1977-10/12/1984"
+CREATE_NEW,,Don Stover,,banjo,1957,1957,1957,,,1957,,,"Stover, Don",1957
+CREATE_NEW,,Jack Cooke,,"guitar, bass",1958,1959,1958,,,1959,,,"Cooke, Jack",1958-1959
+CREATE_NEW,,Charlie Smith,,fiddle,1958,1960,1958,,,1960,,,"Smith, Charlie",1958-1960
+CREATE_NEW,,Eddie Adcock,,banjo,4/1958,6/23/1958,1958,4,,1958,6,23,"Adcock, Eddie",4/1958-6/23/1958
+CREATE_NEW,,Tony Ellis,,"banjo, bass, guitar",1/1960,6/1962,1960,1,,1962,6,,"Ellis, Tony",1/1960-6/1962
+CREATE_NEW,,Billy Baker,,fiddle,1961,1961,1961,,,1961,,,"Baker, Billy","1961, 6/1963-8/1963, 12/1963-2/1964"
+CREATE_NEW,,Billy Baker,,fiddle,6/1963,8/1963,1963,6,,1963,8,,"Baker, Billy","1961, 6/1963-8/1963, 12/1963-2/1964"
+CREATE_NEW,,Billy Baker,,fiddle,12/1963,2/1964,1963,12,,1964,2,,"Baker, Billy","1961, 6/1963-8/1963, 12/1963-2/1964"
+CREATE_NEW,,Jimmy Maynard,,guitar,1961,1961,1961,,,1961,,,"Maynard, Jimmy","1961, 1962, 1964"
+CREATE_NEW,,Jimmy Maynard,,guitar,1962,1962,1962,,,1962,,,"Maynard, Jimmy","1961, 1962, 1964"
+CREATE_NEW,,Jimmy Maynard,,guitar,1964,1964,1964,,,1964,,,"Maynard, Jimmy","1961, 1962, 1964"
+CREATE_NEW,,Lonnie Hoppers,,"banjo, guitar",9/1962,1/1963,1962,9,,1963,1,,"Hoppers, Lonnie",9/1962-1/1963
+REUSE_EXISTING,33,Del McCoury,,"guitar, banjo",2/1963,2/1964,1963,2,,1964,2,,"McCoury, Del",2/1963-2/1964
+REUSE_EXISTING,49,Bill Keith,,banjo,3/1963,12/1963,1963,3,,1963,12,,"Keith, Bill ""Brad""",3/1963-12/1963
+CREATE_NEW,,Steve Arkin,,banjo,1964,1964,1964,,,1964,,,"Arkin, Steve",1964
+CREATE_NEW,,James Monroe,,"guitar, bass",1964,1971,1964,,,1971,,,"Monroe, James",1964-1971
+REUSE_EXISTING,37,Peter Rowan,,guitar,10/1964,3/1/1967,1964,10,,1967,3,1,"Rowan, Peter",10/1964-3/1/1967
+CREATE_NEW,,Gene Lowinger,,fiddle,6/5/1965,2/1966,1965,6,5,1966,2,,"Lowinger, Gene",6/5/1965-2/1966
+CREATE_NEW,,Lamar Grier,,banjo,9/1965,6/1967,1965,9,,1967,6,,"Grier, Lamar",9/1965-6/1967
+REUSE_EXISTING,30,Richard Greene,,fiddle,2/1966,3/5/1967,1966,2,,1967,3,5,"Greene, Richard",2/1966-3/5/1967
+CREATE_NEW,,Byron Berline,,fiddle,3/1967,9/1967,1967,3,,1967,9,,"Berline, Byron",3/1967-9/1967
+CREATE_NEW,,Doug Green,,"bass, guitar",4/1967,5/1967,1967,4,,1967,5,,"Green, Doug","4/1967-5/1967, 3/1969-7/1969"
+CREATE_NEW,,Doug Green,,"bass, guitar",3/1969,7/1969,1969,3,,1969,7,,"Green, Doug","4/1967-5/1967, 3/1969-7/1969"
+REUSE_EXISTING,156,Roland White,,guitar,5/21/1967,2/1969,1967,5,21,1969,2,,"White, Roland",5/21/1967-2/1969
+CREATE_NEW,,Butch Robins,,banjo,6/1967,6/1967,1967,6,,1967,6,,"Robins, Butch","6/1967, 9/2/1977-7/3/1981"
+CREATE_NEW,,Butch Robins,,banjo,9/2/1977,7/3/1981,1977,9,2,1981,7,3,"Robins, Butch","6/1967, 9/2/1977-7/3/1981"
+CREATE_NEW,,Vic Jordan,,banjo,7/27/1967,3/18/1969,1967,7,27,1969,3,18,"Jordan, Vic",7/27/1967-3/18/1969
+CREATE_NEW,,Rual Yarbrough,,banjo,3/24/1969,12/1970,1969,3,24,1970,12,,"Yarbrough, Rual",3/24/1969-12/1970
+CREATE_NEW,,Doug Hutchens,,"bass, banjo",6/26/1971,9/1971,1971,6,26,1971,9,,"Hutchens, Doug",6/26/1971-9/1971
+CREATE_NEW,,Ben Pedigo,,banjo,9/18/1973,11/4/1973,1973,9,18,1973,11,4,"Pedigo, Ben",9/18/1973-11/4/1973
+CREATE_NEW,,Randy Davis,,bass,7/1974,6/1979,1974,7,,1979,6,,"Davis, Randy",7/1974-6/1979
+CREATE_NEW,,Ralph Lewis,,guitar,7/4/1974,5/1976,1974,7,4,1976,5,,"Lewis, Ralph",7/4/1974-5/1976
+CREATE_NEW,,Bob Black,,banjo,9/20/1974,9/19/1976,1974,9,20,1976,9,19,"Black, Bob",9/20/1974-9/19/1976
+CREATE_NEW,,Bob Jones,,guitar,2/1976,5/1976,1976,2,,1976,5,,"Jones, Bob",2/1976-5/1976
+CREATE_NEW,,Wayne Lewis,,guitar,5/1976,5/1986,1976,5,,1986,5,,"Lewis, Wayne",5/1976-5/1986
+CREATE_NEW,,Mark Hembree,,bass,7/16/1979,6/1984,1979,7,16,1984,6,,"Hembree, Mark",7/16/1979-6/1984
+CREATE_NEW,,Blake Williams,,banjo,7/1981,1991,1981,7,,1991,,,"Williams, Blake",7/1981-1991
+CREATE_NEW,,Tom Ewing,,guitar,5/18/1986,12/31/1988,1986,5,18,1988,12,31,"Ewing, Tom","5/18/1986-12/31/1988, 3/31/1989-1996"
+CREATE_NEW,,Tom Ewing,,guitar,3/31/1989,1996,1989,3,31,1996,,,"Ewing, Tom","5/18/1986-12/31/1988, 3/31/1989-1996"
+CREATE_NEW,,Jimmy Campbell,,fiddle,1990,1993,1990,,,1993,,,"Campbell, Jimmy",1990-1993
+CREATE_NEW,,Dana Cupp,,banjo,1991,1996,1991,,,1996,,,"Cupp, Dana",1991-1996
+CREATE_NEW,,Robert Bowlin,,fiddle,1/1993,1996,1993,1,,1996,,,"Bowlin, Robert",1/1993-1996

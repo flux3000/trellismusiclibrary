@@ -93,10 +93,21 @@ def _peer_detail(peer):
          "created_at": _iso(t.created_at), "last_used_at": _iso(t.last_used_at)}
         for t in peer.tokens if t.is_active
     ]
+    # `status` is derived here rather than left to the client to work out from
+    # two booleans. Three states that mean genuinely different things:
+    #   pending  — a LIVE key to this library. The only one worth cancelling.
+    #   used     — someone enrolled with it. History; the device it produced is
+    #              the real record, and revoking that is a different action.
+    #   expired  — dead of old age. Harmless, but clutter.
     d["invites"] = [
-        {"created_at": _iso(i.created_at), "expires_at": _iso(i.expires_at),
-         "consumed": i.consumed_at is not None, "valid": i.is_valid()}
-        for i in peer.invites
+        {"id": i.id,
+         "created_at": _iso(i.created_at), "expires_at": _iso(i.expires_at),
+         "consumed": i.consumed_at is not None, "valid": i.is_valid(),
+         "consumed_at": _iso(i.consumed_at),
+         "status": ("used" if i.consumed_at is not None
+                    else "pending" if i.is_valid() else "expired")}
+        for i in sorted(peer.invites, key=lambda x: x.created_at or _utcnow(),
+                        reverse=True)
     ]
     return d
 
@@ -241,6 +252,47 @@ def mint_invite(peer_id):
         "base_url_set": bool(base_url),
         "expires_at":   _iso(expires_at),
     }), 201
+
+
+@bp.route("/<int:peer_id>/invites/<int:invite_id>", methods=["DELETE"])
+@admin_required
+def delete_invite(peer_id, invite_id):
+    """
+    Cancel an unused invite, or clear an expired one.
+
+    This is NOT "Revoke Access" and the difference matters (Ryan, 2026-08-25 —
+    revoking was the only thing on offer, and it means something else
+    entirely). Revoking kills the PEER: every device they hold stops working
+    and their library goes dark. Cancelling an invite only makes one unused
+    code stop working. Nobody who already joined is affected.
+
+    A USED invite is never deletable. It is the record that this peer enrolled,
+    and the token it minted is the thing you would actually want to kill — that
+    is a device revocation, a different control again. Deleting the row here
+    would quietly erase the audit trail for an access that still exists.
+
+    An unused invite genuinely has no history worth keeping — nobody ever
+    presented it — so this is a real delete rather than a soft one, and no
+    schema change was needed to add it.
+    """
+    invite = db.session.get(PeerInvite, invite_id)
+    if invite is None or invite.peer_id != peer_id:
+        return jsonify({"error": "Not found"}), 404
+
+    if invite.consumed_at is not None:
+        return jsonify({
+            "error": "That invite was used to join. Remove the device instead — "
+                     "deleting this would erase the record of an access that "
+                     "still works.",
+            "code":  "invite_consumed",
+        }), 409
+
+    was_live = invite.is_valid()
+    db.session.delete(invite)
+    db.session.commit()
+    # Say which of the two things just happened, so the UI can word it honestly.
+    return jsonify({"deleted": invite_id,
+                    "was": "pending" if was_live else "expired"}), 200
 
 
 # ── Activity ──────────────────────────────────────────────────────────────────

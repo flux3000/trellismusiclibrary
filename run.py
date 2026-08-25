@@ -23,6 +23,66 @@ from config import Config
 app = create_app()
 
 
+def first_run_setup():
+    """
+    Make an empty machine usable, once.
+
+    An installed app cannot ask someone to run a setup script — the whole point
+    is that it opens when you double-click it. So: if there is no database yet,
+    create the schema and the owner account, and open straight into an empty
+    library (Ryan, 2026-08-25 — first run should just open).
+
+    Runs ONLY when the database file is absent. An existing checkout is left
+    completely alone: this must never become a substitute for a migration
+    script, and create_all() cannot add a column to a table that already
+    exists anyway. If it fired every boot it would quietly conjure tables for
+    half-finished models and hide the fact that a migration was skipped.
+
+    The owner's password is random and thrown away. Nobody types it: the
+    desktop app signs the owner in automatically because there is nothing to
+    log in to on your own machine. If this database is ever pointed at a shared
+    node, set a real password first — scripts/init_db.py is the way in.
+    """
+    if Config.DB_PATH.exists():
+        return
+
+    import secrets
+    import getpass
+
+    import importlib
+
+    import bcrypt
+    from app.extensions import db
+    from app.models.user import User
+
+    # NOT `import app.models`. That statement binds the name `app` in this
+    # function's scope to the PACKAGE, shadowing the Flask instance defined
+    # above — and the failure lands two lines later on `app.app_context()`
+    # with a message about a module having no such attribute, which reads like
+    # a broken install rather than a shadowed name. Caught by running this;
+    # every static check passed it.
+    importlib.import_module("app.models")   # registers every model with SQLAlchemy
+
+    Config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with app.app_context():
+        db.create_all()
+        if db.session.query(User).first() is None:
+            try:
+                who = (getpass.getuser() or "").strip() or "owner"
+            except Exception:
+                who = "owner"
+            db.session.add(User(
+                username      = who,
+                password_hash = bcrypt.hashpw(
+                    secrets.token_urlsafe(32).encode(), bcrypt.gensalt()).decode(),
+                role          = "admin",
+                all_artists   = True,
+                is_active     = True,
+            ))
+            db.session.commit()
+    print(f"First run: created a new library at {Config.DB_PATH}")
+
+
 # -- Window geometry ----------------------------------------------------------
 #
 # Lives beside the database rather than in the OS application-support directory:
@@ -31,7 +91,12 @@ app = create_app()
 # row -- window size is per-machine (a laptop and a desktop want different
 # answers from the same account) and it is needed before Flask is serving, let
 # alone before anyone has logged in.
-WINDOW_STATE_PATH = Path(__file__).parent / "db" / "window_state.json"
+# 2026-08-25: hangs off Config.DATA_DIR rather than the source folder. The
+# reasoning below is unchanged — this still lives beside the database, which is
+# still where per-machine state belongs. What changed is that "beside the
+# database" is a writable per-user directory once the app is installed, because
+# an installed app's own folder is sealed.
+WINDOW_STATE_PATH = Config.DATA_DIR / "db" / "window_state.json"
 
 MIN_W, MIN_H = 960, 640
 
@@ -164,6 +229,9 @@ if __name__ == "__main__":
     # Ctrl-C should kill the process even while PyWebView owns the main thread
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
 
+    # Before anything serves a request: an empty machine gets a library.
+    first_run_setup()
+
     # Flask runs in a daemon thread — dies when the window closes
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
@@ -171,7 +239,7 @@ if __name__ == "__main__":
     # PyWebView must own the main thread on macOS
     start_w, start_h = load_window_size()
     window = webview.create_window(
-        title    = "Flux Audio",
+        title    = "Trellis",
         url      = f"http://{Config.HOST}:{Config.PORT}",
         js_api   = FluxAPI(),
         width    = start_w,

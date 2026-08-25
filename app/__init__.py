@@ -7,7 +7,7 @@ Usage:
 """
 
 from flask import Flask
-from config import Config, DEV_SECRET_DEFAULT
+from config import Config, DEV_SECRET_DEFAULT, resource_dir
 from app.extensions import db, login_manager
 
 
@@ -28,6 +28,17 @@ def _validate_server_mode(app):
             "is an open admin panel. Unset DEV_MODE or disable SERVER_MODE."
         )
 
+    # Same hazard, different flag. SINGLE_USER_DESKTOP defaults to ON inside an
+    # installed app, so this guard is what stops someone running the bundled
+    # app as a public share node and handing the internet a logged-in session.
+    if app.config.get("SINGLE_USER_DESKTOP"):
+        raise RuntimeError(
+            "Refusing to boot: SERVER_MODE and SINGLE_USER_DESKTOP are both "
+            "enabled. SINGLE_USER_DESKTOP signs in the owner with no "
+            "credentials, which is right on someone's own Mac and an open "
+            "admin panel on a publicly reachable one."
+        )
+
     secret_key = app.config.get("SECRET_KEY")
     if not secret_key or secret_key == DEV_SECRET_DEFAULT:
         raise RuntimeError(
@@ -38,7 +49,17 @@ def _validate_server_mode(app):
 
 
 def create_app(config_class=Config):
-    app = Flask(__name__, static_folder="static")
+    # SERVER_MODE has to be known BEFORE Flask() is constructed, not just read
+    # out of app.config afterwards: `static_folder` is a constructor argument,
+    # and a public share process serves no static files at all. Read off the
+    # config class — the same object app.config.from_object() is about to load.
+    server_mode = bool(getattr(config_class, "SERVER_MODE", False))
+
+    # Absolute, via resource_dir(), because inside an installed app the shipped
+    # files are unpacked somewhere PyInstaller chooses — a path relative to the
+    # package works from source and 404s once bundled.
+    app = Flask(__name__, static_folder=(
+        None if server_mode else str(resource_dir() / "app" / "static")))
     app.config.from_object(config_class)
 
     _validate_server_mode(app)
@@ -67,9 +88,40 @@ def create_app(config_class=Config):
     @login_manager.unauthorized_handler
     def _unauthorized():
         from flask import request as _req, jsonify as _jsonify, redirect as _redirect
-        if _req.path.startswith("/api/"):
+        # In SERVER_MODE there is no SPA to redirect to — this process serves
+        # no frontend — so every unauthenticated path answers in JSON.
+        if server_mode or _req.path.startswith("/api/"):
             return _jsonify({"error": "Authentication required"}), 401
         return _redirect("/")
+
+    # ── SERVER_MODE: the share door, and nothing else ──────────
+    #
+    # This is the whole point of SERVER_MODE (Ryan, 2026-08-25). A Cloudflare
+    # Tunnel points at a PORT, not at a set of routes, so everything this
+    # process serves is on the public internet. The peer door was deliberately
+    # built as a blueprint with no write endpoints in it — safety by
+    # construction rather than by remembering to check a role. Registering the
+    # front door alongside it would put the login page, delete-with-files,
+    # folder moves and the BYOK-funded AI endpoints out there too, protected by
+    # a password rather than by not existing.
+    #
+    # So: return BEFORE the front-door imports run. Those routes are not
+    # refused in this process, they are never constructed, and `/api/auth/login`
+    # answers 404 because Flask has never heard of it. That is a property a
+    # test can assert (tests/test_server_mode_surface.py) and a reviewer can
+    # see, which is exactly why this lives here and not in a Cloudflare
+    # dashboard rule — a rule in a dashboard protects one operator's node and
+    # ships to nobody. Every future Trellis install gets this for free.
+    #
+    # No static folder either (see the constructor above): a peer node has its
+    # own copy of the frontend and asks this process only for JSON and audio.
+    # Serving the SPA to a plain browser is a real use case, but a deliberately
+    # later one — it needs a guest mode in app.js and it widens this assertion,
+    # so it does not get to sneak in as a side effect.
+    if server_mode:
+        from app.api.share import bp as share_bp
+        app.register_blueprint(share_bp, url_prefix="/api/share")
+        return app
 
     # ── Register blueprints ────────────────────────────────────
     from app.api.auth         import bp as auth_bp
@@ -119,8 +171,15 @@ def create_app(config_class=Config):
     app.register_blueprint(search_bp,       url_prefix="/api/search")
     app.register_blueprint(system_bp,       url_prefix="/api/system")
 
-    # ── Dev mode: auto-login as first admin ───────────────────
-    if app.config.get("DEV_MODE"):
+    # ── Auto-login as the owner ───────────────────────────────
+    # Two quite different reasons land here:
+    #   DEV_MODE            — a developer does not want a login screen between
+    #                         them and the thing they are editing.
+    #   SINGLE_USER_DESKTOP — an installed app on one person's own machine has
+    #                         nothing to log in to (Ryan, 2026-08-25).
+    # Both are refused above when SERVER_MODE is on, which is the only context
+    # where either would be a hole rather than a convenience.
+    if app.config.get("DEV_MODE") or app.config.get("SINGLE_USER_DESKTOP"):
         from flask_login import login_user, current_user
         from flask import request as _req
 
@@ -142,7 +201,7 @@ def create_app(config_class=Config):
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
     def serve_frontend(path):
-        static_dir = os.path.join(app.root_path, "static")
+        static_dir = str(resource_dir() / "app" / "static")
         if path and os.path.exists(os.path.join(static_dir, path)):
             return send_from_directory(static_dir, path)
         return send_from_directory(static_dir, "index.html")

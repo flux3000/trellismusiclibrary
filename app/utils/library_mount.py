@@ -59,12 +59,12 @@ def _volume_root(path):
     """
     The mountpoint a path lives under, for macOS /Volumes paths.
 
-    Returns e.g. '/Volumes/music' for '/Volumes/music/Flux Audio/Library'.
+    Returns e.g. '/Volumes/music' for '/Volumes/music/Trellis/Library'.
     None when the library is on the boot volume (a dev machine pointing
     LIBRARY_ROOT at a local folder), in which case there is no mount to check.
     """
     parts = os.path.normpath(str(path)).split(os.sep)
-    # ['', 'Volumes', 'music', 'Flux Audio', 'Library']
+    # ['', 'Volumes', 'music', 'Trellis', 'Library']
     if len(parts) >= 3 and parts[1] == "Volumes":
         return os.sep.join(parts[:3])
     return None

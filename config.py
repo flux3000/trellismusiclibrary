@@ -6,10 +6,62 @@ falls back to safe defaults for local development.
 """
 
 import os
+import sys
 from pathlib import Path
 
 # Base directory of this file
 BASE_DIR = Path(__file__).parent.resolve()
+
+
+def is_installed_app():
+    """
+    True when running as a packaged, double-clickable app rather than from a
+    source checkout. PyInstaller sets sys.frozen on the bundle it builds.
+
+    This is the ONLY thing that changes where data lives, and it is deliberately
+    not a setting: a developer running `python3 run.py` must keep the exact
+    layout they have always had, and an installed app must never write inside
+    its own folder — that folder is sealed once the app is signed, and it is
+    replaced wholesale by the next version.
+    """
+    return bool(getattr(sys, "frozen", False))
+
+
+def resource_dir():
+    """
+    Where the app's read-only files live (app/static, fonts, the frontend).
+
+    From source that is simply the repo. Inside a bundle PyInstaller unpacks
+    them somewhere of its own choosing and tells us via sys._MEIPASS. Anything
+    that builds a path to a shipped file must go through here, or it works in
+    development and 404s the moment it is installed.
+    """
+    return Path(getattr(sys, "_MEIPASS", BASE_DIR))
+
+
+def _default_data_dir():
+    """
+    Where THIS MACHINE'S library data lives — database, transcode cache.
+
+    From source: the repo, unchanged, so nothing about a dev checkout moves.
+
+    Installed: the per-user application-data location the platform expects
+    (Ryan, 2026-08-25). It survives app updates, it is per-user on a shared
+    machine, and backup software already knows about it. Windows and Linux
+    are answered here too — not because either is supported yet, but because
+    the alternative is discovering this function again later with a Windows
+    user waiting.
+    """
+    if not is_installed_app():
+        return BASE_DIR
+
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "Trellis"
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or (home / "AppData" / "Local")
+        return Path(base) / "Trellis"
+    return Path(os.environ.get("XDG_DATA_HOME") or (home / ".local" / "share")) / "trellis"
 
 
 def _env_flag(name, default=False):
@@ -41,7 +93,23 @@ class Config:
     # FLUX_DB_PATH exists for the two-node peer-sharing dev rig (2026-08-08):
     # a second instance needs its own database, and the path was hardcoded.
     # Prefixed (unlike LIBRARY_ROOT / IMPORT_DIR) on purpose — see FLUX_PORT.
-    DB_PATH = Path(os.environ.get("FLUX_DB_PATH") or (BASE_DIR / "db" / "fluxaudio.db"))
+    # Everything this machine WRITES hangs off DATA_DIR. Same relative layout
+    # in both cases (db/, cache/), so only the root differs and no other code
+    # has to know which mode it is in.
+    #
+    # The database FILE is still called fluxaudio.db even on a fresh install:
+    # the DB-filename rename is deliberately deferred (see project_app_naming),
+    # and a second name in circulation is worse than one stale one. It is a
+    # one-line change here whenever that rename happens.
+    DATA_DIR = Path(os.environ.get("TRELLIS_DATA_DIR") or _default_data_dir())
+
+    DB_PATH = Path(os.environ.get("FLUX_DB_PATH") or (DATA_DIR / "db" / "fluxaudio.db"))
+
+    # utils/transcode.py has always honoured this key and fallen back to a path
+    # relative to the app package. That fallback lands INSIDE the bundle once
+    # installed, which is read-only — so the key is now actually set.
+    TRANSCODE_CACHE_DIR = (os.environ.get("TRANSCODE_CACHE_DIR")
+                           or str(DATA_DIR / "cache" / "transcodes"))
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{DB_PATH}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     # SQLite: increase timeout for long-running analysis writes (default 5s is too short)
@@ -127,6 +195,20 @@ class Config:
     # with a default/blank SECRET_KEY.
     SERVER_MODE = _env_flag("SERVER_MODE", default=False)
 
+    # ── Single-user desktop ───────────────────────────────────
+    # An installed app on someone's own Mac has nothing to log in to: one
+    # person, one machine, no remote access to the front door. Requiring a
+    # password there is friction protecting nothing (Ryan, 2026-08-25 — first
+    # run should just open).
+    #
+    # Deliberately NOT reusing DEV_MODE, which happens to do the same
+    # auto-login: DEV_MODE also turns on developer debug logging, and a flag
+    # whose name lies about why it is set is how the wrong one gets enabled in
+    # the wrong place. app._validate_server_mode refuses this alongside
+    # SERVER_MODE for exactly the reason it refuses DEV_MODE.
+    SINGLE_USER_DESKTOP = _env_flag(
+        "SINGLE_USER_DESKTOP", default=is_installed_app())
+
     # ── Peer sharing identity (2026-08-08) ────────────────────
     # api/peers.py and api/share.py already read these; until now nothing
     # DEFINED them, so `mint_invite` returned `invite: null` and there was no
@@ -138,6 +220,22 @@ class Config:
     # because it fails at the peer's end with nothing to point at. The admin UI
     # shows the raw code and explains what's missing instead.
     SHARE_BASE_URL = os.environ.get("SHARE_BASE_URL") or None
+
+    # ── Peer-door rate limiting (2026-08-25) ──────────────────
+    # /api/share/enroll is the only route reachable with no credentials, and
+    # the only one an internet stranger can call. See app/utils/rate_limit.py.
+    # Ten tries per caller per fifteen minutes: generous for a person fumbling
+    # a pasted invite, useless for a script.
+    ENROLL_RATE_LIMIT  = int(os.environ.get("ENROLL_RATE_LIMIT", 10))
+    ENROLL_RATE_WINDOW = int(os.environ.get("ENROLL_RATE_WINDOW", 900))
+
+    # Set to "CF-Connecting-IP" when running behind a Cloudflare Tunnel.
+    # Unset by default and DELIBERATELY not defaulted: cloudflared connects
+    # from 127.0.0.1, so without this every visitor on earth shares one
+    # rate-limit bucket — but trusting a client-supplied header on an install
+    # that has no proxy in front of it is worse. Only honoured when the
+    # immediate peer is loopback.
+    TRUSTED_CLIENT_IP_HEADER = os.environ.get("TRUSTED_CLIENT_IP_HEADER") or None
 
     # How this node introduces itself on enroll and /api/share/me. The owner
     # falls back to the first admin's username when unset (see share.py).

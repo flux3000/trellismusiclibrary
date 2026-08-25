@@ -258,6 +258,8 @@ const API = (() => {
       revokeGrant: (id, colId)    => request('DELETE', `/api/peers/${id}/grants/${colId}`),
       // Returns the raw code ONCE — it is hashed at rest and unrecoverable.
       mintInvite:  (id, days)     => post(`/api/peers/${id}/invites`, days ? { expires_days: days } : {}),
+      // Cancels ONE unused invite. Not `revoke`, which kills the peer.
+      deleteInvite: (id, inviteId) => request('DELETE', `/api/peers/${id}/invites/${inviteId}`),
       activity:    (id)           => get(`/api/peers/${id}/activity`),
     },
 

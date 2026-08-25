@@ -226,7 +226,7 @@ def enroll():
     except urllib.error.URLError as e:
         return jsonify({"error": f"Could not reach {base_url}: {e.reason}"}), 502
     except ValueError:
-        return jsonify({"error": "The address answered, but not like a Flux library"}), 502
+        return jsonify({"error": "The address answered, but not like a Trellis library"}), 502
 
     token = payload.get("token")
     if not token:

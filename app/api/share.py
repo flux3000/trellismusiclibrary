@@ -58,6 +58,7 @@ from app.utils.peer_access import (
     peer_can_access_artist,
 )
 from app.utils.serialize import recording_row, recording_summary
+from app.utils.rate_limit import rate_limited
 from app.utils.format import format_partial_date
 from app.api.stream import _serve_file
 from app.utils import transcode as tx
@@ -93,10 +94,15 @@ def _node_identity():
 
 # ── POST /api/share/enroll ────────────────────────────────────────────────────
 # The one unauthenticated-by-token route. The invite code IS the credential:
-# unguessable, single-use, expiring. TODO(server-mode): add rate limiting here
-# as defense-in-depth before this is internet-exposed.
+# unguessable, single-use, expiring.
+#
+# Rate limited since 2026-08-25 (the July TODO, closed before exposure). The
+# code being unguessable assumes a bounded number of guesses; nothing bounded
+# them. Separately, every attempt costs a database lookup, so an unlimited
+# endpoint is a way to make the machine unhappy without ever guessing anything.
 
 @bp.route("/enroll", methods=["POST"], strict_slashes=False)
+@rate_limited("ENROLL_RATE_LIMIT", "ENROLL_RATE_WINDOW", bucket="enroll")
 def enroll():
     data = request.get_json(silent=True) or {}
     code = (data.get("invite_code") or "").strip()

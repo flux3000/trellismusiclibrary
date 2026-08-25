@@ -2177,6 +2177,46 @@ const App = (() => {
   // filling a collection make "share everything" a collection you build once
   // rather than a second grant model to maintain. That decision is why this
   // page needs no migration at all.
+  // Existing invites for one peer.
+  //
+  // Added 2026-08-25 because the ONLY control on this page was "Revoke access",
+  // and that means something else entirely (Ryan): revoking kills the person —
+  // every device they hold stops working and their library goes dark.
+  // Cancelling an invite stops ONE unused code from working and touches nobody
+  // who has already joined. Two very different blast radii, so they get
+  // different words and sit in different blocks.
+  //
+  // Three states, three treatments:
+  //   Unused  — a live key to this library. The only one worth cancelling, and
+  //             the only one that asks for confirmation.
+  //   Expired — already dead. "Clear" is tidying, so no confirm.
+  //   Used    — history, and NOT deletable: the device it produced still works,
+  //             and removing the row would erase the record of a live access.
+  //             Killing that access is a device revocation, a third thing again.
+  function peerInvitesHtml(invites) {
+    if (!invites || !invites.length) return ''
+    const rows = invites.map(i => {
+      const made = `Created ${esc(fmtDateAdded(i.created_at))}`
+      if (i.status === 'used') {
+        return `<div class="peer-inv">
+          <span class="peer-inv-state peer-inv-state--used">Used</span>
+          <span class="peer-inv-when truncate">${made}${
+            i.consumed_at ? ` · joined ${esc(fmtDateAdded(i.consumed_at))}` : ''}</span>
+        </div>`
+      }
+      const live = i.status === 'pending'
+      return `<div class="peer-inv">
+        <span class="peer-inv-state${live ? ' peer-inv-state--live' : ''}">${
+          live ? 'Unused' : 'Expired'}</span>
+        <span class="peer-inv-when truncate">${made} · ${
+          live ? 'expires' : 'expired'} ${esc(fmtDateAdded(i.expires_at))}</span>
+        <button class="btn btn-ghost btn-xs peer-inv-del" data-invite-id="${i.id}"${
+          live ? ' data-live="1"' : ''}>${live ? 'Cancel' : 'Clear'}</button>
+      </div>`
+    }).join('')
+    return `<div class="peer-inv-list"><div class="peer-inv-head">Previous invites</div>${rows}</div>`
+  }
+
   async function renderPeersPage(preSelectId = null) {
     setActiveNav('peers')
     setNavCurrent('Sharing')
@@ -2301,6 +2341,7 @@ const App = (() => {
               : 'Not yet invited'}</div>
           </div>
           <div id="peer-invite-out"></div>
+          ${peerInvitesHtml(p.invites)}
         </div>
 
         <div class="pp-block">
@@ -2370,6 +2411,22 @@ const App = (() => {
           if (row) { row.pending_invites += 1; renderList() }
         } catch (e) { out.innerHTML = `<div class="peer-empty" style="color:var(--red)">${esc(e.message)}</div>` }
       })
+
+      el.querySelectorAll('.peer-inv-del').forEach(btn =>
+        btn.addEventListener('click', async () => {
+          const live = btn.dataset.live === '1'
+          if (live && !confirm(
+                'Cancel this unused invite?\n\n' +
+                'The code stops working immediately. Anyone who has already ' +
+                'joined your library is unaffected — this is not the same as ' +
+                'revoking access.')) return
+          btn.disabled = true
+          try {
+            await API.peers.deleteInvite(p.id, Number(btn.dataset.inviteId))
+            peers = await API.peers.list()
+            renderList(); renderDetail()
+          } catch (e) { btn.disabled = false; alert('Failed: ' + e.message) }
+        }))
 
       document.getElementById('peer-revoke')?.addEventListener('click', async () => {
         if (!confirm(`Revoke all access for "${p.name}"?\n\nThis kills every grant and every device token at once. It cannot be undone — you would need to invite them again.`)) return

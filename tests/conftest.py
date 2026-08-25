@@ -130,3 +130,17 @@ def seeded_ids(app):
         "performance_id": rec.performance_id,
         "recording_id":   rec.id,
     }
+
+
+# ── Rate-limiter isolation (2026-08-25) ──────────────────────────────────────
+# app/utils/rate_limit.py keeps its counters in a module-level dict, which
+# outlives any single test. Without this, enroll attempts accumulate across
+# files and the eleventh one in a run starts failing for reasons that have
+# nothing to do with what it is testing — the same shape of bug as the cached
+# identity above, and just as confusing to chase.
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    from app.utils import rate_limit
+    rate_limit.reset()
+    yield
+    rate_limit.reset()

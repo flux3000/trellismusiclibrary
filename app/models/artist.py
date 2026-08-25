@@ -55,6 +55,14 @@ class Membership(db.Model):
     artist_id    = db.Column(db.Integer, db.ForeignKey("artist.id"),    nullable=False)
     order        = db.Column(db.Integer, nullable=False, default=0)
 
+    # Instrument(s) played during THIS stint, comma-separated free text
+    # ("fiddle, banjo"). Added 2026-08-25 for the doodah.net/bgb Blue Grass
+    # Boys roster ingestion — mirrors PerformancePersonnel.instrument one
+    # layer up, at the act-roster level. Aggregate over the stint, not
+    # broken out per-appearance, because that is the granularity the
+    # source data itself has. See migrate_add_membership_instrument.py.
+    instrument   = db.Column(db.String(128), nullable=True)
+
     # Stint bounds — nullable partial dates. NULL/NULL/NULL on both ends means
     # "always a member" (the default for every pre-existing row).
     start_year   = db.Column(db.Integer, nullable=True)

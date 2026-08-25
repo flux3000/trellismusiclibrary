@@ -3757,6 +3757,26 @@ a.member-chip-name:hover { color: var(--accent); }
   padding: 5px 0; border-bottom: 1px solid var(--bd-0); font-size: 11.5px; color: var(--t1);
 }
 .peer-act:last-child { border-bottom: none; }
+
+/* Previous invites. Same row idiom as .peer-act — this is a log, not a form. */
+.peer-inv-list { margin-top: 10px; }
+.peer-inv-head {
+  font-size: 10.5px; color: var(--t3); text-transform: uppercase;
+  letter-spacing: .06em; padding-bottom: 2px;
+}
+.peer-inv {
+  display: flex; align-items: center; gap: 10px;
+  padding: 5px 0; border-bottom: 1px solid var(--bd-0);
+  font-size: 11.5px; color: var(--t2);
+}
+.peer-inv:last-child { border-bottom: none; }
+.peer-inv-state { flex: 0 0 auto; min-width: 52px; color: var(--t3); }
+/* An unused invite is a live key to the library — the only row that is not
+   merely history, so it is the only one that carries weight. */
+.peer-inv-state--live { color: var(--t1); font-weight: 600; }
+.peer-inv-state--used { color: var(--t3); }
+.peer-inv-when { flex: 1 1 auto; min-width: 0; color: var(--t3); }
+.peer-inv-del { flex: 0 0 auto; margin-left: auto; }
 .peer-act-when { color: var(--t3); white-space: nowrap; }
 
 @media (max-width: 860px) {
