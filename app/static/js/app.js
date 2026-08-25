@@ -7022,6 +7022,10 @@ const App = (() => {
     cancel:    false,
     activeJob: null,
     log:       [],          // [{name, status, recording_id|error}]
+    // Why the run stopped, when it stopped badly. Rendered as a banner above
+    // the cards. Before 2026-08-25 a failed poll or a failed job produced
+    // nothing at all on screen — see pollAnalysis().
+    error:     null,
   }
 
   function renderIngestView() {
@@ -7364,6 +7368,7 @@ const App = (() => {
       lq.expanded  = new Map()
       lq.features  = new Map()
       lq.log       = []
+      lq.error     = null
       // Placeholder rows so every show is on screen immediately — analysis
       // fills them in at roughly 2s each rather than showing a blank wait.
       lq.rows = res.folders.map(f => ({
@@ -7387,16 +7392,94 @@ const App = (() => {
       let s
       try {
         s = await API.quality.analyzeStatus(lq.jobId, lq.sourceDir)
-      } catch (_) { break }
-      if (s.results?.length) lq.rows = s.results
+      } catch (e) {
+        // A failed poll used to `break` in silence. Every card then sat on
+        // "Analysing…" with nothing said anywhere and nothing in the debug
+        // drawer — exactly the stall Ryan reported on 2026-08-25. A stop we
+        // cannot explain is still a stop the user has to be told about.
+        lq.jobId   = null
+        lq.progress = null
+        lq.error   = e.message || 'Lost contact with the analysis job.'
+        _retirePendingRows()
+        if (ingest.step === 'triage') renderTriageView({ preserveScroll: true })
+        return
+      }
+      _mergeAnalysisRows(s.results || [], s.ingested || [])
       lq.progress = { done: s.done, total: s.total, current: s.current }
       if (s.status !== 'running') {
         lq.jobId = null
         lq.progress = null
+        // The job's own failure was likewise never shown: `error` came back on
+        // the payload and nothing read it.
+        if (s.status === 'error') {
+          lq.error = s.error || 'The analysis job failed.'
+        }
+        _retirePendingRows()
+        _sortAnalysisRows()
       }
       // Don't fight the user: re-render only the parts that change during a run.
       if (ingest.step === 'triage') renderTriageView({ preserveScroll: true })
     }
+  }
+
+  // Merge server rows INTO the placeholder list, keyed on folder_path.
+  //
+  // `lq.rows = s.results` (the old line) had two failure modes, and the second
+  // one is what made the page hang:
+  //   * a partial result set REPLACED the list, so every show not yet analysed
+  //     vanished from the page instead of showing its placeholder — the exact
+  //     thing startAnalysis() renders placeholders to avoid;
+  //   * an EMPTY result set left the list untouched, so a job that finished
+  //     successfully but returned no rows left the whole page on "Analysing…"
+  //     forever. That is reachable whenever the scanned directory isn't the one
+  //     the rows were first recorded under (fixed server-side in
+  //     _adopt_into_scan) and whenever a folder is already an ingested
+  //     Recording (reported separately as `ingested`).
+  function _mergeAnalysisRows(results, ingested) {
+    const byPath = new Map(results.map(r => [r.folder_path, r]))
+    const done   = new Set(ingested)
+    const seen   = new Set()
+
+    lq.rows = lq.rows.map(row => {
+      const hit = byPath.get(row.folder_path)
+      if (hit) { seen.add(row.folder_path); return hit }
+      // Already in the library: list_staging excludes promoted rows on purpose
+      // (a row whose folder has become a Recording has nothing left to triage),
+      // so the server names them instead of returning them.
+      if (row._pending && done.has(row.folder_path)) {
+        return { ...row, _pending: false, _ingestedElsewhere: true }
+      }
+      return row
+    })
+
+    // A row the server knows about that we never placed a card for — a re-scan
+    // that resolved the folder differently this time.
+    for (const r of results) {
+      if (!seen.has(r.folder_path) &&
+          !lq.rows.some(x => x.folder_path === r.folder_path)) lq.rows.push(r)
+    }
+  }
+
+  // Nothing may still read "Analysing…" once the job is over. A placeholder
+  // with no server row and no explanation is a real problem, so it becomes a
+  // visible error card rather than a spinner that never resolves.
+  function _retirePendingRows() {
+    lq.rows = lq.rows.map(r => r._pending
+      ? { ...r, _pending: false,
+          error: 'Analysis finished without returning a result for this folder.' }
+      : r)
+  }
+
+  // Best score first, un-scored and errored rows last — the same order
+  // qs.list_staging() applies server-side. Applied once, at the END of the run:
+  // re-sorting on every poll would shuffle cards out from under the pointer
+  // while the user is reading them.
+  function _sortAnalysisRows() {
+    lq.rows = [...lq.rows].sort((a, b) => {
+      const an = a.listening_quality == null, bn = b.listening_quality == null
+      if (an !== bn) return an ? 1 : -1
+      return (b.listening_quality || 0) - (a.listening_quality || 0)
+    })
   }
 
   // ── Stage 2: Listening Quality triage ──────────────────────────────────────
@@ -7654,6 +7737,15 @@ const App = (() => {
           ${_lqActions(row, done)}
         </div>
         <div class="lq-err" style="margin:12px 0 0">${esc(row.error)}</div>
+      </div></div>`
+    }
+    // Skipped by the analysis job because this folder is already a Recording.
+    // Not an error and not a candidate — just say so and move on.
+    if (row._ingestedElsewhere) {
+      return `<div class="lq-row"><div class="lq-card">
+        <div class="lq-card-head"><div class="lq-card-title"><h2>${esc(row.name)}</h2>
+          <div class="lq-qline"><span>Already in your library — nothing to triage.</span></div>
+        </div></div>
       </div></div>`
     }
     if (row._pending) {
@@ -7980,6 +8072,11 @@ const App = (() => {
           lq.progress.current ? ` — ${esc(lq.progress.current)}` : ''}</span>
       </div>` : ''
 
+    // Why the run stopped, when it stopped badly. Reuses the card's own error
+    // styling rather than inventing a banner class.
+    const errorBar = lq.error
+      ? `<div class="lq-err" style="margin:0 0 12px">${esc(lq.error)}</div>` : ''
+
     // The single action. Cancel replaces it mid-run rather than sitting next to
     // it, so there is never a question about which button is live.
     const runBar = lq.running
@@ -7999,6 +8096,7 @@ const App = (() => {
           <button class="btn btn-ghost btn-sm" id="lq-back-btn">↺ Choose another folder</button>
         </div>
         ${progressBar}
+        ${errorBar}
         <div class="lq-runbar">
           ${runBar}
           <label class="lq-behavior">
@@ -8032,7 +8130,7 @@ const App = (() => {
 
   function _wireTriage() {
     document.getElementById('lq-back-btn')?.addEventListener('click', () => {
-      lq.rows = []; lq.jobId = null; lq.progress = null; lq.log = []
+      lq.rows = []; lq.jobId = null; lq.progress = null; lq.log = []; lq.error = null
       ingest.step = 'source'
       renderIngestSource()
     })
@@ -8264,6 +8362,7 @@ const App = (() => {
   function _lqIngestable(r) {
     return !r.error
         && !r._pending
+        && !r._ingestedElsewhere                  // already a Recording
         && r.exists !== false                     // folder still on disk
         && !r.recording_id                        // not already in the library
         && !lq.log.some(l => l.folder_path === r.folder_path)

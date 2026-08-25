@@ -101,6 +101,13 @@ def _run_quality_job(job_id, app, source_dir, folders, reanalyze):
                 # unless explicitly asked to redo them — re-decoding audio is
                 # the only genuinely slow thing here.
                 if not reanalyze and _is_current(folder):
+                    row = _adopt_into_scan(folder, source_dir)
+                    # `list_staging` deliberately excludes rows already promoted
+                    # to a Recording, so the client gets no row for these and
+                    # cannot tell "already in your library" from "something
+                    # broke". Name them explicitly rather than let it guess.
+                    if row is not None and row.recording_id is not None:
+                        job["ingested"].append(qs.norm_path(folder))
                     continue
                 _analyse_one(folder, source_dir)
             job["done"] = len(folders)
@@ -110,6 +117,37 @@ def _run_quality_job(job_id, app, source_dir, folders, reanalyze):
         _tb.print_exc()
         job["error"] = str(e)
         job["status"] = "error"
+
+
+def _adopt_into_scan(folder_path, source_dir):
+    """
+    Repoint an already-analysed row at the directory being scanned NOW.
+
+    Staging rows are keyed by FOLDER PATH, but the triage list is fetched by
+    SOURCE DIR (`qs.list_staging`).  The same show is reachable from several
+    scanned directories — the Download root, the act folder inside it, the show
+    folder itself — so a row first written under one of them is invisible to a
+    scan of another.
+
+    Until 2026-08-25 the skip path above returned without touching the row, so
+    re-scanning at a different level returned ZERO rows from a job that
+    reported "done": the UI's placeholder cards were never replaced and every
+    recording sat on "Analysing…" forever, with no error anywhere to explain it
+    (Ryan, 2026-08-25 — "Review and Ingest just stalls out").  Re-analysis
+    already repoints `source_dir` (see `qs.upsert_staging`); the skip path
+    simply never did, and that asymmetry WAS the bug.
+
+    Writes only when the value actually changes.  The common case is re-scanning
+    the same directory, and that must not cost a commit per folder.
+    """
+    row = qs.get_staging(folder_path)
+    if row is None:                       # raced with a delete — nothing to do
+        return None
+    wanted = qs.norm_path(source_dir)
+    if row.source_dir != wanted:
+        row.source_dir = wanted
+        db.session.commit()
+    return row
 
 
 def _is_current(folder_path):
@@ -160,7 +198,7 @@ def analyze():
     job_id = uuid.uuid4().hex
     _QUALITY_JOBS[job_id] = {
         "status": "running", "total": len(folders), "done": 0,
-        "current": None, "error": None,
+        "current": None, "error": None, "ingested": [],
     }
     threading.Thread(
         target=_run_quality_job,
@@ -204,6 +242,10 @@ def analyze_status(job_id):
         "total": job["total"],
         "done": job["done"],
         "current": job.get("current"),
+        # Folders skipped because they are already Recordings. Not an error and
+        # not in `results` — the client uses it to retire their placeholder
+        # cards with a true explanation instead of spinning on "Analysing…".
+        "ingested": list(job.get("ingested") or []),
         "results": [qs.serialize(r, include_features=True) for r in rows],
     }
     _attach_interpretation(payload["results"])
