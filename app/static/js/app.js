@@ -7054,7 +7054,7 @@ const App = (() => {
   // Server-side preferences snapshot (config.IMPORT_DIR, ingest_file_behavior…).
   // Module-scoped and cached: several views need `import_dir`, it doesn't change
   // within a session, and there is deliberately NO bare `prefs` global — the
-  // only other `prefs` in this file is a local inside openSettingsModal().
+  // only other `prefs` in this file is a local inside renderSettingsPage().
   let appPrefs = null
   async function getPrefs() {
     if (appPrefs) return appPrefs
@@ -11344,6 +11344,8 @@ const App = (() => {
       if (id) renderPersonView(id)
       else    renderLibraryView()
 
+    } else if (hash === '#/settings') {
+      renderSettingsPage()
     } else if (hash === '#/peers') {
       renderPeersPage()
     } else if (hash === '#/collections') {
@@ -11426,107 +11428,277 @@ const App = (() => {
 
   // ── Settings modal ───────────────────────────────────────────────────────────
 
-  async function openSettingsModal() {
-    let prefs = {}
-    try { prefs = await API.preferences.get() } catch (_) {}
-    const keySet   = prefs.has_api_key
+  // ── Settings ───────────────────────────────────────────────────────────────
+  //
+  // A PAGE, not a modal (Ryan, 2026-08-25 — the dialog was "too small and
+  // strange"). Settings had outgrown a box: profile, appearance, library
+  // behaviour, AI, sharing and an About panel do not belong in something you
+  // dismiss by clicking beside it.
+  //
+  // Nothing here has a Save button except the API key, and that is deliberate —
+  // the same reasoning the Peers page already uses for grants: a control that
+  // needs a separate Save is a control that gets left unsaved. A name commits
+  // when you leave the field, a menu when you change it, the theme the instant
+  // you click it. The key is the exception because it is a secret you paste
+  // once and cannot read back to check.
+
+  function _settingsInitial(name) {
+    return (name || '?').trim().charAt(0).toUpperCase()
+  }
+
+  // A short confirmation beside the thing that changed. Deliberately not a
+  // toast: at the moment you change a setting you are looking AT the setting,
+  // and a message in the corner is a message somewhere you are not.
+  function _settingsSaved(el, text = 'Saved') {
+    if (!el) return
+    el.textContent = text
+    el.classList.add('is-on')
+    clearTimeout(el._t)
+    el._t = setTimeout(() => el.classList.remove('is-on'), 1600)
+  }
+
+  function _settingsAvatarHtml(me) {
+    if (me.has_avatar) {
+      return `<img src="${esc(me.avatar_url)}" alt="" class="set-avatar-img">`
+    }
+    return `<span class="set-avatar-initial">${esc(_settingsInitial(me.name))}</span>`
+  }
+
+  async function renderSettingsPage() {
+    setActiveNav('settings')
+    setNavCurrent('Settings')
+    setLoading()
+
+    let prefs = {}, me = {}, about = {}
+    try {
+      [prefs, me, about] = await Promise.all([
+        API.preferences.get(), API.auth.me(), API.system.about(),
+      ])
+    } catch (e) {
+      setMainHTML(`<div class="empty-state">
+        <div class="empty-title">Could not load settings</div>
+        <div class="empty-sub">${esc(e.message)}</div></div>`)
+      return
+    }
+
+    const keySet     = prefs.has_api_key
     const noKeychain = prefs.keychain_available === false
-    const model    = prefs.ai_model || 'claude-sonnet-5'
-    const behavior = prefs.ingest_file_behavior || 'move'
+    const model      = prefs.ai_model || 'claude-sonnet-5'
+    const behavior   = prefs.ingest_file_behavior || 'move'
 
-    const overlay = document.createElement('div')
-    overlay.className = 'modal-overlay'
-    overlay.innerHTML = `
-      <div class="modal-card settings-modal">
-        <div class="modal-header"><h3>Settings</h3>
-          <button class="btn-icon" id="settings-close">${icon('x')}</button></div>
-        <div class="modal-body">
-          <!-- Appearance first: it is the one setting every user has an opinion
-               about, and the only one that applies the moment it is clicked
-               rather than on Save. -->
-          <label class="settings-label">Appearance</label>
-          <div class="view-mode-toggle settings-theme" id="settings-theme" role="group" aria-label="Theme">
-            <button type="button" class="vm-opt" data-theme="dark">Dark</button>
-            <button type="button" class="vm-opt" data-theme="light">Light</button>
+    setMainHTML(`
+      <div class="set-wrap">
+        <header class="set-head">
+          <h1 class="set-h1">Settings</h1>
+          <p class="set-lede">Changes save as you make them.</p>
+        </header>
+
+        <section class="set-sec">
+          <h2 class="set-sec-title">You</h2>
+          <p class="set-sec-hint">Your name and picture appear on any library you
+            share — they are how a peer knows whose shelf they are looking at.</p>
+
+          <div class="set-person">
+            <div class="set-avatar" id="set-avatar">${_settingsAvatarHtml(me)}</div>
+            <div class="set-person-fields">
+              <div class="set-field">
+                <label class="set-label" for="set-name">Display name</label>
+                <input class="set-input" id="set-name" maxlength="120"
+                       value="${esc(me.display_name || '')}"
+                       placeholder="${esc(me.username)}" autocomplete="off">
+                <span class="set-flash" id="set-name-flash"></span>
+                <p class="set-hint">Leave it empty to go by your sign-in name.</p>
+              </div>
+              <div class="set-field">
+                <span class="set-label">Sign-in name</span>
+                <div class="set-static">${esc(me.username)}</div>
+                <p class="set-hint">Your account name. It does not change here.</p>
+              </div>
+              <div class="set-field">
+                <span class="set-label">Picture</span>
+                <div class="set-actions">
+                  <input type="file" id="set-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+                  <button class="btn btn-ghost btn-sm" id="set-avatar-pick">
+                    ${me.has_avatar ? 'Replace' : 'Choose a picture'}</button>
+                  ${me.has_avatar
+                    ? '<button class="btn btn-ghost btn-sm" id="set-avatar-clear">Remove</button>' : ''}
+                  <span class="set-flash" id="set-avatar-flash"></span>
+                </div>
+                <p class="set-hint">A square image works best. 4 MB maximum.</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="set-sec">
+          <h2 class="set-sec-title">Appearance</h2>
+          <div class="set-field">
+            <span class="set-label">Theme</span>
+            <div class="view-mode-toggle set-theme" id="set-theme" role="group" aria-label="Theme">
+              <button type="button" class="vm-opt" data-theme="dark">Dark</button>
+              <button type="button" class="vm-opt" data-theme="light">Light</button>
+            </div>
+            <p class="set-hint">Applies immediately, and only on this machine.</p>
+          </div>
+        </section>
+
+        <section class="set-sec">
+          <h2 class="set-sec-title">Adding recordings</h2>
+          <div class="set-field">
+            <label class="set-label" for="set-behavior">Source files</label>
+            <select class="set-input" id="set-behavior">
+              <option value="move" ${behavior !== 'copy' ? 'selected' : ''}>Move into the library — the source folder is emptied</option>
+              <option value="copy" ${behavior === 'copy' ? 'selected' : ''}>Copy into the library — the source folder is left alone</option>
+            </select>
+            <span class="set-flash" id="set-behavior-flash"></span>
+            <p class="set-hint">What happens to a folder after its recording is filed.</p>
+          </div>
+        </section>
+
+        <section class="set-sec">
+          <h2 class="set-sec-title">AI assistance</h2>
+          <p class="set-sec-hint">Used to research performers and read info files.
+            You bring your own key, so you pay Anthropic directly and Trellis
+            never marks it up.</p>
+
+          <div class="set-field">
+            <label class="set-label" for="set-key">Anthropic API key</label>
+            <div class="set-actions">
+              <input class="set-input" type="password" id="set-key" autocomplete="off"
+                     placeholder="${keySet ? '•••••••••••••  (a key is saved)' : 'sk-ant-…'}">
+              <button class="btn btn-primary btn-sm" id="set-key-save">Save key</button>
+              ${keySet ? '<button class="btn btn-ghost btn-sm" id="set-key-clear">Clear</button>' : ''}
+              <span class="set-flash" id="set-key-flash"></span>
+            </div>
+            <p class="set-hint">${noKeychain
+              ? 'This machine has no usable keychain, so a key cannot be stored.'
+              : 'Stored in your OS keychain, never in the database.'}</p>
           </div>
 
-          <label class="settings-label" style="margin-top:14px">Anthropic API key <span class="settings-hint">(BYOK — stored in your OS keychain)</span></label>
-          <div class="settings-key-row">
-            <input type="password" id="settings-key" placeholder="${keySet ? '•••••••••• (key saved)' : 'sk-ant-…'}" autocomplete="off" />
-            ${keySet ? '<button class="btn btn-ghost btn-sm" id="settings-clear-key">Clear</button>' : ''}
+          <div class="set-field">
+            <label class="set-label" for="set-model">Model</label>
+            <select class="set-input" id="set-model">
+              <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet — stronger research</option>
+              <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku — faster and cheaper</option>
+            </select>
+            <span class="set-flash" id="set-model-flash"></span>
           </div>
-          ${noKeychain ? '<div class="settings-warn">OS keychain unavailable on this system — key cannot be saved.</div>' : ''}
+        </section>
 
-          <label class="settings-label" style="margin-top:14px">AI model</label>
-          <select id="settings-model">
-            <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet 5 (default — stronger research)</option>
-            <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku 4.5 (lightweight)</option>
-          </select>
+        ${canEditLibrary() ? `
+        <section class="set-sec">
+          <h2 class="set-sec-title">Sharing</h2>
+          <p class="set-sec-hint">Who can reach your library, and what they see.
+            Enrolling someone has its own steps and its own page.</p>
+          <button class="btn btn-ghost btn-sm" id="set-peers">Manage sharing →</button>
+        </section>` : ''}
 
-          <label class="settings-label" style="margin-top:14px">Ingest file handling</label>
-          <select id="settings-behavior">
-            <option value="move" ${behavior !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
-            <option value="copy" ${behavior === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
-          </select>
+        <section class="set-sec set-sec--about">
+          <h2 class="set-sec-title">About</h2>
+          <dl class="set-about">
+            <dt>Version</dt><dd>${esc(about.app_name || 'Trellis')} ${esc(about.version || '')}${
+              about.installed ? '' : ' <span class="set-about-tag">running from source</span>'}</dd>
+            <dt>Library data</dt><dd class="set-path">${esc(about.database || '')}</dd>
+            <dt>Audio files</dt><dd class="set-path">${esc(about.library_root || '')}</dd>
+          </dl>
+        </section>
+      </div>`)
 
-          ${canEditLibrary() ? `
-          <!-- Sharing came out of the sidebar 2026-08-22 (Ryan). Managing peers
-               is account configuration, not a place in the library — and the
-               sidebar is now a shelf of shows you kept. It is a link out to the
-               full page rather than a panel here: peer enrolment is a
-               multi-step flow with its own state, not a preference. -->
-          <label class="settings-label" style="margin-top:14px">Sharing</label>
-          <button class="btn btn-ghost btn-sm settings-link-btn" id="settings-peers">
-            Manage peers &amp; shared collections →</button>` : ''}
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-ghost btn-sm" id="settings-cancel">Cancel</button>
-          <button class="btn btn-primary btn-sm" id="settings-save">Save</button>
-        </div>
-      </div>`
-    document.body.appendChild(overlay)
+    _wireSettings(me)
+  }
 
-    const close = () => overlay.remove()
-    overlay.addEventListener('click', e => { if (e.target === overlay) close() })
-    overlay.querySelector('#settings-close').addEventListener('click', close)
+  function _wireSettings(me) {
+    const $ = id => document.getElementById(id)
 
-    // Theme applies immediately and is not part of Save — it is a local display
-    // preference, not one of the account settings this dialog persists, and you
-    // want to SEE it to judge it. Cancel therefore does not undo it, which is
-    // the honest behaviour for a live preview you chose on purpose.
-    const themeWrap = overlay.querySelector('#settings-theme')
-    const paintTheme = () => themeWrap.querySelectorAll('.vm-opt').forEach(b => {
+    // ── Display name — commits on blur or Enter, never on every keystroke ────
+    const nameInput = $('set-name')
+    let lastName = me.display_name || ''
+    const commitName = async () => {
+      const v = nameInput.value.trim()
+      if (v === lastName) return
+      try {
+        const updated = await API.auth.updateProfile({ display_name: v })
+        lastName = updated.display_name || ''
+        nameInput.value = lastName
+        state.user = { ...(state.user || {}), ...updated }
+        _settingsSaved($('set-name-flash'))
+        // The initial in the picture placeholder is derived from the name, so
+        // it has to follow it.
+        if (!updated.has_avatar) $('set-avatar').innerHTML =
+          `<span class="set-avatar-initial">${esc(_settingsInitial(updated.name))}</span>`
+      } catch (e) {
+        nameInput.value = lastName
+        _settingsSaved($('set-name-flash'), e.message)
+      }
+    }
+    nameInput?.addEventListener('blur', commitName)
+    nameInput?.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur() })
+
+    // ── Picture ─────────────────────────────────────────────────────────────
+    const file = $('set-avatar-file')
+    $('set-avatar-pick')?.addEventListener('click', () => file.click())
+    file?.addEventListener('change', async () => {
+      const f = file.files && file.files[0]
+      if (!f) return
+      try {
+        const updated = await API.auth.uploadAvatar(f)
+        $('set-avatar').innerHTML = `<img src="${esc(updated.avatar_url)}" alt="" class="set-avatar-img">`
+        _settingsSaved($('set-avatar-flash'))
+        renderSettingsPage()          // repaint so Remove appears
+      } catch (e) { _settingsSaved($('set-avatar-flash'), e.message) }
+      finally { file.value = '' }
+    })
+    $('set-avatar-clear')?.addEventListener('click', async () => {
+      try { await API.auth.removeAvatar(); renderSettingsPage() }
+      catch (e) { _settingsSaved($('set-avatar-flash'), e.message) }
+    })
+
+    // ── Theme — applies live, so there is nothing to save ───────────────────
+    const themeWrap = $('set-theme')
+    const paintTheme = () => themeWrap?.querySelectorAll('.vm-opt').forEach(b => {
       const on = (b.dataset.theme === 'light') === isLightTheme()
       b.classList.toggle('active', on)
       b.setAttribute('aria-pressed', on ? 'true' : 'false')
     })
     paintTheme()
-    themeWrap.addEventListener('click', e => {
+    themeWrap?.addEventListener('click', e => {
       const b = e.target.closest('.vm-opt')
       if (!b) return
       setTheme(b.dataset.theme === 'light')
       paintTheme()
     })
-    overlay.querySelector('#settings-cancel').addEventListener('click', close)
-    overlay.querySelector('#settings-peers')?.addEventListener('click', () => {
-      close()
-      window.location.hash = '#/peers'
+
+    // ── Menus — commit on change ────────────────────────────────────────────
+    const menu = (id, key) => $(id)?.addEventListener('change', async e => {
+      try {
+        await API.preferences.update({ [key]: e.target.value })
+        _settingsSaved($(`${id}-flash`))
+      } catch (err) { _settingsSaved($(`${id}-flash`), err.message) }
     })
-    overlay.querySelector('#settings-clear-key')?.addEventListener('click', async () => {
-      try { await API.preferences.update({ clear_api_key: true }); close() } catch (e) { alert(e.message) }
+    menu('set-behavior', 'ingest_file_behavior')
+    menu('set-model',    'ai_model')
+
+    // ── The one explicit Save: a secret you paste and cannot read back ──────
+    $('set-key-save')?.addEventListener('click', async () => {
+      const key = $('set-key').value.trim()
+      if (!key) return _settingsSaved($('set-key-flash'), 'Paste a key first')
+      try {
+        await API.preferences.update({ api_key: key })
+        $('set-key').value = ''
+        _settingsSaved($('set-key-flash'))
+      } catch (e) { _settingsSaved($('set-key-flash'), e.message) }
     })
-    overlay.querySelector('#settings-save').addEventListener('click', async () => {
-      const payload = {
-        ai_model:             overlay.querySelector('#settings-model').value,
-        ingest_file_behavior: overlay.querySelector('#settings-behavior').value,
-      }
-      const key = overlay.querySelector('#settings-key').value.trim()
-      if (key) payload.api_key = key
-      try { await API.preferences.update(payload); close() } catch (e) { alert(e.message) }
+    $('set-key-clear')?.addEventListener('click', async () => {
+      try { await API.preferences.update({ clear_api_key: true }); renderSettingsPage() }
+      catch (e) { _settingsSaved($('set-key-flash'), e.message) }
     })
+
+    $('set-peers')?.addEventListener('click', () => { window.location.hash = '#/peers' })
   }
 
-  document.getElementById('settings-btn')?.addEventListener('click', openSettingsModal)
+
+  document.getElementById('settings-btn')?.addEventListener('click',
+    () => { window.location.hash = '#/settings' })
 
   // ── Search (IO-46, 2026-08-18) ─────────────────────────────────────────────
   //

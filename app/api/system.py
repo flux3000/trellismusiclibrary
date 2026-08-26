@@ -18,7 +18,8 @@ drive-dependent endpoints wear so they fail cleanly instead of half-working.
 
 from functools import wraps
 
-from flask import Blueprint, jsonify, Response
+from flask import Blueprint, jsonify, Response, current_app
+from config import is_installed_app
 from flask_login import login_required
 
 from app.utils import library_mount
@@ -77,6 +78,29 @@ _PLACEHOLDER_SVG = (
     '<circle cx="63" cy="37" r="5" fill="#3a3a3d"/>'
     '</svg>'
 )
+
+
+@bp.route("/about")
+@login_required
+def about():
+    """
+    What this install IS. Answers the first question of every support
+    conversation — which version, and where is the data — without asking anyone
+    to find a terminal.
+
+    Paths are deliberately shown: a packaged app hides its database somewhere a
+    person would never guess, and "where did my library go" is a fair question
+    to be able to answer from inside the app.
+    """
+    from version import __version__, APP_NAME
+    return jsonify({
+        "app_name":     APP_NAME,
+        "version":      __version__,
+        "installed":    is_installed_app(),
+        "data_dir":     str(current_app.config.get("DATA_DIR")),
+        "database":     str(current_app.config.get("DB_PATH")),
+        "library_root": str(current_app.config.get("LIBRARY_ROOT")),
+    })
 
 
 def require_library(kind="json"):

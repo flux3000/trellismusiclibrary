@@ -2,7 +2,7 @@
 Migration: add sample_rate_hz, bit_depth, bitrate_kbps to track_analysis.
 
 Run after stopping Flask:
-    cd ~/Workshop/dev/fluxaudio && python3 scripts/migrate_add_format_columns.py
+    cd ~/Workshop/dev/trellis && python3 scripts/migrate_add_format_columns.py
 """
 import os, sqlite3
 

@@ -10,6 +10,7 @@ Usage:
 """
 
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 import webview
 from app import create_app
 from config import Config
+from version import APP_NAME
 
 app = create_app()
 
@@ -226,6 +228,24 @@ def start_flask():
 
 
 if __name__ == "__main__":
+    # ── Startup self-test ─────────────────────────────────────────────────────
+    # `TRELLIS_SELFTEST=1 Trellis` starts everything the app needs and exits
+    # without opening a window. tools/build_macos.sh runs this against the
+    # freshly built bundle.
+    #
+    # It exists because the interesting packaging failures happen at IMPORT
+    # time, before there is a window or a log to look at: a data file the
+    # packager did not know to copy, a module it could not see. From Finder
+    # that looks like nothing happening at all. By the time create_app() has
+    # returned and first_run_setup() has built a database, every module has
+    # been imported and every import-time data file has been read — which is
+    # precisely the class of bug that shipped a broken bundle on 2026-08-25
+    # (geonamescache's JSON tables).
+    if os.environ.get("TRELLIS_SELFTEST") == "1":
+        first_run_setup()
+        print(f"selftest ok — {Config.DB_PATH}")
+        sys.exit(0)
+
     # Ctrl-C should kill the process even while PyWebView owns the main thread
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
 
@@ -239,7 +259,7 @@ if __name__ == "__main__":
     # PyWebView must own the main thread on macOS
     start_w, start_h = load_window_size()
     window = webview.create_window(
-        title    = "Trellis",
+        title    = APP_NAME,
         url      = f"http://{Config.HOST}:{Config.PORT}",
         js_api   = FluxAPI(),
         width    = start_w,

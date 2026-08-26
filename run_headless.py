@@ -31,6 +31,7 @@ import sys
 
 from app import create_app
 from config import Config
+from version import APP_NAME
 
 
 def main():
@@ -40,7 +41,7 @@ def main():
     # confusion is not knowing which one a terminal belongs to — so say it
     # before serving a single request.
     print("─" * 60, flush=True)
-    print(f"  Trellis (headless)", flush=True)
+    print(f"  {APP_NAME} (headless)", flush=True)
     # SHARE_NODE_NAME is None when unset — the real name is derived from the
     # owner at request time (share._node_identity), so say that rather than
     # printing "None" in the identity banner.

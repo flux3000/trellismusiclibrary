@@ -13,7 +13,7 @@ e.g. track titled "Audience" flagged "tuning" — not this script's place to
 second-guess that).
 
 Run once:
-    cd ~/Workshop/dev/fluxaudio
+    cd ~/Workshop/dev/trellis
     python3 scripts/backfill_track_flags.py --dry-run   # preview only
     python3 scripts/backfill_track_flags.py              # apply
 """

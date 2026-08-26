@@ -28,7 +28,7 @@ ending up with two Full Library rows.
 Additive and idempotent — safe to re-run.
 
 Run once:
-    cd ~/Workshop/dev/fluxaudio
+    cd ~/Workshop/dev/trellis
     python3 scripts/migrate_add_system_collections.py
 """
 

@@ -33,7 +33,7 @@ import sqlite3
 import argparse
 from datetime import datetime
 
-DEFAULT_DB = os.path.expanduser("~/Workshop/dev/fluxaudio/db/fluxaudio.db")
+DEFAULT_DB = os.path.expanduser("~/Workshop/dev/trellis/db/trellis.db")
 
 
 def main():

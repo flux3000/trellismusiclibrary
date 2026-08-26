@@ -12,8 +12,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 VERSION=$(python3 -c 'from version import __version__; print(__version__)')
+APP_NAME=$(python3 -c 'from version import APP_NAME; print(APP_NAME)')
 
-echo "── Building Trellis ${VERSION} ────────────────────────────────"
+echo "── Building ${APP_NAME} ${VERSION} ─────────────────────"
 
 if [[ "$(uname)" != "Darwin" ]]; then
   echo "This builds a MAC app and must run on macOS. On Linux or Windows you"
@@ -31,7 +32,7 @@ rm -rf build dist
 
 python3 -m PyInstaller trellis.spec --noconfirm --clean
 
-APP="dist/Trellis.app"
+APP="dist/${APP_NAME}.app"
 [[ -d "$APP" ]] || { echo "Build finished but $APP is missing." >&2; exit 1; }
 
 echo
@@ -44,6 +45,36 @@ find "$APP" -name 'libsndfile*' | grep -q . \
 [[ -f "$APP/Contents/Resources/app/static/index.html" ]] \
   || [[ -f "$APP/Contents/Frameworks/app/static/index.html" ]] \
   && echo "  ✓ frontend bundled" || echo "  ✗ frontend MISSING — the window will be blank"
+
+# ── The check that actually matters ──────────────────────────────────────────
+# A bundle that is missing a data file or a hidden import does not fail during
+# use — it fails on LAUNCH, before there is a window, and from Finder that looks
+# like nothing happening at all. Which is how a broken build got as far as being
+# double-clicked on 2026-08-25.
+#
+# So: start the real bundled binary, against a throwaway data directory so it
+# cannot touch a real library, and make it prove it can get all the way through
+# importing itself and creating a database.
+echo
+echo "── Startup self-test ──────────────────────────────────────────"
+SELFTEST_DIR=$(mktemp -d)
+if TRELLIS_DATA_DIR="$SELFTEST_DIR" TRELLIS_SELFTEST=1 \
+     "$APP/Contents/MacOS/${APP_NAME}" 2>&1 | sed 's/^/  /'; then
+  echo "  ✓ the app starts"
+else
+  echo
+  echo "  ✗ THE APP DOES NOT START. The output above is the real error —" >&2
+  echo "    a missing data file or hidden import. Add it to trellis.spec." >&2
+  rm -rf "$SELFTEST_DIR"
+  exit 1
+fi
+rm -rf "$SELFTEST_DIR"
+
+# PyInstaller leaves TWO copies: the raw collected output, and the .app it
+# assembles from it. The .app is fully self-contained, so the raw folder is
+# leftovers — and leaving it there doubles the disk cost of every build and
+# invites someone to ship the wrong one.
+rm -rf "dist/${APP_NAME}"
 
 echo
 du -sh "$APP"

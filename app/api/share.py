@@ -39,7 +39,7 @@ included — see the rule in the ENTITY PAGES banner below.
 from datetime import datetime, timezone
 import json as _json
 
-from flask import Blueprint, request, jsonify, g, current_app, abort
+from flask import Blueprint, request, jsonify, g, current_app, abort, send_file
 
 from app.extensions import db
 from app.models.user import User
@@ -70,6 +70,11 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+def _owner_user():
+    """The person whose library this is: the first active admin."""
+    return db.session.query(User).filter_by(role="admin", is_active=True).first()
+
+
 def _node_identity():
     """This instance's public identity, shown to peers on enroll/‘me’.
     Config-driven with sensible fallbacks; SHARE_NODE_NAME / SHARE_OWNER_NAME
@@ -77,8 +82,12 @@ def _node_identity():
     # Owner first — the node name is derived from it when unset.
     owner = current_app.config.get("SHARE_OWNER_NAME")
     if not owner:
-        admin = db.session.query(User).filter_by(role="admin", is_active=True).first()
-        owner = admin.username if admin else "Unknown"
+        admin = _owner_user()
+        # `.name`, not `.username` (2026-08-25). This is the most public place a
+        # person's name appears — it is what a peer's library selector shows —
+        # and a display name that does not reach it is a display name for
+        # nobody.
+        owner = admin.name if admin else "Unknown"
 
     # A node with no configured name is "<Owner>'s Library" rather than a
     # generic product name. The old fallback was a fixed string, which made
@@ -150,7 +159,34 @@ def me():
         "node_name":         node_name,
         "owner_name":        owner_name,
         "collection_count":  len(peer_granted_collection_ids(peer)),
+        # Whether /api/share/me/image will answer. A boolean, not a URL: the
+        # consumer builds its own proxied URL and never addresses this host.
+        "owner_has_image":   bool(_owner_user() and _owner_user().avatar_ext),
     })
+
+
+# ── GET /api/share/me/image ───────────────────────────────────────────────────
+# The owner's picture. Deliberately under the `me` prefix rather than a new
+# top-level one: `me` is already relayed by the proxy and already exempt from
+# client-side rewriting, so this adds a route without touching THE THREE LISTS
+# (share.py / _ALLOWED_PREFIXES / REMOTE_CAPABLE — see test_peer_surface_parity).
+#
+# It is catalog metadata about a PERSON, not about their holdings, so it reveals
+# nothing about what they own — the same reasoning that lets a peer see a full
+# performer page.
+
+@bp.route("/me/image", strict_slashes=False)
+@peer_required
+def owner_image():
+    from app.api.auth import _avatar_path
+    from app.utils.entity_images import ALLOWED_IMAGE_EXTS
+
+    owner = _owner_user()
+    path = _avatar_path(owner) if owner else None
+    if not path or not path.exists():
+        return jsonify({"error": "No picture"}), 404
+    return send_file(str(path),
+                     mimetype=ALLOWED_IMAGE_EXTS.get(owner.avatar_ext, "image/jpeg"))
 
 
 # ── GET /api/share/collections ────────────────────────────────────────────────

@@ -17,6 +17,7 @@ Notes:
 """
 
 import os
+import shutil
 import subprocess
 import threading
 
@@ -32,7 +33,47 @@ _locks_guard = threading.Lock()
 
 
 class FfmpegMissing(RuntimeError):
-    """ffmpeg is not installed / not on PATH."""
+    """ffmpeg could not be found."""
+
+
+# Where Homebrew puts things, plus the system location. Apple Silicon uses the
+# first, Intel Macs the second.
+_FFMPEG_FALLBACKS = (
+    "/opt/homebrew/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+)
+
+
+def resolve_ffmpeg():
+    """
+    Find ffmpeg, without assuming a login shell's PATH.
+
+    This matters specifically because of packaging (2026-08-25). An app launched
+    by double-clicking does NOT inherit the PATH from your terminal — macOS gives
+    it a minimal one, typically /usr/bin:/bin:/usr/sbin:/sbin. Homebrew installs
+    to /opt/homebrew/bin, which is not on that list. So `ffmpeg` resolves
+    perfectly from a terminal and not at all from the Dock, and the symptom is
+    every track failing to play with "Transcoder unavailable" — which reads like
+    a network or sharing fault, not a missing program.
+
+    Order: an explicit setting wins (including a wrong one, so a typo fails
+    loudly rather than being silently corrected), then PATH, then the usual
+    install locations.
+    """
+    configured = current_app.config.get("FFMPEG_BIN")
+    if configured:
+        return configured
+
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    for candidate in _FFMPEG_FALLBACKS:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+
+    return "ffmpeg"      # let the run fail, and say where we looked
 
 
 class SourceMissing(RuntimeError):
@@ -94,7 +135,7 @@ def get_or_create_transcode(track, fmt=DEFAULT_FORMAT, bitrate=DEFAULT_BITRATE):
             return dest
 
         tmp = dest + ".part"
-        ffmpeg = current_app.config.get("FFMPEG_BIN", "ffmpeg")
+        ffmpeg = resolve_ffmpeg()
         cmd = [
             ffmpeg, "-nostdin", "-y",
             "-i", src,
@@ -108,7 +149,11 @@ def get_or_create_transcode(track, fmt=DEFAULT_FORMAT, bitrate=DEFAULT_BITRATE):
             proc = subprocess.run(cmd, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.PIPE)
         except FileNotFoundError:
-            raise FfmpegMissing(ffmpeg)
+            raise FfmpegMissing(
+                f"ffmpeg not found (tried {ffmpeg!r}, PATH, and "
+                f"{', '.join(_FFMPEG_FALLBACKS)}). Install it, or set "
+                f"FFMPEG_BIN to its full path."
+            )
 
         if proc.returncode != 0 or not os.path.isfile(tmp) or os.path.getsize(tmp) == 0:
             # Clean up a failed/partial temp file, surface the error.

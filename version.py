@@ -11,7 +11,12 @@ Bump this, then tag the commit to match.
 
 __version__ = "0.1.0"
 
-# Shown in the app and in the bundle. Kept separate from __version__ so a build
-# can be identified more precisely than a release ("0.1.0" vs "0.1.0 (mini)")
-# without polluting the number things compare against.
-BUILD_NAME = "Trellis"
+# The app has two names on purpose (Ryan, 2026-08-25 — "we should be calling it
+# Trellis Music Library, not just Trellis").
+#
+# APP_NAME is the real name: the Finder icon, the About box, the installer.
+# SHORT_NAME is for places with a hard length budget — macOS puts CFBundleName
+# in the menu bar and truncates past roughly sixteen characters, and "Trellis
+# Music Library" is twenty-one. Apple's own convention is exactly this split.
+APP_NAME   = "Trellis Music Library"
+SHORT_NAME = "Trellis"

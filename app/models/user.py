@@ -19,6 +19,23 @@ class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(64),  unique=True, nullable=False)
     email         = db.Column(db.String(255), unique=True, nullable=True)
+
+    # ── Identity, 2026-08-25 ──────────────────────────────────────────────────
+    # `username` is the CREDENTIAL and stays put once chosen; `display_name` is
+    # what a human sees, here and on any library this person shares. Two fields
+    # because they answer different questions — Ryan's collecting partner signed
+    # everything "oldindian" and was called Jeff, and renaming yourself should
+    # not change how you log in.
+    #
+    # Nullable, falling back to `username`: every existing row predates this and
+    # a blank name on screen is worse than a handle.
+    display_name  = db.Column(db.String(120), nullable=True)
+
+    # Extension only ('.jpg'). The file is Config.AVATAR_DIR/user_<id><ext> —
+    # one picture per person, so this is a column rather than the row-per-image
+    # table performers use. NB performer.image_ext is vestigial for exactly the
+    # opposite reason: performers grew galleries. A face does not.
+    avatar_ext    = db.Column(db.String(8), nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
 
     # "admin" | "archivist" | "listener"
@@ -39,6 +56,11 @@ class User(UserMixin, db.Model):
     preferences        = db.relationship("UserPreference",       back_populates="user",
                                          cascade="all, delete-orphan")
     play_logs          = db.relationship("PlayLog", back_populates="user")
+
+    @property
+    def name(self):
+        """What to show. Never blank — falls back to the login handle."""
+        return (self.display_name or "").strip() or self.username
 
     def __repr__(self):
         return f"<User {self.username} ({self.role})>"

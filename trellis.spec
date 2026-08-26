@@ -19,7 +19,7 @@ from PyInstaller.utils.hooks import (
 )
 
 sys.path.insert(0, str(Path(SPECPATH)))
-from version import __version__, BUILD_NAME          # noqa: E402
+from version import __version__, APP_NAME, SHORT_NAME   # noqa: E402
 
 # ── Files the app reads at runtime ───────────────────────────────────────────
 # The frontend and the self-hosted fonts. config.resource_dir() resolves these
@@ -40,6 +40,23 @@ datas = [("app/static", "app/static")]
 # version these lines are belt and braces. They stay because a hook that quietly
 # stops applying is indistinguishable from one that never ran, and this failure
 # only shows up on someone else's computer.
+# geonamescache ships its city/country tables as JSON beside the code and has
+# no PyInstaller hook. app/utils/ingest.py builds its lookup sets AT IMPORT
+# TIME, so a bundle without these files does not fail later during an ingest —
+# it fails on launch, before the window appears, with a FileNotFoundError
+# naming a path nobody recognises. (Exactly what happened, 2026-08-25.)
+#
+# numpy, scipy, matplotlib and sqlalchemy are NOT listed here on purpose:
+# PyInstaller ships hooks for all four, and collecting them by hand would add
+# hundreds of megabytes of headers and test data for no benefit.
+_geonames = collect_data_files("geonamescache")
+if not _geonames:
+    raise SystemExit(
+        "Refusing to build: geonamescache's data files were not found.\n"
+        "Without them the app dies on launch, before it can say why."
+    )
+datas   += _geonames
+
 datas   += collect_data_files("_soundfile_data")
 binaries = collect_dynamic_libs("_soundfile_data")
 if not binaries:
@@ -99,7 +116,7 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz, a.scripts, [],
     exclude_binaries=True,
-    name="Trellis",
+    name=APP_NAME,
     debug=False,
     strip=False,
     upx=False,          # UPX and macOS code signing do not get along
@@ -108,19 +125,21 @@ exe = EXE(
 
 coll = COLLECT(
     exe, a.binaries, a.datas,
-    strip=False, upx=False, name="Trellis",
+    strip=False, upx=False, name=APP_NAME,
 )
 
 # BUNDLE is a no-op off macOS, so this spec stays valid on any platform.
 app = BUNDLE(
     coll,
-    name="Trellis.app",
+    name=f"{APP_NAME}.app",
     icon="assets/icon/Trellis.icns",
     bundle_identifier="com.trellismusiclibrary.trellis",
     version=__version__,
     info_plist={
-        "CFBundleName":             BUILD_NAME,
-        "CFBundleDisplayName":      BUILD_NAME,
+        # Menu bar — short, or macOS truncates it.
+        "CFBundleName":             SHORT_NAME,
+        # Finder, About, everywhere with room for the real name.
+        "CFBundleDisplayName":      APP_NAME,
         "CFBundleShortVersionString": __version__,
         "CFBundleVersion":          __version__,
         # Without this the whole window renders at 1x and looks blurry on any

@@ -145,6 +145,8 @@ const API = (() => {
     system: {
       libraryStatus:  () => get('/api/system/library-status'),
       libraryRecheck: () => post('/api/system/library-recheck'),
+      // Which version am I running, and where is my data? Read by Settings.
+      about:          () => get('/api/system/about'),
     },
 
     // ── Auth ────────────────────────────────────────────────────────────────
@@ -152,7 +154,26 @@ const API = (() => {
       me:     ()             => get('/api/auth/me'),
       login:  (username, password) => post('/api/auth/login', { username, password }),
       logout: ()             => post('/api/auth/logout'),
+
+      // ── Profile (2026-08-25) ───────────────────────────────────────────────
+      // The display name and picture. NOT the username, which is the credential
+      // and is not editable here.
+      updateProfile: (data) => request('PATCH', '/api/auth/me', data),
+      // Plain URL for an <img src>, cache-busted by the server so replacing a
+      // picture actually repaints instead of showing the old one.
+      avatarUrl:     (v)    => `/api/auth/me/avatar${v ? `?v=${encodeURIComponent(v)}` : ''}`,
+      uploadAvatar:  async (file) => {
+        const form = new FormData()
+        form.append('image', file)
+        const res = await fetch('/api/auth/me/avatar',
+          { method: 'POST', body: form, credentials: 'same-origin' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        return data
+      },
+      removeAvatar:  ()     => request('DELETE', '/api/auth/me/avatar'),
     },
+
 
     // ── Artists (people) ──────────────────────────────────────────────────────
     artists: {

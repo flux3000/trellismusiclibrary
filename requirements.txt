@@ -1,3 +1,15 @@
+# requirements.txt — what Trellis DEPENDS ON, with deliberately loose bounds.
+#
+# This file states intent. requirements-lock.txt states fact: the exact versions
+# a build was made from, produced by `pip freeze` inside the virtual
+# environment. Install from THIS file when developing; build from the LOCK when
+# packaging, so an app built in October is the same app built today.
+#
+# Adopted 2026-08-25 alongside the packaged build. Before that a global Python
+# was fine — nothing shipped. A packaged app bundles whatever is installed in
+# the environment it was built in, so "whatever happens to be on the laptop"
+# stopped being an acceptable answer.
+
 flask>=3.0
 flask-sqlalchemy>=3.1
 flask-login>=0.6

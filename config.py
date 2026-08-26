@@ -9,6 +9,11 @@ import os
 import sys
 from pathlib import Path
 
+# The app's name lives in exactly one file. config.py needs it for the
+# per-user data folder, and a second copy of a name is a second thing to
+# forget to change. version.py imports nothing, so this cannot cycle.
+from version import APP_NAME
+
 # Base directory of this file
 BASE_DIR = Path(__file__).parent.resolve()
 
@@ -56,12 +61,18 @@ def _default_data_dir():
         return BASE_DIR
 
     home = Path.home()
+    # The FULL name (Ryan, 2026-08-25). This folder is something a person opens
+    # in Finder looking for their library — "Trellis" alone is a word, "Trellis
+    # Music Library" is an answer. The short form survives only where there is a
+    # hard length budget: the macOS menu bar, and the wordmark in the app's own
+    # header.
     if sys.platform == "darwin":
-        return home / "Library" / "Application Support" / "Trellis"
+        return home / "Library" / "Application Support" / APP_NAME
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or (home / "AppData" / "Local")
-        return Path(base) / "Trellis"
-    return Path(os.environ.get("XDG_DATA_HOME") or (home / ".local" / "share")) / "trellis"
+        return Path(base) / APP_NAME
+    return (Path(os.environ.get("XDG_DATA_HOME") or (home / ".local" / "share"))
+            / APP_NAME.lower().replace(" ", "-"))
 
 
 def _env_flag(name, default=False):
@@ -97,13 +108,17 @@ class Config:
     # in both cases (db/, cache/), so only the root differs and no other code
     # has to know which mode it is in.
     #
-    # The database FILE is still called fluxaudio.db even on a fresh install:
-    # the DB-filename rename is deliberately deferred (see project_app_naming),
-    # and a second name in circulation is worse than one stale one. It is a
-    # one-line change here whenever that rename happens.
+    # The database file is `trellis.db` as of 2026-08-25 (Ryan: "we should not
+    # be calling it fluxaudio.db"). The rename had been deferred; moving his
+    # library into Application Support was the moment to stop deferring, since
+    # it was being moved anyway.
+    #
+    # The ~20 scripts and tools that hardcode `db/fluxaudio.db` keep working:
+    # the repo's db/ holds symlinks under BOTH names pointing at the one real
+    # file. A symlink's name has nothing to do with its target's.
     DATA_DIR = Path(os.environ.get("TRELLIS_DATA_DIR") or _default_data_dir())
 
-    DB_PATH = Path(os.environ.get("FLUX_DB_PATH") or (DATA_DIR / "db" / "fluxaudio.db"))
+    DB_PATH = Path(os.environ.get("FLUX_DB_PATH") or (DATA_DIR / "db" / "trellis.db"))
 
     # utils/transcode.py has always honoured this key and fallen back to a path
     # relative to the app package. That fallback lands INSIDE the bundle once
@@ -123,7 +138,7 @@ class Config:
     # "Trellis" (Ryan, 2026-08-23) — the NAS folder itself was renamed on disk
     # from "Flux Audio" to "Trellis"; these defaults follow it. See
     # project_app_naming.md for the naming decision. (The dev repo/app root at
-    # ~/Workshop/dev/fluxaudio and the DB filename are a separate, deliberately
+    # ~/Workshop/dev/trellis and the DB filename are a separate, deliberately
     # deferred rename — see that memo's "Rebrand blast radius" section.)
     LIBRARY_ROOT = Path(os.environ.get(
         "LIBRARY_ROOT",
@@ -220,6 +235,32 @@ class Config:
     # because it fails at the peer's end with nothing to point at. The admin UI
     # shows the raw code and explains what's missing instead.
     SHARE_BASE_URL = os.environ.get("SHARE_BASE_URL") or None
+
+    # ── User avatars ──────────────────────────────────────────
+    # Beside the database, NOT under LIBRARY_ROOT (Ryan, 2026-08-25). Performer
+    # and venue photos live in the music library because they are about its
+    # contents; a person's own picture is about the INSTALL. A listener has no
+    # music library at all — putting an avatar there would mean Jeff cannot have
+    # a face.
+    # Derived from the DATABASE, not from DATA_DIR, and RESOLVED through any
+    # symlink (2026-08-25). Ryan's library file lives in Application Support
+    # with a symlink left at the old repo path so the twenty-odd scripts that
+    # hardcode it keep working. Without .resolve() a source run would put
+    # pictures in the repo and the installed app would put them in Application
+    # Support — one library, two faces, and neither app showing the other's.
+    #
+    # Following the database also gets the rigs right for free: a consumer node
+    # pointed at its own database gets its own avatars, which is correct — it is
+    # a different person's install.
+    AVATAR_DIR = os.environ.get("AVATAR_DIR") or str(
+        Path(DB_PATH).resolve().parent.parent / "avatars")
+
+    # ── ffmpeg ────────────────────────────────────────────────
+    # Full path to ffmpeg, when it is somewhere unusual. Normally unset:
+    # utils/transcode.resolve_ffmpeg() checks PATH and the usual Homebrew
+    # locations. Set this if a packaged app cannot find it — a double-clicked
+    # app gets a minimal PATH that excludes /opt/homebrew/bin.
+    FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or None
 
     # ── Peer-door rate limiting (2026-08-25) ──────────────────
     # /api/share/enroll is the only route reachable with no credentials, and

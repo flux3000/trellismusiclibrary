@@ -5,7 +5,7 @@ rating: nullable integer 0–100. Holistic listener score (show quality +
 experience). Separate from `quality` (technical recording grade letter).
 
 Run once:
-    cd ~/Workshop/dev/fluxaudio
+    cd ~/Workshop/dev/trellis
     python3 scripts/migrate_add_rating.py
 """
 

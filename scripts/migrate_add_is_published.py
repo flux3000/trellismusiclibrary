@@ -17,7 +17,7 @@ definition, in the library.
 Additive and idempotent — safe to re-run.
 
 Run once:
-    cd ~/Workshop/dev/fluxaudio
+    cd ~/Workshop/dev/trellis
     python3 scripts/migrate_add_is_published.py
 """
 

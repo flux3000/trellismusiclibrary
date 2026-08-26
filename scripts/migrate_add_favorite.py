@@ -9,7 +9,7 @@ boolean rather than a star scale.
 Additive and idempotent — safe to re-run.
 
 Run once:
-    cd ~/Workshop/dev/fluxaudio
+    cd ~/Workshop/dev/trellis
     python3 scripts/migrate_add_favorite.py
 """
 

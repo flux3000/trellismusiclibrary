@@ -6,7 +6,7 @@ Runs completely independently of Flux — own server, own UI, no database.
 ## Run it
 
 ```bash
-cd ~/Workshop/dev/fluxaudio/tools/quality
+cd ~/Workshop/dev/trellis/tools/quality
 pip3 install flask numpy scipy soundfile pyloudnorm --break-system-packages
 python3 quality_app.py
 ```
