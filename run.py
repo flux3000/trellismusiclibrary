@@ -37,7 +37,7 @@ app = create_app()
 # beside the database (Config.DATA_DIR), never inside the library itself --
 # the marker has to be readable before we know where the library even is.
 TRELLIS_ROOT_MARKER = Config.DATA_DIR / "trellis_root.json"
-TRELLIS_SUBFOLDERS  = ("Library", "Download", "Backlog", "Workshop")
+TRELLIS_SUBFOLDERS  = ("Trellis Music Library", "Download", "Backlog", "Workshop")
 
 
 def _read_trellis_root_marker():
@@ -90,7 +90,7 @@ def _apply_trellis_root(root):
     with the original default -- browsing in from an external drive should
     still work.
     """
-    app.config["LIBRARY_ROOT"] = str(root / "Library")
+    app.config["LIBRARY_ROOT"] = str(root / "Trellis Music Library")
     app.config["IMPORT_DIR"]   = str(root / "Download")
     app.config["TRIAGE_DIRS"]  = {
         "backlog":  str(root / "Backlog"),
@@ -177,7 +177,7 @@ def _setup_html():
   <div class="folders">Download &mdash; where new recordings land<br>
   Workshop &mdash; needs work before it's ready<br>
   Backlog &mdash; set aside during triage<br>
-  Library &mdash; your collection</div>
+  Trellis Music Library &mdash; your collection</div>
   <p>You can change the folder later. For now, pick where it should start.</p>
   <button id="choose">Choose Location&hellip;</button>
   <div id="status"></div>
@@ -399,11 +399,11 @@ class FluxAPI:
         """
         First-run only. The user picked a parent folder via pick_folder() and
         typed a name for themselves; this creates
-        <parent>/Trellis/{Library,Download,Backlog,Workshop}, remembers the
-        folder choice for next launch, patches the already-running app's
-        config -- Flask started before this could possibly be known -- and
-        creates the owner account under the chosen name. Called from the
-        setup page's JS.
+        <parent>/Trellis/{Trellis Music Library,Download,Backlog,Workshop},
+        remembers the folder choice for next launch, patches the already-
+        running app's config -- Flask started before this could possibly be
+        known -- and creates the owner account under the chosen name. Called
+        from the setup page's JS.
 
         The account only gets created here on a genuinely empty database --
         first_run_setup() skips its own automatic account for exactly this

@@ -38,8 +38,9 @@ no Open option in sight. Two ways past it, once, and only once:
 
 The first time it actually opens, it asks two things: what to call you, and
 where to keep your library. It creates a **Trellis** folder there, with
-Download, Workshop, Backlog, and Library folders inside it. Both can change
-later; something has to be chosen once before there's a library to open.
+Download, Workshop, Backlog, and Trellis Music Library folders inside it.
+Both can change later; something has to be chosen once before there's a
+library to open.
 
 The rest of this README is for building from source.
 
