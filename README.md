@@ -1,23 +1,21 @@
 # Trellis Music Library
 
-A home for a live music collection — built first for the people who keep one.
+A home for a live music collection, built for the people who keep one.
 
-Trellis is for people who collect live concert recordings — the tapes
-taper-friendly artists have long permitted fans to record and trade freely,
-on the understanding that no money ever changes hands.
+Trellis is for people who collect live concert recordings: the tapes
+taper-friendly artists have long let fans record and trade freely.
 
-It's an **archivist's tool** — ingest a folder of FLACs, and Trellis reads the
-taper's info file and files the show properly, with metadata editing and
-quality scoring built in. And it's a **listener's app** — browse a library by
-performer, venue, artist, genre, or date, and play what you find.
+It does two things. As an archivist's tool, it takes a folder of FLACs,
+reads the taper's info file, and files the show properly, with metadata
+editing and quality scoring built in. As a listener's app, it's just a good
+way to browse a library, by performer, venue, artist, genre, or date, and
+play what you find.
 
-The two meet at **peer sharing**. Every install is a full node — your own
-library, your own database, no central server and no company account in the
+The two meet at peer sharing. Every install is a full node: your own
+library, your own database, no central server, no company account in the
 middle. Invite someone and they browse and stream your collection from their
 own copy of Trellis, with no ability to change anything on your end. You
-don't have to be a collector to use it that way — and because a Trellis
-library is just files and a database someone owns, it doesn't depend on any
-platform staying online.
+don't have to be a collector to use it that way.
 
 ---
 
