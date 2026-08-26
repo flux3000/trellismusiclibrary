@@ -20,6 +20,12 @@ import numpy as np
 from scipy import signal
 import soundfile as sf
 
+# Only for naming what WAS found when nothing FLAC-decodable was (the .shn/
+# .ape/etc formats select_tracks below doesn't read). Deliberately not a
+# structural dependency the other direction — ingest.py has no reason to
+# import anything from the quality engine.
+from app.utils.ingest import RESOLVE_AUDIO_EXTS
+
 # Bumped to "2" on 2026-07-31: crowd_snr_db, noise_nonstationarity_db and
 # modulation_index were added to analyse_window(). Rows extracted at version 1
 # do not contain them, so they must be re-decoded rather than merely re-scored —
@@ -101,6 +107,35 @@ def _db(x, floor=-140.0):
 # ═════════════════════════════════════════════════════════════════════════════
 # Track + window selection
 # ═════════════════════════════════════════════════════════════════════════════
+def _other_audio_extensions(folder):
+    """
+    What audio-*like* files actually sit in `folder` when select_tracks()
+    found no .flac. Mirrors select_tracks' own root-then-recurse preference,
+    for the same reason: an un-flattened recording has an empty root, and a
+    folder with its own (unsupported) audio shouldn't get bothered by
+    whatever sits in a nested duplicate below it.
+
+    Returns a sorted list of extensions (e.g. [".shn"]), or [] when the
+    folder really does hold nothing audio-shaped — the plain "no flac files"
+    case, same as always.
+    """
+    safe = glob.escape(folder)
+    other_exts = RESOLVE_AUDIO_EXTS - {".flac"}
+
+    def _scan(pattern):
+        found = set()
+        for p in glob.glob(pattern, recursive=True):
+            ext = os.path.splitext(p)[1].lower()
+            if ext in other_exts:
+                found.add(ext)
+        return found
+
+    found = _scan(os.path.join(safe, "*"))
+    if not found:
+        found = _scan(os.path.join(safe, "**", "*"))
+    return sorted(found)
+
+
 def select_tracks(folder):
     """
     Choose which tracks to sample. Three rules, deliberately simple.
@@ -149,6 +184,9 @@ def select_tracks(folder):
         # Path-string sort keeps discs in order: CD1/* then CD2/*.
         paths = sorted(glob.glob(os.path.join(safe, "**", "*.flac"), recursive=True))
     if not paths:
+        other = _other_audio_extensions(folder)
+        if other:
+            return None, "no flac files (found %s instead — not supported yet)" % ", ".join(other)
         return None, "no flac files"
 
     durations = {}

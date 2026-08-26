@@ -98,8 +98,19 @@ _TEXT_PREFER_WORDS = {
 # track). Show RESOLUTION needs to recognise a folder as "containing audio" even
 # for formats the ingest pipeline itself won't take, or a folder of .ape files
 # looks like an empty grouping folder and gets silently walked past.
+# .shn added 2026-08-26 (Ryan — a Shorten-sourced show from gdarchive.net):
+# without it, a folder of nothing but .shn was completely invisible rather
+# than recognised-but-unsupported, and "Add Recordings" reported a bare
+# "no audio folders found" with nothing pointing at why.
 RESOLVE_AUDIO_EXTS = {".flac", ".mp3", ".wav", ".aiff", ".aif",
-                      ".m4a", ".ogg", ".ape", ".wv"}
+                      ".m4a", ".ogg", ".ape", ".wv", ".shn"}
+
+# Recognised as audio by RESOLVE_AUDIO_EXTS, but not a format the ingest
+# pipeline can actually read a track from. scan_folder() sorts files matching
+# this into their own bucket rather than the generic "other files" pile, so
+# the UI can say what's actually wrong ("6 .shn files — not supported yet")
+# instead of a show silently scoring zero with no explanation.
+UNSUPPORTED_AUDIO_EXTENSIONS = RESOLVE_AUDIO_EXTS - AUDIO_EXTENSIONS
 
 
 def _root_audio_count(path):
@@ -313,20 +324,22 @@ def scan_folder(folder_path):
 
     Returns:
       {
-        "audio_files":    [ { index, filename, path, set_number } ],
-        "text_files":     [ { filename, path, score } ],   # sorted best-first
-        "fingerprints":   [ { type, filename, path } ],
-        "other_files":    [ { filename, path } ],
-        "sets_detected":  bool,   # True when multi-set subdir structure was used
+        "audio_files":       [ { index, filename, path, set_number } ],
+        "text_files":        [ { filename, path, score } ],   # sorted best-first
+        "fingerprints":      [ { type, filename, path } ],
+        "unsupported_audio": [ { filename, path, ext } ],   # recognised audio format, but not one Trellis can read
+        "other_files":       [ { filename, path } ],
+        "sets_detected":     bool,   # True when multi-set subdir structure was used
       }
     """
     folder_path = str(folder_path)
     result = {
-        "audio_files":   [],
-        "text_files":    [],
-        "fingerprints":  [],
-        "other_files":   [],
-        "sets_detected": False,
+        "audio_files":       [],
+        "text_files":        [],
+        "fingerprints":      [],
+        "unsupported_audio": [],   # recognised as audio, but a format we can't read a track from
+        "other_files":       [],
+        "sets_detected":     False,
     }
 
     # ── Detect subdir structure ────────────────────────────────────────────────
@@ -428,6 +441,10 @@ def scan_folder(folder_path):
                 "filename": fname,
                 "path":     full,
                 "rel_path": os.path.relpath(full, folder_path),
+            })
+        elif ext in UNSUPPORTED_AUDIO_EXTENSIONS:
+            result["unsupported_audio"].append({
+                "filename": fname, "path": full, "ext": ext,
             })
         else:
             result["other_files"].append({"filename": fname, "path": full})

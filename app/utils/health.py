@@ -148,6 +148,21 @@ def compute_health(scan):
     # ── Final ratio ───────────────────────────────────────────────────────────
     if n_audio == 0 or total == 0:
         score = 0
+        # Say WHY there's no audio when we can (2026-08-26 — a .shn-only
+        # folder used to just score 0 with an empty factors list, no
+        # different from a genuinely empty directory). Not ai_recoverable:
+        # this is a file-format problem, nothing the AI Research Assistant
+        # can fill in.
+        unsupported = scan.get("unsupported_audio") or []
+        if unsupported:
+            exts = sorted({u.get("ext", "") for u in unsupported if u.get("ext")})
+            factors.append(_f(
+                "Audio", 0,
+                "%d file%s found in an unsupported format (%s) — not readable yet"
+                % (len(unsupported), "" if len(unsupported) == 1 else "s",
+                   ", ".join(exts)),
+                False,
+            ))
     else:
         score = max(0, min(100, round(100 * populated / total)))
     band = "green" if score >= 85 else "yellow" if score >= 60 else "red"

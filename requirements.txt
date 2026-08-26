@@ -22,16 +22,25 @@ python-dateutil>=2.9   # flexible date parsing for info file text
 geonamescache>=1.3     # local city/state/country lookup for location parsing
 matplotlib>=3.8        # spectrogram rendering
 anthropic>=0.40.0      # AI Research Assistant (BYOK) — web-search + vision
-keyring>=24            # OS keychain storage for the BYOK API key
+keyring>=24             # OS keychain storage for the BYOK API key
 
 # ── Listening Quality engine (app/utils/quality/) ──
 # Moved out of tools/ and into app runtime 2026-07-30. Librosa is deliberately
 # NOT used by this engine; soundfile's native seek decodes only the sampled
 # windows, which is what keeps analysis at ~2 s per recording.
-numpy>=1.26            # also used by utils/analysis.py
+numpy>=1.26            # also used by utils/analysis.py and librosa below
 scipy>=1.11            # STFT, filtering
 soundfile>=0.12        # windowed FLAC decode without loading whole files
 pyloudnorm>=0.1        # LUFS integrated loudness
+
+# ── Per-track analysis & spectrograms (utils/analysis.py, api/tracks.py) ──
+# A DIFFERENT feature from the quality engine above, and it does need the
+# full decode librosa does — BPM and spectral centroid aren't available from
+# soundfile's windowed reads. Pulls in numba/llvmlite/scikit-learn/pooch as
+# transitive deps (2026-08-26: was imported by both modules but never
+# actually listed here, which is why "librosa not installed" showed up on a
+# machine with everything else in this file already working).
+librosa>=0.10           # per-track BPM/spectral analysis + spectrogram data
 
 waitress>=3.0          # production WSGI server for run_headless.py / SERVER_MODE
 
