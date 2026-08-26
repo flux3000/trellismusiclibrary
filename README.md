@@ -1,21 +1,7 @@
 # Trellis Music Library
 
-A home for a live music collection, built for the people who keep one.
-
-Trellis is for people who collect live concert recordings: the tapes
-taper-friendly artists have long let fans record and trade freely.
-
-It does two things. As an archivist's tool, it takes a folder of FLACs,
-reads the taper's info file, and files the show properly, with metadata
-editing and quality scoring built in. As a listener's app, it's just a good
-way to browse a library, by performer, venue, artist, genre, or date, and
-play what you find.
-
-The two meet at peer sharing. Every install is a full node: your own
-library, your own database, no central server, no company account in the
-middle. Invite someone and they browse and stream your collection from their
-own copy of Trellis, with no ability to change anything on your end. You
-don't have to be a collector to use it that way.
+Trellis is a desktop app for organizing, browsing, and sharing a collection
+of live concert recordings.
 
 ---
 
