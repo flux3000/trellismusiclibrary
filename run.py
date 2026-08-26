@@ -25,6 +25,167 @@ from version import APP_NAME
 app = create_app()
 
 
+# ── First-run library location (2026-08-26) ──────────────────────────────
+#
+# config.py's LIBRARY_ROOT default is Ryan's own NAS mount -- correct on the
+# machine that mount was built for, meaningless anywhere else. Before this,
+# a fresh install just reported "library drive not mounted" and stopped,
+# with no way forward -- confirmed on a brand-new Mac Mini with none of that
+# infrastructure. Every other install has the identical problem.
+#
+# TRELLIS_ROOT_MARKER remembers a chosen location across launches. It lives
+# beside the database (Config.DATA_DIR), never inside the library itself --
+# the marker has to be readable before we know where the library even is.
+TRELLIS_ROOT_MARKER = Config.DATA_DIR / "trellis_root.json"
+TRELLIS_SUBFOLDERS  = ("Library", "Download", "Backlog", "Workshop")
+
+
+def _read_trellis_root_marker():
+    """The Trellis folder chosen on a previous run, or None."""
+    try:
+        data = json.loads(TRELLIS_ROOT_MARKER.read_text(encoding="utf-8"))
+        root = data.get("trellis_root")
+        return Path(root) if root else None
+    except Exception:
+        return None
+
+
+def _write_trellis_root_marker(root):
+    TRELLIS_ROOT_MARKER.parent.mkdir(parents=True, exist_ok=True)
+    TRELLIS_ROOT_MARKER.write_text(
+        json.dumps({"trellis_root": str(root)}), encoding="utf-8")
+
+
+def _looks_reachable(path):
+    """
+    Cheap, synchronous "can we list this" check -- good enough for a
+    one-time startup decision. Deliberately not the full library_mount.py
+    treatment (a threaded probe with a timeout, built for a mount that can
+    hang mid-request): this runs once, before the window even opens, so a
+    genuinely hung mount here just delays launch rather than wedging a live
+    Flask worker.
+    """
+    try:
+        os.listdir(path)
+        return True
+    except Exception:
+        return False
+
+
+def _apply_trellis_root(root):
+    """Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS at <root>'s four folders."""
+    app.config["LIBRARY_ROOT"] = str(root / "Library")
+    app.config["IMPORT_DIR"]   = str(root / "Download")
+    app.config["TRIAGE_DIRS"]  = {
+        "backlog":  str(root / "Backlog"),
+        "workshop": str(root / "Workshop"),
+    }
+
+
+def resolve_trellis_root_and_patch_config():
+    """
+    Decide where the library lives for THIS run and patch it into
+    app.config -- a live dict Flask already built from Config by the time
+    this runs, so editing Config itself here would do nothing.
+
+    Returns True if the app can go straight to its main window, False if
+    first-run setup (the folder picker) has to run first.
+    """
+    # An explicit env var always wins -- the two-node dev rig and any
+    # headless deployment depend on this, unchanged.
+    if os.environ.get("LIBRARY_ROOT"):
+        return True
+
+    marker = _read_trellis_root_marker()
+    if marker is not None:
+        _apply_trellis_root(marker)
+        return True
+
+    # Nothing chosen yet. If the old hardcoded default happens to be
+    # reachable right now (Ryan's NAS-mounted dev machine), keep working
+    # exactly as it always has -- this machine never needs the picker.
+    if _looks_reachable(Config.LIBRARY_ROOT):
+        return True
+
+    return False
+
+
+def _setup_html():
+    """
+    The one-time first-run screen. Inline, not a static file -- Flask isn't
+    serving anything yet at this point, and this only ever runs once per
+    machine. window.location.href navigates this same window over to the
+    real app once confirm_trellis_root() succeeds -- ordinary web navigation,
+    nothing PyWebView-specific needed for that part.
+    """
+    app_url = f"http://{Config.HOST}:{Config.PORT}"
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root {{ color-scheme: dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; height: 100vh; display: flex; align-items: center;
+    justify-content: center; background: #14161a; color: #e8e6e1;
+    font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }}
+  .card {{ max-width: 460px; padding: 40px; }}
+  h1 {{ font-size: 21px; margin: 0 0 16px; }}
+  p {{ font-size: 14px; line-height: 1.6; color: #b8b5ae; margin: 0 0 12px; }}
+  .folders {{
+    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px;
+    color: #d8d5ce; background: #1e2126; border-radius: 6px;
+    padding: 12px 16px; margin: 0 0 20px;
+  }}
+  button {{
+    font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
+    background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
+  }}
+  button:disabled {{ opacity: .5; cursor: default; }}
+  .chosen {{ margin-top: 14px; font-size: 13px; color: #8fbf7f; word-break: break-all; }}
+  .err {{ margin-top: 14px; font-size: 13px; color: #e0806a; }}
+</style></head>
+<body><div class="card">
+  <h1>Where should Trellis keep your library?</h1>
+  <p>Choose a location and Trellis will create a <strong>Trellis</strong> folder
+     there, with four folders inside it:</p>
+  <div class="folders">Download &mdash; where new recordings land<br>
+  Workshop &mdash; needs work before it's ready<br>
+  Backlog &mdash; set aside during triage<br>
+  Library &mdash; your collection</div>
+  <p>You can change this later. For now, pick where it should start.</p>
+  <button id="choose">Choose Location&hellip;</button>
+  <div id="status"></div>
+</div>
+<script>
+  const btn = document.getElementById('choose')
+  const status = document.getElementById('status')
+  btn.addEventListener('click', async () => {{
+    btn.disabled = true
+    status.className = ''
+    status.textContent = ''
+    try {{
+      const parent = await window.pywebview.api.pick_folder()
+      if (!parent) {{ btn.disabled = false; return }}
+      status.textContent = 'Setting up your library\u2026'
+      const result = await window.pywebview.api.confirm_trellis_root(parent)
+      if (result && result.ok) {{
+        status.className = 'chosen'
+        status.textContent = 'Created ' + result.root
+        window.location.href = {app_url!r}
+      }} else {{
+        status.className = 'err'
+        status.textContent = (result && result.error) || 'Something went wrong. Try again.'
+        btn.disabled = false
+      }}
+    }} catch (e) {{
+      status.className = 'err'
+      status.textContent = String(e)
+      btn.disabled = false
+    }}
+  }})
+</script></body></html>"""
+
+
 def first_run_setup():
     """
     Make an empty machine usable, once.
@@ -192,6 +353,25 @@ class FluxAPI:
         """Return the configured library root path (for display purposes only)."""
         return str(Config.LIBRARY_ROOT)
 
+    def confirm_trellis_root(self, parent_path):
+        """
+        First-run only. The user picked a parent folder via pick_folder();
+        this creates <parent>/Trellis/{Library,Download,Backlog,Workshop},
+        remembers the choice for next launch, and patches the already-
+        running app's config -- Flask started before this could possibly be
+        known. Called from the setup page's JS.
+        Returns {"ok": True, "root": "..."} or {"ok": False, "error": "..."}.
+        """
+        try:
+            root = Path(parent_path) / "Trellis"
+            for name in TRELLIS_SUBFOLDERS:
+                (root / name).mkdir(parents=True, exist_ok=True)
+            _write_trellis_root_marker(root)
+            _apply_trellis_root(root)
+            return {"ok": True, "root": str(root)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def open_in_browser(self, url):
         """
         Open a URL in the system's default browser (macOS: `open`).
@@ -252,20 +432,30 @@ if __name__ == "__main__":
     # Before anything serves a request: an empty machine gets a library.
     first_run_setup()
 
+    # Where does the library actually live on THIS machine? Patches
+    # app.config in place. Comes back False only on a genuinely fresh
+    # install with nothing configured and nothing reachable at the old
+    # default -- the window opens on the setup page instead of the real
+    # app until a folder is chosen.
+    trellis_root_ready = resolve_trellis_root_and_patch_config()
+
     # Flask runs in a daemon thread — dies when the window closes
     flask_thread = threading.Thread(target=start_flask, daemon=True)
     flask_thread.start()
 
     # PyWebView must own the main thread on macOS
     start_w, start_h = load_window_size()
-    window = webview.create_window(
+    window_kwargs = dict(
         title    = APP_NAME,
-        url      = f"http://{Config.HOST}:{Config.PORT}",
         js_api   = FluxAPI(),
         width    = start_w,
         height   = start_h,
         min_size = (MIN_W, MIN_H),
     )
+    if trellis_root_ready:
+        window = webview.create_window(url=f"http://{Config.HOST}:{Config.PORT}", **window_kwargs)
+    else:
+        window = webview.create_window(html=_setup_html(), **window_kwargs)
 
     # Track the size as it changes and write it once on the way out, rather than
     # writing on every resize event -- a single drag fires those continuously.

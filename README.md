@@ -2,9 +2,9 @@
 
 A home for a live music collection — built first for the people who keep one.
 
-Trellis is for collectors of **ROIO** (Recordings of Independent Origin): the
-live concert tapes that taper-friendly artists have long permitted fans to
-record and trade, on the understanding that no money ever changes hands.
+Trellis is for people who collect live concert recordings — the tapes
+taper-friendly artists have long permitted fans to record and trade freely,
+on the understanding that no money ever changes hands.
 
 It's an **archivist's tool** — ingest a folder of FLACs, and Trellis reads the
 taper's info file and files the show properly, with metadata editing and
@@ -26,8 +26,15 @@ platform staying online.
 Grab the latest build from [**Releases**](https://github.com/flux3000/trellismusiclibrary/releases)
 — no Python, no command line required.
 
-Builds are currently unsigned, so the first launch is refused by Gatekeeper:
-right-click the app → **Open** → **Open**, once per machine.
+The app isn't signed yet, so macOS blocks it outright the first time, with
+no Open option in sight. Two ways past it, once, and only once:
+
+- **Terminal:** `xattr -dr com.apple.quarantine "/path/to/Trellis Music Library.app"`,
+  then open it normally.
+- **No Terminal:** try to open it, dismiss the blocked dialog, then go to
+  System Settings → Privacy & Security → scroll down to the blocked-app
+  notice → **Open Anyway**. Open the app again and this time there's a real
+  Open button.
 
 The rest of this README is for building from source.
 
