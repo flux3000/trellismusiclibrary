@@ -9,7 +9,7 @@ question every support conversation starts with.
 Bump this, then tag the commit to match.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 # The app has two names on purpose (Ryan, 2026-08-25 — "we should be calling it
 # Trellis Music Library, not just Trellis").
