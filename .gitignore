@@ -43,6 +43,9 @@ temp/
 # Per-machine PyWebView window size, written on quit by run.py
 db/window_state.json
 
+# Per-machine first-run folder choice, written by confirm_trellis_root()
+db/trellis_root.json
+
 # Python
 __pycache__/
 *.py[cod]

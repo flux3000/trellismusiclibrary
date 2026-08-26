@@ -143,23 +143,40 @@ def _setup_html():
   button:disabled {{ opacity: .5; cursor: default; }}
   .chosen {{ margin-top: 14px; font-size: 13px; color: #8fbf7f; word-break: break-all; }}
   .err {{ margin-top: 14px; font-size: 13px; color: #e0806a; }}
+  label {{ display: block; font-size: 13px; color: #b8b5ae; margin: 4px 0 6px; }}
+  input.field {{
+    width: 100%; font-size: 14px; padding: 9px 12px; margin-bottom: 20px;
+    border-radius: 6px; border: 1px solid #3a3d43; background: #1e2126;
+    color: #e8e6e1; font-family: inherit;
+  }}
+  input.field:focus {{ outline: none; border-color: #d98f4e; }}
 </style></head>
 <body><div class="card">
-  <h1>Where should Trellis keep your library?</h1>
-  <p>Choose a location and Trellis will create a <strong>Trellis</strong> folder
-     there, with four folders inside it:</p>
+  <h1>Welcome to Trellis</h1>
+  <label for="username">What should we call you?</label>
+  <input id="username" class="field" type="text" placeholder="e.g. jeff" autocomplete="off">
+  <p>Now, choose a location and Trellis will create a <strong>Trellis</strong>
+     folder there, with four folders inside it:</p>
   <div class="folders">Download &mdash; where new recordings land<br>
   Workshop &mdash; needs work before it's ready<br>
   Backlog &mdash; set aside during triage<br>
   Library &mdash; your collection</div>
-  <p>You can change this later. For now, pick where it should start.</p>
+  <p>You can change the folder later. For now, pick where it should start.</p>
   <button id="choose">Choose Location&hellip;</button>
   <div id="status"></div>
 </div>
 <script>
   const btn = document.getElementById('choose')
   const status = document.getElementById('status')
+  const usernameInput = document.getElementById('username')
   btn.addEventListener('click', async () => {{
+    const username = usernameInput.value.trim()
+    if (!username) {{
+      status.className = 'err'
+      status.textContent = 'Tell us what to call you first.'
+      usernameInput.focus()
+      return
+    }}
     btn.disabled = true
     status.className = ''
     status.textContent = ''
@@ -167,7 +184,7 @@ def _setup_html():
       const parent = await window.pywebview.api.pick_folder()
       if (!parent) {{ btn.disabled = false; return }}
       status.textContent = 'Setting up your library\u2026'
-      const result = await window.pywebview.api.confirm_trellis_root(parent)
+      const result = await window.pywebview.api.confirm_trellis_root(parent, username)
       if (result && result.ok) {{
         status.className = 'chosen'
         status.textContent = 'Created ' + result.root
@@ -186,7 +203,7 @@ def _setup_html():
 </script></body></html>"""
 
 
-def first_run_setup():
+def first_run_setup(create_default_user=True):
     """
     Make an empty machine usable, once.
 
@@ -205,6 +222,14 @@ def first_run_setup():
     desktop app signs the owner in automatically because there is nothing to
     log in to on your own machine. If this database is ever pointed at a shared
     node, set a real password first — scripts/init_db.py is the way in.
+
+    create_default_user=False (2026-08-26) on a genuinely fresh install,
+    where the setup page is about to ask the person for a name instead of
+    settling for whatever their OS account is called. In that case this
+    still creates the schema — the User table has to exist before anyone can
+    be inserted into it — it just leaves the table empty. The account gets
+    created once, under the chosen name, by FluxAPI.confirm_trellis_root()
+    when the setup page's form is submitted.
     """
     if Config.DB_PATH.exists():
         return
@@ -229,7 +254,7 @@ def first_run_setup():
     Config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with app.app_context():
         db.create_all()
-        if db.session.query(User).first() is None:
+        if create_default_user and db.session.query(User).first() is None:
             try:
                 who = (getpass.getuser() or "").strip() or "owner"
             except Exception:
@@ -353,13 +378,23 @@ class FluxAPI:
         """Return the configured library root path (for display purposes only)."""
         return str(Config.LIBRARY_ROOT)
 
-    def confirm_trellis_root(self, parent_path):
+    def confirm_trellis_root(self, parent_path, username=None):
         """
-        First-run only. The user picked a parent folder via pick_folder();
-        this creates <parent>/Trellis/{Library,Download,Backlog,Workshop},
-        remembers the choice for next launch, and patches the already-
-        running app's config -- Flask started before this could possibly be
-        known. Called from the setup page's JS.
+        First-run only. The user picked a parent folder via pick_folder() and
+        typed a name for themselves; this creates
+        <parent>/Trellis/{Library,Download,Backlog,Workshop}, remembers the
+        folder choice for next launch, patches the already-running app's
+        config -- Flask started before this could possibly be known -- and
+        creates the owner account under the chosen name. Called from the
+        setup page's JS.
+
+        The account only gets created here on a genuinely empty database --
+        first_run_setup() skips its own automatic account for exactly this
+        case (its create_default_user flag). Anywhere that already has an
+        account, including the "old default happened to be reachable" case
+        that skips this page entirely, this leaves it alone rather than
+        renaming it out from under someone.
+
         Returns {"ok": True, "root": "..."} or {"ok": False, "error": "..."}.
         """
         try:
@@ -368,9 +403,44 @@ class FluxAPI:
                 (root / name).mkdir(parents=True, exist_ok=True)
             _write_trellis_root_marker(root)
             _apply_trellis_root(root)
-            return {"ok": True, "root": str(root)}
         except Exception as e:
             return {"ok": False, "error": str(e)}
+
+        try:
+            self._create_owner_account(username)
+        except Exception as e:
+            return {"ok": False, "error": f"Folder created, but account setup failed: {e}"}
+
+        return {"ok": True, "root": str(root)}
+
+    def _create_owner_account(self, username):
+        """
+        Create the owner account under `username` -- same random-password,
+        thrown-away-on-the-spot, auto-login design as first_run_setup(); see
+        that docstring for why nobody ever types a password on this machine.
+
+        No-ops if an account already exists, so a retried submission (say,
+        the folder step succeeded but this failed the first time) never
+        tries to create a second one.
+        """
+        import secrets
+        import bcrypt
+        from app.extensions import db
+        from app.models.user import User
+
+        with app.app_context():
+            if db.session.query(User).first() is not None:
+                return
+            who = (username or "").strip()[:64] or "owner"
+            db.session.add(User(
+                username      = who,
+                password_hash = bcrypt.hashpw(
+                    secrets.token_urlsafe(32).encode(), bcrypt.gensalt()).decode(),
+                role          = "admin",
+                all_artists   = True,
+                is_active     = True,
+            ))
+            db.session.commit()
 
     def open_in_browser(self, url):
         """
@@ -429,15 +499,20 @@ if __name__ == "__main__":
     # Ctrl-C should kill the process even while PyWebView owns the main thread
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
 
-    # Before anything serves a request: an empty machine gets a library.
-    first_run_setup()
-
     # Where does the library actually live on THIS machine? Patches
     # app.config in place. Comes back False only on a genuinely fresh
     # install with nothing configured and nothing reachable at the old
     # default -- the window opens on the setup page instead of the real
-    # app until a folder is chosen.
+    # app until a folder is chosen. Resolved BEFORE first_run_setup() so the
+    # latter knows whether a person is about to type a name into that page,
+    # or whether this machine is skipping straight to the main window and
+    # needs its usual automatic owner account.
     trellis_root_ready = resolve_trellis_root_and_patch_config()
+
+    # Before anything serves a request: an empty machine gets a database.
+    # The default owner account is only created here when the setup page
+    # isn't about to ask for a name instead -- see confirm_trellis_root().
+    first_run_setup(create_default_user=trellis_root_ready)
 
     # Flask runs in a daemon thread — dies when the window closes
     flask_thread = threading.Thread(target=start_flask, daemon=True)

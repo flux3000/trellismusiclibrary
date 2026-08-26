@@ -36,6 +36,11 @@ no Open option in sight. Two ways past it, once, and only once:
   notice → **Open Anyway**. Open the app again and this time there's a real
   Open button.
 
+The first time it actually opens, it asks two things: what to call you, and
+where to keep your library. It creates a **Trellis** folder there, with
+Download, Workshop, Backlog, and Library folders inside it. Both can change
+later; something has to be chosen once before there's a library to open.
+
 The rest of this README is for building from source.
 
 ## Requirements
@@ -65,6 +70,21 @@ states the exact versions a given release was built from.
 python3 run.py            # native window, desktop app
 python3 run_headless.py   # no window, for a machine that only serves
 ```
+
+Running from a source checkout, you'll hit a real login screen. The
+installed app signs itself in automatically since there's nothing to log
+in to on your own machine, so `first_run_setup()` creates one admin
+account with a password that's generated and thrown away on the spot.
+Nobody, including the app, knows it. From source, set one of these so the
+same auto-login applies:
+
+```bash
+SINGLE_USER_DESKTOP=true python3 run.py
+```
+
+`DEV_MODE=true` does the same thing and also turns on debug logging.
+Neither is needed once the app is built: the packaged `.app` sets this
+automatically and the login screen never appears.
 
 Headless mode is configured by environment variables: `FLUX_PORT`,
 `FLUX_DB_PATH`, `SHARE_BASE_URL`, `SECRET_KEY`, `FLUX_COOKIE_NAME`.
