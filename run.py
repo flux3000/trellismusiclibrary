@@ -73,13 +73,30 @@ def _looks_reachable(path):
 
 
 def _apply_trellis_root(root):
-    """Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS at <root>'s four folders."""
+    """
+    Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS/IMPORT_ROOTS at <root>'s four
+    folders.
+
+    IMPORT_ROOTS (2026-08-26) matters just as much as the other three and is
+    easy to forget: it's the allowlist every filesystem-reading endpoint
+    checks a folder against before it will browse, import, triage-move, or
+    stream from it (app/api/quality.py, app/api/stream.py) -- config.py
+    computes it once, from the OLD hardcoded default, at class-definition
+    time. Patching the other three keys without this one means "Add
+    Recordings" (and playback) rejects every folder under a freshly chosen
+    root as "outside the permitted import roots," having never heard of it.
+    Set to the whole Trellis root, not just Library, since Download/Backlog/
+    Workshop all need to pass this same check. "/Volumes" is kept for parity
+    with the original default -- browsing in from an external drive should
+    still work.
+    """
     app.config["LIBRARY_ROOT"] = str(root / "Library")
     app.config["IMPORT_DIR"]   = str(root / "Download")
     app.config["TRIAGE_DIRS"]  = {
         "backlog":  str(root / "Backlog"),
         "workshop": str(root / "Workshop"),
     }
+    app.config["IMPORT_ROOTS"] = [str(root), "/Volumes"]
 
 
 def resolve_trellis_root_and_patch_config():
