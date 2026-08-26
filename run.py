@@ -36,8 +36,11 @@ app = create_app()
 # TRELLIS_ROOT_MARKER remembers a chosen location across launches. It lives
 # beside the database (Config.DATA_DIR), never inside the library itself --
 # the marker has to be readable before we know where the library even is.
-TRELLIS_ROOT_MARKER = Config.DATA_DIR / "trellis_root.json"
-TRELLIS_SUBFOLDERS  = ("Trellis Music Library", "Download", "Backlog", "Workshop")
+TRELLIS_ROOT_MARKER     = Config.DATA_DIR / "trellis_root.json"
+# The folder name a person sees in Finder, chosen 2026-08-26 (Ryan): the
+# short "Trellis" collided visually with the code repo of the same name.
+TRELLIS_ROOT_FOLDER_NAME = "Trellis Music Library"
+TRELLIS_SUBFOLDERS       = ("Library", "Download", "Backlog", "Workshop")
 
 
 def _read_trellis_root_marker():
@@ -90,7 +93,7 @@ def _apply_trellis_root(root):
     with the original default -- browsing in from an external drive should
     still work.
     """
-    app.config["LIBRARY_ROOT"] = str(root / "Trellis Music Library")
+    app.config["LIBRARY_ROOT"] = str(root / "Library")
     app.config["IMPORT_DIR"]   = str(root / "Download")
     app.config["TRIAGE_DIRS"]  = {
         "backlog":  str(root / "Backlog"),
@@ -172,12 +175,10 @@ def _setup_html():
   <h1>Welcome to Trellis</h1>
   <label for="username">What should we call you?</label>
   <input id="username" class="field" type="text" placeholder="e.g. jeff" autocomplete="off">
-  <p>Now, choose a location and Trellis will create a <strong>Trellis</strong>
-     folder there, with four folders inside it:</p>
-  <div class="folders">Download &mdash; where new recordings land<br>
-  Workshop &mdash; needs work before it's ready<br>
-  Backlog &mdash; set aside during triage<br>
-  Trellis Music Library &mdash; your collection</div>
+  <p>Choose a location below. Trellis will create a
+     &ldquo;<strong>{TRELLIS_ROOT_FOLDER_NAME}</strong>&rdquo; folder there,
+     with four folders inside of it:</p>
+  <div class="folders">{", ".join(TRELLIS_SUBFOLDERS)}</div>
   <p>You can change the folder later. For now, pick where it should start.</p>
   <button id="choose">Choose Location&hellip;</button>
   <div id="status"></div>
@@ -399,7 +400,7 @@ class FluxAPI:
         """
         First-run only. The user picked a parent folder via pick_folder() and
         typed a name for themselves; this creates
-        <parent>/Trellis/{Trellis Music Library,Download,Backlog,Workshop},
+        <parent>/Trellis Music Library/{Library,Download,Backlog,Workshop},
         remembers the folder choice for next launch, patches the already-
         running app's config -- Flask started before this could possibly be
         known -- and creates the owner account under the chosen name. Called
@@ -415,7 +416,7 @@ class FluxAPI:
         Returns {"ok": True, "root": "..."} or {"ok": False, "error": "..."}.
         """
         try:
-            root = Path(parent_path) / "Trellis"
+            root = Path(parent_path) / TRELLIS_ROOT_FOLDER_NAME
             for name in TRELLIS_SUBFOLDERS:
                 (root / name).mkdir(parents=True, exist_ok=True)
             _write_trellis_root_marker(root)
