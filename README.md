@@ -1,6 +1,6 @@
 # Trellis Music Library
 
-Trellis is music library software for live recording collectors.
+Trellis is a music library manager for live recording collectors and aficionados.
 
 ---
 
