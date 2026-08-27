@@ -1,7 +1,6 @@
 # Trellis Music Library
 
-Trellis is a desktop app for organizing, browsing, and sharing a collection
-of live concert recordings.
+Trellis is music library software for live recording collectors.
 
 ---
 
