@@ -19,12 +19,6 @@ no Open option in sight. Two ways past it, once, and only once:
   notice → **Open Anyway**. Open the app again and this time there's a real
   Open button.
 
-The first time it actually opens, it asks two things: what to call you, and
-where to keep your library. It creates a **Trellis** folder there, with
-Download, Workshop, Backlog, and Trellis Music Library folders inside it.
-Both can change later; something has to be chosen once before there's a
-library to open.
-
 The rest of this README is for building from source.
 
 ## Requirements
