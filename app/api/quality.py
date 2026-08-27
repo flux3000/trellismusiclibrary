@@ -553,6 +553,25 @@ def _attach_concerns(results):
             concerns.append({"level": "error", "kind": "checksum",
                              "text": f"{n} track{'' if n == 1 else 's'} failed checksum verification"})
 
+        # A checksum FILE that couldn't be read at all (corrupt, unreadable,
+        # gone missing between scan and read) is a different failure than a
+        # mismatch — utils/checksums.py catches the OSError, tags that file
+        # with "error", and skips it out of `summary` entirely, so nothing
+        # above ever counted it. Left alone, that file's tracks silently fall
+        # back to "unverified" — the same badge as "we just haven't run the
+        # deep check yet" — and the actual read failure is visible only if
+        # you open the Fingerprints tab and read that one file's row (Ryan,
+        # 2026-08-27: "a failed fingerprint scan" must be exposed at
+        # ingestion prep, not buried a click away).
+        errored_fp_files = [f["filename"] for f in (fp.get("files") or []) if f.get("error")]
+        if errored_fp_files:
+            n = len(errored_fp_files)
+            first = errored_fp_files[0]
+            more = f" (+{n - 1} more)" if n > 1 else ""
+            concerns.append({"level": "error", "kind": "checksum_scan_failed",
+                             "text": f"Could not read checksum file {first}{more} — "
+                                     f"its tracks could not be verified"})
+
         # Technical issues are already computed by the engine; surfacing the
         # phase/dead-channel class here means they are visible without opening
         # a tab, which is the whole point of a concerns line.
@@ -735,17 +754,29 @@ def browse():
     except PermissionError:
         return jsonify({"error": f"No permission to read {path}"}), 403
 
-    dirs = []
+    # A folder holding one recording has no sub-folders at all — just audio
+    # plus its FFP/MD5/TXT paperwork sitting right there — and the picker
+    # used to have nothing to show for that but "No sub-folders here",
+    # which reads as an empty folder rather than the one you're looking at
+    # (Ryan, 2026-08-27). List files alongside dirs so landing on that folder
+    # shows what's actually in it.
+    dirs, files = [], []
     for name in entries:
         if name.startswith("."):
             continue
         full = os.path.join(path, name)
-        if not os.path.isdir(full):
-            continue
-        has_audio, subdirs, subdir_count, size_bytes = _probe_folder(full, AUDIO_EXT)
-        dirs.append({"name": name, "path": full,
-                     "audio": has_audio, "subdirs": subdirs,
-                     "subdir_count": subdir_count, "size_bytes": size_bytes})
+        if os.path.isdir(full):
+            has_audio, subdirs, subdir_count, size_bytes = _probe_folder(full, AUDIO_EXT)
+            dirs.append({"name": name, "path": full,
+                         "audio": has_audio, "subdirs": subdirs,
+                         "subdir_count": subdir_count, "size_bytes": size_bytes})
+        else:
+            try:
+                size_bytes = os.path.getsize(full)
+            except OSError:
+                size_bytes = 0
+            ext = os.path.splitext(name)[1].lstrip(".").upper()
+            files.append({"name": name, "ext": ext, "size_bytes": size_bytes})
 
     # Bulk Import's standing convention is one folder per act
     # (ImportDir/Performer Name/Show Folder/ — see _cleanup_empty_parent's
@@ -767,6 +798,7 @@ def browse():
         "redirected_from": redirected_from,
         "parent": None if parent == path else parent,
         "dirs": dirs,
+        "files": files,
         "here_has_audio": any(e.lower().endswith(AUDIO_EXT) for e in entries),
         "shortcuts": _shortcuts(),
     })

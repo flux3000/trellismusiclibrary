@@ -105,7 +105,8 @@
      well as on .rec-view-shell so a stray .slide-panel outside that shell still
      resolves calc() rather than collapsing to width:auto. */
   --rec-panel-w: 42%;
-  --player-h:  68px;
+  --player-h:  84px;   /* was 68px — bar read as smushed with no vertical
+                          padding at all (Ryan, 2026-08-27) */
   --header-h:   58px;   /* +12px, Ryan 2026-08-23 */
   --r-sm: 4px;
   --r-md: 8px;
@@ -727,11 +728,14 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .pp-hero-main { flex: 1; min-width: 0; }
 .pp-hero-portrait { flex: 0 0 104px; }
 
-/* Ring is the genre colour, tying the page to its Browse card. */
+/* Ring is the genre colour, tying the page to its Browse card. Square as of
+   2026-08-27 (Ryan, experimental, site-wide) — used to be circular with
+   Venue deliberately overridden to square below so the two pages read as
+   different entity types; that distinction is gone now that both are
+   square, so the override below is a harmless no-op kept for the day this
+   reverses rather than deleted. */
 .pp-portrait-img, .pp-portrait-blank {
-  width: 104px; height: 104px; border-radius: 50%;
-  /* Venue overrides this to a square below — a place is not a person, and the
-     silhouette shape is the cheapest way to tell the two pages apart. */
+  width: 104px; height: 104px; border-radius: var(--r-md);
   border: 3px solid var(--ring, var(--bd-1)); background: var(--bg-3);
   display: block; object-fit: cover;
 }
@@ -1342,26 +1346,24 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 /* ── Recording detail view ──────────────────────────────────────────────────── */
 
-/* Back link + collections, one row (Ryan, 2026-07-15 — collections used to
-   live inside the top-right box; moved up here, aligned with the back link). */
-/* The back link that used to sit at the left of this row was removed
-   2026-08-22 (the App Header's arrow replaced it), so the action cluster is
-   all that is left and it hangs off the right. */
-.rec-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 16px;
-  padding: 16px 28px 0;
-}
-.rec-top-row .rec-collections { margin-bottom: 0; }
+/* Action cluster (collections, favorite, Actions menu) — lives inside
+   .rec-header-main as of 2026-08-27, right-aligned opposite .rec-header-left,
+   both flex-start so it sits level with the top of the avatar/name instead of
+   stacked above it in its own row (which is what it was until Ryan asked for
+   this — it used to align with a back link that was removed 2026-08-22, and
+   once that link was gone the row was just this cluster floating with dead
+   space below it). */
+.rec-header-actions { flex-shrink: 0; }
+.rec-header-actions .rec-collections { margin-bottom: 0; }
 
-/* Two stacked rows: .rec-header-main (avatar + name/date/personnel/provenance)
-   then Notes across the full width. Single-column since 2026-08-21, when the
-   Source/Lineage/Quality block was broken up — Quality went to the action row
-   above, Source and Lineage down beside Members and Guests. */
+/* Two stacked rows: .rec-header-main (avatar + name/date/personnel/provenance,
+   sharing its row with .rec-header-actions on the right) then Notes across
+   the full width. Single-column since 2026-08-21, when the Source/Lineage/
+   Quality block was broken up — Quality briefly lived in the action row
+   above (reversed 2026-08-27: it's back beside Source and Lineage, see
+   .rec-sl-row). */
 .rec-detail-header {
-  padding: 10px 28px 18px;
+  padding: 16px 28px 18px;
   border-bottom: 1px solid var(--bd-0);
   display: flex;
   flex-direction: column;
@@ -1370,6 +1372,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-header-main {
   display: flex;
   align-items: flex-start;
+  justify-content: space-between;
   gap: 24px;
 }
 
@@ -1390,7 +1393,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    wants. It now spans the name AND date lines, which is also why the meta block
    opposite it aligns to the date line rather than the name. */
 .rec-header-photo {
-  width: 84px; height: 84px; border-radius: 50%; object-fit: cover;
+  width: 84px; height: 84px; border-radius: var(--r-md); object-fit: cover;
   border: 2px solid var(--genre-fg, var(--bd-1)); background: var(--bg-2);
   display: block;
 }
@@ -1408,35 +1411,10 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    into the Side Panel there is one pane left, and a box with a tab strip for a
    single pane is furniture around three rows of text. */
 /* .rec-header-right REMOVED 2026-08-21. Source / Lineage / Quality stopped
-   being one block: they were never one thing. Quality is a human verdict on the
-   whole recording and the attribute a collector sorts and chooses by, so it
-   moved UP to the action row at full size (.rec-quality-chip). Source and
-   Lineage are the tape's paperwork, so they moved DOWN beside Members and
-   Guests (.rec-sl-row), where the show's other supporting facts already sit.
-   The header is a single column again. */
-
-/* Quality, promoted (Ryan, 2026-08-21) — in the action row beside Add to
-   Collection, and deliberately the largest thing in that row. It is a human
-   judgement about the whole recording, and on a shelf of ROIO it is the number
-   a collector chooses by; at 12px in a three-row block it read as one field
-   among many. Still quick-editable in place: the .hm-val cell inside is what
-   the delegated handler targets. */
-.rec-quality-chip {
-  display: inline-flex; align-items: center; gap: 9px;
-  padding: 2px 12px 2px 11px;
-  border: 1px solid var(--bd-1); border-radius: 13px;
-  white-space: nowrap;
-}
-.rec-quality-lbl {
-  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--t3);
-}
-.rec-quality-chip .hm-val { line-height: 1; }
-.rec-quality-chip .quality { font-size: 18px; line-height: 1; }
-
-/* Source + Lineage, demoted to one quiet row under Guests. Left edge and label
-   treatment match .mg-row so the three read as one stack of supporting facts.
-   Lineage takes the remaining width because it is the one that can be long. */
+   being one block: Quality briefly lived alone in the action row at full size;
+   reversed 2026-08-27 (Ryan) — Rating now sits IN .rec-sl-row, left of Source,
+   so Rating/Source/Lineage read as one stack of supporting facts. The header
+   is a single column. */
 .rec-sl-row {
   display: flex;
   flex-wrap: wrap;
@@ -1446,6 +1424,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   margin: 4px 0 6px;
 }
 .rec-sl-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rec-sl-item--quality { flex: 0 0 auto; }
 .rec-sl-item--lineage { flex: 1 1 260px; min-width: 0; }
 .rec-sl-item--lineage .hm-val {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2235,7 +2214,10 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   display: grid;
   grid-template-columns: 240px 1fr 200px;
   align-items: center;
-  padding: 0 20px;
+  /* Deliberately asymmetric: more room below the timeline than above the
+     transport buttons, per Ryan 2026-08-27 — was 0 vertical padding, which
+     is why the bar read as smushed against the window edge. */
+  padding: 10px 20px 16px;
   gap: 16px;
   flex-shrink: 0;
 }
@@ -2716,6 +2698,11 @@ input[type="range"].progress-bar {
   background: var(--bd-1);
   margin: 0 4px;
 }
+
+/* AirPlay button states. Base look borrows .player-btn as-is on purpose —
+   this is a functional placeholder ahead of the player-bar redesign. */
+.airplay-btn.is-active { color: var(--accent); }
+.airplay-btn.is-unavailable { opacity: 0.35; cursor: default; }
 
 /* ── Skip non-music toggle ──────────────────────────────────────────────────── */
 
@@ -3623,7 +3610,12 @@ input[type="range"].progress-bar {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 6px 8px;
   border-radius: var(--r-sm);
-  background: var(--bg-1);
+  /* Was var(--bg-1) — the SIDEBAR/player shade, not the main content area
+     this actually sits in (var(--bg-2)), which read as a faint mismatched
+     tint (Ryan, 2026-08-27). Transparent blends into whatever's behind it in
+     every context .mg-row is reused in, rather than hardcoding a shade that
+     only happened to be close in one of them. */
+  background: transparent;
 }
 .mg-row-label {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
@@ -3899,7 +3891,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .nav-fav-row:hover { background: var(--bg-1); }
 .nav-fav-avatar {
-  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: var(--r-sm); flex-shrink: 0;
   object-fit: cover; background: var(--bg-3);
 }
 /* Initials fallback — same idiom as heroPortraitHtml()'s, shrunk down: with
@@ -5290,11 +5282,20 @@ a.member-chip-name:hover { color: var(--accent); }
    before sets this footer apart from the metadata editor above it. */
 .ingest-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   padding: 10px 20px;
   border-top: 1px solid var(--bd-0);
   background: var(--accent-dim);
+}
+.ingest-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ingest-actions-left select {
+  background: var(--bg-1); border: 1px solid var(--bd-1); color: var(--t0);
+  border-radius: var(--r-sm); padding: 4px 8px; font-size: 12px;
 }
 
 /* Tracks (N) header row + the relocated preview player, right-aligned
@@ -5630,13 +5631,6 @@ a.member-chip-name:hover { color: var(--accent); }
                           hard outer clip so it can never blow out the layout */
   border-bottom: 1px solid rgba(0,200,180,0.12);
 }
-.rec-waveform-zoom-slider {
-  position: absolute;
-  top: 6px;
-  right: 12px;
-  z-index: 2;
-  width: 110px;
-}
 
 /* ── Spectrogram — inside slide pane ────────────────────────────────────────── */
 
@@ -5898,6 +5892,11 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-dir:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .lq-dir--empty { color: var(--t3); cursor: default; padding: 6px 9px; }
 .lq-dir--empty:hover { background: none; }
+/* A plain file in the listing — not a folder to enter, so no pointer cursor
+   and no hover highlight; the name reads a shade dimmer than a folder's. */
+.lq-file { cursor: default; }
+.lq-file:hover { background: none; }
+.lq-file .nm { color: var(--t1); }
 .lq-dir .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Performer-implied-by-folder-name badge (2026-08-22). Uses the shared
@@ -5905,7 +5904,6 @@ a.member-chip-name:hover { color: var(--accent); }
    "new" gets the same accent treatment as everything else worth noticing;
    "existing" stays deliberately quiet since it's the unremarkable case. */
 .lq-perf-badge { flex: none; }
-.lq-perf-badge--new      { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-lit); }
 .lq-perf-badge--existing { background: var(--bg-5); color: var(--t3); }
 
 .lq-dir-count, .lq-dir-size {
@@ -5945,13 +5943,37 @@ a.member-chip-name:hover { color: var(--accent); }
 
 /* ── Progress + run bar ──────────────────────────────────────────────────── */
 .lq-progress { display: flex; align-items: center; gap: 12px; margin: 14px 0; font-size: 12.5px; color: var(--t2); }
-.lq-progress-bar { flex: 1; height: 4px; background: var(--bg-5); border-radius: 2px; overflow: hidden; }
-.lq-progress-bar i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+.lq-progress-bar {
+  flex: 1; height: 6px; background: var(--bg-5); border-radius: 3px; overflow: hidden;
+}
+.lq-progress-bar i {
+  display: block; height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-lit) 100%);
+  transition: width .3s ease;
+}
+.lq-progress-count { font-family: var(--font-mono); color: var(--t1); flex: none; }
+.lq-progress-current { color: var(--t2); flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lq-runbar {
   display: flex; align-items: center; gap: 16px;
   padding: 12px 0 16px; border-bottom: 1px solid var(--bd-0); margin-bottom: 16px;
 }
 .lq-run-note { font-size: 12.5px; color: var(--t2); }
+/* Tier chips — one-click filter into Sound Quality's own High/Medium/Low
+   bands, feeding both the visible card list and "Ingest N" (Ryan, 2026-08-27,
+   Direction A from the ingest-redesign specimen). */
+.lq-tierbar { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; flex-wrap: wrap; }
+.lq-tierchip {
+  display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 500; color: var(--t2); border: 1px solid var(--bd-1);
+  background: var(--bg-3); cursor: pointer; font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.lq-tierchip:hover { color: var(--t0); background: var(--bg-4); }
+.lq-tierchip.on { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-lit); }
+.lq-tierdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.lq-tierchip-n { color: var(--t3); }
+.lq-tierchip.on .lq-tierchip-n { color: var(--accent-lit); }
+
 .lq-behavior { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--t2); margin-left: auto; }
 .lq-behavior select {
   background: var(--bg-1); border: 1px solid var(--bd-1); color: var(--t0);
@@ -5972,6 +5994,14 @@ a.member-chip-name:hover { color: var(--accent); }
   border-radius: var(--r-lg); padding: 16px 18px;
 }
 .lq-card--pending { opacity: .6; }
+/* The one card actually being analyzed right now, out of possibly hundreds
+   still queued behind it — distinguished by a lit accent edge rather than
+   dimmed like its queued siblings (Ryan, 2026-08-26: "not showing any sort
+   of progress indicator for an individual recording"). */
+.lq-card--active {
+  opacity: 1;
+  border-left: 2px solid var(--accent);
+}
 /* flex-start, not center (2026-08-02): with actions on the right and a
    two-or-three-line title block on the left, centring floated the title
    against a taller neighbour. The title is the anchor — it pins to the top. */
@@ -5991,7 +6021,6 @@ a.member-chip-name:hover { color: var(--accent); }
   font-family: var(--font-ui);
 }
 .lq-qline .sep { color: var(--bd-2); }
-.lq-qcut { border-bottom: 1px dotted var(--t3); cursor: help; }
 
 /* Three-band verdict, replacing the numeric headline (2026-07-31).
    Set as a pill so it reads as a categorical call rather than a value on a
@@ -6121,9 +6150,6 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-minfo.lq-tip:hover ~ .lq-tipbox { visibility: visible; opacity: 1; }
 .lq-tipbox .tt { font-weight: 600; margin-bottom: 5px; }
 .lq-tipbox .ab { color: var(--t1); }
-/* Cutoff tooltip in the quick line: anchor right so it never runs off the
-   card edge on a long recording title. */
-.lq-qcut .lq-tipbox { left: auto; right: 0; }
 .lq-tipbox .th {
   color: var(--t2); font-size: 10px; text-transform: uppercase; letter-spacing: .07em;
   margin: 9px 0 4px; padding-top: 7px; border-top: 1px solid var(--bd-1);
@@ -6335,13 +6361,28 @@ a.member-chip-name:hover { color: var(--accent); }
   max-width: 320px;
 }
 .lq-act {
-  display: block; text-align: center; cursor: pointer; white-space: nowrap;
+  /* Was display:block — harmless for the text-only Ingest/Review buttons,
+     but .lq-act--move's "Move" + chevronIcon() are plain inline content,
+     and .caret-ic itself is display:block (deliberately, so it behaves as
+     a flex item wherever its container IS flex — .nav-caret, .lq-tab, etc).
+     Without a flex container of its own here, that block-level SVG forced
+     itself onto its own centered line under "Move", rendering huge and
+     orphaned instead of a small inline caret (Ryan, 2026-08-27). inline-flex
+     gives every .lq-act a real flex context, which is what every other
+     working chevron in the app already relies on. */
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; white-space: nowrap;
   background: transparent; border: 1px solid var(--bd-1); color: var(--t1);
   border-radius: var(--r-sm); padding: 5px 12px; font-size: 12px;
   font-family: inherit; text-decoration: none;
 }
 .lq-act:hover { border-color: var(--accent); color: var(--accent-lit); }
 .lq-act:disabled { opacity: .5; cursor: default; }
+/* Real Lucide chevron on "Move" (Ryan, 2026-08-27) — chevronIcon()'s own
+   stroke is thick relative to its 8px box; Lucide's is the thin 2-on-24
+   stroke the rest of the icon set uses, sized down to sit quietly next to
+   12px button text rather than reading as its own shape. */
+.lq-act-chev { width: 11px; height: 11px; margin-left: 3px; flex-shrink: 0; }
 .lq-act--ingest { color: var(--green); border-color: rgba(106,184,128,.35); }
 .lq-act--ingest:hover { border-color: var(--green); color: var(--green); background: rgba(106,184,128,.08); }
 .lq-act--view { color: var(--accent-lit); border-color: var(--accent); }
@@ -6439,11 +6480,11 @@ a.member-chip-name:hover { color: var(--accent); }
   background: var(--genre-fg, var(--t2));
 }
 
-/* Circular performer photo. Only 1 of 164 performers has one today, so the
-   card is designed to look finished WITHOUT it — the element is simply absent,
-   never a placeholder silhouette. */
+/* Square performer photo (2026-08-27, was circular). Only 1 of 164
+   performers has one today, so the card is designed to look finished
+   WITHOUT it — the element is simply absent, never a placeholder silhouette. */
 .rec-card-photo {
-  width: 52px; height: 52px; border-radius: 50%; object-fit: cover;
+  width: 52px; height: 52px; border-radius: var(--r-md); object-fit: cover;
   margin: 2px auto 10px; display: block;
   border: 2px solid var(--genre-fg, var(--bd-1));
   background: var(--bg-2);
@@ -6569,7 +6610,7 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .rec-rowcard-avatar { display: flex; align-items: center; }
 .rec-rowcard-photo {
-  width: 38px; height: 38px; border-radius: 50%; object-fit: cover;
+  width: 38px; height: 38px; border-radius: var(--r-md); object-fit: cover;
   border: 2px solid var(--genre-fg, var(--bd-1)); background: var(--bg-2);
   display: block;
 }
@@ -7213,11 +7254,10 @@ body.drive-offline img[src*="/api/venues/images/"] {
   .track-note-col, .track-sw-col { display: none; }
 
   /* Transport survives; the volume group does not. */
-  .player-bar { grid-template-columns: minmax(0, 1fr) auto; padding: 0 12px; gap: 10px; }
+  .player-bar { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 12px 10px; gap: 10px; }
   .player-right { display: none; }
 
   .rec-detail-header { padding: 8px 14px 14px; }
-  .rec-quality-chip .quality { font-size: 15px; }
   .rec-header-main   { gap: 10px; }
   .rec-header-photo  { width: 52px; height: 52px; }
   .rec-header-photo--initials { font-size: 17px; }
@@ -7752,7 +7792,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 .brow:hover { background: var(--bg-3); }
 .brow-spine { align-self: stretch; background: var(--genre-fg, var(--t3)); }
 .brow-av {
-  width: 24px; height: 24px; border-radius: 50%;
+  width: 24px; height: 24px; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center;
   font-size: 9px; font-weight: 600; color: var(--t2);
   background: var(--bg-4); border: 1.5px solid var(--genre-fg, var(--bd-1));

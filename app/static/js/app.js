@@ -424,6 +424,7 @@ const App = (() => {
     'arrow-left':   '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
     'chevron-left':  '<path d="m15 18-6-6 6-6"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+    'chevron-down':  '<path d="m6 9 6 6 6-6"/>',
   }
 
   // `fill` is for the one genuine filled/outline pair we have: a favourited
@@ -1005,7 +1006,7 @@ const App = (() => {
                      title="Create new ${esc(singular)}">${icon('plus')}</span>` : ''}
             <span class="nav-action" data-act="refresh" title="Refresh list">${icon('rotate-cw')}</span>
           </span>
-          <span class="nav-caret ${open ? 'open' : ''}">${chevronIcon()}</span>
+          <span class="nav-caret nav-caret--sm ${open ? 'open' : ''}">${chevronIcon()}</span>
         </div>
         <div class="nav-records ${sub ? 'nav-records--sub' : ''}" id="nav-records-${dim}" style="display:${open ? '' : 'none'}"></div>
       </div>`
@@ -5051,23 +5052,20 @@ const App = (() => {
     // sits INSIDE the .hm-val cell rather than replacing it, so the quick-edit
     // handler still finds .hm-val--editable[data-qedit] and swaps its innerHTML.
     //
-    // The three of them no longer share a box (Ryan, 2026-08-21). They were
-    // never one thing — Quality is a human verdict on the whole recording and
-    // the single attribute a collector sorts and chooses by, while Source and
-    // Lineage are provenance: the tape's paperwork, read once when you care
-    // where it came from. So Quality goes UP into the action row at full size,
-    // and Source + Lineage go DOWN into a quiet row with Members and Guests,
-    // where the rest of the show's supporting facts already live.
-    const qualityChip = `
-      <span class="rec-quality-chip" title="Quality grade">
-        <span class="rec-quality-lbl">Quality</span>
-        <span class="hm-val hm-val--chip${qc}"${qa('quality')}><span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '\u2014')}</span></span>
-      </span>`
-
+    // Rating (the Quality letter grade) was promoted to the action row alone
+    // 2026-08-21, then moved back down 2026-08-27 (Ryan) to sit left of Source
+    // — Rating, Source and Lineage read as one row of "the tape's paperwork
+    // plus the verdict on it" rather than Rating living apart from the two
+    // facts it's a judgement about.
+    //
     // Aligned with the Members/Guests rows above it — same .mg-row-label type
     // treatment and the same left edge, because it is the same kind of content.
-    const sourceLineageRow = (!qEditable && !rec.source && !rec.lineage) ? '' : `
+    const sourceLineageRow = (!qEditable && !rec.source && !rec.lineage && !rec.quality) ? '' : `
       <div class="rec-sl-row">
+        <div class="rec-sl-item rec-sl-item--quality">
+          <span class="mg-row-label">Rating</span>
+          <span class="hm-val hm-val--chip${qc}"${qa('quality')}><span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '\u2014')}</span></span>
+        </div>
         <div class="rec-sl-item">
           <span class="mg-row-label">Source</span>
           <span class="hm-val hm-val--chip${qc}"${qa('source')}>${sourceBadge(rec.source) || '\u2014'}</span>
@@ -5100,7 +5098,6 @@ const App = (() => {
     const collectionArea = `
       <div class="rec-collections" id="rec-collections">
         ${(rec.collections || []).map(collectionTagHtml).join('')}
-        ${qualityChip}
         ${libraryState.activeId == null ? `
         <button class="collection-add-btn" id="btn-add-collection">+ Add to Collection</button>` : ''}
         <!-- Favorite toggle (moved here 2026-08-09 — was a star icon beside
@@ -5158,10 +5155,6 @@ const App = (() => {
       <div class="rec-waveform-wrap" id="rec-waveform-wrap">
         <div id="rec-waveform-ws" class="rec-waveform-ws"></div>
       </div>` : ''}
-      <!-- Back link + collections, one row, horizontally aligned (Ryan, 2026-07-15) -->
-      <div class="rec-top-row">
-        ${collectionArea}
-      </div>
       <div class="rec-detail-header">
         <!-- Two rows since 2026-08-21: the identity row (avatar + lines +
              then Notes spanning the full width beneath it. Notes used to sit
@@ -5169,16 +5162,17 @@ const App = (() => {
              width and at 480px on top of that — a paragraph of taper notes
              wrapped into a narrow ribbon with half the header empty beside it.
              The right-hand meta block that emptiness belonged to is gone as of
-             2026-08-21; see the qualityChip / sourceLineageRow comment. -->
+             2026-08-21; see the sourceLineageRow comment (Rating rejoined
+             it 2026-08-27). -->
         <div class="rec-header-main">
         <div class="rec-header-left">
-          <!-- Performer avatar (Ryan, 2026-08-18) — circle to the left of the
-               name and date lines, spanning both. Same perfPhotoHtml() the
-               cards and the Performer hero use, so an act has one face
-               everywhere; falls back to the initials disc, which is the NORMAL
-               appearance rather than an error state (62 of 173 performers are
-               photographed). Ringed in the performer's genre colour, matching
-               the card treatment. -->
+          <!-- Performer avatar (Ryan, 2026-08-18; squared 2026-08-27) — to the
+               left of the name and date lines, spanning both. Same
+               perfPhotoHtml() the cards and the Performer hero use, so an act
+               has one face everywhere; falls back to the initials disc, which
+               is the NORMAL appearance rather than an error state (62 of 173
+               performers are photographed). Ringed in the performer's genre
+               colour, matching the card treatment. -->
           <div class="rec-header-avatar" style="--genre-fg:${esc(perf?.performer_genre_color || 'var(--bd-1)')}">
             ${perfPhotoHtml({ image_id: perf?.performer_image_id, performer: perfName }, 'rec-header-photo')}
           </div>
@@ -5206,6 +5200,16 @@ const App = (() => {
           </div>` : ''}
           <div class="rec-header-notes${canEdit ? ' pp-editable' : ''}${rec.notes ? '' : ' pp-empty'}" id="rec-notes"${canEdit ? ' title="Click to edit notes"' : ''}>${rec.notes ? esc(rec.notes) : (canEdit ? 'Add notes…' : '')}</div>
           </div>
+        </div>
+        <!-- Action cluster (collections, favorite, Actions menu) — sibling of
+             .rec-header-left inside .rec-header-main as of 2026-08-27, not its
+             own row above the header. It used to be a full row of its own
+             (originally aligned with a back link removed 2026-08-22), which
+             left it floating above the Performer Name with a big dead gap
+             between them. Pulled level with the top of the avatar/name block
+             instead (Ryan). -->
+        <div class="rec-header-actions">
+          ${collectionArea}
         </div>
         </div>
       </div>
@@ -5388,11 +5392,19 @@ const App = (() => {
       playRecording(recordingId, 0, rec.tracks)
     })
 
-    // Track row clicks — skip grayed-out rows; use track ID to find correct queue index
+    // Track row clicks — skip grayed-out rows; use track ID to find correct queue index.
+    // Clicking the row for the track that's already loaded toggles play/pause
+    // in place; clicking any other row starts that track fresh (Ryan,
+    // 2026-08-27 — previously every click restarted playback from 0, so the
+    // "pause" icon could never actually get back to "play").
     mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
       row.addEventListener('click', () => {
         if (row.classList.contains('track-row--skipped')) return
         const tid = parseInt(row.dataset.trackId)
+        if (tid === Player.currentId()) {
+          Player.togglePlay()
+          return
+        }
         const idx = rec.tracks.findIndex(t => t.id === tid)
         if (idx >= 0) playRecording(recordingId, idx, rec.tracks)
       })
@@ -6506,7 +6518,8 @@ const App = (() => {
         cursorWidth: 1,
       })
       _wsTrackId = defaultTrackId
-      _wsInstance.registerPlugin(window.WaveSurfer.Zoom.create({ scale: 0.5, maxZoom: 300 }))
+      // Zoom plugin removed 2026-08-27 (Ryan) — wheel-zoom, pinch-zoom and the
+      // top-right slider all came from this one registerPlugin call.
 
       // Click/drag → seek the REAL shared player, not wavesurfer's own
       // silent internal audio. If this recording isn't already the one
@@ -6525,16 +6538,6 @@ const App = (() => {
         if (audio.readyState >= 1) applySeek()
         else audio.addEventListener('loadedmetadata', applySeek, { once: true })
       })
-
-      const zoomSlider = document.createElement('input')
-      zoomSlider.type = 'range'
-      zoomSlider.min = '10'
-      zoomSlider.max = '400'
-      zoomSlider.value = '50'
-      zoomSlider.className = 'rec-waveform-zoom-slider'
-      zoomSlider.title = 'Zoom'
-      zoomSlider.addEventListener('input', () => _wsInstance.zoom(parseInt(zoomSlider.value, 10)))
-      wrap.appendChild(zoomSlider)
     })()
 
     // If nothing is currently loaded in the player, pressing the persistent
@@ -7073,6 +7076,12 @@ const App = (() => {
     // question of WHICH panel. Absent = collapsed. One panel at a time.
     expanded:  new Map(),
     features:  new Map(),   // folder_path → features+interpretation, lazily fetched
+    // 'all' | 'green' | 'yellow' | 'red' — which tier chip is active (Ryan,
+    // 2026-08-27: "Direction A" from the ingest-redesign specimen). Filters
+    // both which cards are drawn AND what "Ingest N" acts on — one flag
+    // reused by both, same reasoning as _lqIngestable below: the number on
+    // the button can never promise more than the loop actually delivers.
+    filterBand: 'all',
     // Queue-ingest state. `cancel` is checked between shows; `activeJob` is the
     // in-flight confirm job so Cancel can also stop the current copy.
     running:   false,
@@ -7095,14 +7104,8 @@ const App = (() => {
     if (ingest._resume) {
       ingest._resume = false
     } else if (ingest.step !== 'triage' || !lq.rows.length) {
-      ingest.step       = 'source'
-      ingest.scan       = null
-      ingest.folderPath = null
-      ingest.form       = {}
-      ingest.tracks     = []
-      ingest.aiResult   = null
-      ingest.fromBatch  = false
-      ingest.fromTriage = false
+      resetIngestState()
+      lq.rows = []; lq.log = []; lq.jobId = null; lq.progress = null; lq.error = null; lq.filterBand = 'all'
     }
     renderIngestStep()
   }
@@ -7160,9 +7163,14 @@ const App = (() => {
   // `folderPath` is the thing that re-breaks the page on each retry, so
   // clearing it IS the recovery — not just re-rendering.
   function resetIngestState() {
-    ingest.scan = null
+    ingest.step       = 'source'
+    ingest.scan       = null
     ingest.folderPath = null
-    ingest.step = 'source'
+    ingest.form       = {}
+    ingest.tracks     = []
+    ingest.aiResult   = null
+    ingest.fromBatch  = false
+    ingest.fromTriage = false
   }
 
   function resetIngestToSource() {
@@ -7247,10 +7255,9 @@ const App = (() => {
       // The server climbs to the nearest surviving ancestor when a remembered
       // path has gone (routinely: ingesting an act's last show moves its folder
       // into the library and the empty-parent cleanup removes the act folder).
-      // Say so rather than silently landing somewhere else.
-      say(j.redirected_from
-        ? `${j.redirected_from.split('/').pop()} is no longer here — it was probably moved into the library. Showing its parent folder.`
-        : '')
+      // Used to say so here in red — removed 2026-08-26 (Ryan): this is
+      // expected, routine behavior, not something worth alarming the user
+      // about every time it happens.
       paint(j)
     }
 
@@ -7264,9 +7271,13 @@ const App = (() => {
     // already in the library or would be new. Still shown at deeper levels
     // (a date-named show folder), where it's just always "new" — true, if
     // not useful; not worth a depth check to suppress it.
+    // "New performer" removed from this badge (Ryan, 2026-08-27) — nearly
+    // everything queued up to ingest IS a new performer, so flagging it added
+    // noise without adding information. "In library" stays: THAT'S the
+    // notable case, worth a glance before you queue up a folder you may have
+    // already added.
     const PERF_BADGE = {
       existing: '<span class="badge lq-perf-badge lq-perf-badge--existing">In library</span>',
-      new:      '<span class="badge lq-perf-badge lq-perf-badge--new">New performer</span>',
     }
 
     function dirRowHtml(d, depth) {
@@ -7285,6 +7296,22 @@ const App = (() => {
             <span class="lq-dir-size">${fmtBytes(d.size_bytes)}</span>
           </div>
           <div class="lq-dir-children"></div>
+        </div>`
+    }
+
+    // A plain file — no caret, no drill-down. Same row shape as a folder
+    // (spacer, name, right-hand pair) so a mixed listing of dirs and files
+    // still lines up as one table. "Contents" becomes the extension here,
+    // the closest a file has to that column's meaning for a folder.
+    function fileRowHtml(fl, depth) {
+      return `
+        <div class="lq-dir-row" data-depth="${depth}">
+          <div class="lq-dir lq-file" style="padding-left:${depth * 18}px">
+            <span class="lq-dir-caret lq-dir-caret--spacer"></span>
+            <span class="nm">${esc(fl.name)}</span>
+            <span class="lq-dir-count">${esc(fl.ext || '—')}</span>
+            <span class="lq-dir-size">${fmtBytes(fl.size_bytes)}</span>
+          </div>
         </div>`
     }
 
@@ -7308,9 +7335,10 @@ const App = (() => {
       kids.innerHTML = `<div class="lq-nav-loading lq-nav-loading--sm"><span class="lq-spin"></span></div>`
       try {
         const j = await API.quality.browse(path)
-        kids.innerHTML = (j.dirs && j.dirs.length)
-          ? j.dirs.map(d => dirRowHtml(d, depth + 1)).join('')
-          : `<div class="lq-dir-row lq-dir--empty" style="padding-left:${(depth + 1) * 18}px">No sub-folders here</div>`
+        const kidsHtml = (j.dirs || []).map(d => dirRowHtml(d, depth + 1)).join('')
+                       + (j.files || []).map(fl => fileRowHtml(fl, depth + 1)).join('')
+        kids.innerHTML = kidsHtml
+          || `<div class="lq-dir-row lq-dir--empty" style="padding-left:${(depth + 1) * 18}px">This folder is empty</div>`
         kids.dataset.loaded = '1'
       } catch (e) {
         kids.innerHTML = `<div class="lq-err lq-err--sm">Could not read that folder.</div>`
@@ -7334,8 +7362,10 @@ const App = (() => {
         return `<a data-go="${esc(acc)}">${esc(p)}</a>`
       })).join('<span class="sep">/</span>')
 
-      const dirs = j.dirs.length ? j.dirs.map(d => dirRowHtml(d, 0)).join('')
-        : '<div class="lq-dir-row lq-dir--empty">No sub-folders here</div>'
+      const dirsHtml  = j.dirs.map(d => dirRowHtml(d, 0)).join('')
+      const filesHtml = (j.files || []).map(fl => fileRowHtml(fl, 0)).join('')
+      const dirs = dirsHtml + filesHtml
+        || '<div class="lq-dir-row lq-dir--empty">This folder is empty</div>'
 
       pickerEl.innerHTML = `
         <div class="lq-nav-addr">
@@ -7426,6 +7456,7 @@ const App = (() => {
       lq.features  = new Map()
       lq.log       = []
       lq.error     = null
+      lq.filterBand = 'all'
       // Placeholder rows so every show is on screen immediately — analysis
       // fills them in at roughly 2s each rather than showing a blank wait.
       lq.rows = res.folders.map(f => ({
@@ -7806,9 +7837,13 @@ const App = (() => {
       </div></div>`
     }
     if (row._pending) {
-      return `<div class="lq-row"><div class="lq-card lq-card--pending">
+      const base = (row.folder_path || '').split('/').pop()
+      const active = !!lq.progress && lq.progress.current === base
+      return `<div class="lq-row"><div class="lq-card lq-card--pending${active ? ' lq-card--active' : ''}">
         <div class="lq-card-head"><div class="lq-card-title"><h2>${esc(row.name)}</h2>
-          <div class="lq-qline"><span>Analyzing…</span></div></div></div>
+          <div class="lq-qline">${active
+            ? `<span class="lq-spin"></span><span>Analyzing now…</span>`
+            : `<span>Queued</span>`}</div></div></div>
       </div></div>`
     }
 
@@ -7851,23 +7886,22 @@ const App = (() => {
     // 2026-08-02). These are plain facts about the file, not readings that
     // need a meter — the box gave them more visual weight than they earn, and
     // it was occupying the top-right corner where the actions belong.
+    // Cutoff folded in as a plain fact (2026-08-27, Ryan) — it used to be
+    // singled out with its own colour + hover tooltip (.lq-qcut), which read
+    // as more alarming than the reading warrants for a strip of otherwise
+    // plain facts. Matches the read-only Fidelity pane's version above,
+    // which never had the highlight to begin with.
     const bits = [
       nTracks != null ? `${nTracks} track${nTracks === 1 ? '' : 's'}` : null,
       [q.format, q.bit_depth ? `${q.bit_depth}-bit` : null,
        q.sample_rate_hz ? `${(q.sample_rate_hz / 1000).toFixed(1)} kHz` : null]
         .filter(Boolean).join(' ') || null,
       q.bitrate_kbps ? `${q.bitrate_kbps} kbps` : null,
+      cut.khz != null ? `${cut.khz} kHz cutoff` : null,
     ].filter(Boolean).map(esc)
 
-    const cutSeg = cut.khz != null
-      ? `<span class="lq-tip lq-qcut" style="color:${_stateColour(cut.state)}">${
-          cut.khz} kHz cutoff
-          <span class="lq-tipbox"><div class="tt">Frequency cutoff — ${esc(cut.verdict || '')}</div>
-            <div class="ab">${esc(cut.detail || '')}</div></span></span>` : ''
-
     const quick = `<div class="lq-qline">${
-      [...bits.map(b => `<span>${b}</span>`), cutSeg].filter(Boolean)
-        .join('<span class="sep">|</span>')}</div>`
+      bits.map(b => `<span>${b}</span>`).join('<span class="sep">|</span>')}</div>`
 
     const metricRow = m => {
       // No ladder (e.g. mains frequency) → no colour and no range: a range is
@@ -8101,7 +8135,7 @@ const App = (() => {
       <button class="lq-act lq-act--review" data-path="${esc(row.folder_path)}"
               title="Open the full Add Recording page">Review</button>
       <div class="lq-move-wrap">
-        <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${chevronIcon()}</button>
+        <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${icon('chevron-down', 'lq-act-chev')}</button>
         <div class="lq-move-menu" hidden>
           <button class="lq-move-opt" data-dest="backlog" data-path="${esc(row.folder_path)}">Backlog</button>
           <button class="lq-move-opt" data-dest="workshop" data-path="${esc(row.folder_path)}">Workshop</button>
@@ -8118,15 +8152,16 @@ const App = (() => {
     // Anything still in the list is still a candidate — moving a show to
     // Backlog/Working physically removes it from the scanned folder, so the
     // queue IS the remaining work. No separate accept step to forget.
-    const queue     = lq.rows.filter(_lqIngestable)
-    const analysing = !!lq.progress && lq.progress.done < lq.progress.total
+    const visibleRows = _lqFiltered(lq.rows)
+    const queue        = visibleRows.filter(_lqIngestable)
+    const analysing    = !!lq.progress && lq.progress.done < lq.progress.total
 
     const progressBar = analysing ? `
       <div class="lq-progress">
         <div class="lq-progress-bar"><i style="width:${
           Math.round(100 * lq.progress.done / Math.max(1, lq.progress.total))}%"></i></div>
-        <span>Analysing ${lq.progress.done}/${lq.progress.total}${
-          lq.progress.current ? ` — ${esc(lq.progress.current)}` : ''}</span>
+        <span class="lq-progress-count">${lq.progress.done}/${lq.progress.total}</span>
+        ${lq.progress.current ? `<span class="lq-progress-current">${esc(lq.progress.current)}</span>` : ''}
       </div>` : ''
 
     // Why the run stopped, when it stopped badly. Reuses the card's own error
@@ -8134,14 +8169,73 @@ const App = (() => {
     const errorBar = lq.error
       ? `<div class="lq-err" style="margin:0 0 12px">${esc(lq.error)}</div>` : ''
 
+    // Tier chips filter by Sound Quality band (verdict_band) — the same value
+    // the "Sound Quality" tab already shows on every card, just promoted to a
+    // one-click filter/bulk-select surface (Ryan, 2026-08-27, "Direction A").
+    // Deliberately NOT a composite with Metadata Completeness: that stays its
+    // own separate score, visible on its own tab exactly as before — Ryan
+    // uses it as his actual review trigger, so nothing here may bury it.
+    const bandCounts = { green: 0, yellow: 0, red: 0 }
+    for (const r of lq.rows) if (bandCounts[r.verdict_band] !== undefined) bandCounts[r.verdict_band]++
+    const tierChip = (band, label, count, colour) => `
+      <button type="button" class="lq-tierchip${lq.filterBand === band ? ' on' : ''}" data-band="${band}">
+        ${colour ? `<span class="lq-tierdot" style="background:${colour}"></span>` : ''}
+        ${label} <span class="lq-tierchip-n">${count}</span>
+      </button>`
+    const tierBar = lq.rows.length ? `
+      <div class="lq-tierbar">
+        ${tierChip('all', 'All', lq.rows.length, null)}
+        ${tierChip('green', 'High', bandCounts.green, 'var(--green)')}
+        ${tierChip('yellow', 'Medium', bandCounts.yellow, 'var(--amber)')}
+        ${tierChip('red', 'Low', bandCounts.red, 'var(--red)')}
+      </div>` : ''
+
     // The single action. Cancel replaces it mid-run rather than sitting next to
-    // it, so there is never a question about which button is live.
+    // it, so there is never a question about which button is live. Label and
+    // count both track the active tier filter — "Ingest 178 High" can never
+    // promise more than the loop (which filters the same way) will do.
+    const tierLabel = _LQ_BAND_TEXT[lq.filterBand]  // High/Medium/Low — same map the Sound Quality tab uses
+    const queueWord = tierLabel
+      ? `${tierLabel}-confidence recording${queue.length === 1 ? '' : 's'}`
+      : `recording${queue.length === 1 ? '' : 's'}`
     const runBar = lq.running
       ? `<button class="btn btn-danger" id="lq-cancel-btn">Cancel</button>
          <span class="lq-run-note" id="lq-run-note"></span>`
       : `<button class="btn btn-primary" id="lq-ingest-all-btn" ${queue.length ? '' : 'disabled'}>
-           ⇉ Ingest ${queue.length} recording${queue.length === 1 ? '' : 's'}
+           ⇉ Ingest ${queue.length} ${queueWord}
          </button>`
+
+    // Three body states: the queue is genuinely empty (all done / nothing
+    // found), a tier filter is hiding everything that IS left, or there are
+    // cards to show.
+    const cardsBody = !lq.rows.length
+      ? (
+        // Draining to empty is now the NORMAL end state, since finished
+        // shows leave the queue. "Nothing to show" read like a failure.
+        lq.log.some(l => l.status === 'done')
+          ? `<div class="empty-state">
+               <div class="empty-title">All done</div>
+               <div class="empty-sub">Everything in this folder has been added to your library.</div>
+               <div style="margin-top:14px; display:flex; gap:8px; justify-content:center">
+                 <button class="btn btn-primary btn-sm" id="lq-alldone-more">Add More Recordings</button>
+                 <a class="btn btn-ghost btn-sm" href="#/">Browse Library</a>
+               </div>
+             </div>`
+          : `<div class="empty-state">
+               <div class="empty-title">Nothing to ingest here</div>
+               <div class="empty-sub">No audio folders were found under this directory.</div>
+               <div style="margin-top:14px; display:flex; gap:8px; justify-content:center">
+                 <button class="btn btn-primary btn-sm" id="lq-alldone-more">Add More Recordings</button>
+                 <a class="btn btn-ghost btn-sm" href="#/">Browse Library</a>
+               </div>
+             </div>`)
+      : !visibleRows.length
+        ? `<div class="empty-state">
+             <div class="empty-title">No ${tierLabel || ''} recordings</div>
+             <div class="empty-sub">Nothing left in this batch is tagged ${tierLabel || ''} confidence.</div>
+             <div style="margin-top:14px"><button class="btn btn-ghost btn-sm" id="lq-clear-filter">Clear filter</button></div>
+           </div>`
+        : visibleRows.map(_lqCard).join('')
 
     setMainHTML(`
       <div class="batch-shell lq-shell">
@@ -8154,31 +8248,19 @@ const App = (() => {
         </div>
         ${progressBar}
         ${errorBar}
+        ${tierBar}
         <div class="lq-runbar">
           ${runBar}
-          <label class="lq-behavior">
+          <label class="lq-behavior" title="What happens to each source folder once its recording is filed">
             <span>Files:</span>
             <select id="lq-behavior" ${lq.running ? 'disabled' : ''}>
-              <option value="move"${batch.behavior !== 'copy' ? ' selected' : ''}>Move</option>
-              <option value="copy"${batch.behavior === 'copy' ? ' selected' : ''}>Copy</option>
+              <option value="move"${batch.behavior !== 'copy' ? ' selected' : ''}>Move into library (source removed)</option>
+              <option value="copy"${batch.behavior === 'copy' ? ' selected' : ''}>Copy into library (keep source)</option>
             </select>
           </label>
         </div>
         ${_lqDoneStripHtml()}
-        <div class="lq-cards" id="lq-cards">
-          ${lq.rows.length ? lq.rows.map(_lqCard).join('') : (
-            // Draining to empty is now the NORMAL end state, since finished
-            // shows leave the queue. "Nothing to show" read like a failure.
-            lq.log.some(l => l.status === 'done')
-              ? `<div class="empty-state">
-                   <div class="empty-title">All done</div>
-                   <div class="empty-sub">Everything in this folder has been added to your library.</div>
-                 </div>`
-              : `<div class="empty-state">
-                   <div class="empty-title">Nothing to ingest here</div>
-                   <div class="empty-sub">No audio folders were found under this directory.</div>
-                 </div>`)}
-        </div>
+        <div class="lq-cards" id="lq-cards">${cardsBody}</div>
       </div>`)
 
     if (preserveScroll) window.scrollTo(0, scrollY)
@@ -8187,13 +8269,30 @@ const App = (() => {
 
   function _wireTriage() {
     document.getElementById('lq-back-btn')?.addEventListener('click', () => {
-      lq.rows = []; lq.jobId = null; lq.progress = null; lq.log = []; lq.error = null
+      lq.rows = []; lq.jobId = null; lq.progress = null; lq.log = []; lq.error = null; lq.filterBand = 'all'
+      ingest.step = 'source'
+      renderIngestSource()
+    })
+    document.getElementById('lq-alldone-more')?.addEventListener('click', () => {
+      lq.rows = []; lq.jobId = null; lq.progress = null; lq.log = []; lq.error = null; lq.filterBand = 'all'
       ingest.step = 'source'
       renderIngestSource()
     })
 
     document.getElementById('lq-behavior')?.addEventListener('change', e => {
       batch.behavior = e.target.value
+    })
+
+    // Tier chips — one click to narrow the queue and the "Ingest N" button to
+    // a single Sound Quality band, or back to everything.
+    mainContent.querySelectorAll('.lq-tierchip').forEach(chip =>
+      chip.addEventListener('click', () => {
+        lq.filterBand = chip.dataset.band
+        renderTriageView()
+      }))
+    document.getElementById('lq-clear-filter')?.addEventListener('click', () => {
+      lq.filterBand = 'all'
+      renderTriageView()
     })
 
     // Expand/collapse. BOTH detail panels are already in the DOM (rendered up
@@ -8416,6 +8515,13 @@ const App = (() => {
     lq.features.delete(folderPath)
   }
 
+  // Rows the active filter chip selects — 'all' or one tier. Both the visible
+  // card list and "Ingest N" derive from this so a filtered "Ingest 178 High"
+  // can never silently act on rows the chip hid.
+  function _lqFiltered(rows) {
+    return lq.filterBand === 'all' ? rows : rows.filter(r => r.verdict_band === lq.filterBand)
+  }
+
   function _lqIngestable(r) {
     return !r.error
         && !r._pending
@@ -8495,7 +8601,7 @@ const App = (() => {
     lq.running = true; lq.cancel = false
     renderTriageView({ preserveScroll: true })
 
-    const queue = lq.rows.filter(_lqIngestable)
+    const queue = _lqFiltered(lq.rows).filter(_lqIngestable)
 
     for (const row of queue) {
       if (lq.cancel) break
@@ -9407,6 +9513,13 @@ const App = (() => {
                  done. "Add & View" (farthest right) opens the finished record
                  instead — a lighter fill than the primary button so the pair
                  doesn't read as primary+disabled-looking-ghost. -->
+            <div class="ingest-actions-left">
+              <label class="batch-behavior-label" for="ingest-behavior-select">Files</label>
+              <select id="ingest-behavior-select" title="What happens to the source folder once this recording is filed">
+                <option value="move" ${(appPrefs?.ingest_file_behavior !== 'copy') ? 'selected' : ''}>Move into library (source removed)</option>
+                <option value="copy" ${(appPrefs?.ingest_file_behavior === 'copy') ? 'selected' : ''}>Copy into library (keep source)</option>
+              </select>
+            </div>
             <div class="ingest-actions-right">
               <button class="btn btn-primary" id="btn-confirm"
                       data-after="return" title="Add to library and return to the list">Add &amp; Return ↵</button>
@@ -9551,8 +9664,10 @@ const App = (() => {
           }
 
           // Pausing the main player bar so the two don't talk over each other
-          // (Ryan, 2026-07-15).
-          if (window.Player && Player.isPlaying()) Player.pause()
+          // (Ryan, 2026-07-15). `window.Player` is always undefined — a
+          // top-level const doesn't attach to window — so this guard was
+          // dead and the two players could run at once (Ryan, 2026-08-27).
+          if (typeof Player !== 'undefined' && Player.isPlaying()) Player.pause()
 
           loadTrack(btn, filename, true)
         })
@@ -10132,8 +10247,11 @@ const App = (() => {
       // through this path (2026-07-31). When the review was opened from triage,
       // the dropdown the user was just looking at wins.
       let behavior = 'move'
+      const behaviorSel = document.getElementById('ingest-behavior-select')
       if (ingest.fromTriage && batch.behavior) {
         behavior = batch.behavior
+      } else if (behaviorSel) {
+        behavior = behaviorSel.value
       } else {
         try {
           const prefs = await API.preferences.get()
@@ -10203,6 +10321,7 @@ const App = (() => {
           }
 
           if (after === 'view') {
+            resetIngestState()
             window.location.hash = `#/recording/${result.recording_id}`
           } else if (ingest.fromTriage) {
             // Straight back to the ingest queue, which is the point of
@@ -10217,6 +10336,7 @@ const App = (() => {
             history.replaceState(null, '', '#/batch')
             renderBatchResultsView()
           } else {
+            resetIngestState()
             window.location.hash = `#/recording/${result.recording_id}`
           }
         } else {
@@ -10353,24 +10473,35 @@ const App = (() => {
     Player.loadQueue(queue, queueStart, opts)
   }
 
-  /** Called by Player when the track changes (for highlighting in the track list) */
-  function onTrackChange(trackId) {
-    state.playingTrackId = trackId
+  /** Sync every play/pause icon to REAL Player state — both "is this the
+   * loaded track" AND "is it actually playing", not just the former. Called
+   * on track load (via onTrackChange) and on every play/pause of a track
+   * that was already loaded (via Player's audio listeners calling this
+   * directly) — a row that only asked "is this the loaded track" stayed
+   * stuck on the pause icon forever once paused (Ryan, 2026-08-27). */
+  function syncPlayButtons() {
+    const activeId = Player.currentId()
+    const playing  = activeId != null && Player.isPlaying()
 
-    // Highlight the active track row if the recording view is showing
     document.querySelectorAll('.track-row').forEach(el => {
-      const isActive = parseInt(el.dataset.trackId) === trackId
+      const isActive = parseInt(el.dataset.trackId) === activeId && playing
       el.classList.toggle('playing', isActive)
       el.querySelector('.track-play').innerHTML = icon(isActive ? 'pause' : 'play')
     })
 
     // Same, but for the track table in the Edit Recording view
     document.querySelectorAll('.et-row').forEach(el => {
-      const isActive = parseInt(el.dataset.id) === trackId
+      const isActive = parseInt(el.dataset.id) === activeId && playing
       el.classList.toggle('playing', isActive)
       const playBtn = el.querySelector('.et-play')
       if (playBtn) playBtn.innerHTML = icon(isActive ? 'pause' : 'play')
     })
+  }
+
+  /** Called by Player when the track changes (for highlighting in the track list) */
+  function onTrackChange(trackId) {
+    state.playingTrackId = trackId
+    syncPlayButtons()
 
     // Switch the wavesurfer waveform to the new track's peaks if we have
     // analysis data for it (mirrors the old canvas's track-follow
@@ -11235,6 +11366,22 @@ const App = (() => {
     // link now (see renderSidebar). Back/Forward are unchanged.
     document.getElementById('nav-back')?.addEventListener('click', () => _navGo(-1))
     document.getElementById('nav-fwd')?.addEventListener('click', () => _navGo(1))
+
+    // "Add Recordings" is a same-hash link whenever the user is already on
+    // #/ingest — mid-triage, sitting on "All done", or looking at a filled
+    // review form. A same-hash click fires no hashchange, so route() never
+    // runs and renderIngestView() never fires: the page just sits there
+    // stale (Ryan, 2026-08-26 — the "still shows the previous job" bug).
+    // Same class of issue as the documented fromBatch case on the in-page
+    // back-link below; fixed the same way, by not depending on the hash
+    // actually changing.
+    document.getElementById('sidebar-nav')?.addEventListener('click', e => {
+      if (!e.target.closest('.nav-add-btn')) return
+      if (window.location.hash === '#/ingest') {
+        e.preventDefault()
+        renderIngestView()
+      }
+    })
 
     // Sidebar collapse toggle (2026-08-23). Plain localStorage flag, same
     // idiom as setTheme() above — applied before first paint by the inline
@@ -12378,6 +12525,6 @@ const App = (() => {
     get paula()       { return (typeof ingest !== 'undefined' && ingest?.scan?.paula) || null },
   }
 
-  return { onTrackChange, libraryDrive }
+  return { onTrackChange, syncPlayButtons, libraryDrive }
 
 })()

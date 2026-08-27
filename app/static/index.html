@@ -213,13 +213,21 @@
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>
       </span>
       <input type="range" class="volume-bar" id="volume-bar" min="0" max="1" value="0.8" step="0.01" />
+      <!-- WebKit-only (Safari + the packaged app's WKWebView). No equivalent
+           API exists in Chrome/Firefox, so this stays display:none until
+           player.js feature-detects webkitShowPlaybackTargetPicker and
+           reveals it. Lucide's airplay glyph, same idiom as the other
+           player-bar icons above (inline, not the ICONS registry — this bar
+           never went through that helper). -->
+      <button class="player-btn airplay-btn" id="btn-airplay" title="AirPlay" style="display:none">
+        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7Z"/></svg>
+      </button>
     </div>
   </div>
 
   <audio id="audio-el" preload="none"></audio>
 
   <script src="/js/vendor/wavesurfer.min.js"></script>
-  <script src="/js/vendor/wavesurfer-zoom.min.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/player.js"></script>
   <script src="/js/app.js"></script>

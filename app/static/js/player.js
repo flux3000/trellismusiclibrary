@@ -14,6 +14,7 @@ const Player = (() => {
   const btnNext = document.getElementById('btn-next')
   const progress  = document.getElementById('progress-bar')
   const volBar    = document.getElementById('volume-bar')
+  const btnAirplay = document.getElementById('btn-airplay')
   const timeCur   = document.getElementById('time-current')
   const timeDur   = document.getElementById('time-duration')
   const titleEl   = document.getElementById('player-title')
@@ -160,8 +161,12 @@ const Player = (() => {
     timeCur.textContent = fmtTime(audio.currentTime)
   })
 
-  audio.addEventListener('play',  () => { iconPlay.style.display = 'none'; iconPause.style.display = '' })
-  audio.addEventListener('pause', () => { iconPlay.style.display = '';     iconPause.style.display = 'none' })
+  // Bottom-bar icon is local state; the recording-view row icons live in
+  // App and must be told explicitly — they don't listen to this element
+  // themselves. Fires on every play/pause, not just on track load, which is
+  // the piece that was missing (Ryan, 2026-08-27).
+  audio.addEventListener('play',  () => { iconPlay.style.display = 'none'; iconPause.style.display = ''; if (typeof App !== 'undefined') App.syncPlayButtons() })
+  audio.addEventListener('pause', () => { iconPlay.style.display = '';     iconPause.style.display = 'none'; if (typeof App !== 'undefined') App.syncPlayButtons() })
 
   audio.addEventListener('ended', () => {
     // Log the completed play
@@ -195,6 +200,34 @@ const Player = (() => {
     audio.volume = parseFloat(volBar.value)
   })
 
+  // ── AirPlay ────────────────────────────────────────────────────────────
+  // webkitShowPlaybackTargetPicker is a WebKit-only extension on the media
+  // element itself — Safari and any WKWebView (the packaged desktop app on
+  // macOS) get it; Chrome and Firefox never adopted AirPlay, and there is no
+  // polyfill for that, so the button just never appears there. WebKit owns
+  // discovery, the picker UI and the actual routing — this is the entire
+  // integration.
+  if (btnAirplay && typeof audio.webkitShowPlaybackTargetPicker === 'function') {
+    btnAirplay.style.display = ''
+
+    btnAirplay.addEventListener('click', () => {
+      audio.webkitShowPlaybackTargetPicker()
+    })
+
+    // Attaching this listener is what turns WebKit's AirPlay discovery on —
+    // it isn't scanning for free before something asks. Greys the button out
+    // when zero receivers are visible on the network.
+    audio.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
+      btnAirplay.classList.toggle('is-unavailable', e.availability === 'not-available')
+    })
+
+    // Tint the icon while audio is actively routed to an AirPlay target —
+    // the same signal macOS's own AirPlay icon uses.
+    audio.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+      btnAirplay.classList.toggle('is-active', audio.webkitCurrentPlaybackTargetIsWireless)
+    })
+  }
+
   // Playback dying mid-track is the other way a dropped mount shows up. The
   // media error itself is not diagnostic, so ask the server what happened.
   audio.addEventListener('error', () => {
@@ -208,6 +241,6 @@ const Player = (() => {
     get queueIdx()     { return queueIdx },
   }
 
-  return { loadQueue, isPlaying, pause, currentId, setFallbackPlay }
+  return { loadQueue, isPlaying, pause, togglePlay, currentId, setFallbackPlay }
 
 })()

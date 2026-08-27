@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trellis — Add Recordings Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..700&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-0:#141210;--bg-1:#1c1916;--bg-2:#1a1714;--bg-3:#252220;--bg-4:#2e2a25;--bg-5:#38322c;
+  --bd-0:rgba(255,255,255,.05);--bd-1:rgba(255,255,255,.09);--bd-2:rgba(255,255,255,.16);
+  --t0:#e0d8ce;--t1:#a89880;--t2:#7a6e64;--t3:#5a5048;
+  --accent:#c4956a;--accent-lit:#d4aa82;--accent-dim:rgba(196,149,106,.14);
+  --green:#6ab880;--amber:#c89b50;--red:#d96055;--blue:#6898c8;
+  --green-dim:rgba(106,184,128,.13);--amber-dim:rgba(200,155,80,.13);--red-dim:rgba(217,96,85,.13);
+  --r-sm:4px;--r-md:8px;--r-lg:12px;
+  --fd:'Archivo',sans-serif; --fu:'IBM Plex Sans',sans-serif; --fm:'JetBrains Mono',monospace; --fs-body:12.5px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg-0);color:var(--t0);font-family:var(--fu)}
+.wrap{max-width:1180px;margin:0 auto;padding:30px 22px 90px}
+h1{font-family:var(--fd);font-size:27px;margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+.lede{font-size:var(--fs-body);color:var(--t2);line-height:1.65;max-width:78ch;margin:0 0 8px}
+h2{font-family:var(--fd);font-size:19px;margin:44px 0 3px;letter-spacing:-.01em}
+h2 .tag{font-family:var(--fu);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+        color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:2px 7px;
+        margin-left:10px;vertical-align:3px;font-weight:600}
+h3{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin:26px 0 10px}
+.note{font-size:var(--fs-body);color:var(--t2);line-height:1.65;max-width:80ch;margin:8px 0 18px}
+.note b{color:var(--t1);font-weight:600}
+.note code{font-family:var(--fm);font-size:11.5px;background:var(--bg-3);padding:1px 5px;border-radius:3px;color:var(--t1)}
+.stage{background:var(--bg-2);border:1px solid var(--bd-0);border-radius:var(--r-lg);padding:0;overflow:hidden;margin-bottom:8px}
+.stage-in{padding:20px 22px 24px}
+
+/* measured-facts panel */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--bd-0);
+       border:1px solid var(--bd-0);border-radius:var(--r-md);overflow:hidden;margin:18px 0 6px}
+.fact{background:var(--bg-2);padding:14px 16px}
+.fact-n{font-family:var(--fd);font-size:21px;color:var(--t0);line-height:1.1}
+.fact-l{font-size:11px;color:var(--t2);margin-top:5px;line-height:1.45}
+
+.sec-head{display:flex;align-items:baseline;justify-content:space-between;margin:0 0 11px;gap:12px}
+.sec-title{font-family:var(--fd);font-size:15px;color:var(--t0);letter-spacing:-.005em}
+.ic{width:12px;height:12px;display:inline-block;vertical-align:-1px}
+.verdict{background:var(--bg-1);border:1px solid var(--bd-1);border-left:3px solid var(--accent);
+  border-radius:var(--r-md);padding:16px 18px;margin-top:18px}
+.verdict h4{margin:0 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.verdict p{margin:0 0 9px;font-size:var(--fs-body);color:var(--t1);line-height:1.65}
+.verdict p:last-child{margin-bottom:0}
+ul.pts{margin:10px 0 0;padding-left:18px}
+ul.pts li{font-size:var(--fs-body);color:var(--t2);line-height:1.7;margin-bottom:5px}
+ul.pts li b{color:var(--t1);font-weight:600}
+
+/* ══ Direction A — Belt (dense table) ══ */
+.belt-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.tierchip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:20px;
+  font-size:12px;font-weight:500;border:1px solid var(--bd-1);background:var(--bg-3);cursor:pointer;
+  font-variant-numeric:tabular-nums}
+.tierchip.on{background:var(--accent-dim);border-color:var(--accent);color:var(--accent-lit)}
+.tierdot{width:8px;height:8px;border-radius:50%;flex:none}
+.belt-search{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--bg-3);
+  border:1px solid var(--bd-1);border-radius:var(--r-sm);padding:6px 10px;font-size:12px;color:var(--t3);min-width:200px}
+
+.bulkbar{display:flex;align-items:center;gap:12px;background:var(--accent-dim);border:1px solid var(--accent);
+  border-radius:var(--r-md);padding:9px 14px;margin-bottom:10px;font-size:12.5px;color:var(--t0)}
+.bulkbar b{color:var(--accent-lit)}
+.bulkbar .sp{flex:1}
+.bbtn{font-size:12px;font-weight:500;border-radius:var(--r-sm);padding:6px 13px;border:1px solid;cursor:pointer;font-family:var(--fu)}
+.bbtn-p{background:var(--accent);border-color:var(--accent);color:#211a12}
+.bbtn-g{background:transparent;border-color:var(--bd-2);color:var(--t1)}
+
+.belt-progress{display:flex;align-items:center;gap:12px;margin:0 0 16px;font-size:12px;color:var(--t2)}
+.belt-pbar{flex:1;height:6px;background:var(--bg-5);border-radius:3px;overflow:hidden}
+.belt-pbar i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent-lit))}
+.belt-pcount{font-family:var(--fm);color:var(--t1);flex:none}
+
+.btable{display:flex;flex-direction:column;border:1px solid var(--bd-0);border-radius:var(--r-md);overflow:hidden}
+.brow{display:grid;grid-template-columns:20px 4px minmax(0,1fr) 130px 90px 210px;gap:12px;align-items:center;
+  padding:9px 12px;background:var(--bg-3);border-bottom:1px solid var(--bd-0)}
+.brow:last-child{border-bottom:none}
+.brow:hover{background:var(--bg-4)}
+.brow input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px}
+.brow-spine{align-self:stretch;border-radius:2px}
+.brow-main{min-width:0}
+.brow-name{font-family:var(--fd);font-size:13px;color:var(--t0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brow-sub{font-size:10.5px;color:var(--t3);margin-top:2px;display:flex;gap:6px;font-family:var(--fm)}
+.brow-sub .b{color:var(--bd-2)}
+.brow-perf{font-size:10px}
+.brow-perf.existing{color:var(--t2)}
+.brow-band{justify-self:start}
+.bandpill{font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:20px}
+.bandpill.g{background:var(--green-dim);color:var(--green)}
+.bandpill.y{background:var(--amber-dim);color:var(--amber)}
+.bandpill.r{background:var(--red-dim);color:var(--red)}
+.brow-tracks{font-size:11.5px;color:var(--t2);font-variant-numeric:tabular-nums}
+.brow-actions{display:flex;gap:6px;justify-content:flex-end}
+.ract{font-size:11px;font-weight:500;padding:5px 11px;border-radius:var(--r-sm);border:1px solid var(--bd-1);
+  background:var(--bg-2);color:var(--t1);cursor:pointer;font-family:var(--fu)}
+.ract:hover{color:var(--t0);border-color:var(--bd-2)}
+.ract.primary{background:var(--accent);border-color:var(--accent);color:#211a12}
+.ract.ghost-x{color:var(--t3)}
+.brow.expanded{background:var(--bg-4)}
+.bdetail{grid-column:1/-1;padding:10px 0 4px 32px;border-top:1px dashed var(--bd-1);margin-top:9px;
+  display:grid;grid-template-columns:repeat(3,1fr);gap:16px;font-size:11.5px}
+.bdetail-g h5{margin:0 0 6px;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3)}
+.bdetail-m{display:flex;justify-content:space-between;color:var(--t2);padding:2px 0}
+.bdetail-m b{color:var(--t1);font-weight:500}
+.caret-mini{width:9px;height:9px;color:var(--t3);cursor:pointer}
+
+/* ══ Direction B — Funnel (auto-triage) ══ */
+.funnel-stat{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--bd-0);
+  border:1px solid var(--bd-0);border-radius:var(--r-md);overflow:hidden;margin-bottom:18px}
+.fstat{background:var(--bg-3);padding:16px 16px 14px;position:relative}
+.fstat.hi{background:var(--bg-4)}
+.fstat-n{font-family:var(--fd);font-size:25px;color:var(--t0);font-variant-numeric:tabular-nums}
+.fstat-n.accent{color:var(--accent-lit)}
+.fstat-n.amber{color:var(--amber)}
+.fstat-l{font-size:11px;color:var(--t2);margin-top:4px}
+.fstat-bar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent)}
+
+.autolog{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-3);
+  border:1px solid var(--bd-0);border-radius:var(--r-md);margin-bottom:22px;font-size:12px;color:var(--t2)}
+.autolog b{color:var(--t0)}
+.autolog-link{margin-left:auto;color:var(--accent-lit);cursor:pointer;display:flex;align-items:center;gap:5px}
+
+.qcard{background:var(--bg-3);border:1px solid var(--bd-1);border-radius:var(--r-lg);padding:20px 22px;margin-bottom:12px}
+.qcard-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px;gap:16px}
+.qcard-title{font-family:var(--fd);font-size:17px;color:var(--t0)}
+.qcard-path{font-family:var(--fm);font-size:10.5px;color:var(--t3);margin-top:4px}
+.qcard-why{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:5px 11px;
+  border-radius:20px;flex:none}
+.qcard-why.y{background:var(--amber-dim);color:var(--amber)}
+.qcard-why.r{background:var(--red-dim);color:var(--red)}
+.qcard-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px}
+.qfield{}
+.qfield label{display:block;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:5px}
+.qfield .v{font-size:13px;color:var(--t0)}
+.qfield .v.warn{color:var(--amber)}
+.qfield input{width:100%;background:var(--bg-2);border:1px solid var(--bd-1);border-radius:var(--r-sm);
+  color:var(--t0);font-size:13px;padding:6px 9px;font-family:var(--fu)}
+.qcard-foot{display:flex;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--bd-0)}
+.qcard-foot .sp{flex:1}
+.qcard-idx{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+
+@media(max-width:1000px){.funnel-stat{grid-template-columns:repeat(2,1fr)}.qcard-grid{grid-template-columns:1fr}
+  .brow{grid-template-columns:20px 4px minmax(0,1fr) 90px}
+  .brow-tracks,.brow-actions{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Add Recordings — two redesigns</h1>
+<p class="lede">Both directions replace the always-expanded triage cards with something that survives a folder of
+  hundreds — maybe thousands — of shows, per your brief. They differ in where the person's attention goes:
+  <b>A</b> keeps every recording on screen, compressed into one scannable row, and adds bulk actions.
+  <b>B</b> keeps almost nothing on screen — it auto-files what the scoring is already confident about and only
+  ever shows you the ones it isn't.</p>
+
+<div class="facts">
+  <div class="fact"><div class="fact-n">3</div><div class="fact-l">clicks per recording today just to accept a <b>High</b>-confidence green-tier show — expand, read, Ingest. At 1,000 shows that's 3,000 clicks for the easy 80%.</div></div>
+  <div class="fact"><div class="fact-n">1 at a time</div><div class="fact-l">Every triage card renders fully expanded, all the time — no way to collapse, filter, or bulk-act on a tier today.</div></div>
+  <div class="fact"><div class="fact-n">900ms</div><div class="fact-l">poll interval the current queue already uses to report progress — both directions below can ride it as-is.</div></div>
+  <div class="fact"><div class="fact-n">High / Medium / Low</div><div class="fact-l">the actual band labels the scoring engine already returns — <code>quality_interpret.py</code>. Both directions use these, not invented tiers.</div></div>
+</div>
+<p class="note">The facts above are about the current system's shape, not a snapshot of your library — I don't have a
+  path to the live database from here the way the Browse redesign did. Every recording named below is illustrative,
+  drawn from real acts and venues already in your collection.</p>
+
+<!-- ════════ DIRECTION A ════════ -->
+<h2>Direction A — The Belt <span class="tag">everything, compressed</span></h2>
+<p class="note">The premise: nothing gets hidden, but nothing takes more than one line unless you ask it to. Filter
+  chips replace scrolling past what you don't need to look at; a bulk bar replaces clicking Ingest a thousand times.
+  Expand a row only for the one that needs a second look.</p>
+
+<div class="stage"><div class="stage-in">
+
+  <div class="belt-top">
+    <span class="tierchip on"><span class="tierdot" style="background:var(--t1)"></span>All <span style="color:var(--t3)">214</span></span>
+    <span class="tierchip"><span class="tierdot" style="background:var(--green)"></span>High <span style="color:var(--t3)">178</span></span>
+    <span class="tierchip"><span class="tierdot" style="background:var(--amber)"></span>Medium <span style="color:var(--t3)">31</span></span>
+    <span class="tierchip"><span class="tierdot" style="background:var(--red)"></span>Low <span style="color:var(--t3)">5</span></span>
+    <span class="belt-search">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      Filter by name…
+    </span>
+  </div>
+
+  <div class="belt-progress">
+    <span class="belt-pcount">142/214</span>
+    <div class="belt-pbar"><i style="width:66%"></i></div>
+    <span>Analyzing now — Old &amp; In the Way, Boarding House 1973-10-08</span>
+  </div>
+
+  <div class="bulkbar">
+    <input type="checkbox" checked style="accent-color:#211a12;width:14px;height:14px">
+    <span><b>178 High</b>-confidence recordings selected</span>
+    <span class="sp"></span>
+    <button class="bbtn bbtn-g">Clear</button>
+    <button class="bbtn bbtn-p">Ingest 178 selected →</button>
+  </div>
+
+  <div class="btable">
+
+    <div class="brow">
+      <input type="checkbox" checked>
+      <span class="brow-spine" style="background:var(--green)"></span>
+      <div class="brow-main">
+        <div class="brow-name">Tony Rice Unit — 1984-07-04</div>
+        <div class="brow-sub">FLAC 24-bit 96.0 kHz <span class="b">|</span> 44.1 kHz cutoff <span class="b">|</span> SBD</div>
+      </div>
+      <div class="brow-band"><span class="bandpill g">High</span></div>
+      <div class="brow-tracks">14 tracks</div>
+      <div class="brow-actions">
+        <button class="ract primary">Ingest</button>
+        <button class="ract">Review</button>
+        <svg class="caret-mini" viewBox="0 0 8 8" fill="none"><path d="M1.5 0.5 6.5 4 1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+
+    <div class="brow">
+      <input type="checkbox" checked>
+      <span class="brow-spine" style="background:var(--green)"></span>
+      <div class="brow-main">
+        <div class="brow-name">David Grisman Quintet — 1976-10-16</div>
+        <div class="brow-sub">FLAC 16-bit 44.1 kHz <span class="b">|</span> SBD <span class="brow-perf existing">· In library</span></div>
+      </div>
+      <div class="brow-band"><span class="bandpill g">High</span></div>
+      <div class="brow-tracks">9 tracks</div>
+      <div class="brow-actions">
+        <button class="ract primary">Ingest</button>
+        <button class="ract">Review</button>
+        <svg class="caret-mini" viewBox="0 0 8 8" fill="none"><path d="M1.5 0.5 6.5 4 1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+
+    <div class="brow expanded">
+      <input type="checkbox">
+      <span class="brow-spine" style="background:var(--amber)"></span>
+      <div class="brow-main">
+        <div class="brow-name">Doc &amp; Merle Watson — 1980-07-12</div>
+        <div class="brow-sub">FLAC 16-bit 44.1 kHz <span class="b">|</span> 17.2 kHz cutoff <span class="b">|</span> AUD</div>
+      </div>
+      <div class="brow-band"><span class="bandpill y">Medium</span></div>
+      <div class="brow-tracks">11 tracks</div>
+      <div class="brow-actions">
+        <button class="ract primary">Ingest</button>
+        <button class="ract">Review</button>
+        <svg class="caret-mini" viewBox="0 0 8 8" fill="none" style="transform:rotate(90deg)"><path d="M1.5 0.5 6.5 4 1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="bdetail">
+        <div class="bdetail-g"><h5>Tone</h5>
+          <div class="bdetail-m">Spectral balance <b>Fair</b></div>
+          <div class="bdetail-m">Presence <b>Good</b></div></div>
+        <div class="bdetail-g"><h5>Noise</h5>
+          <div class="bdetail-m">Hiss floor <b>Elevated</b></div>
+          <div class="bdetail-m">Hum (60 Hz) <b>None</b></div></div>
+        <div class="bdetail-g"><h5>Dynamics</h5>
+          <div class="bdetail-m">Loudness range <b>Good</b></div>
+          <div class="bdetail-m">Clipping <b>None</b></div></div>
+      </div>
+    </div>
+
+    <div class="brow">
+      <input type="checkbox">
+      <span class="brow-spine" style="background:var(--red)"></span>
+      <div class="brow-main">
+        <div class="brow-name">Unknown Artist — Cassette_Side_A</div>
+        <div class="brow-sub">MP3 128 kbps <span class="b">|</span> 15.8 kHz cutoff <span class="b">|</span> AUD</div>
+      </div>
+      <div class="brow-band"><span class="bandpill r">Low</span></div>
+      <div class="brow-tracks">6 tracks</div>
+      <div class="brow-actions">
+        <button class="ract">Ingest</button>
+        <button class="ract">Review</button>
+        <svg class="caret-mini" viewBox="0 0 8 8" fill="none"><path d="M1.5 0.5 6.5 4 1.5 7.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+    </div>
+
+  </div>
+
+</div></div>
+
+<div class="verdict">
+  <h4>What A fixes</h4>
+  <ul class="pts">
+    <li><b>One line per recording</b> instead of a full metrics card, always. 214 shows fits on a screen you can actually scan; today's cards would run for pages.</li>
+    <li><b>Filter chips</b> (All / High / Medium / Low) so "show me only what needs my judgment" — the Medium and Low tiers — is one click, not a scroll.</li>
+    <li><b>Bulk bar</b> — select a tier, one button ingests all of it. This is the piece that makes 1,000 shows tractable: you triage the 5% that's ambiguous and mass-accept the rest.</li>
+    <li><b>Expand-in-place</b> for the one row you want the full metric breakdown on, rather than it being forced on all 214 whether you asked or not.</li>
+    <li><b>The "In library" badge</b> stays exactly where you already have it (the 8/26 fix); "New performer" doesn't show here either, same reasoning as the folder picker.</li>
+  </ul>
+</div>
+
+<!-- ════════ DIRECTION B ════════ -->
+<h2>Direction B — The Funnel <span class="tag">auto-file, review exceptions</span></h2>
+<p class="note">The premise: at real scale, the person shouldn't be the one clicking Ingest on 900 shows the scoring
+  is already confident about. High-tier recordings file themselves; the screen's only job is the handful that
+  genuinely need a human — a low cutoff, a name that doesn't match anyone in your library, a suspicious duration.</p>
+
+<div class="stage"><div class="stage-in">
+
+  <div class="funnel-stat">
+    <div class="fstat"><div class="fstat-n">1,842</div><div class="fstat-l">folders found</div></div>
+    <div class="fstat hi"><div class="fstat-n accent">1,690</div><div class="fstat-l">auto-filed — High confidence, no review needed</div><div class="fstat-bar" style="width:92%"></div></div>
+    <div class="fstat"><div class="fstat-n amber">12</div><div class="fstat-l">waiting on you — Medium or Low confidence</div></div>
+    <div class="fstat"><div class="fstat-n" style="color:var(--t2)">140</div><div class="fstat-l">already in your library — skipped</div></div>
+  </div>
+
+  <div class="autolog">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+    <span><b>1,690</b> recordings filed automatically while you were away — nothing needed your input.</span>
+    <span class="autolog-link">View the log
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+    </span>
+  </div>
+
+  <h3>Needs your attention — 12 remaining</h3>
+
+  <div class="qcard">
+    <div class="qcard-head">
+      <div>
+        <div class="qcard-title">Doc &amp; Merle Watson — 1980-07-12</div>
+        <div class="qcard-path">/Volumes/music/Trellis/Download/docwatson_greatgorge_1980/</div>
+      </div>
+      <span class="qcard-why y">Medium confidence — noise floor</span>
+    </div>
+    <div class="qcard-grid">
+      <div class="qfield"><label>Performer match</label><div class="v">Doc &amp; Merle Watson <span style="color:var(--t3)">— exact match</span></div></div>
+      <div class="qfield"><label>Source</label><div class="v">AUD, 17.2 kHz cutoff <span class="warn">(below the usual FM/SBD floor)</span></div></div>
+      <div class="qfield"><label>Tracks</label><div class="v">11, all matched to the info file</div></div>
+    </div>
+    <div class="qcard-foot">
+      <span class="qcard-idx">1 of 12</span>
+      <span class="sp"></span>
+      <button class="ract ghost-x">Reject</button>
+      <button class="ract">Open full review</button>
+      <button class="ract primary">Looks right — file it</button>
+    </div>
+  </div>
+
+  <div class="qcard">
+    <div class="qcard-head">
+      <div>
+        <div class="qcard-title">Unknown Artist — Cassette_Side_A</div>
+        <div class="qcard-path">/Volumes/music/Trellis/Download/backlog/tape_47/</div>
+      </div>
+      <span class="qcard-why r">Low confidence — no performer match</span>
+    </div>
+    <div class="qcard-grid">
+      <div class="qfield"><label>Performer match</label><div class="v warn">No match — folder name isn't a performer</div></div>
+      <div class="qfield"><label>Source</label><div class="v">MP3 128 kbps, 15.8 kHz cutoff</div></div>
+      <div class="qfield"><label>Performer name</label><input type="text" placeholder="Type to search or leave for later…"></div>
+    </div>
+    <div class="qcard-foot">
+      <span class="qcard-idx">2 of 12</span>
+      <span class="sp"></span>
+      <button class="ract ghost-x">Reject</button>
+      <button class="ract">Open full review</button>
+      <button class="ract primary">Looks right — file it</button>
+    </div>
+  </div>
+
+</div></div>
+
+<div class="verdict">
+  <h4>What B does differently</h4>
+  <ul class="pts">
+    <li><b>Most of the work never reaches you.</b> At 1,842 folders, 92% auto-filing themselves is the difference between a task and a chore — you open the page to 12 decisions, not 1,842.</li>
+    <li><b>The stat band is the whole status report</b> — found / auto-filed / needs you / already-owned — the four numbers you'd actually want to know before scrolling further.</li>
+    <li><b>One card, one decision.</b> Each exception shows exactly why it stopped (the reason badge), the specific field that's uncertain, and three actions: accept, fix and open the full form, or reject.</li>
+    <li><b>The auto-filed log is a receipt, not a queue</b> — collapsed by default, because if the scoring was right about 1,690 shows there's nothing to review there.</li>
+    <li><b>Cost:</b> this needs the confidence threshold for "auto-file without asking" to be a real, tuned number — get it wrong and either good shows get quietly buried or bad ones get filed unattended.</li>
+  </ul>
+</div>
+
+<div class="verdict" style="border-left-color:var(--green)">
+  <h4>My recommendation</h4>
+  <p><b>B, with A's table as the "View all" screen underneath it.</b> You told me the real case is hundreds or
+    thousands at once — that's a scale where a human looking at every row, even one compressed line each, stops
+    being the bottleneck-fix and starts being the bottleneck. B is the only one of the two that actually removes
+    work rather than compressing it.</p>
+  <p>The risk is trust: the first time B auto-files something wrong unattended is the last time you trust it
+    unattended. That's a real cost, not a hypothetical one — which is why I'd build A's table first regardless. It's
+    the correct redesign of what exists today, ships faster, and B's "needs attention" queue is a filtered view of
+    that exact same table once you're comfortable raising the auto-file threshold.</p>
+  <p>Practically: ship A. Add the auto-file threshold as an opt-in once you've watched A's High tier be right often
+    enough to trust it unattended — B becomes almost a free feature at that point, not a second build.</p>
+</div>
+
+<div class="verdict" style="border-left-color:var(--amber)">
+  <h4>Two things I need you to decide</h4>
+  <ul class="pts">
+    <li><b>What confidence threshold earns auto-file?</b> B assumes "High" (today's scoring band) is enough to skip human review entirely. If that's too aggressive, B's whole value — 92% needing zero clicks — shrinks along with it. Is High good enough to trust unattended, or does that only apply to something stricter, like High <em>and</em> an exact performer match?</li>
+    <li><b>Does Reject in the queue delete the folder, or just skip it?</b> Neither mockup answers this, and it's a real data question — a Low-confidence cassette rip might be genuinely worth keeping around to revisit later, not a mis-scan to discard.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>
