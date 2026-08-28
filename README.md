@@ -1,7 +1,6 @@
 # Trellis Music Library
 
-Trellis is a desktop app for organizing, browsing, and sharing a collection
-of live concert recordings.
+Trellis is a music library manager for live recording collectors and aficionados.
 
 ---
 
@@ -19,12 +18,6 @@ no Open option in sight. Two ways past it, once, and only once:
   System Settings → Privacy & Security → scroll down to the blocked-app
   notice → **Open Anyway**. Open the app again and this time there's a real
   Open button.
-
-The first time it actually opens, it asks two things: what to call you, and
-where to keep your library. It creates a **Trellis** folder there, with
-Download, Workshop, Backlog, and Trellis Music Library folders inside it.
-Both can change later; something has to be chosen once before there's a
-library to open.
 
 The rest of this README is for building from source.
 
