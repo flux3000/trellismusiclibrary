@@ -437,9 +437,24 @@ class FluxAPI:
         thrown-away-on-the-spot, auto-login design as first_run_setup(); see
         that docstring for why nobody ever types a password on this machine.
 
-        No-ops if an account already exists, so a retried submission (say,
-        the folder step succeeded but this failed the first time) never
-        tries to create a second one.
+        If an account already exists this ADOPTS the typed name onto it
+        rather than leaving it alone (Ryan, 2026-08-28). It used to return
+        silently, which made this page ask a question and then discard the
+        answer: Ryan typed "jeff" on a second install and got `ryanfbaker`,
+        his macOS account name, because the database had survived.
+        **Deleting the Trellis library folder does not reset an install** --
+        the account lives in Application Support, so every "fresh" install on
+        a machine that has run Trellis before inherits the first account it
+        ever made, and first_run_setup() returns at
+        `if Config.DB_PATH.exists()` long before it could make a second one.
+
+        Renaming is safe. `username` is read in exactly three places -- the
+        login lookup, the /api/auth/me payload, and User.name's display
+        fallback -- and no peer, invite or device row stores it. Flask-Login
+        keys the session on the row id, so nobody is signed out by this.
+
+        A retried submission (folders succeeded, this failed the first time)
+        is still safe: adopting the same name twice is a no-op.
         """
         import secrets
         import bcrypt
@@ -447,11 +462,28 @@ class FluxAPI:
         from app.models.user import User
 
         with app.app_context():
-            if db.session.query(User).first() is not None:
+            who      = (username or "").strip()[:64]
+            existing = db.session.query(User).first()
+
+            if existing is not None:
+                # An empty field must never blank out a working name -- only a
+                # name the person actually typed gets adopted.
+                if who and who != existing.username:
+                    clash = (db.session.query(User)
+                             .filter(User.username == who, User.id != existing.id)
+                             .first())
+                    if clash is not None:
+                        # Raise rather than skip: confirm_trellis_root() turns
+                        # this into a visible message on the setup page. A
+                        # second silent fallback is the whole bug being fixed.
+                        raise ValueError(
+                            f"Another account on this machine is already called {who!r}.")
+                    existing.username = who
+                    db.session.commit()
                 return
-            who = (username or "").strip()[:64] or "owner"
+
             db.session.add(User(
-                username      = who,
+                username      = who or "owner",
                 password_hash = bcrypt.hashpw(
                     secrets.token_urlsafe(32).encode(), bcrypt.gensalt()).decode(),
                 role          = "admin",

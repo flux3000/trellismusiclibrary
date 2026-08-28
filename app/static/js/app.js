@@ -11657,9 +11657,12 @@ const App = (() => {
                 <p class="set-hint">Leave it empty to go by your sign-in name.</p>
               </div>
               <div class="set-field">
-                <span class="set-label">Sign-in name</span>
-                <div class="set-static">${esc(me.username)}</div>
-                <p class="set-hint">Your account name. It does not change here.</p>
+                <label class="set-label" for="set-username">Sign-in name</label>
+                <input class="set-input" id="set-username" maxlength="64"
+                       value="${esc(me.username)}" autocomplete="off">
+                <span class="set-flash" id="set-username-flash"></span>
+                <p class="set-hint">The name you sign in with. Peers see your
+                  display name instead, unless you have left that empty.</p>
               </div>
               <div class="set-field">
                 <span class="set-label">Picture</span>
@@ -11780,6 +11783,38 @@ const App = (() => {
     }
     nameInput?.addEventListener('blur', commitName)
     nameInput?.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur() })
+
+    // ── Sign-in name — same commit-on-blur shape (Ryan, 2026-08-28) ─────────
+    // Editable at last. It is the credential, so a rejected value snaps back
+    // to the last one the server accepted rather than sitting there looking
+    // saved. Changing it does NOT sign you out: Flask-Login carries the row
+    // id, not the name.
+    const userInput = $('set-username')
+    let lastUsername = me.username
+    const commitUsername = async () => {
+      const v = userInput.value.trim()
+      if (v === lastUsername) return
+      try {
+        const updated = await API.auth.updateProfile({ username: v })
+        lastUsername = updated.username
+        userInput.value = lastUsername
+        state.user = { ...(state.user || {}), ...updated }
+        _settingsSaved($('set-username-flash'))
+        // The display-name field shows the sign-in name as its placeholder —
+        // that is the "leave it empty and go by this" promise, so it has to
+        // follow a rename or it quietly promises the old name.
+        if (nameInput) nameInput.placeholder = lastUsername
+        // Same for the picture initial when there is no display name and no
+        // picture: it is derived from whichever name is in force.
+        if (!updated.has_avatar) $('set-avatar').innerHTML =
+          `<span class="set-avatar-initial">${esc(_settingsInitial(updated.name))}</span>`
+      } catch (e) {
+        userInput.value = lastUsername
+        _settingsSaved($('set-username-flash'), e.message)
+      }
+    }
+    userInput?.addEventListener('blur', commitUsername)
+    userInput?.addEventListener('keydown', e => { if (e.key === 'Enter') userInput.blur() })
 
     // ── Picture ─────────────────────────────────────────────────────────────
     const file = $('set-avatar-file')

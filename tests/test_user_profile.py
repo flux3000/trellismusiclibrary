@@ -1,9 +1,13 @@
 """
 tests/test_user_profile.py — display name and picture.
 
-Two names on purpose (Ryan, 2026-08-25): `username` is the credential and does
-not change here; `display_name` is what a human sees. Ryan's collecting partner
-signed everything "oldindian" and was called Jeff.
+Two names on purpose (Ryan, 2026-08-25): `username` is the credential,
+`display_name` is what a human sees. Ryan's collecting partner signed
+everything "oldindian" and was called Jeff.
+
+The credential became editable on 2026-08-28 — see the last section. It had
+been fixed for the life of the account, which meant a name typed once on the
+first-run setup page could never be corrected.
 
 Both travel: the name a peer sees on a library they joined comes from the
 owner's display name, and the picture is served through the share door.
@@ -140,3 +144,81 @@ def test_the_profile_endpoints_require_a_session(app):
                          ("get", "/api/auth/me/avatar")]:
         r = getattr(anon, method)(path)
         assert r.status_code in (401, 403), f"{method.upper()} {path} → {r.status_code}"
+
+
+# ── Changing the sign-in name (2026-08-28) ───────────────────────────────────
+#
+# Ryan set up a second install, typed "jeff" on the setup page, and got
+# `ryanfbaker` — his macOS account name. Two separate faults: the setup page
+# discarded the answer when a database already existed (run.py, covered by
+# test_first_run_owner_account.py), and once wrong there was no way to fix it.
+# This section covers the second half.
+
+
+def test_the_signin_name_can_be_changed(client):
+    r = client.patch("/api/auth/me", json={"username": "oldindian"})
+    assert r.status_code == 200
+    assert r.get_json()["username"] == "oldindian"
+    assert _db.session.query(User).filter_by(username="oldindian").first() is not None
+
+
+def test_a_rename_does_not_sign_you_out(client):
+    """
+    Flask-Login carries the row id, not the name. If that ever stopped being
+    true, renaming yourself would log you out mid-request and the failure
+    would look like a permissions bug rather than a session one.
+    """
+    assert client.patch("/api/auth/me", json={"username": "oldindian"}).status_code == 200
+    after = client.get("/api/auth/me")
+    assert after.status_code == 200, "the session must survive its own rename"
+    assert after.get_json()["username"] == "oldindian"
+
+
+def test_an_empty_signin_name_is_refused(client):
+    r = client.patch("/api/auth/me", json={"username": "   "})
+    assert r.status_code == 400
+    assert _db.session.query(User).filter_by(username="admin").first() is not None
+
+
+def test_an_absurd_signin_name_is_refused(client):
+    r = client.patch("/api/auth/me", json={"username": "x" * 65})
+    assert r.status_code == 400
+
+
+def test_a_name_someone_else_holds_is_refused(client):
+    _db.session.add(User(username="jeff", password_hash="x", role="user", is_active=True))
+    _db.session.commit()
+    r = client.patch("/api/auth/me", json={"username": "jeff"})
+    assert r.status_code == 409
+    assert _db.session.query(User).filter_by(username="admin").first() is not None
+
+
+def test_renaming_to_your_own_name_is_not_a_conflict(client):
+    """The uniqueness check must exclude the row being edited, or saving a
+    form without touching the field reports a clash with yourself."""
+    assert client.patch("/api/auth/me", json={"username": "admin"}).status_code == 200
+
+
+def test_a_refused_signin_name_leaves_the_display_name_alone(client):
+    """
+    Both names travel in one PATCH. Validating as it goes would leave the
+    display name changed and the sign-in name not — a half-applied edit the
+    person never asked for and cannot see.
+    """
+    _db.session.add(User(username="jeff", password_hash="x", role="user", is_active=True))
+    _db.session.commit()
+    r = client.patch("/api/auth/me",
+                     json={"username": "jeff", "display_name": "Should Not Stick"})
+    assert r.status_code == 409
+    me = _db.session.query(User).filter_by(username="admin").first()
+    assert me.display_name != "Should Not Stick"
+
+
+def test_both_names_change_together_when_both_are_valid(client):
+    r = client.patch("/api/auth/me",
+                     json={"username": "oldindian", "display_name": "Jeff"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["username"] == "oldindian"
+    assert body["display_name"] == "Jeff"
+    assert body["name"] == "Jeff", "the display name still wins for what humans see"

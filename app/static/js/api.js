@@ -156,8 +156,9 @@ const API = (() => {
       logout: ()             => post('/api/auth/logout'),
 
       // ── Profile (2026-08-25) ───────────────────────────────────────────────
-      // The display name and picture. NOT the username, which is the credential
-      // and is not editable here.
+      // The display name, the sign-in name and the picture. The sign-in name
+      // joined this on 2026-08-28 — it used to be fixed for the life of the
+      // account, so a name typed once on the setup page could never be fixed.
       updateProfile: (data) => request('PATCH', '/api/auth/me', data),
       // Plain URL for an <img src>, cache-busted by the server so replacing a
       // picture actually repaints instead of showing the old one.

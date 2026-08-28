@@ -5,7 +5,7 @@ Routes:
   POST   /api/auth/login       — validate credentials, create session
   POST   /api/auth/logout      — clear session
   GET    /api/auth/me          — current user, including profile
-  PATCH  /api/auth/me          — change the display name
+  PATCH  /api/auth/me          — change the sign-in name or display name
   POST   /api/auth/me/avatar   — set the picture
   DELETE /api/auth/me/avatar   — remove it
   GET    /api/auth/me/avatar   — serve it
@@ -70,7 +70,7 @@ def _avatar_path(user):
 def profile_payload(user):
     return {
         "id":           user.id,
-        "username":     user.username,          # the credential — not editable here
+        "username":     user.username,          # the credential — editable since 2026-08-28
         "display_name": user.display_name,      # may be None
         "name":         user.name,              # what to SHOW; never blank
         "has_avatar":   bool(user.avatar_ext),
@@ -83,14 +83,56 @@ def profile_payload(user):
 @bp.route("/me", methods=["PATCH"])
 @login_required
 def update_me():
+    """
+    Both names, in one request or either alone.
+
+    `username` became editable here on 2026-08-28. It had been fixed for the
+    life of the account, which meant the one name a person types on the
+    first-run setup page was the one name the app gave them no way to
+    correct -- and that page had a bug that could put the wrong name there
+    (see FluxAPI._create_owner_account in run.py). Safe to change: the
+    username is read by the login lookup, this payload and User.name's
+    fallback, and nothing keys off it. Flask-Login carries the row id, so a
+    rename does not end the session.
+
+    Every field is VALIDATED before any of them is APPLIED. A patch that
+    sets both names must not leave the first one changed when the second is
+    rejected.
+    """
     data = request.get_json(silent=True) or {}
+
+    new_username     = None      # None = not being changed
+    new_display_name = None
+    touch_display    = False
+
+    if "username" in data:
+        raw = (data.get("username") or "").strip()
+        if not raw:
+            return jsonify({"error": "A sign-in name can't be empty."}), 400
+        if len(raw) > 64:
+            return jsonify({"error": "That sign-in name is too long (64 characters max)."}), 400
+        if raw != current_user.username:
+            taken = (db.session.query(User)
+                     .filter(User.username == raw, User.id != current_user.id)
+                     .first())
+            if taken is not None:
+                return jsonify({"error": "Another account here already uses that sign-in name."}), 409
+            new_username = raw
+
     if "display_name" in data:
         raw = (data.get("display_name") or "").strip()
         if len(raw) > 120:
             return jsonify({"error": "That name is too long (120 characters max)."}), 400
         # Empty means "go back to my username", stored as NULL rather than "" so
         # there is one representation of absent.
-        current_user.display_name = raw or None
+        new_display_name = raw or None
+        touch_display    = True
+
+    if new_username is not None:
+        current_user.username = new_username
+    if touch_display:
+        current_user.display_name = new_display_name
+
     current_user.updated_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify(profile_payload(current_user))
