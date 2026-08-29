@@ -414,7 +414,12 @@ def _attach_interpretation(results):
         try:
             # Rows arrive serialized WITH features (include_features=True); the
             # raw dict is popped again below — the interpretation supersedes it.
-            r["interp"] = interpret_full(r, r.get("features") or {})
+            # scored_only: the triage panel shows ONLY readings that move the
+            # meter above them (Ryan, 2026-08-28). The five zero-weight
+            # measurements stay available on View Recording, where the question
+            # is what the recording IS rather than why it scored what it did.
+            r["interp"] = interpret_full(r, r.get("features") or {},
+                                         scored_only=True)
         except Exception:  # noqa: BLE001
             _tb.print_exc()
         finally:
@@ -717,15 +722,35 @@ def browse():
                  ".ape", ".wv")
 
     raw = (request.args.get("path") or "").strip()
-    path = os.path.abspath(os.path.expanduser(
-        raw or current_app.config.get("IMPORT_DIR", "/")))
+    import_dir = current_app.config.get("IMPORT_DIR", "/")
+    path = os.path.abspath(os.path.expanduser(raw or import_dir))
 
+    # ── Navigation root ──────────────────────────────────────────────────────
+    # The picker used to let you climb the breadcrumbs all the way to "/", and
+    # the ancestors of an import root were allowed through the guard below
+    # precisely so that would work. It was a mistake twice over: nobody adds
+    # recordings from "/", and one stray click on /Volumes/music landed on a
+    # 2,233-folder iTunes library that took the picker 45 seconds to describe
+    # (Ryan, 2026-08-28 — "it's not stopping").
+    #
+    # Browsing now starts at IMPORT_DIR and cannot go above it. A folder the
+    # user chose deliberately in the NATIVE dialog is still honoured — that is
+    # an explicit choice made outside this endpoint, and `root` comes back with
+    # every response so the client knows where "up" stops.
+    #
+    # IMPORT_ROOTS is unchanged and still the security boundary underneath
+    # this; this is a usability clamp inside it, not a replacement for it.
+    # One level ABOVE the download folder (Ryan, 2026-08-28). Browsing STARTS in
+    # Download, but Up reaches the app folder that holds it — "Trellis" here,
+    # "Trellis Music Library" in a real install — because Backlog and Workshop
+    # are its siblings and a user putting material in one of them has nowhere
+    # else to go. It stops there: above the app folder is the whole disk, which
+    # is what made this a filesystem browser.
+    app_root = os.path.dirname(import_dir.rstrip(os.sep)) or import_dir
+    nav_root = os.path.realpath(app_root) if os.path.isdir(app_root) else None
     roots = [os.path.realpath(r) for r in current_app.config.get("IMPORT_ROOTS", [])]
     real = os.path.realpath(path)
-    # "/" and other ancestors of a root are allowed so the crumbs stay
-    # navigable; only descending OUTSIDE every root is refused.
-    if not any(real == r or real.startswith(r + os.sep) or r.startswith(real + os.sep)
-               or real == "/" for r in roots):
+    if not any(real == r or real.startswith(r + os.sep) for r in roots):
         return jsonify({"error": "Outside the permitted import roots"}), 403
     # WALK UP RATHER THAN FAIL (2026-08-07). A remembered path routinely stops
     # existing: ingesting the last show of an act moves its folder into the
@@ -746,8 +771,7 @@ def browse():
         # Re-check the roots guard for wherever we landed — climbing must not
         # become a way out of IMPORT_ROOTS.
         real = os.path.realpath(path)
-        if not any(real == r or real.startswith(r + os.sep) or r.startswith(real + os.sep)
-                   or real == "/" for r in roots):
+        if not any(real == r or real.startswith(r + os.sep) for r in roots):
             return jsonify({"error": "Outside the permitted import roots"}), 403
     try:
         entries = sorted(os.listdir(path), key=lambda s: s.lower())
@@ -789,14 +813,27 @@ def browse():
     for d in dirs:
         d["performer_status"] = pstatus[d["name"]]
 
+    # "Up" stops at the navigation root. Outside it entirely (a folder picked
+    # in the native dialog), the parent is offered normally — the user is
+    # somewhere they asked to be, and stranding them with no way back up would
+    # be its own trap.
     parent = os.path.dirname(path.rstrip(os.sep)) or "/"
+    if parent == path:
+        parent = None
+    elif nav_root and (real == nav_root or not real.startswith(nav_root + os.sep)):
+        parent = None if real == nav_root else parent
     return jsonify({
         "path": path,
+        # Where browsing starts and where "up" stops.
+        "root": import_dir,
+        # Where "up" stops. The client shows the current folder relative to
+        # `root` but must not offer a parent above this.
+        "nav_root": app_root,
         # Set when the requested folder had vanished and we climbed to an
         # ancestor — the picker uses it to explain the jump rather than
         # silently showing somewhere else.
         "redirected_from": redirected_from,
-        "parent": None if parent == path else parent,
+        "parent": parent,
         "dirs": dirs,
         "files": files,
         "here_has_audio": any(e.lower().endswith(AUDIO_EXT) for e in entries),
@@ -840,6 +877,11 @@ def _performer_status_map(names):
 # does. Bounded and cleared wholesale, same as _META_CACHE.
 _BROWSE_CACHE = {}
 _BROWSE_CACHE_MAX = 4000
+
+# How many subfolders _probe_folder will look inside before giving up on
+# finding audio one level down. See the comment at that loop for why a cap is
+# not a compromise here.
+_PROBE_MAX_SUBDIRS = 8
 
 
 def _probe_folder(full, audio_ext):
@@ -895,8 +937,18 @@ def _probe_folder(full, audio_ext):
     except (PermissionError, OSError):
         pass
 
+    # ⚠ BOUNDED (Ryan, 2026-08-28). This loop used to walk EVERY subfolder, and
+    # on a big tree that is a scandir per child over SMB. Clicking
+    # /Volumes/music put the picker on a folder holding `iTunes Media` (2,233
+    # subdirectories) and `FLAC` (331) — roughly 2,600 round trips at a few ms
+    # each, which is the 45-second spinner that never stopped.
+    #
+    # The descent exists for ONE case: a recording that keeps its audio in
+    # CD1/CD2 subdirs rather than at its own root. Those have two to four
+    # subfolders, never thousands. Probing the first few answers that question
+    # completely; probing two thousand answers a question nobody asked.
     if not has_audio:
-        for sub in subdir_paths:
+        for sub in subdir_paths[:_PROBE_MAX_SUBDIRS]:
             try:
                 with os.scandir(sub) as it:
                     if any(e.name.lower().endswith(audio_ext) for e in it):
@@ -1036,7 +1088,9 @@ def staging_features():
     from app.utils.quality import interpret_full
     payload = qs.serialize(row, include_features=True)
     try:
-        payload["interpretation"] = interpret_full(payload, payload.get("features") or {})
+        # Same triage surface as the poll above, so the same filter.
+        payload["interpretation"] = interpret_full(payload, payload.get("features") or {},
+                                                   scored_only=True)
     except Exception:  # noqa: BLE001
         # Plain-English rendering must never take down the metrics panel.
         _tb.print_exc()

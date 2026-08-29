@@ -24,7 +24,8 @@ from app import create_app
 from app.extensions import db
 from app.models.recording import Recording
 from app.models.track import Track
-from app.utils.analysis import analyse_and_store_track, ANALYSIS_VERSION
+from app.utils.analysis import (analyse_and_store_track, ANALYSIS_VERSION,
+                                score_recording_non_music)
 from config import Config
 from datetime import datetime, timezone
 
@@ -105,6 +106,17 @@ def run():
                 else:
                     track_failed += 1
                     print(f"  ← FAILED ({elapsed:.1f}s)")
+
+            # The non-music score is a comparison ACROSS this recording's
+            # tracks, so it can only be computed once they have all been
+            # written — analyse_recording() does the same thing at the same
+            # point. Without this the script silently desynchronises the data:
+            # store_track_analysis overwrites spectral_flatness and duration_s
+            # with full-track values while non_music_score keeps a number
+            # derived from the windowed ones it just replaced. Cheap enough to
+            # run unconditionally (pure arithmetic over stored columns), which
+            # also backfills every pre-existing recording on the first sweep.
+            score_recording_non_music(rec, db.session)
 
         elapsed_total = time.time() - t_start
         mins, secs    = divmod(int(elapsed_total), 60)

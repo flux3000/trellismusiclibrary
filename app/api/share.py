@@ -268,7 +268,17 @@ def recording_detail(recording_id):
     v = p.venue if p else None
 
     def _analysis(ta):
-        if ta is None:
+        """
+        Serialise a TrackAnalysis row, or None if the full analysis has not run.
+
+        Mirrors api/recordings.py::_analysis — a "signals" row is the partial
+        written during ingest (non-music measurements only), and handing a peer
+        a dict of nulls with an empty waveform says "analysed, and everything
+        about it is unknown" rather than "not analysed yet". Both serialisers
+        read the same table and must answer the same way.
+        """
+        from app.utils.analysis import SIGNALS_ONLY_VERSION
+        if ta is None or ta.analysis_version == SIGNALS_ONLY_VERSION:
             return None
         return {
             "sample_rate_hz":       ta.sample_rate_hz,
@@ -279,7 +289,6 @@ def recording_detail(recording_id):
             "noise_floor_db":       ta.noise_floor_db,
             "dynamic_range_db":     ta.dynamic_range_db,
             "spectral_cutoff_hz":   ta.spectral_cutoff_hz,
-            "bpm":                  ta.bpm,
             "waveform":             _json.loads(ta.waveform_json) if ta.waveform_json else [],
         }
 

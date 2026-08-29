@@ -68,7 +68,8 @@ from app.models.recording import Recording
 from app.models.quality import RecordingQuality
 from app.models.track_analysis import TrackAnalysis
 from app.utils import quality_store as qs
-from app.utils.analysis import analyse_and_store_track, ANALYSIS_VERSION
+from app.utils.analysis import (analyse_and_store_track, ANALYSIS_VERSION,
+                                score_recording_non_music)
 from config import Config
 
 
@@ -243,6 +244,13 @@ def main():
                 t_failed  += counts["failed"]
                 detail = "  ".join(f"{k} {v}" for k, v in counts.items() if v)
                 print(f"      ♪ analysis: {detail}  ({time.time() - t0:.0f}s)")
+
+                # Recording-level, so it goes here and not in the track loop —
+                # same reason analyse_recording() calls it after its own loop.
+                # Runs even when every track was skipped, which is what
+                # backfills non_music_score across a library whose rows were
+                # written before the column existed.
+                score_recording_non_music(rec, db.session)
 
             # ── Pass 2: listening quality ────────────────────────────────────
             if need_q:

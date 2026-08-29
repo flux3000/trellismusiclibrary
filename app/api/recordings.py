@@ -275,8 +275,17 @@ def get_recording(recording_id):
         return jsonify({"error": "Not found"}), 404
 
     def _analysis(ta):
-        """Serialise a TrackAnalysis row, or return None if not yet run."""
-        if ta is None:
+        """
+        Serialise a TrackAnalysis row, or None if the full analysis has not run.
+
+        A "signals" row is a PARTIAL written during ingest — it carries the
+        non-music measurements and nothing else. Returning it here would hand
+        the UI a dict of nulls and an empty waveform for a recording whose
+        analysis is merely deferred (Quick Add), which reads as "analysed, and
+        everything about it is unknown" rather than "not analysed yet".
+        """
+        from app.utils.analysis import SIGNALS_ONLY_VERSION
+        if ta is None or ta.analysis_version == SIGNALS_ONLY_VERSION:
             return None
         return {
             "sample_rate_hz":       ta.sample_rate_hz,
@@ -290,7 +299,8 @@ def get_recording(recording_id):
             "dc_offset":            ta.dc_offset,
             "spectral_centroid_hz": ta.spectral_centroid_hz,
             "spectral_cutoff_hz":   ta.spectral_cutoff_hz,
-            "bpm":                  ta.bpm,
+            "spectral_flatness":    ta.spectral_flatness,
+            "non_music_score":      ta.non_music_score,
             "waveform":             _json.loads(ta.waveform_json) if ta.waveform_json else [],
             "analyzed_at":          ta.analyzed_at.isoformat() if ta.analyzed_at else None,
         }

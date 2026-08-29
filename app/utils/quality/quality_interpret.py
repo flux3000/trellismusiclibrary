@@ -410,12 +410,93 @@ METRIC_GROUP = {
 }
 
 
-def metric_rows(f):
-    """Build display rows for the Advanced Metrics panel."""
+# Which scoring curve each SCORED metric is read through. The curve is the
+# authority on what a reading is worth; the "scale" ladders above are only the
+# authority on what to CALL it.
+#
+# Until 2026-08-28 the two were independent and disagreed. A recording measuring
+# 24.7 dB mid-band SNR was labelled "Clean" in green — the ladder's second-from-
+# top rung, and its top two rungs are BOTH "good" — while MID_SNR put the same
+# reading at 80.8/100, and 23.3 dB crowd SNR read "Quiet room" in green while
+# CROWD_SNR put it at 73.4, which is amber on the app's own bands. Their Noise
+# meter came out at 77.8 (amber) under two green readings, with nothing on
+# screen to explain it (Ryan, 2026-08-28). Colour now comes from the curve, so
+# a reading can never be a different colour from the meter it feeds.
+def _metric_curves():
+    """
+    (curve_fn, {metric_key: anchors}) — imported lazily because quality_scoring
+    pulls in numpy and this module otherwise does not, which is what keeps app
+    boot off the analysis dependencies.
+
+    Only the five SCORED metrics appear. A key missing here means the metric has
+    no curve, which is the same thing as carrying no weight.
+    """
+    from app.utils.quality.quality_scoring import (
+        curve, TILT, HF_RATIO, MID_SNR, CROWD_SNR, CREST)
+    return curve, {
+        "spectral_tilt_db_oct": TILT,
+        "hf_energy_ratio_db":   HF_RATIO,
+        "mid_snr_db":           MID_SNR,
+        "crowd_snr_db":         CROWD_SNR,
+        "crest_factor_db":      CREST,
+    }
+
+
+# Four bands over a metric's own 0-100 curve position.
+#
+# NOT the 90/80/60 the UI uses for group meters and the overall score, which is
+# what this function tried first and got wrong. Those are bands on a SCORE; a
+# single metric's curve position is a different quantity, and reading it on the
+# score ruler pushed a third to a half of every metric's range into a different
+# colour than the corpus-derived display ladder gives it — 39% of the range for
+# HF energy ratio alone.
+#
+# These boundaries come from the ladders themselves. The rungs in METRICS were
+# drawn from the 110-recording corpus and, for hf_energy_ratio_db, deliberately
+# aligned to the HF_RATIO curve's knees — a decision recorded in
+# tests/test_quality.py::test_hf_energy_ratio_bands_track_the_scoring_curve,
+# which pins -55/-45/-35/-20 dB to bad/poor/ok/good. 85/60/35 reproduces all
+# four, and disagrees with the existing ladders on 8-29% of their range rather
+# than 34-45%.
+#
+# What this does and does not buy: a reading can no longer be GREEN under an
+# amber meter, which was the reported defect — 24.7 dB mid-band SNR was labelled
+# "Clean" in green at a true 80.8, and 23.3 dB crowd SNR "Quiet room" in green at
+# 73.4, under a 77.8 Noise meter. Both now read one band down. It does NOT
+# guarantee a reading always shares its meter's exact colour: a weighted mean of
+# two numbers can land in a lower band than either input, and no threshold
+# choice fixes arithmetic.
+def _state_from_subscore(sub):
+    if sub is None:
+        return None
+    if sub >= 85:
+        return "good"
+    if sub >= 60:
+        return "ok"
+    if sub >= 35:
+        return "poor"
+    return "bad"
+
+
+def metric_rows(f, scored_only=False):
+    """
+    Build display rows for the Advanced Metrics panel.
+
+    `scored_only=True` drops every zero-weight reading. Triage passes it: a
+    number on the triage page is there to justify a meter, and five of the
+    eleven justify nothing (Ryan, 2026-08-28 — "if something does not
+    contribute to the score, remove that metric from view here"). View
+    Recording still shows the full set, where the question is "what IS this
+    recording" rather than "why this score".
+    """
+    curve_fn, curves = None, None
     rows = []
     for key, m in METRICS:
         v = f.get(key)
         if v is None:
+            continue
+        group, scored = METRIC_GROUP.get(key, ("other", False))
+        if scored_only and not scored:
             continue
         cmpv = abs(v) if m.get("abs") else v
         state, desc = m["scale"][-1][1], m["scale"][-1][2]
@@ -423,12 +504,24 @@ def metric_rows(f):
             if cmpv < bound:
                 state, desc = st, d
                 break
-        group, scored = METRIC_GROUP.get(key, ("other", False))
+        # The WORD still comes from the ladder — "Clean" is the right thing to
+        # call 24.7 dB. Only the colour moves to the curve.
+        sub = None
+        if scored:
+            if curves is None:
+                curve_fn, curves = _metric_curves()
+            pts = curves.get(key)
+            if pts is not None:
+                sub = curve_fn(v, pts)
+                state = _state_from_subscore(sub) or state
         rows.append({
             "key": key, "label": m["label"], "value": v, "unit": m["unit"],
             "dp": m.get("dp"), "abs": bool(m.get("abs")),
             "state": state, "verdict": desc, "about": m["about"],
             "group": group, "scored": scored,
+            # 0-100 on this metric's own scoring curve. Present only for scored
+            # metrics; it is what `state` is now derived from.
+            "sub_score": round(sub, 1) if sub is not None else None,
             "scale": [{"upto": b, "state": s2, "text": d} for b, s2, d in m["scale"]],
         })
     return rows
@@ -466,11 +559,11 @@ def interpret(result):
     return out
 
 
-def interpret_full(scored, feats):
+def interpret_full(scored, feats, scored_only=False):
     """interpret() plus the quick-glance strip and Advanced Metrics rows."""
     out = interpret(scored)
     out["cutoff"] = cutoff_verdict(feats)
-    out["metrics"] = metric_rows(feats)
+    out["metrics"] = metric_rows(feats, scored_only=scored_only)
     out["quick"] = {
         "format": feats.get("format"),
         "bitrate_kbps": feats.get("bitrate_kbps"),

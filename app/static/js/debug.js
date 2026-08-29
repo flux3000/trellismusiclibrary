@@ -169,6 +169,7 @@
           <button class="dev-pane-btn is-on" data-pane="errors">Errors <span class="dev-count" id="dev-c-errors">0</span></button>
           <button class="dev-pane-btn" data-pane="network">Network <span class="dev-count" id="dev-c-network">0</span></button>
           <button class="dev-pane-btn" data-pane="server">Server</button>
+          <button class="dev-pane-btn" data-pane="ingest">Ingest</button>
         </div>
         <div class="dev-head-right">
           <label class="dev-check"><input type="checkbox" id="dev-fails-only"> Failures only</label>
@@ -210,6 +211,7 @@
         drawer.querySelectorAll('.dev-pane-btn').forEach(x => x.classList.toggle('is-on', x === b))
         if (pane === 'errors') { seenErrors = errors.length; updateBadge() }
         pane === 'server' ? startServerPoll() : stopServerPoll()
+        pane === 'ingest' ? startIngestPoll() : stopIngestPoll()
         render()
       })
     })
@@ -262,6 +264,7 @@
     if (pane === 'errors')  els.body.innerHTML = renderErrors()
     if (pane === 'network') els.body.innerHTML = renderNetwork()
     if (pane === 'server')  els.body.innerHTML = renderServer()
+    if (pane === 'ingest')  els.body.innerHTML = renderIngest()
   }
 
   function updateCounts() {
@@ -354,6 +357,86 @@
     if (serverTimer) { clearInterval(serverTimer); serverTimer = null }
   }
 
+  // ── Ingest pane ───────────────────────────────────────────────────────────
+  // What is actually moving through ingestion right now: every in-flight
+  // confirm job with the PHASE it is in, plus the track-analysis queue behind
+  // it (Ryan, 2026-08-28).
+  //
+  // The two halves answer different questions and both were previously
+  // invisible. A confirm job reported only copied/total, which is meaningful
+  // during one of its four phases — so "resolving", "verifying checksums" and
+  // "saving" all looked like a stalled copy. And the analysis queue had no
+  // representation at all: it used to be an unbounded set of fire-and-forget
+  // threads, so the honest answer to "why is this slow" lived nowhere.
+  let ingestState = null, ingestTimer = null, ingestErr = null
+
+  function renderIngest() {
+    if (ingestErr)   return empty('Ingest status unavailable.', esc(ingestErr))
+    if (!ingestState) return empty('Listening…', 'Polling /api/ingest/pipeline.')
+    const { jobs = [], analysis = {} } = ingestState
+
+    const jobRows = jobs.length ? jobs.map(j => `
+      <div class="dev-net-row ${j.status === 'error' ? 'is-bad' : 'is-pending'}">
+        <span class="dev-time"></span>
+        <span class="dev-net-method">${esc(j.quick ? 'QUICK' : 'FULL')}</span>
+        <span class="dev-net-status">${esc(j.phase || j.status || '')}</span>
+        <span class="dev-net-url" title="${esc(j.artist || '')}">${esc(j.folder || '')}
+          — ${esc(j.label || '')}${j.detail ? ` (${esc(j.detail)})` : ''}${
+          j.total ? ` ${j.copied}/${j.total}` : ''}</span>
+        <span class="dev-net-ms">${j.in_phase}s / ${j.elapsed}s</span>
+      </div>`).join('')
+      : `<div class="dev-net-row"><span class="dev-time"></span><span class="dev-net-method"></span>
+           <span class="dev-net-status"></span><span class="dev-net-url">No ingest job in flight.</span></div>`
+
+    const cur = analysis.current
+    const anaRows = `
+      <div class="dev-net-row ${cur ? 'is-pending' : ''}">
+        <span class="dev-time"></span>
+        <span class="dev-net-method">TRACKS</span>
+        <span class="dev-net-status">${cur ? 'running' : 'idle'}</span>
+        <span class="dev-net-url">${cur
+          ? `${esc(cur.name)} — ${cur.tracks_total} track${cur.tracks_total === 1 ? '' : 's'}`
+          : 'Worker idle.'}</span>
+        <span class="dev-net-ms">${cur ? cur.elapsed + 's' : ''}</span>
+      </div>
+      <div class="dev-net-row">
+        <span class="dev-time"></span>
+        <span class="dev-net-method">QUEUE</span>
+        <span class="dev-net-status">${analysis.pending || 0}</span>
+        <span class="dev-net-url">waiting · ${analysis.done || 0} analysed ·
+          ${analysis.failed || 0} failed · ${analysis.skipped || 0} skipped (Quick Add)</span>
+        <span class="dev-net-ms"></span>
+      </div>`
+
+    return `
+      <div class="dev-sec-h">Confirm jobs</div>
+      <div class="dev-net">${jobRows}</div>
+      <div class="dev-sec-h">Track analysis (single worker)</div>
+      <div class="dev-net">${anaRows}</div>`
+  }
+
+  function startIngestPoll() {
+    if (ingestTimer) return
+    const tick = async () => {
+      try {
+        const res = await _fetch('/api/ingest/pipeline', { credentials: 'same-origin' })
+        if (!res.ok) throw new Error('HTTP ' + res.status)
+        ingestState = await res.json(); ingestErr = null
+      } catch (e) {
+        ingestErr = (e && e.message) || 'request failed'
+      }
+      if (pane === 'ingest') render()
+    }
+    tick()
+    // Faster than the server pane's 2s: phases inside one confirm job change
+    // in well under two seconds and a phase missed is a phase that never
+    // existed as far as this pane is concerned.
+    ingestTimer = setInterval(tick, 900)
+  }
+  function stopIngestPoll() {
+    if (ingestTimer) { clearInterval(ingestTimer); ingestTimer = null }
+  }
+
   // ══ Open / close ══════════════════════════════════════════════════════════
 
   function open() {
@@ -363,6 +446,7 @@
     document.body.classList.add('dev-drawer-open')
     if (pane === 'errors') { seenErrors = errors.length; updateBadge() }
     if (pane === 'server') startServerPoll()
+    if (pane === 'ingest') startIngestPoll()
     write(LS_OPEN, '1')
     render()
   }
@@ -372,6 +456,7 @@
     els.tab.classList.remove('is-hidden')
     document.body.classList.remove('dev-drawer-open')
     stopServerPoll()
+    stopIngestPoll()
     write(LS_OPEN, '0')
   }
   function toggle() {

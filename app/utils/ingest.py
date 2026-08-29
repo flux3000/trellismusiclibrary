@@ -952,8 +952,19 @@ def detect_track_flags(title):
     # Strip one trailing parenthetical (usually an attribution, e.g. "(Bobby)")
     # before splitting into segments, so it doesn't get treated as its own
     # segment or block a match on the segment before it.
+    # One trailing parenthetical is stripped, on the theory that it is an
+    # attribution ("(Bobby)") rather than the subject.
+    #
+    # ⚠ Unless stripping leaves NOTHING. "(Chatter)", "(Introduction)",
+    # "(Announcements)", "(Cox Family Intro)" are titles that are entirely a
+    # parenthetical, and the strip reduced them to "" so nothing could ever
+    # match. Measured over 1,499 real track titles: this single case accounted
+    # for 9 of the 53 missed non-music tracks (Ryan, 2026-08-28).
     m = _FLAG_TRAILING_PAREN.match(raw)
     base = m.group(1).strip() if m else raw
+    if m and not base:
+        inner = re.match(r'^\s*\((.*)\)\s*$', raw)
+        base = inner.group(1).strip() if inner else raw
 
     for segment in _FLAG_SEGMENT_SPLIT.split(base):
         segment = segment.strip()
@@ -970,12 +981,101 @@ def detect_track_flags(title):
     return sorted(flags)
 
 # Source type keywords (scan full file text)
+# ── Source detection ──────────────────────────────────────────────────────────
+# ⚠ REWRITTEN 2026-08-28. The previous version was a plain substring scan over
+# the whole lowercased file, first hit wins:
+#
+#     for kw, val in _SOURCE_KEYWORDS.items():
+#         if kw in full_low: ...
+#
+# "aud" is a substring of audio, audiophile, inaudible, Claude and Audley.
+# Measured across 44 real info files in the library: 28 were assigned a source
+# and 9 of those (32%) fired on a substring inside another word. One was an
+# outright misclassification — abb2001-08-03.txt was tagged AUD because the
+# file contains the surname "Audley".
+#
+# Dict order made it worse: "aud" was tested before "mtx"/"matrix", so any
+# matrix recording whose info file contains the word "audio" — which is nearly
+# all of them — came out AUD. Source is the strongest single predictor of grade
+# in the quality model (CV r = +0.314, see quality_scoring.py), so this fed a
+# wrong answer into the score as well as the metadata.
+#
+# Three changes: word-boundary matching, a labelled line beats free text, and
+# longest keyword first so "soundboard" is never pre-empted by a shorter token.
 _SOURCE_KEYWORDS = {
-    "sbd": "SBD", "soundboard": "SBD",
+    "sbd": "SBD", "soundboard": "SBD", "sound board": "SBD",
     "aud": "AUD", "audience":   "AUD",
     "mtx": "MTX", "matrix":     "MTX",
     "fm":  "FM",  "broadcast":  "FM",
 }
+
+# Longest first: "soundboard" must win over "sbd" when both appear, and
+# "audience" over "aud", so the reported keyword is the specific one.
+# Word boundary, but tolerant of ONE glued leading letter, because the trading
+# community writes DAUD (DAT audience) and DSBD (DAT soundboard) and both were
+# lost by a strict \b (measured: 3 of 44 files went from a correct answer to
+# None). One letter is the whole allowance, and a trailing letter still
+# disqualifies — so this admits DAUD and DSBD while still rejecting audio,
+# audiophile, inaudible, Claude and Audley, which is what the strict version
+# was for.
+_SOURCE_PATTERNS = [
+    (re.compile(r"(?<![a-z])[a-z]?" + re.escape(kw) + r"(?![a-z])", re.IGNORECASE), val)
+    for kw, val in sorted(_SOURCE_KEYWORDS.items(), key=lambda kv: -len(kv[0]))
+]
+
+# A line that NAMES the source. "Source: AUD DAT master" is an assertion;
+# "recorded from the audience side" is prose that happens to contain a word.
+_SOURCE_LABEL_RE = re.compile(
+    r"^\s*(source|src|recording\s*type|lineage)\s*[:\-]", re.IGNORECASE)
+
+
+# The folder name is a SEPARATE and often better witness than the info file.
+# Two conventions live side by side in a real collection:
+#   library style   "... - Ancramdale, NY (AUD)"          parenthesised
+#   download style  "cs2024-08-16.mtx.koucky.flac1648"    dot delimited
+# quality_scoring.py::guess_source_from_name only reads the first, so it returns
+# None for essentially every folder in the Download directory, which is exactly
+# where triage runs.
+#
+# Delimiters only — no glued-prefix tolerance here. A folder name is short and
+# adversarial (act names, venue names, taper names), so this stays strict.
+_SOURCE_IN_FOLDER = re.compile(
+    r"(?:^|[(\[._\-\s])(sbd|aud|mtx|fm)(?=$|[)\]._\-\s])", re.IGNORECASE)
+
+
+def detect_source_from_name(folder_name):
+    """Source marker in a folder name, or None. Last marker wins."""
+    if not folder_name:
+        return None
+    hits = _SOURCE_IN_FOLDER.findall(folder_name)
+    return hits[-1].upper() if hits else None
+
+
+def detect_source(text):
+    """
+    Best guess at the recording source (SBD / AUD / MTX / FM), or None.
+
+    Labelled lines are searched first and in file order, because a taper who
+    wrote "Source: SBD" has told us the answer directly. Only if no labelled
+    line yields anything does this fall back to the whole text, where a bare
+    keyword is a hint rather than a statement.
+
+    Word boundaries throughout — see the note on _SOURCE_KEYWORDS for what the
+    substring version did to 32% of the corpus.
+    """
+    if not text:
+        return None
+
+    labelled = [ln for ln in text.splitlines() if _SOURCE_LABEL_RE.match(ln)]
+    for line in labelled:
+        for pat, val in _SOURCE_PATTERNS:
+            if pat.search(line):
+                return val
+
+    for pat, val in _SOURCE_PATTERNS:
+        if pat.search(text):
+            return val
+    return None
 
 # Lineage section triggers — explicit labels only (bare ">" removed to avoid false positives)
 _LINEAGE_LABELS = {"lineage", "source:", "transfer", "recording info", "recorded by", "chain:"}
@@ -1309,12 +1409,8 @@ def parse_info_file(file_path, known_artists=None, known_venues=None):
             result["country"] = country
             break
 
-    # Source type — scan full file text for keywords
-    full_low = raw.lower()
-    for kw, val in _SOURCE_KEYWORDS.items():
-        if kw in full_low:
-            result["source"] = val
-            break
+    # Source type — labelled lines first, then the whole file. See detect_source.
+    result["source"] = detect_source(raw)
 
     # Lineage — collect the contiguous block of non-blank lines starting at an
     # explicit lineage label, stopping at the next blank line (or a hard line
@@ -1511,6 +1607,18 @@ def build_scan_payload(folder_path):
             },
         },
     }
+    # Source, last resort: the folder's own name. Measured over 39 recordings
+    # whose folder states a source, the info file alone answered 26 of them;
+    # adding the folder name answers all 39. Applied only where BOTH the tag
+    # and the info file are silent, so an explicit statement always wins over
+    # a name. See detect_source_from_name.
+    if not resp["suggestions"]["from_tags"].get("source") \
+            and not resp["suggestions"]["from_info_file"].get("source"):
+        from_folder = detect_source_from_name(resp["folder_name"])
+        if from_folder:
+            resp["suggestions"]["from_info_file"]["source"] = from_folder
+            resp["source_from_folder_name"] = True
+
     resp["health"] = compute_health(resp)
     log_step(job, "done", f"health {resp['health']['score']} ({resp['health']['band']})")
     return resp

@@ -98,6 +98,12 @@ def _real_title_count(tags, info, n):
     return count
 
 
+# band -> the word shown to a user. Same three-word vocabulary as the Sound
+# Quality verdict (High / Medium / Low) so the two readings on a triage row are
+# read on the same scale, rather than one word and one number.
+RATING = {"green": "High", "yellow": "Medium", "red": "Low"}
+
+
 def compute_health(scan):
     """Score a scan payload. Returns {score, band, factors, populated, total}."""
     sugg = scan.get("suggestions") or {}
@@ -166,9 +172,17 @@ def compute_health(scan):
     else:
         score = max(0, min(100, round(100 * populated / total)))
     band = "green" if score >= 85 else "yellow" if score >= 60 else "red"
+    # Ryan, 2026-08-28: "I don't like the numerical score for metadata."
+    # A 0-100 completeness number invites a precision it does not have — it is
+    # a count of populated fields over expected fields, so 79 and 82 mean
+    # "a couple of things missing" and nothing more. The three bands were
+    # already the only distinction anyone acted on; naming them is what the
+    # display now shows. The score stays in the payload for the factor list and
+    # for anything that wants to sort.
+    rating = RATING[band]
 
     factors.sort(key=lambda x: x["delta"])
-    return {"score": score, "band": band, "factors": factors,
+    return {"score": score, "band": band, "rating": rating, "factors": factors,
             "populated": round(populated, 2), "total": total,
             # Exposed so the Metadata Quality panel can state the track-title
             # position directly ("18 of 20 named") instead of re-deriving it by

@@ -775,11 +775,18 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
   font-size: 11.5px;
 }
-.lq-donestrip-n { color: var(--green); font-weight: 600; }
-.lq-donestrip-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--t2); }
-.lq-donestrip-list a { color: var(--t1); text-decoration: none; }
-.lq-donestrip-list a:hover { color: var(--accent-lit); text-decoration: underline; }
-.lq-donestrip-err { color: var(--red); margin-left: auto; }
+.lq-donestrip-n { color: var(--t0); font-weight: 600; }
+/* Verdict on the run as a whole. Only rendered once nothing is still going —
+   a green "completed without errors" beside a queue that is still copying is
+   a lie the strip used to be capable of telling. */
+.lq-donestrip-verdict, .lq-done-verdict { font-weight: 500; }
+.lq-done-verdict.is-ok   { color: var(--green); }
+.lq-done-verdict.is-bad  { color: var(--red); }
+.lq-done-verdict.is-warn { color: var(--amber); }
+/* Named recording, not the run-together list of folder names this replaced. */
+.lq-donestrip-last { color: var(--t2); margin-left: auto; }
+.lq-donestrip-last a { color: var(--t1); text-decoration: none; }
+.lq-donestrip-last a:hover { color: var(--accent-lit); text-decoration: underline; }
 
 .gn-swatch {
   width: 104px; height: 104px; border-radius: 50%;
@@ -1727,20 +1734,6 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 .slide-pane.active { display: flex; }
 
-.slide-pane-header {
-  padding: 11px 16px 9px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--t2);
-  border-bottom: 1px solid var(--bd-0);
-  flex-shrink: 0;
-  background: var(--bg-1);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 .dbg-popout-btn {
   margin-left: auto;
@@ -1768,9 +1761,13 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 /* Pane content breathing room (Ryan, 2026-08-21). Each pane's body carries its
    own padding — set for a bordered box, and too tight now that the box is gone
-   and the content sits directly on the panel. Scoped to .slide-panel--htabs so
-   the ingest Review screen, which reuses .rev-raw-section, .cksum-* and
-   .ai-results, keeps its own denser spacing. */
+   and the content sits directly on the panel.
+
+   Scoped to .slide-panel--htabs, which USED to mean "View Recording only" and
+   kept Add Recording's denser spacing. Add Recording carries the modifier as
+   of 2026-08-28, so these now win there too (specificity 0,2,0 over its own
+   0,1,0 rules) and both panels breathe the same. That is deliberate: Ryan
+   picked this spacing off the redesign sheet. */
 .slide-panel--htabs .rev-raw-section { padding: 16px 20px 18px; }
 .slide-panel--htabs .rq-wrap         { padding: 18px 20px 24px; }
 .slide-panel--htabs .filetags-json   { padding: 18px 20px; }
@@ -1792,15 +1789,35 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   flex-direction: column;
   overflow: hidden;
 }
-.slide-panel--htabs:not(.open) .slide-panel-main { display: none; }
+/* The panel body is CLIPPED by the panel's width, never display:none'd
+   (Ryan, 2026-08-28 — "strange flickering when clicking to close").
+   display:none took effect on the first frame of the close: the body vanished
+   instantly, which left the rail as the only child of a panel that was still
+   at its full open width, so the rail snapped to the panel's LEFT edge and
+   then travelled back to the right as the width animated. Clipping instead
+   keeps the rail's 28px column pinned for the whole transition and lets the
+   content slide out under it, which is what a drawer is supposed to look like.
+
+   visibility still goes hidden, so the tabs inside a collapsed panel stay out
+   of the keyboard order and out of a screen reader — but only AFTER the slide
+   finishes (transition-delay), so it cannot cause the flicker again. */
+.slide-panel--htabs .slide-panel-main { visibility: visible; transition: visibility 0s; }
+.slide-panel--htabs:not(.open) .slide-panel-main {
+  visibility: hidden;
+  transition: visibility 0s 0.22s;
+}
 .slide-panel--htabs .slide-tabs {
   width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
   flex-direction: row;
   align-items: stretch;
   padding: 0 4px;
   gap: 2px;
   border-left: none;
-  border-bottom: 1px solid var(--bd-1);
+  /* The rule under the row belongs to .slide-tabrow now, so it runs the full
+     width of the panel rather than stopping where the tabs stop. */
+  border-bottom: none;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1839,20 +1856,51 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    horizontal scrolling and the action could end up off-screen. It hides itself
    whenever the active pane has no action, so panes that need no toolbar do not
    pay for one. */
+/* Tabs and their actions share ONE row (Ryan, 2026-08-28: "the large bar that
+   only has the small button"). The actions had a 36px band of their own, which
+   is a lot of chrome to spend on one 22px control.
+
+   They went into a band of their own on 08-21 because, crammed in beside five
+   tabs, a long label ("Write Tags to Files") pushed the strip into horizontal
+   scrolling and the action could scroll out of sight. That objection is
+   answered here by structure rather than by a second row: the tabs scroll
+   inside .slide-tabs, the actions sit in a fixed slot OUTSIDE that scroller,
+   so the action is always visible and it is the tabs that give way. */
+.slide-tabrow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--bd-1);
+  flex-shrink: 0;
+}
 .pane-acts {
   display: flex;
   align-items: center;
   gap: 6px;
   justify-content: flex-end;   /* Ryan, 2026-08-21 — actions hang off the right */
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--bd-0);
-  flex-shrink: 0;
-  min-height: 36px;
+  padding: 0 12px 0 10px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
+/* Give-way order as the panel narrows: the TAB STRIP first (flex-shrink 100
+   against this half's 1), then the status text down to its ellipsis, and the
+   buttons never. The tabs can afford to go first because they scroll, so
+   nothing there becomes unreachable; a clipped Save or Cancel would be.
+   min-width:0 on .pane-acts is load-bearing — it is what lets the pressure
+   reach the status instead of stopping at the half's min-content. Measured at
+   510 / 440 / 400 / 340 / 300 / 240 / 212px: buttons fully on screen at every
+   one, 212px being the narrowest the drag handle allows. */
+.slide-panel--htabs .slide-tabs { flex-shrink: 100; }
+.pane-acts .pane-act { flex: 0 0 auto; }
 .pane-acts[hidden] { display: none; }
 .pane-acts > [hidden] { display: none; }
 
 .pane-act {
+  /* inline-flex so the Lucide glyph on AI Assist sits on the text's centre
+     line instead of the baseline (2026-08-28, when the sparkles emoji was
+     replaced by a real icon). */
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font: inherit;
   font-size: 10.5px;
   font-weight: 600;
@@ -1875,10 +1923,19 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   color: var(--amber);
   border-color: var(--amber);
 }
+/* Capped, because it now shares a row with the tabs: a long "Save failed: …"
+   would otherwise squeeze them out. The full text stays in the title. */
 .pane-act-status {
   font-size: 10px;
   color: var(--t2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  min-width: 0;
+  /* The one thing inside .pane-acts that can shrink, so once the tabs are
+     spent all further give-way lands here. Full text is in the title. */
+  flex: 0 1 auto;
 }
 /* Says what the amber tab means. Sits to the LEFT of the button that clears it,
    so the row reads as a sentence: the problem, then the fix. */
@@ -3103,8 +3160,9 @@ input[type="range"].progress-bar {
 .batch-meta-sep   { font-size: 11px; color: var(--t3); }
 
 /* Just the number — no badge chrome, no dots, no tier bar. Colored text only,
-   sized to match the rest of the row (this used to double up with .iq-score's
-   22px rule and lose the cascade, which is why it looked huge before). */
+   sized to match the rest of the row. It used to double up with a 22px
+   .iq-score rule and lose the cascade, which is why it looked huge before;
+   that rule is gone as of 2026-08-28, but the explicit size stays. */
 .batch-score {
   flex-shrink: 0;
   font-size: 12px;
@@ -3257,6 +3315,15 @@ input[type="range"].progress-bar {
   flex-shrink: 0;
 }
 .ingest-topbar-title { margin: 0; font-size: 15px; font-weight: 500; color: var(--t0); }
+/* Title at the left, metadata chip pushed to the right edge of the same line. */
+.ingest-topbar-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+.ingest-topbar-line .iq-chip { margin-left: auto; }
 
 /* Standardized back link (Ryan, 2026-07-15) — one consistent affordance at
    the top of the review page, above the title, reflecting how it was
@@ -4039,7 +4106,10 @@ a.member-chip-name:hover { color: var(--accent); }
    rows sit one level down from a dim section header and read as a lighter
    control, not a section toggle. */
 .nav-caret--sm { width: 14px; height: 14px; }
-.nav-caret--sm .caret-ic { width: 8px; height: 8px; }
+/* Bumped 8px -> 10px with the 2026-08-28 chevron swap: the new glyph carries a
+   ~0.9px stroke where the old one carried ~2.1px, so the same box reads
+   noticeably smaller. */
+.nav-caret--sm .caret-ic { width: 10px; height: 10px; }
 
 .nav-record {
   display: flex; align-items: center; gap: 6px;
@@ -4784,14 +4854,15 @@ a.member-chip-name:hover { color: var(--accent); }
 .ingest-review-form {
   display: flex;
   flex-direction: column;
-  /* grow/shrink both 0: the JS drag handler (wireResizablePanel) sets an
-     explicit pixel width once dragging starts, and a nonzero flex-grow here
-     would keep fighting that value — pulling the panel wider than the mouse
-     position and making the divider feel like it jumps. Fixed 66% basis
-     gives the same "main area ~2/3" starting look; .ingest-review-raw's
-     flex:1 absorbs whatever's left. */
-  flex: 0 0 66%;
-  min-width: 260px;
+  /* FLEXIBLE, and deliberately the side that does not own a width (Ryan,
+     2026-08-28). It used to be the sized one, with the drag handler writing an
+     explicit pixel width here and .ingest-review-raw's flex:1 absorbing the
+     rest. That cannot be animated: collapsing the panel meant swapping which
+     element was fixed, which is a jump, not a slide. Sizing the PANEL instead
+     lets its width transition, and this side simply takes back whatever the
+     panel gives up, frame by frame. */
+  flex: 1 1 auto;
+  min-width: 300px;
   overflow: hidden;
 }
 
@@ -4807,7 +4878,10 @@ a.member-chip-name:hover { color: var(--accent); }
 .ingest-review-form-body {
   flex: 1;
   overflow-y: auto;
-  padding: 8px 20px 12px;
+  /* 14px at the top, not 8 (2026-08-28): the "Inferred from" strip used to
+     stand between the topbar's hairline and the first field label, and without
+     it the Performer label sat almost on the rule. */
+  padding: 14px 20px 12px;
 }
 
 /* Compact input sizes for ingest form */
@@ -4833,42 +4907,83 @@ a.member-chip-name:hover { color: var(--accent); }
 .date-grid {
   grid-template-columns: 76px 50px 50px;
 }
-
-.ingest-review-raw {
-  display: flex;
-  flex-direction: column;   /* quality bar on top, then panes + tab rail */
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  background: var(--bg-1);
-}
-
-/* Quality bar — score + blurb at left, AI Assist button at far right */
-.ingest-quality-bar {
-  display: flex;
-  align-items: center;
+/* Identity row: date, venue, event on one line (Ryan, 2026-08-28, from the
+   redesign sheet). minmax(0,…) on the flexible tracks rather than plain fr, so
+   a narrow panel shrinks the two text fields instead of overflowing the form. */
+.ingest-row-ident {
+  grid-template-columns: 72px 48px 48px minmax(0, 1.6fr) minmax(0, 1.2fr);
   gap: 10px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--bd-0);
+}
+/* Quality, Source, Lineage — that order. Lineage is the long one and takes
+   what is left. */
+.ingest-row-src {
+  grid-template-columns: 96px 84px minmax(0, 1fr);
+  gap: 10px;
+}
+
+/* Add Recording's details panel. Carries .slide-panel--htabs as well, so the
+   rail, the horizontal tab strip, the pane padding and the collapse behaviour
+   all come from the ONE component View Recording uses (Ryan, 2026-08-28:
+   "ship A"). Only the sizing is local: this page has a drag handle and
+   .slide-panel's fixed 28px/42% widths would fight it. */
+.ingest-review-raw {
+  /* display:flex is NOT inherited from .slide-panel--htabs — that modifier only
+     sets flex-direction, because on View Recording the display comes from
+     .slide-panel itself. This wrapper deliberately does not carry .slide-panel
+     (its fixed 28px/42% widths would fight the drag handle), so it declares its
+     own. Measured: without this the rail and the tab strip both land at the
+     panel's left edge. */
+  display: flex;
+  /* Sized, not flexible — same reason .slide-panel is sized on View Recording:
+     an element can only be transitioned between two widths if it owns them.
+     The drag handle overwrites this inline; _ingestPanelOpen stashes and
+     restores that inline value around a collapse so the rule below can win. */
+  flex: 0 0 34%;
+  min-width: 28px;
+  overflow: hidden;
+  background: var(--bg-2);   /* was --bg-1; matches the panel on View Recording */
+  transition: flex-basis 0.22s cubic-bezier(0.4, 0, 0.2, 1),
+              width      0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* Collapsed: the rail and nothing else, arrived at by sliding. */
+.ingest-review-raw:not(.open) {
+  flex-basis: 28px;
+}
+/* Mid-drag there is nothing to animate towards — without this every mousemove
+   would ease over 220ms and the divider would feel like it was on elastic. */
+.ingest-review-raw.resizing { transition: none; }
+.rev-resize-handle[hidden] { display: none; }
+
+/* Metadata completeness, as a chip in the topbar. It used to own a 34px bar of
+   its own alongside one button (Ryan, 2026-08-28). Shows the Low/Medium/High
+   rating, never the raw number. */
+.iq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid var(--bd-1);
+  background: var(--bg-3);
+  color: var(--t2);
+  white-space: nowrap;
   flex-shrink: 0;
 }
-.iq-score {
-  font-size: 22px; font-weight: 600; line-height: 1;
-  font-variant-numeric: tabular-nums; flex-shrink: 0;
+.iq-chip b { font-weight: 600; }
+/* Not part of the chip above — the shared "AI Assist"-shaped button, still
+   used by the performer dossier and the AI Assist retry button. It lost its
+   third user when Add Recording's quality bar was removed (2026-08-28). */
+.iq-ai-btn {
+  flex-shrink: 0; white-space: nowrap; margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
 }
-.iq-score--green  { color: #5aa96a; }
-.iq-score--yellow { color: #c99040; }
-.iq-score--red    { color: #e06060; }
-.iq-ai-btn { flex-shrink: 0; white-space: nowrap; margin-left: auto; }
-.iq-label {
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--t3);
-  flex-shrink: 0;
-  align-self: center;
-}
+/* One size for the AI glyph wherever the button appears. */
+.pane-act .tic, .iq-ai-btn .tic { width: 12px; height: 12px; flex: none; }
+.iq-chip--green  { color: var(--green); border-color: rgba(106,184,128,0.40); background: rgba(106,184,128,0.10); }
+.iq-chip--yellow { color: var(--amber); border-color: rgba(200,155,80,0.40);  background: rgba(200,155,80,0.10); }
+.iq-chip--red    { color: var(--red);   border-color: rgba(217,96,85,0.40);   background: rgba(217,96,85,0.10); }
+
 
 /* Purple input borders mark fields the completeness scorer (app/utils/paula.py)
    is confident enough in to have pre-filled — see paulaCls() in app.js. The
@@ -4880,17 +4995,11 @@ a.member-chip-name:hover { color: var(--accent); }
   box-shadow: 0 0 0 1px var(--purple);
 }
 
-/* Row holding the reference panes + vertical tab rail */
-.ingest-tabs {
-  display: flex;
-  flex-direction: row;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-}
-
-/* AI Assist tab — brighter than the dim default so the freshly-created tab
-   stands out. var(--t0), not a literal white, so it flips with the theme. */
+/* AI Assist tab — brighter than the dim default. var(--t0), not a literal
+   white, so it flips with the theme. It used to be justified as "the
+   freshly-created tab stands out"; the tab is permanent on both surfaces now
+   (2026-08-28), and the brightness is simply what marks the one tab that does
+   something rather than showing something. */
 .slide-tab--ai { color: var(--t0); }
 .slide-tab--ai.active { color: var(--accent); }
 
@@ -4983,6 +5092,13 @@ a.member-chip-name:hover { color: var(--accent); }
 .artist-picker-wrap {
   position: relative;
 }
+/* The input inside never stretched (2026-08-28). .venue-picker-wrap and
+   .event-picker-wrap have always set this; this one did not, so Performer —
+   the widest, most important field on the form — rendered at an <input>'s
+   default ~20-character width while its row was 1200px wide. Scoped with the
+   child combinator so the Members/Guests widget, which reuses this class for
+   its own inline add-picker, is untouched. */
+.ingest-field > .artist-picker-wrap > input { width: 100%; box-sizing: border-box; }
 
 .artist-dropdown {
   position: absolute;
@@ -5098,21 +5214,6 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .info-file-btn:hover:not(.active) { background: var(--bg-4); }
 
-/* [hidden] must be spelled out: the UA rule that implements the attribute is
-   display:none at element-name specificity, so a class rule setting display
-   beats it and the row stays visible while locked. */
-.info-file-save-row[hidden] { display: none; }
-.info-file-save-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  padding-top: 6px;
-}
-.info-file-save-status {
-  font-size: 10px;
-  color: var(--t2);
-}
 
 .rev-info-text {
   font-size: 11px;
@@ -5280,23 +5381,31 @@ a.member-chip-name:hover { color: var(--accent); }
    BELOW this bar instead of beside "Add & Return" — simple flex, both
    buttons right-aligned, fixes that outright. Same warm background as
    before sets this footer apart from the metadata editor above it. */
+/* Bottom action bar (Ryan, 2026-08-28). It was tinted --accent-dim, which
+   nothing else in the app does: an accent wash says "this whole strip is the
+   primary thing", and the primary thing here is one button on it. Now it is
+   the same ground and hairline as the topbar and the pane action row, so the
+   page is bounded top and bottom by the same chrome and the accent is spent
+   only on the button that earns it. */
 .ingest-actions {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 20px;
-  border-top: 1px solid var(--bd-0);
-  background: var(--accent-dim);
+  gap: 16px;
+  padding: 9px 20px;
+  border-top: 1px solid var(--bd-1);
+  background: var(--bg-1);
+  flex-shrink: 0;
 }
 .ingest-actions-left {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
-.ingest-actions-left select {
-  background: var(--bg-1); border: 1px solid var(--bd-1); color: var(--t0);
-  border-radius: var(--r-sm); padding: 4px 8px; font-size: 12px;
-}
+/* The select itself is .bfilter's, shared with the Review & Ingest settings
+   bar; it only needs a ceiling here so a long option cannot crowd the buttons. */
+.ingest-actions-left .bfilter select { max-width: 260px; }
 
 /* Tracks (N) header row + the relocated preview player, right-aligned
    opposite the title (Ryan, 2026-08-08). */
@@ -5307,28 +5416,73 @@ a.member-chip-name:hover { color: var(--accent); }
   gap: 12px;
   flex-wrap: wrap;
 }
-.ingest-audio-inline {
+/* Preview transport (Ryan, 2026-08-28). Replaces <audio controls>, which the
+   OS drew at its own weight, radius and palette — the only control in the app
+   that ignored the design tokens. Everything here is the player bar's own
+   vocabulary at roughly two thirds scale, so the two transports read as the
+   same instrument. The range input is .progress-bar, shared verbatim with the
+   player bar, accent gradient fill and all. */
+.ingest-xport {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: 320px;
+  flex-shrink: 0;
   min-width: 0;
-  flex-shrink: 0;
+  width: 340px;
+  padding: 4px 12px 4px 5px;
+  border: 1px solid var(--bd-1);
+  border-radius: 20px;
+  background: var(--bg-3);
 }
-#ingest-audio-label {
+.ingest-xport audio { display: none; }   /* the engine, not the UI */
+.ingest-xport-btn {
+  background: none;
+  border: none;
+  color: var(--t1);
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: var(--r-sm);
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  transition: color 0.1s;
+}
+.ingest-xport-btn:hover { color: var(--t0); }
+.ingest-xport-btn svg { width: 14px; height: 14px; display: block; }
+/* Same accent-filled circle as .player-btn-play, 24px against its 32px. */
+.ingest-xport-play {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #211a12;
+  justify-content: center;
+  padding: 0;
+}
+.ingest-xport-play:hover { background: var(--accent-lit); color: #211a12; }
+.ingest-xport-play svg { width: 11px; height: 11px; }
+.ingest-xport-name {
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--t2);
-  flex-shrink: 0;
+  color: var(--t0);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 110px;
+  flex-shrink: 1;
 }
-.ingest-audio-inline audio,
-#ingest-preview-audio {
-  flex: 1;
-  min-width: 200px;
-  height: 28px;
+.ingest-xport-time {
+  font-size: 9.5px;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
+.ingest-xport input[type="range"].progress-bar { flex: 1; min-width: 40px; }
+
+/* The row whose file the transport is holding. Not a "playing" highlight —
+   it stays on while paused, because the point is which track the transport is
+   pointed at, which is exactly the question you press play to answer. */
+.track-review-row--playing > td { background: var(--accent-dim); }
 
 /* "Add & View" — same accent family as "Add & Return" (.btn-primary) but a
    lighter, tinted fill rather than .btn-ghost's transparent-on-dark look,
@@ -5801,7 +5955,6 @@ a.member-chip-name:hover { color: var(--accent); }
    real directory pane, and a directory pane fills the window it's given. */
 .lq-wrap { padding: 24px 28px; }
 .lq-h1 { font-size: 21px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.01em; }
-.lq-sub-head { color: var(--t2); font-size: 13px; margin-bottom: 24px; }
 
 /* ── Folder navigator ────────────────────────────────────────────────────────
    Rebuilt 2026-08-02: the navigator IS the page. Reworked again 2026-08-22
@@ -5830,19 +5983,26 @@ a.member-chip-name:hover { color: var(--accent); }
   display: flex; align-items: center; gap: 10px; padding-bottom: 11px;
   border-bottom: 1px solid var(--bd-0);
 }
-.lq-crumbs {
-  display: flex; flex-wrap: wrap; gap: 5px; align-items: center; flex: 1; min-width: 0;
+/* Breadcrumbs REMOVED 2026-08-28 (Ryan). They made every ancestor a link up to
+   "/", which is a filesystem browser, not a way to add recordings. What is
+   left is what a normal app has and in the order one has it: the controls on
+   the LEFT, the folder you are in after them. */
+.lq-browse-btn { flex: none; gap: 6px; }
+.lq-browse-ic { width: 13px; height: 13px; }
+.lq-nav-up {
+  display: inline-flex; align-items: center; gap: 5px; flex: none;
+  background: none; border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  padding: 4px 10px; font-size: 11.5px; color: var(--t1); cursor: pointer;
+  font-family: inherit;
+}
+.lq-nav-up:hover:not(:disabled) { border-color: var(--accent); color: var(--accent-lit); }
+.lq-nav-up:disabled { opacity: .4; cursor: default; }
+/* The current folder, shown RELATIVE to the download root — an absolute NAS
+   path is longer than the row and tells the user nothing they did not know. */
+.lq-nav-here {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono); font-size: 12px; color: var(--t2);
 }
-.lq-crumbs a { color: var(--t1); cursor: pointer; text-decoration: none; }
-.lq-crumbs a:hover { color: var(--accent-lit); text-decoration: underline; }
-.lq-crumbs .sep { color: var(--t3); }
-.lq-browse-btn {
-  background: var(--bg-5); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
-  padding: 4px 10px; font-size: 11.5px; color: var(--t1); cursor: pointer;
-  font-family: inherit; flex: none;
-}
-.lq-browse-btn:hover { border-color: var(--accent); color: var(--accent-lit); }
 .lq-typepath {
   background: none; border: none; color: var(--t3); font-size: 11.5px;
   cursor: pointer; padding: 2px 4px; flex: none; text-decoration: underline;
@@ -5980,6 +6140,263 @@ a.member-chip-name:hover { color: var(--accent); }
   border-radius: var(--r-sm); padding: 4px 8px; font-size: 12.5px;
 }
 
+/* ── Ingestion settings bar (Ryan, 2026-08-28) ───────────────────────────── */
+/* Horizontal, across the top, reusing `.bfilter` from the Browse view so the
+   two read as the same control. This was a left-hand rail for exactly one day:
+   the rail gave the mode descriptions more room, but a vertical settings column
+   is a shape this app uses nowhere else, and matching the rest of the app beats
+   the room. The mode explanation moved to the label's tooltip. */
+.lq-setbar {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 11px 0 13px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--bd-0);
+}
+.lq-setbar .bfilter select { max-width: 190px; }
+/* The folder is a BUTTON, not a select — it opens the picker rather than
+   listing options, and it should not pretend otherwise. Sized to sit level
+   with the two selects beside it. */
+.lq-setbar-path {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0;
+  text-transform: none; font-weight: 400; color: var(--t0);
+  background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  padding: 4px 9px; max-width: 260px;
+}
+.lq-setbar-path span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lq-setbar-path:hover:not(:disabled) { background: var(--bg-4); border-color: var(--accent); color: var(--accent-lit); }
+.lq-setbar-path:disabled { opacity: .5; cursor: default; }
+.lq-setbar-ic { width: 13px; height: 13px; flex: none; }
+/* Consequence of the file-treatment choice, in plain words. Pushed right the
+   same way .browse-count is. */
+/* One line, always. It wrapped "filed" onto a line of its own at 40ch (Ryan,
+   2026-08-28) — a single orphaned word reads as a rendering fault, not a
+   sentence. It gets whatever room is left and truncates rather than wraps; the
+   full text is in the title. */
+.lq-setbar-note {
+  margin-left: auto; font-size: 11px; color: var(--t3); text-align: right;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex: 0 1 auto;
+}
+
+/* Below this the bar wraps, and the note goes to a line of its own where it
+   has the whole width and can say the sentence in full. */
+@media (max-width: 1100px) {
+  .lq-setbar-note {
+    margin-left: 0; text-align: left; white-space: normal; flex: 1 0 100%;
+  }
+}
+
+/* ── Apply to all (Ryan, 2026-08-28) ─────────────────────────────────────── */
+/* Values that ride along with every recording in the queue. One field today
+   (Event, for a folder of shows from one festival); shaped as a container so
+   the next one is a line of markup rather than a new mechanism.
+   Collapsed to a single quiet link until asked for, because it is a rare case
+   and a permanent empty form above the primary button would tax every ordinary
+   ingest for the sake of an occasional one. */
+.lq-applyall-open {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  background: none; border: 0; padding: 4px 0; margin-bottom: 10px;
+  font-family: inherit; font-size: 11.5px; color: var(--t3);
+}
+.lq-applyall-open:hover { color: var(--accent-lit); }
+.lq-applyall-ic { width: 12px; height: 12px; }
+
+.lq-applyall {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 13px; margin-bottom: 12px;
+  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
+}
+.lq-applyall-head { display: flex; align-items: center; gap: 10px; }
+.lq-applyall-h {
+  font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--t3); font-weight: 600;
+}
+.lq-applyall-input {
+  background: var(--bg-1); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+  color: var(--t0); font-family: var(--font-ui); font-size: 12px;
+  letter-spacing: 0; text-transform: none; font-weight: 400;
+  padding: 4px 8px; min-width: 280px;
+}
+.lq-applyall-input:focus { outline: none; border-color: var(--accent); }
+.lq-applyall-input::placeholder { color: var(--t3); }
+.lq-applyall-x {
+  background: none; border: 0; cursor: pointer; padding: 4px 6px;
+  font-family: inherit; font-size: 11px; color: var(--t3);
+}
+.lq-applyall-x:hover { color: var(--t0); text-decoration: underline; }
+
+/* ── Row drill-in (rebuilt 2026-08-28) ───────────────────────────────────── */
+/* The density toggle is GONE — compact is the only mode, so there is nothing to
+   toggle between (Ryan). What was the "card" is now only the panel that drops
+   BELOW a row, which is what stops the row's own buttons moving when it opens. */
+
+/* Tab Strip. Uses the app's tab vocabulary rather than the three full-width
+   value-carrying buttons this replaced: every value they showed is now on the
+   row two lines above, so they were repeating the user's last glance back at
+   them in a control style used nowhere else. */
+.lq-dtabs {
+  display: flex; align-items: stretch; gap: 2px;
+  padding: 0 12px; border-bottom: 1px solid var(--bd-1); background: var(--bg-2);
+}
+.lq-dtab {
+  background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 9px 12px 8px; margin-bottom: -1px; cursor: pointer;
+  font-family: inherit; font-size: 12px; color: var(--t2);
+}
+.lq-dtab:hover { color: var(--t0); }
+.lq-dtab.on { color: var(--accent-lit); border-bottom-color: var(--accent); }
+.lq-pane { padding: 14px 16px 16px; background: var(--bg-2); }
+.lq-detailwrap { border-top: 1px solid var(--bd-0); }
+
+/* ── Compact row — Direction A, "The Belt" ───────────────────────────────── */
+/* Cards sit 22px apart because each one is a separate report. Compact rows are
+   a TABLE, so they butt against each other with a single hairline between —
+   the gap is what would stop it reading as one scannable list. */
+/* Doubled class, not `.lq-cards--compact` alone: `.lq-cards { gap: 22px }` is
+   defined below this block at equal specificity, so a single class would lose
+   the cascade and leave a dead strip between every row. */
+/* NOT overflow:hidden. That clipped the error chip's tooltip against the
+   bottom of the table, which is exactly where the rows most likely to have
+   failed sit (2026-08-28). The rounded ends are done by rounding the first and
+   last painted children instead, which costs nothing and lets a tooltip escape
+   the box the way a tooltip has to. */
+.lq-cards.lq-cards--compact { gap: 0; border: 1px solid var(--bd-0); border-radius: var(--r-md); }
+.lq-cards--compact > :first-child .lq-brow,
+.lq-cards--compact > .lq-brow-head {
+  border-top-left-radius: var(--r-md); border-top-right-radius: var(--r-md);
+}
+.lq-cards--compact > :last-child .lq-brow,
+.lq-cards--compact > :last-child .lq-pane {
+  border-bottom-left-radius: var(--r-md); border-bottom-right-radius: var(--r-md);
+}
+.lq-cards--compact > .lq-row + .lq-row { border-top: 1px solid var(--bd-0); }
+/* A row the user drilled into keeps card padding and re-gains its own border,
+   so it reads as lifted OUT of the list rather than as a very tall row. */
+/* Every row is a compact row now — the "drilled into becomes a card" state it
+   used to style cannot happen. */
+
+/* The actions column is a FIXED width even when a row has no actions (queued,
+   already-ingested). An auto column collapses on those rows and drags the two
+   score columns out of line with the rows above — which defeats the only
+   reason to put a score in a table. */
+.lq-brow {
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 22px;
+  gap: 10px; align-items: center;
+  padding: 7px 12px; background: var(--bg-3);
+}
+/* The row being copied right now, out of a queue of seventeen. Same accent
+   edge the analysis phase uses for the folder it is decoding, for the same
+   reason — one lit row answers "where is it up to" without reading anything. */
+.lq-brow--running { background: var(--bg-4); box-shadow: inset 2px 0 0 var(--accent); }
+
+/* Column header. Three unlabelled readings in a row is a puzzle, not a table
+   (Ryan, 2026-08-28). Shares the row's grid so the labels sit over their own
+   columns and cannot drift when the column widths change. */
+.lq-brow-head {
+  display: grid;
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 22px;
+  gap: 10px; padding: 7px 12px; background: var(--bg-2);
+  border-bottom: 1px solid var(--bd-1);
+  font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--t3); font-weight: 600;
+  /* Bottom-aligned so a label that wraps still sits on the same baseline as
+     its single-line neighbours. */
+  align-items: end;
+}
+/* Each header cell aligns the way its column's CONTENT aligns, or the labels
+   float free of the numbers they name. */
+.lq-brow-head > :nth-child(4) { text-align: right; }
+.lq-brow-head > :nth-child(5) { text-align: center; }
+.lq-brow-head .lq-tip { cursor: help; }
+.lq-brow-head .lq-tip:hover { color: var(--t1); }
+.lq-brow:hover { background: var(--bg-4); }
+.lq-brow--pending { opacity: .6; }
+.lq-brow-spine { align-self: stretch; border-radius: 2px; min-height: 26px; }
+.lq-brow-main { min-width: 0; }
+.lq-brow-name {
+  font-size: 12.5px; font-weight: 600; color: var(--t0); line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The facts line is the first thing to go on a narrow window — the name and
+   the actions are what the row is for. */
+.lq-brow-sub {
+  display: flex; align-items: center; gap: 6px; margin-top: 2px;
+  font-size: 11px; color: var(--t3); font-family: var(--font-ui);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.lq-brow-sub .sep { color: var(--bd-2); }
+.lq-brow-err { color: var(--red); white-space: nowrap; }
+.lq-brow-band { justify-self: start; }
+/* Tabular so a column of them lines up — the whole reason to put a score in a
+   table instead of on a card. Only ONE number survives here: the 0-100 Sound
+   Quality score was removed 2026-08-28 because the pill beside it already said
+   the same thing in a word. */
+.lq-brow-meta { font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+/* Fingerprint verdict — a colour and a tooltip, where the card gives it a whole
+   tab. At triage speed the only question is whether the checksums matched. */
+.lq-brow-fp { display: inline-flex; align-items: center; justify-content: center; }
+.lq-fp-ic { width: 15px; height: 15px; }
+.lq-brow-fp .lq-tipbox { text-transform: none; letter-spacing: 0; font-weight: 400; }
+
+/* ── Inline copy progress, both views ────────────────────────────────────── */
+/* The confirm job has always reported copied/total on every poll and nothing
+   read it — a queue run showed one sentence above the list and rows that
+   vanished when they finished (Ryan, 2026-08-28). */
+.lq-copybar { display: flex; align-items: center; gap: 9px; margin-top: 5px; }
+.lq-copybar-track {
+  flex: 1; max-width: 260px; height: 3px; background: var(--bg-5);
+  border-radius: 2px; overflow: hidden;
+}
+.lq-copybar-track i {
+  display: block; height: 100%; border-radius: 2px; background: var(--accent);
+  transition: width .25s linear;
+}
+.lq-copybar-n {
+  font-size: 10.5px; color: var(--t2); font-variant-numeric: tabular-nums; flex: none;
+}
+
+/* Queued / Ingesting — the two states before "Complete". Deliberately not
+   buttons: a row the queue owns must not look clickable. */
+.lq-act-queued, .lq-act-running {
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
+  font-size: 11.5px; padding: 4px 10px; border-radius: var(--r-sm);
+}
+.lq-act-queued  { color: var(--t3); border: 1px dashed var(--bd-1); }
+.lq-act-running { color: var(--accent-lit); border: 1px solid var(--accent); }
+.lq-brow-caret {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; cursor: pointer;
+  background: transparent; border: 0; color: var(--t3); border-radius: 3px;
+}
+.lq-brow-caret:hover { color: var(--accent-lit); background: var(--bg-5); }
+/* Rows with nothing to drill into (queued, errored, already ingested) keep the
+   column so the grid stays aligned, and show no control. */
+.lq-brow-caret--spacer { pointer-events: none; }
+/* An open row and its panel read as ONE block. */
+.lq-row--compact.is-open .lq-brow { background: var(--bg-4); }
+.lq-row--compact.is-open { box-shadow: inset 2px 0 0 var(--bd-2); }
+/* Actions are the tallest thing in the row; shrink them so the row can be
+   short. Same buttons, same handlers — just less padding. */
+.lq-brow .lq-actions { max-width: none; flex-wrap: nowrap; gap: 4px; }
+.lq-brow .lq-act { padding: 3px 9px; font-size: 11.5px; }
+/* Concerns still show — they are the one thing that can change the decision. */
+.lq-brow .lq-concerns { margin-top: 4px; }
+/* The card's verdict pill is sized for a card. In a row it is the tallest
+   thing present and would set the row height on its own. */
+.lq-brow .lq-verdict { padding: 3px 8px; font-size: 11px; }
+
+
+/* Under ~900px the numbers and the facts line lose their columns before the
+   name or the actions do. */
+@media (max-width: 900px) {
+  .lq-brow,
+  .lq-brow-head { grid-template-columns: 3px minmax(0, 1fr) 66px 24px 214px 22px; gap: 9px; }
+  .lq-brow-meta, .lq-brow-head > :nth-child(4) { display: none; }
+}
+
 /* ── Row = the card, full width ──────────────────────────────────────────── */
 /* The card is now the whole row (2026-08-02). Actions moved inside it, so the
    fixed-width gutter that used to sit alongside is gone and the card runs
@@ -5988,26 +6405,8 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-row { display: block; }
 .lq-cards { display: flex; flex-direction: column; gap: 22px; }
 
-.lq-card {
-  width: 100%; min-width: 0;
-  background: var(--bg-3); border: 1px solid var(--bd-1);
-  border-radius: var(--r-lg); padding: 16px 18px;
-}
-.lq-card--pending { opacity: .6; }
-/* The one card actually being analyzed right now, out of possibly hundreds
-   still queued behind it — distinguished by a lit accent edge rather than
-   dimmed like its queued siblings (Ryan, 2026-08-26: "not showing any sort
-   of progress indicator for an individual recording"). */
-.lq-card--active {
-  opacity: 1;
-  border-left: 2px solid var(--accent);
-}
-/* flex-start, not center (2026-08-02): with actions on the right and a
-   two-or-three-line title block on the left, centring floated the title
-   against a taller neighbour. The title is the anchor — it pins to the top. */
-.lq-card-head { display: flex; align-items: flex-start; gap: 16px; }
-.lq-card-title { flex: 1; min-width: 0; }
-.lq-card-title h2 { font-size: 13px; font-weight: 600; margin: 0; word-break: break-word; line-height: 1.3; }
+/* .lq-card* removed 2026-08-28 — the card is gone; a row plus its drill-in
+   is the only shape now. */
 
 /* Quick-glance facts — Tracks | Format | Bitrate | Cutoff.
    Was a bordered four-cell strip in the top-right corner; now one pipe-
@@ -6053,37 +6452,8 @@ a.member-chip-name:hover { color: var(--accent); }
    (2026-08-02). Each carries its own reading and opens its own panel, so the
    two quality signals are visibly separate things with separate evidence —
    which they are. Equal widths on purpose: neither reading outranks the other. */
-.lq-tabs { display: flex; gap: 8px; margin-top: 12px; }
-.lq-tab {
-  flex: 1 1 0; min-width: 0;
-  display: flex; align-items: center; gap: 10px; text-align: left;
-  padding: 8px 11px; background: var(--bg-2); border: 1px solid var(--bd-0);
-  border-radius: var(--r-sm); color: var(--t1); font: inherit; cursor: pointer;
-}
-.lq-tab:hover { background: var(--bg-4); border-color: var(--bd-1); }
-.lq-tab.on { background: var(--bg-4); border-color: var(--bd-2); color: var(--t0); }
-.lq-tab-txt { flex: 1; min-width: 0; }
-.lq-tab-k { display: block; font-size: 12px; font-weight: 600; }
-/* The honesty line. Sound Quality is a detection at r = 0.55 against 113 graded
-   recordings, not a definitive judgement — that belongs on the face of the
-   control, not buried in a tooltip. */
-.lq-tab-sub { display: block; font-size: 9.5px; color: var(--t3); margin-top: 2px; }
-.lq-tab-score {
-  font-family: var(--font-ui); font-size: 19px; font-weight: 600;
-  line-height: 1; font-variant-numeric: tabular-nums; flex: none;
-}
-/* Leads the button now (2026-08-09, was trailing after the value) and sized
-   up — at 12px trailing a coloured badge it read as decoration; a plainer
-   task is to make it obviously the "expand this" control, which wants to be
-   both first and a little bigger than the text it sits beside. */
-.lq-tab .chev { color: var(--t2); font-size: 16px; flex: none; }
-.lq-tab:hover .chev { color: var(--accent-lit); }
-
-.lq-detail { display: none; }
-.lq-card.open-lq   .lq-detail--lq   { display: block; }
-.lq-card.open-meta .lq-detail--meta { display: block; }
-.lq-card.open-fp   .lq-detail--fp   { display: block; }
-.lq-card.open .lq-tabs { margin-bottom: 2px; }
+/* .lq-tabs / .lq-tab* / .lq-detail removed 2026-08-28 — replaced by the
+   .lq-dtabs Tab Strip and a single .lq-pane above. */
 
 /* ── Metadata Completeness panel ────────────────────────────────────────────
    One row per field the completeness score counts, all nine of them. The
@@ -6115,8 +6485,10 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-grp:first-of-type { margin-top: 10px; }
 .lq-grp-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 5px; }
 .lq-grp-name { font-weight: 600; font-size: 12.5px; min-width: 66px; border-bottom: 1px dotted var(--t3); cursor: help; }
-.lq-grp-score { font-family: var(--font-ui); font-size: 12.5px; font-variant-numeric: tabular-nums; }
-.lq-grp-weight { color: var(--t3); font-size: 10.5px; margin-left: auto; }
+/* margin-left:auto inherited from the removed .lq-grp-weight caption
+   (2026-08-28): the score now holds the right-hand slot the percentage used to,
+   which is where the eye already goes for it. */
+.lq-grp-score { font-family: var(--font-ui); font-size: 12.5px; font-variant-numeric: tabular-nums; margin-left: auto; }
 .lq-meter { height: 5px; background: var(--bg-5); border-radius: 3px; overflow: hidden; margin-bottom: 5px; }
 .lq-meter-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
 .lq-grp-txt { color: var(--t1); font-size: 12.5px; }
@@ -6311,10 +6683,6 @@ a.member-chip-name:hover { color: var(--accent); }
   font-size: 9.5px; color: var(--amber); margin-left: 7px;
   text-transform: uppercase; letter-spacing: .05em;
 }
-.lq-footnote {
-  margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--bd-0);
-  font-size: 11px; color: var(--t3); line-height: 1.5;
-}
 .lq-star { color: var(--t3); margin-left: 2px; }
 
 /* Metrics — now nested under their group rather than in one flat Advanced
@@ -6382,12 +6750,22 @@ a.member-chip-name:hover { color: var(--accent); }
    stroke is thick relative to its 8px box; Lucide's is the thin 2-on-24
    stroke the rest of the icon set uses, sized down to sit quietly next to
    12px button text rather than reading as its own shape. */
-.lq-act-chev { width: 11px; height: 11px; margin-left: 3px; flex-shrink: 0; }
 .lq-act--ingest { color: var(--green); border-color: rgba(106,184,128,.35); }
 .lq-act--ingest:hover { border-color: var(--green); color: var(--green); background: rgba(106,184,128,.08); }
 .lq-act--view { color: var(--accent-lit); border-color: var(--accent); }
 .lq-act-done     { font-size: 12px; color: var(--green); padding: 4px 0; white-space: nowrap; }
-.lq-act-failed   { font-size: 12px; color: var(--red);   padding: 4px 0; }
+/* .lq-act-failed removed 2026-08-28 — the message is a hover now, not a
+   paragraph wedged into the actions column. See .lq-errchip. */
+.lq-errchip {
+  display: inline-flex; align-items: center; flex: none;
+  color: var(--red); cursor: help;
+}
+.lq-errchip-ic { width: 15px; height: 15px; }
+.lq-errchip:hover { color: var(--accent-lit); }
+/* Anchored to its RIGHT edge. The default .lq-tipbox is left-anchored and
+   300px wide, which runs off the window when the thing being hovered sits in
+   the last column of the row. */
+.lq-tipbox--right { left: auto; right: 0; }
 .lq-act-cancelled{ font-size: 12px; color: var(--t3);    padding: 4px 0; white-space: nowrap; }
 
 .lq-move-wrap { position: relative; }
@@ -6416,11 +6794,25 @@ a.member-chip-name:hover { color: var(--accent); }
    have no reason to stop short of the pane. */
 .lq-shell { max-width: none; }
 .lq-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.lq-act--review, .lq-act--move { color: var(--t2); }
-.lq-act--review:hover, .lq-act--move:hover { color: var(--accent-lit); }
+/* Review is a real choice, not a fallback (Ryan, 2026-08-28: "too dark").
+   It sat at --t2, the same weight as Move, which read as disabled next to
+   Ingest — and Review is the button you WANT someone reaching for when the
+   automatic path cannot do the job. Brought up to full text colour with a
+   visible border; Ingest keeps the accent, so the order of prominence is
+   still Ingest, then Review, then Move. */
+.lq-act--review {
+  color: var(--t0); border-color: var(--bd-2); background: var(--bg-4);
+}
+.lq-act--review:hover {
+  color: var(--accent-lit); border-color: var(--accent); background: var(--bg-5);
+}
+.lq-act--move { color: var(--t2); }
+.lq-act--move:hover { color: var(--accent-lit); }
+/* One chevron across the app now (2026-08-28) — chevronIcon() only. This is
+   the inline-with-a-label size; the rotation comes from .caret-ic--down. */
+.lq-act-chev { margin-left: 3px; flex-shrink: 0; }
 /* Failure text can now be a whole sentence, so let it wrap instead of
    overflowing the action column. */
-.lq-act-failed { white-space: normal; line-height: 1.35; font-size: 11px; }
 
 /* ── Library Browse view (2026-08-02 design spec) ─────────────────────────────
    The fixed module dashboard and its shared components (rec-card, perf-tile,
@@ -6744,8 +7136,8 @@ a.member-chip-name:hover { color: var(--accent); }
   font-family: var(--font-ui);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  margin-left: auto;   /* was .rq-grp-weight's slot until 2026-08-28 */
 }
-.rq-grp-weight { margin-left: auto; font-size: 10px; color: var(--t3); }
 .rq-grp-txt { font-size: 11.5px; color: var(--t2); line-height: 1.45; }
 
 /* Advanced metrics: collapsed by default behind a caret (Ryan, 2026-08-18).
@@ -7926,4 +8318,11 @@ select.set-input { max-width: 480px; }
 
 @media (max-width: 640px) {
   .set-person { flex-direction: column; }
+}
+
+/* Section header inside a debug pane — the Ingest pane shows two different
+   tables (confirm jobs, analysis queue) and they are not the same list. */
+.dev-sec-h {
+  padding: 9px 14px 5px; font-size: 9.5px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--t3); font-weight: 600;
 }

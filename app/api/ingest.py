@@ -13,6 +13,9 @@ provides names and dates; this endpoint does the lookup/create work.
 import re
 import os
 import json
+import queue
+import threading
+import time
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
@@ -43,6 +46,7 @@ from app.utils.checksums import (
     parse_checksum_file, match_entries_to_tracks, verify_track_checksum,
     FINGERPRINT_TYPE_PRIORITY,
 )
+from app.utils.debug_log import log_step
 
 bp = Blueprint("ingest", __name__)
 
@@ -387,38 +391,127 @@ def ai_assist_status(job_id):
     return jsonify({"status": "done", "result": job["result"]})
 
 
-_INGEST_JOBS = {}  # job_id -> {status, copied, total, result, error}
+_INGEST_JOBS = {}  # job_id -> {status, phase, copied, total, result, error}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Confirm-job phases
+# ═════════════════════════════════════════════════════════════════════════════
+# The confirm job reported exactly two things — `copied` and `total` — which
+# are only meaningful during ONE of its four phases. Everything before the copy
+# (resolving the act, venue, event and performance) and everything after it
+# (checksum verification, which reads every track when the folder ships .md5)
+# showed as a motionless 0/0, so a slow ingest was indistinguishable from a
+# hung one (Ryan, 2026-08-28: "help me and the user understand what may be
+# taking a while").
+#
+# Labels are user-facing and deliberately name the WORK, not the code.
+PHASES = {
+    "resolving":  "Reading folder and matching metadata",
+    "copying":    "Copying files into the library",
+    "moving":     "Moving files into the library",
+    "cataloging": "Cataloging tracks",
+    "checksums":  "Verifying checksums",
+    # Deliberately vague (Ryan, 2026-08-28: "don't be that specific"). The
+    # phase measures each track to decide whether it looks like music, but
+    # naming the heuristic in a progress line tells the user about our
+    # internals rather than about their ingest.
+    "signals":    "Analyzing tracks",
+    "saving":     "Saving to the library",
+    "queued":     "Queued for analysis",
+    "analyzing":  "Analyzing audio for metrics",
+    "done":       "Done",
+}
 
 
-def _run_analysis_job(app, recording_id):
-    """
-    Background worker: run Librosa analysis on every track of a freshly
-    ingested recording. Fire-and-forget — nothing polls this, it just fills in
-    track_analysis (waveform, RMS, BPM, etc.) shortly after the recording
-    itself becomes visible. Deliberately its own thread, separate from the
-    ingest job, so analysis time never delays "done" (and the UI's jump to
-    the new recording page) the way the copy step used to. Re-Analyze can
-    always re-run this by hand; it upserts the same rows either way.
-    """
+# ═════════════════════════════════════════════════════════════════════════════
+# Track-analysis queue
+# ═════════════════════════════════════════════════════════════════════════════
+# ONE worker, drained from a queue — not a thread per recording.
+#
+# The old line was `threading.Thread(target=_run_analysis_job, ...).start()`
+# fired from inside each finished ingest, with nothing bounding it. Ingesting a
+# folder of seventeen shows therefore spawned seventeen concurrent Librosa
+# threads, each holding a fully decoded track in RAM (a 4.6-minute 24/96 track
+# is 106 MB as float32) and each competing for the same CPU and the same NAS
+# spindle as the copy still running for the NEXT show.
+#
+# Measured on one such track (2026-08-28): librosa.load 19.6 s, beat_track
+# 29.1 s, full-track STFT + centroid 5.9 s — 57.7 s per track, roughly 16
+# minutes for that 8-track show. Seventeen of those at once is the thing that
+# actually made ingestion feel slow; the listening-quality pass everyone
+# suspects costs about 3 seconds a show.
+#
+# A single worker does not make the analysis faster. It makes it FINITE, keeps
+# it off the critical path of the next copy, and — because the queue is now a
+# real object — makes it reportable, which is what the debug pane needs.
+_ANALYSIS_Q = queue.Queue()
+_ANALYSIS_STATE = {
+    "current": None,      # {recording_id, name, started, tracks_done, tracks_total}
+    "worker":  False,     # has the worker thread been started
+    "done":    0,
+    "failed":  0,
+    "skipped": 0,         # recordings ingested in Quick Add, never enqueued
+}
+
+
+def _analysis_worker(app):
+    """Drain the analysis queue forever, one recording at a time."""
     import traceback as _tb
-    try:
-        with app.app_context():
-            from app.models.recording import Recording
-            from app.utils.analysis import analyse_recording
-            rec = db.session.get(Recording, recording_id)
-            if not rec:
-                return
-            library_root = app.config.get("LIBRARY_ROOT", "")
-            n_ok, errors = analyse_recording(rec, library_root, db.session)
-            print("[ingest] auto-analysis for recording %s: %d ok, %d error(s)"
-                  % (recording_id, n_ok, len(errors)), flush=True)
-    except Exception:
-        _tb.print_exc()
+    while True:
+        recording_id = _ANALYSIS_Q.get()
+        try:
+            with app.app_context():
+                from app.models.recording import Recording
+                from app.utils.analysis import analyse_recording
+                rec = db.session.get(Recording, recording_id)
+                if not rec:
+                    continue
+                _ANALYSIS_STATE["current"] = {
+                    "recording_id": recording_id,
+                    "name": os.path.basename(rec.folder_path or "") or str(recording_id),
+                    "started": time.time(),
+                    "tracks_total": len(rec.tracks or []),
+                }
+                log_step(f"analysis:{recording_id}", "analyzing",
+                         f"{len(rec.tracks or [])} tracks", force=True)
+                library_root = app.config.get("LIBRARY_ROOT", "")
+                n_ok, errors = analyse_recording(rec, library_root, db.session)
+                _ANALYSIS_STATE["done"] += 1
+                if errors:
+                    _ANALYSIS_STATE["failed"] += len(errors)
+                print("[ingest] auto-analysis for recording %s: %d ok, %d error(s)"
+                      % (recording_id, n_ok, len(errors)), flush=True)
+        except Exception:
+            _ANALYSIS_STATE["failed"] += 1
+            _tb.print_exc()
+        finally:
+            _ANALYSIS_STATE["current"] = None
+            _ANALYSIS_Q.task_done()
+
+
+def _enqueue_analysis(app, recording_id):
+    """Hand a freshly ingested recording to the single analysis worker."""
+    if not _ANALYSIS_STATE["worker"]:
+        _ANALYSIS_STATE["worker"] = True
+        threading.Thread(target=_analysis_worker, args=(app,), daemon=True).start()
+    _ANALYSIS_Q.put(recording_id)
+
+
+def analysis_snapshot():
+    """Queue state for the debug pane. Never raises — it is a debug surface."""
+    cur = _ANALYSIS_STATE.get("current")
+    return {
+        "pending": _ANALYSIS_Q.qsize(),
+        "current": (dict(cur, elapsed=round(time.time() - cur["started"], 1))
+                    if cur else None),
+        "done":    _ANALYSIS_STATE["done"],
+        "failed":  _ANALYSIS_STATE["failed"],
+        "skipped": _ANALYSIS_STATE["skipped"],
+    }
 
 
 def _run_ingest_job(job_id, app, data, user_id):
     """Background worker: copy files (with progress) + create the DB chain."""
-    import threading
     import traceback as _tb
     from app.utils.ingest import IngestCancelled
     job = _INGEST_JOBS[job_id]
@@ -428,11 +521,23 @@ def _run_ingest_job(job_id, app, data, user_id):
                 job["copied"] = copied
                 job["total"]  = total
 
+            def phase(key, detail=None):
+                job["phase"] = key
+                job["phase_label"] = PHASES.get(key, key)
+                job["phase_at"] = time.time()
+                # Unconditional: a phase with no detail must CLEAR the previous
+                # one, or "Saving to the library" inherits the checksum phase's
+                # "(FFP, MD5)" and reports work it is not doing.
+                job["phase_detail"] = detail
+                log_step(f"ingest:{job_id}", key, detail or PHASES.get(key, key),
+                         force=True)
+
             def cancelled():
                 return bool(job.get("cancel"))
 
             try:
-                job["result"] = _do_confirm(data, user_id, prog, cancel_cb=cancelled)
+                job["result"] = _do_confirm(data, user_id, prog,
+                                            cancel_cb=cancelled, phase_cb=phase)
             except IngestCancelled:
                 # move_to_library has already put the filesystem back; the DB
                 # session has not committed yet, so rolling back leaves no trace
@@ -442,12 +547,27 @@ def _run_ingest_job(job_id, app, data, user_id):
                 job["status"] = "cancelled"
                 return
             job["status"] = "done"
-        # Kick off Librosa analysis in its own background thread once the
+            job["phase"] = "done"
+            job["phase_label"] = PHASES["done"]
+        # Hand Librosa analysis to the single background worker once the
         # recording exists — decoupled from this job so it can't hold up
         # reporting "done".
+        #
+        # Quick Add (`skip_analysis`) simply does not enqueue. Nothing else
+        # about the ingest changes: the same files are copied, the same tracks
+        # and checksums are written, and the listening-quality score still
+        # travels across in _do_confirm step 11. Only waveform/BPM/spectral are
+        # deferred, and Re-Analyze fills them in later against the same rows —
+        # which is exactly what makes this safe to skip (Ryan, 2026-08-28).
         rec_id = (job.get("result") or {}).get("recording_id")
         if rec_id:
-            threading.Thread(target=_run_analysis_job, args=(app, rec_id), daemon=True).start()
+            if data.get("skip_analysis"):
+                _ANALYSIS_STATE["skipped"] += 1
+                log_step(f"ingest:{job_id}", "analysis-skipped",
+                         "Quick Add — waveform/BPM deferred to Re-Analyze",
+                         force=True)
+            else:
+                _enqueue_analysis(app, rec_id)
     except Exception as e:  # noqa: BLE001
         _tb.print_exc()
         job["error"]  = str(e)
@@ -469,7 +589,14 @@ def confirm_ingest():
     if not artist_name:
         return jsonify({"error": "artist_name is required"}), 400
     job_id = uuid.uuid4().hex
-    _INGEST_JOBS[job_id] = {"status": "running", "copied": 0, "total": 0}
+    _INGEST_JOBS[job_id] = {
+        "status": "running", "copied": 0, "total": 0,
+        "phase": "resolving", "phase_label": PHASES["resolving"],
+        "started": time.time(), "phase_at": time.time(),
+        "folder": os.path.basename(source_folder.rstrip("/")),
+        "artist": artist_name,
+        "quick": bool(data.get("skip_analysis")),
+    }
     threading.Thread(
         target=_run_ingest_job,
         args=(job_id, current_app._get_current_object(), data, current_user.id),
@@ -488,6 +615,12 @@ def confirm_status(job_id):
     if job["status"] == "running":
         return jsonify({"status": "running", "copied": job.get("copied", 0),
                         "total": job.get("total", 0),
+                        # Which of the four phases it is IN, so the dialog can
+                        # say "Verifying checksums" instead of a frozen 0/0.
+                        "phase": job.get("phase"),
+                        "phase_label": job.get("phase_label"),
+                        "phase_detail": job.get("phase_detail"),
+                        "elapsed": round(time.time() - job.get("started", time.time()), 1),
                         "cancelling": bool(job.get("cancel"))})
     _INGEST_JOBS.pop(job_id, None)
     if job["status"] == "error":
@@ -495,6 +628,40 @@ def confirm_status(job_id):
     if job["status"] == "cancelled":
         return jsonify({"status": "cancelled"})
     return jsonify({"status": "done", "result": job["result"]})
+
+
+@bp.route("/pipeline", methods=["GET"])
+@login_required
+def pipeline_status():
+    """
+    Everything currently moving through ingestion, for the debug drawer's
+    Ingest pane (Ryan, 2026-08-28: "add info to the debug window that
+    characterizes and prints the status of the ingestion job").
+
+    Reads live in-memory state — no DB, no filesystem — so it is safe to poll
+    while a copy is saturating the disk. Confirm jobs are removed from
+    _INGEST_JOBS the first time a client polls them to a terminal state, so
+    this shows what is IN FLIGHT plus the analysis queue's running totals,
+    which is the pair that answers "what is taking so long".
+    """
+    now = time.time()
+    jobs = []
+    for jid, j in list(_INGEST_JOBS.items()):
+        jobs.append({
+            "job_id":  jid[:8],
+            "folder":  j.get("folder"),
+            "artist":  j.get("artist"),
+            "status":  j.get("status"),
+            "phase":   j.get("phase"),
+            "label":   j.get("phase_label"),
+            "detail":  j.get("phase_detail"),
+            "copied":  j.get("copied", 0),
+            "total":   j.get("total", 0),
+            "quick":   bool(j.get("quick")),
+            "elapsed": round(now - j.get("started", now), 1),
+            "in_phase": round(now - j.get("phase_at", now), 1),
+        })
+    return jsonify({"jobs": jobs, "analysis": analysis_snapshot()})
 
 
 @bp.route("/confirm/<job_id>/cancel", methods=["POST"])
@@ -515,7 +682,62 @@ def confirm_cancel(job_id):
     return jsonify({"status": "cancelling"})
 
 
-def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
+def _store_non_music_signal(tracks, library_root, folder_path):
+    """
+    Measure each track's spectral flatness and length, then score the recording.
+
+    Writes ONLY the two raw measurements plus the derived score, and pointedly
+    does NOT stamp `analysis_version` — these rows are partial. Stamping them
+    would make analyse_and_store_track's skip-path treat them as fully analysed
+    and never fill in the waveform, RMS and spectral columns that Complete mode
+    (or a later Re-Analyze) is supposed to add.
+    """
+    from app.models.track_analysis import TrackAnalysis
+    from app.utils.analysis import SIGNALS_ONLY_VERSION
+    from app.utils.track_signals import (measure_track, non_music_scores,
+                                         NON_MUSIC_THRESHOLD)
+
+    measured = []
+    # NOTE: only ever SET on rows this function creates. An existing row from a
+    # real analysis keeps its own version, so adding the signal to an already
+    # analysed recording never demotes it.
+    for t in tracks:
+        abs_path = os.path.join(library_root, folder_path, t.file_path)
+        flat, dur = measure_track(abs_path)
+        if flat is None and dur is None:
+            continue
+        ta = (db.session.query(TrackAnalysis)
+              .filter_by(track_id=t.id).first())
+        if ta is None:
+            ta = TrackAnalysis(track_id=t.id)
+            db.session.add(ta)
+        ta.spectral_flatness = flat
+        ta.duration_s = dur
+        # Mark the row for what it is. A brand-new TrackAnalysis would
+        # otherwise take the model's default of "1", which reads as "analysed
+        # at version 1" — a row claiming an analysis that never ran. Any value
+        # other than ANALYSIS_VERSION makes the full pass re-run later; this
+        # one also says why the row exists.
+        if ta.analysis_version in (None, "1"):
+            ta.analysis_version = SIGNALS_ONLY_VERSION
+        measured.append((t.id, flat, dur))
+
+    if not measured:
+        return
+    db.session.flush()
+    scored = non_music_scores(measured)
+    for tid, hit in scored.items():
+        ta = db.session.query(TrackAnalysis).filter_by(track_id=tid).first()
+        if ta is not None:
+            ta.non_music_score = hit["score"]
+    log_step("ingest", "signals",
+             f"{len(scored)} scored, "
+             f"{sum(1 for h in scored.values() if h['score'] >= NON_MUSIC_THRESHOLD)}"
+             f" look non-musical",
+             force=True)
+
+
+def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     """
     Resolve or create the full object chain, then ingest the recording.
     Runs inside an app context (background thread). Returns a result dict;
@@ -548,8 +770,15 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
       ]
     }
     """
+    # No-op when nobody is listening, so every call site below stays unguarded.
+    def _phase(key, detail=None):
+        if phase_cb:
+            phase_cb(key, detail)
+
     source_folder = (data.get("source_folder_path") or "").strip()
     artist_name   = (data.get("artist_name")        or "").strip()
+
+    _phase("resolving", artist_name or None)
 
     city        = (data.get("city")       or "").strip() or None
     state       = (data.get("state")      or "").strip() or None
@@ -733,6 +962,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
     # original name and only the final DB/verification path uses the new one.
     audio_rename_map = compute_audio_rename_map(tracks_in)
 
+    # The long one. Named for what it will actually do to the source folder, so
+    # "Moving files into the library" and "Copying files into the library" are
+    # not the same sentence — one of them removes the original.
+    _phase("moving" if behavior == "move" else "copying", folder_name)
+
     try:
         new_folder_path = move_to_library(
             source_folder    = source_folder,
@@ -753,6 +987,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
     except Exception as e:
         db.session.rollback()
         raise RuntimeError(f"File operation failed: {e}")
+
+    _phase("cataloging", f"{len(tracks_in)} track{'' if len(tracks_in) == 1 else 's'}")
 
     # ── 7. Create Recording ───────────────────────────────────────────────────
     rec_is_official = bool(data.get("is_official", False))
@@ -830,6 +1066,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
         data.get("fingerprints", []),
         key=lambda fp: FINGERPRINT_TYPE_PRIORITY.get(fp.get("type"), 9),
     )
+    # Worth naming as its own phase: an ffp/st5 folder reads a FLAC header per
+    # track and is instant, but an .md5 folder re-hashes every byte of every
+    # file. Same phase, two very different waits — and until now both looked
+    # like the copy having stalled at 100%.
+    if fingerprints:
+        _phase("checksums", ", ".join(sorted(
+            {(fp.get("type") or "?").upper() for fp in fingerprints})))
     for fp in fingerprints:
         fp_type  = fp.get("type")
         rel_path = fp.get("rel_path") or os.path.basename(fp.get("filename") or "")
@@ -897,6 +1140,25 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None):
     #
     # A no-op when the folder was never analysed — ingest does not require a
     # quality pass, and never failing an ingest over a score is deliberate.
+    # ── 9.5. Non-music signal ────────────────────────────────────────────────
+    # Runs HERE, inside the ingest, and not in the Librosa analysis pass, for
+    # one reason: Quick Add is the default and Quick Add never runs that pass.
+    # A signal that only exists in the mode nobody uses is not a feature.
+    #
+    # Affordable because it is windowed and librosa-free — measured at 0.15 s
+    # per track, ~1.8 s for a 12-track show, against a copy that takes minutes.
+    # Files are already in the library at this point (step 6 moved them), so it
+    # reads the copy it will be describing, not the source that may be gone.
+    #
+    # Never fatal: an ingest must not fail over a suggestion.
+    _phase("signals", f"{len(created_tracks)} tracks")
+    try:
+        _store_non_music_signal(created_tracks, library_root, new_folder_path)
+    except Exception:  # noqa: BLE001
+        import traceback as _tb3
+        _tb3.print_exc()
+
+    _phase("saving")
     try:
         from app.utils.quality_store import promote_to_recording
         promote_to_recording(source_folder, rec.id, commit=False)
@@ -1067,7 +1329,6 @@ def batch_scan():
     from app.utils.ingest import build_scan_payload
     from app.models.recording import Recording
     from app.utils.paula import compute_paula_score
-    from app.utils.debug_log import log_step
 
     data       = request.get_json() or {}
     source_dir = (data.get("source_dir") or "").strip()

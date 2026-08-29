@@ -34,7 +34,26 @@ class TrackAnalysis(db.Model):
     # Spectral / musical
     spectral_centroid_hz = db.Column(db.Float, nullable=True)  # brightness
     spectral_cutoff_hz   = db.Column(db.Integer, nullable=True) # highest active freq — lossy transcodes show hard wall below Nyquist
-    bpm                  = db.Column(db.Float, nullable=True)   # estimated tempo
+    # ── Non-music detection (2026-08-28) ─────────────────────────────────────
+    # `spectral_flatness` is the raw per-track measurement — Wiener entropy,
+    # how evenly energy is spread across the spectrum. `duration_s` is stored
+    # beside it because the score needs both, and reading it back off disk per
+    # track just to compare durations would be silly.
+    #
+    # `non_music_score` (0-1) is DERIVED, and derived at the RECORDING level:
+    # it is this track's flatness and length measured against the medians of
+    # its own show. A track's own numbers cannot produce it — see
+    # utils/track_signals.py, which documents why absolute thresholds fail.
+    # NULL means "not scored": too few tracks in the recording, or analysis
+    # never ran (Quick Add defers it).
+    spectral_flatness    = db.Column(db.Float, nullable=True)
+    duration_s           = db.Column(db.Float, nullable=True)
+    non_music_score      = db.Column(db.Float, nullable=True)
+
+    # Written by nothing since 2026-08-28 (BPM removed — meaningless for live
+    # concert material, and beat_track was half the cost of analysing a track).
+    # Column kept so existing rows still read; drop it in a future migration.
+    bpm                  = db.Column(db.Float, nullable=True)   # deprecated
 
     # Waveform envelope — JSON list of ~300 floats, 0.0–1.0
     waveform_json    = db.Column(db.Text, nullable=True)
