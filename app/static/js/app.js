@@ -580,6 +580,13 @@ const App = (() => {
     const infoMap = {}
     infoTracks.forEach(t => { infoMap[t.number] = t.title })
 
+    // Songwriter credits the parser split out of a title's trailing
+    // "(Composer Name)" (Ryan, 2026-08-30) — keyed the same way, and offered
+    // as a fallback regardless of which source wins the TITLE, since the
+    // credit only ever comes from the info file's text either way.
+    const infoSongwriterMap = {}
+    infoTracks.forEach(t => { if (t.songwriter) infoSongwriterMap[t.number] = t.songwriter })
+
     // rel_path, not bare filename: a multi-disc source has a "01.flac" per
     // disc and the bare name collides.
     const setByRelPath = {}
@@ -588,9 +595,10 @@ const App = (() => {
     })
     const setsDetected = !!scan?.sets_detected
 
-    const mk = (title, relPath, trackNumber, duration, setNumber) => ({
+    const mk = (title, relPath, trackNumber, duration, setNumber, songwriter) => ({
       track_number: trackNumber,
       title,
+      songwriter:   songwriter || null,
       set_number:   setNumber || null,
       duration:     duration || null,
       filename:     relPath,
@@ -612,7 +620,8 @@ const App = (() => {
           // continuous across discs in the right order.
           (!setsDetected && t.track_number) ? parseInt(t.track_number) : t.index,
           t.duration,
-          setByRelPath[relPath])
+          setByRelPath[relPath],
+          infoSongwriterMap[t.index])
       })
     }
 
@@ -622,7 +631,7 @@ const App = (() => {
         const f = files[t.number - 1] || {}
         const relPath = f.rel_path || f.filename || ''
         return mk(titleCase(t.title) || `Track ${t.number}`,
-                  relPath, t.number, null, setByRelPath[relPath])
+                  relPath, t.number, null, setByRelPath[relPath], t.songwriter)
       })
     }
 
@@ -8722,8 +8731,12 @@ const App = (() => {
     // cards to show.
     const cardsBody = !lq.rows.length
       ? (
-        // Draining to empty is now the NORMAL end state, since finished
-        // shows leave the queue. "Nothing to show" read like a failure.
+        // Rows no longer drain on ingest (2026-08-30), so this is only
+        // reached when literally nothing was found, or every row was Moved
+        // away (the one action that still removes a row outright). Kept as
+        // two distinct messages rather than collapsing to one, since "you
+        // ingested everything" and "there was nothing here" are different
+        // facts worth telling apart.
         lq.log.some(l => l.status === 'done')
           ? `<div class="empty-state">
                <div class="empty-title">All done</div>
@@ -9264,12 +9277,14 @@ const App = (() => {
             status: 'done', recording_id: result.recording_id })
       if (result) {
         invalidateDims()
-        // Finished work leaves the queue — but NOT mid-run. Removing the row the
-        // instant it succeeded meant the third state of the progression Ryan
-        // asked for ("Complete") could never actually be seen: the row was gone
-        // before it could be drawn. During a bulk run the row stays and reads
-        // Complete; runIngestQueue() drains them all when the run ends.
-        if (!lq.running) _lqRemoveRow(row.folder_path)
+        // Row stays put — it does not leave the queue at all (Ryan,
+        // 2026-08-30: "so a person coming back after a long queue can review
+        // everything, rather than just see a blank page that says all
+        // done"). It renders via _lqActions()'s existing recording_id branch:
+        // "Complete" while a bulk run is still going, "Ingested" + a View
+        // link once it (or this single-card ingest) is done. Nothing removes
+        // a row on success any more — see the matching change at the end of
+        // runIngestQueue().
       }
       return result
     } catch (err) {
@@ -9333,9 +9348,11 @@ const App = (() => {
       renderTriageView({ preserveScroll: true })   // → and to "Complete"
     }
 
-    // Only now do finished rows leave. Draining as we went is what hid the
-    // "Complete" state; draining at the end keeps the queue's normal empty
-    // end-state (the "All done" panel) intact.
+    // Finished rows are NOT drained (Ryan, 2026-08-30) — they stay on screen
+    // reading "Ingested", each with a View link, so a long queue's cards are
+    // still there to review afterwards instead of the page going straight to
+    // the empty "All done" panel. _lqIngestable() already excludes anything
+    // in lq.log from being offered again, so nothing here can be re-ingested.
     lq.running = false; lq.activeJob = null; lq.activePath = null
     // A cancelled run is NOT finished business. It stops with untouched rows
     // still on screen and live Ingest buttons, and marking it finished meant
@@ -9344,7 +9361,6 @@ const App = (() => {
     // deliberately stopped short of.
     lq.jobFinished = !lq.cancel
     lq.queued.clear(); lq.copyProgress.clear()
-    for (const l of lq.log) if (l.status === 'done') _lqRemoveRow(l.folder_path)
     invalidateDims()
     renderTriageView({ preserveScroll: true })
   }

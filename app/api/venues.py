@@ -2,7 +2,7 @@
 api/venues.py — Venue endpoints.
 
 Routes:
-  GET  /api/venues/        — list venues (q= for search, limit=100)
+  GET  /api/venues/        — list venues (q= for search)
   GET  /api/venues/<id>    — venue detail + performances
   POST /api/venues/        — create venue
   PUT  /api/venues/<id>    — update venue
@@ -35,7 +35,13 @@ def list_venues():
         query = query.filter(
             or_(Venue.name.ilike(like), Venue.city.ilike(like), Venue.state.ilike(like))
         )
-    venues = query.order_by(Venue.name).limit(200).all()
+    # No limit — list_performers/list_artists/list_genres don't cap theirs
+    # either, and the sidebar's whole point is showing the complete index.
+    # This one WAS capped at 200 and it bit: alphabetically past "L" is
+    # exactly where a 200-row cut lands once a library has more than 200
+    # venues, so the Venues nav list silently stopped mid-alphabet with no
+    # sign anything was missing (Ryan, 2026-08-30).
+    venues = query.order_by(Venue.name).all()
     return jsonify([
         {
             "id":                v.id,

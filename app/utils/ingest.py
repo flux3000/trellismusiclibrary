@@ -841,6 +841,17 @@ _MONTH_NAMES = {
 # Track line: "01 Title", "1. Title", "1 - Title", "11: Title"
 _TRACK_PATTERN = re.compile(r"^\s*(\d{1,3})[.:\-\s]\s*(.+)$")
 
+# A bare "H:MM:SS" or "M:SS" value with nothing else on the line — almost
+# always a stated total running time in the header ("1:46:28"), never a
+# track. _TRACK_PATTERN alone can't tell these apart: it reads "1:46:28" as
+# track 1 titled "46:28", which displaces every real track number by one
+# (Ryan, 2026-08-30, from a Gary Burton Quintet info file whose 4th line was
+# the recording's total length). Checked before a line is ever offered to
+# _TRACK_PATTERN, so a bare duration line never becomes a track candidate in
+# the first place — real track lines always carry a title too, so they never
+# collide with this.
+_TOTAL_DURATION_RE = re.compile(r"^\d{1,2}:\d{2}(:\d{2})?$")
+
 # A standalone heading (nothing else on the line) that marks the end of the
 # track list — trailing "Notes:"/"Comments:" sections often contain their own
 # numbered lines (e.g. "1 - Noise at 2:51 from the guys goofing around.")
@@ -853,6 +864,12 @@ _TRACKLIST_END_RE = re.compile(
 
 # Trailing timestamp appended by tapers: "Dark Star 12:34", "Intro :45", "Help > Slip 1:23:45"
 _TRAILING_TS_RE = re.compile(r'\s+\d*:[\d:]+$')
+
+# Trailing timestamp given in PARENTHESES instead — just as common a taper
+# habit: "Carry On (4:59)". Only strips when the parens hold nothing but a
+# time (digits and colons), so a genuine credit like "(Carla Bley)" is left
+# alone (Ryan, 2026-08-30).
+_TRAILING_PAREN_TS_RE = re.compile(r'\s*\(\d{1,2}:\d{2}(?::\d{2})?\)\s*$')
 
 # Words kept lowercase in title case (unless first word)
 _TC_LOWER = frozenset({
@@ -928,6 +945,72 @@ _FLAG_WORD_PATTERNS = [
     ('announcement', re.compile(r'\bannouncements?\b', re.IGNORECASE)),
     ('interview',    re.compile(r'\binterviews?\b',    re.IGNORECASE)),
 ]
+
+# ── Songwriter credit in a trailing parenthetical ───────────────────────────
+#
+# Just as common a taper habit as the timestamp above: "Carry On (Stephen
+# Stills)", "Ictus / Syndrome (Carla Bley)" (Ryan, 2026-08-30). Split off and
+# filed as the track's songwriter rather than left sitting in the title.
+#
+# Deliberately narrow, on the same reasoning as _is_track_noise() and
+# detect_track_flags() above: a false NEGATIVE just leaves the credit in the
+# title, still visible and still fixable by hand in the wizard; a false
+# POSITIVE quietly mislabels something as a songwriter, which is worse. So
+# this only fires when EVERY word in the parens looks like a name (Title
+# Case, letters/apostrophe/hyphen/period only, no digits) AND none of them is
+# a common non-name annotation that happens to share the same shape — "(Alt
+# Take)" and "(Steve Swallow)" are both two Title-Case words, and only a
+# blocklist tells them apart. Reuses the same annotation vocabulary
+# _FLAG_SEGMENT_SYNONYMS/_FLAG_WORD_PATTERNS already curate above, so a word
+# added there for flag detection is automatically excluded here too.
+_PAREN_NON_NAME_WORDS = frozenset({
+    w for words in _FLAG_SEGMENT_SYNONYMS.values() for w in words
+} | {
+    'announcement', 'announcements', 'interview', 'interviews',
+    'live', 'reprise', 'instrumental', 'acoustic', 'electric', 'unplugged',
+    'outro', 'interlude', 'jam', 'improv', 'improvisation',
+    'alt', 'alternate', 'version', 'take', 'edit', 'mix', 'remix',
+    'excerpt', 'incomplete', 'unfinished', 'unreleased', 'demo',
+    'rehearsal', 'soundcheck', 'encore', 'bonus', 'early', 'late',
+    'first', 'second', 'part', 'pt', 'set', 'disc', 'side', 'cd',
+    'medley', 'segue', 'false', 'start', 'fade', 'in', 'out', 'cut',
+    'ending', 'beginning', 'partial', 'sbd', 'aud', 'matrix', 'fm',
+})
+
+_TRAILING_NAME_PAREN_RE = re.compile(r'\s*\(([^()]+)\)\s*$')
+_NAME_WORD_RE           = re.compile(r"^[A-Z][A-Za-z'\u2019.\-]*$")
+
+
+def _extract_trailing_songwriter(title):
+    """
+    Split a trailing "(Composer Name)" credit off a track title.
+
+    Returns (title_without_credit, songwriter_or_None). Only pulls ONE
+    composer — "(Bley/Swallow)" or "(Jagger & Richards)" style multi-writer
+    credits are left in the title untouched rather than guessed at.
+    """
+    m = _TRAILING_NAME_PAREN_RE.search(title)
+    if not m:
+        return title, None
+    words = m.group(1).split()
+    if not (1 <= len(words) <= 3):
+        return title, None
+    if any(w.lower().strip('.,') in _PAREN_NON_NAME_WORDS for w in words):
+        return title, None
+    if not all(_NAME_WORD_RE.match(w) for w in words):
+        return title, None
+    base = title[:m.start()].rstrip()
+    if not base:                      # title would be empty — refuse, not a credit
+        return title, None
+    # "Tuning (Bobby)" is a taper crediting WHO was tuning, not a song called
+    # "Tuning" written by someone named Bobby — the word-shape check above
+    # only looks at the parens, so a segment label left behind as the base
+    # needs its own veto. Reuses the same whole-segment patterns
+    # detect_track_flags() matches against ("tuning", "banter", "intro", …).
+    if any(pattern.match(base) for _, pattern in _FLAG_SEGMENT_PATTERNS):
+        return title, None
+    return base, ' '.join(words)
+
 
 
 def detect_track_flags(title):
@@ -1273,6 +1356,8 @@ def _is_track_noise(title):
         return True
     if re.match(r"^\d{1,2}[-./]\d{1,2}", title) and len(title) < 15:  # short date range "6-15.1978"
         return True
+    if _TOTAL_DURATION_RE.match(title):                        # title is itself a bare duration, e.g. "46:28"
+        return True
     return False
 
 
@@ -1322,7 +1407,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None):
 
     # ── Pass 1: split into header block and track block ───────────────────────
     header_lines = []
-    track_pairs  = []       # [(number, title), ...]
+    track_pairs  = []       # [(number, title, songwriter), ...]
     in_tracks    = False
     tracks_ended = False    # set once a trailing Notes/Comments/etc. heading is seen
     disc_offset  = 0        # running offset so multi-disc restarts (1, 2, 3... 1, 2, 3...)
@@ -1340,10 +1425,24 @@ def parse_info_file(file_path, known_artists=None, known_venues=None):
             tracks_ended = True
             continue
 
+        # Bare duration line ("1:46:28") — never a track, whether it's
+        # sitting in the header or turns up again as a footer total.
+        if _TOTAL_DURATION_RE.match(stripped):
+            if not in_tracks:
+                header_lines.append(stripped)
+            continue
+
         m = _TRACK_PATTERN.match(stripped)
         if m:
             num   = int(m.group(1))
-            title = _title_case(_TRAILING_TS_RE.sub('', m.group(2).strip()))
+            raw_title = _TRAILING_TS_RE.sub('', m.group(2).strip())
+            raw_title = _TRAILING_PAREN_TS_RE.sub('', raw_title)
+            # Split off a trailing "(Composer Name)" credit BEFORE title-
+            # casing — a name should keep its own capitalisation, not run
+            # through the "on"/"of"/"in"-stay-lowercase rule meant for
+            # titles (Ryan, 2026-08-30).
+            raw_title, songwriter = _extract_trailing_songwriter(raw_title)
+            title = _title_case(raw_title)
             if not _is_track_noise(title) and (in_tracks or len(header_lines) >= 2):
                 in_tracks = True
                 # Multi-disc listings restart numbering at 1 each disc — e.g.
@@ -1355,7 +1454,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None):
                 if last_raw_num is not None and num <= last_raw_num:
                     disc_offset += last_raw_num
                 last_raw_num = num
-                track_pairs.append((disc_offset + num, title))
+                track_pairs.append((disc_offset + num, title, songwriter))
                 continue
 
         if not in_tracks:
@@ -1434,7 +1533,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None):
         result["lineage"] = " ".join(lineage_buf)
 
     # Tracks
-    result["tracks"] = [{"number": n, "title": t} for n, t in track_pairs]
+    result["tracks"] = [{"number": n, "title": t, "songwriter": sw} for n, t, sw in track_pairs]
 
     return result
 
@@ -1520,7 +1619,8 @@ def build_scan_payload(folder_path):
                 "source":       parsed.get("source"),
                 "lineage":      parsed.get("lineage"),
                 "tracks": [
-                    {"number": t["number"], "title": t["title"]}
+                    {"number": t["number"], "title": t["title"],
+                     "songwriter": t.get("songwriter")}
                     for t in parsed.get("tracks", [])
                 ],
             },
@@ -1601,7 +1701,8 @@ def build_scan_payload(folder_path):
                 "source":       from_info.get("source"),
                 "lineage":      from_info.get("lineage"),
                 "tracks": [
-                    {"number": t["number"], "title": t["title"]}
+                    {"number": t["number"], "title": t["title"],
+                     "songwriter": t.get("songwriter")}
                     for t in from_info.get("tracks", [])
                 ],
             },
