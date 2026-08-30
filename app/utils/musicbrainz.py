@@ -39,6 +39,8 @@ import urllib.parse
 import urllib.request
 import urllib.error
 
+from app.utils.net import SSL_CONTEXT
+
 log = logging.getLogger(__name__)
 
 _BASE = "https://musicbrainz.org/ws/2"
@@ -126,7 +128,7 @@ def _get(path, params):
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         _throttle()
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         _failures[0] = 0
         return data

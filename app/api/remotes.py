@@ -41,6 +41,7 @@ from app.extensions import db
 from app.models.remote_node import RemoteNode
 from app.utils.prefs import get_remote_token, set_remote_token, delete_remote_token
 from app.api.peers import admin_required          # decorator, not a view
+from app.utils.net import SSL_CONTEXT
 
 bp = Blueprint("remotes", __name__)
 
@@ -88,7 +89,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_opener = urllib.request.build_opener(_NoRedirect)
+_opener = urllib.request.build_opener(
+    _NoRedirect, urllib.request.HTTPSHandler(context=SSL_CONTEXT)
+)
 
 
 def fetch_remote_json(node, subpath, query=None):

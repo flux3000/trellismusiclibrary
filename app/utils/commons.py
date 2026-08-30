@@ -37,6 +37,8 @@ import urllib.parse
 import urllib.request
 import urllib.error
 
+from app.utils.net import SSL_CONTEXT
+
 log = logging.getLogger(__name__)
 
 _UA = "FluxAudio/1.0 ( https://github.com/flux3000/fluxaudio )"
@@ -77,7 +79,7 @@ def _get_json(url):
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         _throttle()
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             ValueError, OSError) as e:
@@ -256,7 +258,7 @@ def download(url, max_bytes=_MAX_BYTES):
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
     try:
         _throttle()
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
             ctype = (resp.headers.get("Content-Type") or "").split(";")[0].strip()
             ext = _ALLOWED_MIME.get(ctype)
             if not ext:

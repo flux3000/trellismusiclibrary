@@ -18,6 +18,7 @@ pywebview>=5.0
 mutagen>=1.47          # FLAC tag reading/writing
 bcrypt>=4.1            # password hashing
 python-dotenv>=1.0     # .env support for config
+certifi                # bundled CA file — see app/utils/net.py; every outbound HTTPS call shares it
 python-dateutil>=2.9   # flexible date parsing for info file text
 geonamescache>=1.3     # local city/state/country lookup for location parsing
 matplotlib>=3.8        # spectrogram rendering
