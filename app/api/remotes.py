@@ -93,6 +93,14 @@ _opener = urllib.request.build_opener(
     _NoRedirect, urllib.request.HTTPSHandler(context=SSL_CONTEXT)
 )
 
+# A peer's own address means nothing to the OTHER end of these requests until
+# it identifies itself -- and Python's default (`Python-urllib/3.13`) is a
+# textbook automated-traffic signature, exactly what a host's bot protection
+# exists to block. Every outbound call in this file carries this instead
+# (Ryan, 2026-08-30 -- traced a live "library refused the invite (403)" to a
+# Cloudflare edge block on the default UA; peer.is_active was fine).
+USER_AGENT = "TrellisMusicLibrary/1.0 (+https://trellismusiclibrary.com)"
+
 
 def fetch_remote_json(node, subpath, query=None):
     """GET a share-door path on `node` and return (payload, error_response).
@@ -121,6 +129,7 @@ def fetch_remote_json(node, subpath, query=None):
         url = f"{url}?{query}"
     req = urllib.request.Request(url, method="GET")
     req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("User-Agent", USER_AGENT)
 
     try:
         with _opener.open(req, timeout=_TIMEOUT) as resp:
@@ -214,6 +223,7 @@ def enroll():
     }).encode()
     req = urllib.request.Request(f"{base_url}/api/share/enroll", data=body, method="POST")
     req.add_header("Content-Type", "application/json")
+    req.add_header("User-Agent", USER_AGENT)
 
     try:
         with _opener.open(req, timeout=_TIMEOUT) as resp:
@@ -337,6 +347,7 @@ def proxy(node_id, subpath):
 
     req = urllib.request.Request(url, method="GET")
     req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("User-Agent", USER_AGENT)
     for header in _FORWARD_REQUEST_HEADERS:
         if header in request.headers:
             req.add_header(header, request.headers[header])
