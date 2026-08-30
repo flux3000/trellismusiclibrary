@@ -25,6 +25,11 @@ from app.models.artist import Artist, Membership
 from app.models.performance_personnel import PerformancePersonnel
 from app.models.user import UserArtistPermission
 from app.models.recording import Recording
+from pathlib import Path
+from flask import current_app
+from app.models.venue import Venue
+from app.models.event import Event
+from app.utils.ingest import _sanitize_path
 
 
 def _delete_orphan_artists(artist_ids):
@@ -106,3 +111,73 @@ def prune_after_recording_delete(performance_id):
         pruned["artists"] += _delete_orphan_artists(extra_candidates)
 
     return pruned
+
+
+def prune_venue_if_orphaned(venue_id):
+    """
+    If a Venue has no performances left AND no Events anchored to it, delete
+    it. Mirrors prune_performer_if_orphaned's trip-wire; called from
+    performances.update_performance right after venue_id changes.
+
+    A Venue can be referenced two ways -- Performance.venue_id (where a show
+    happened) and Event.venue_id (a festival's anchor grounds) -- both must
+    be clear before deleting, or repointing a show away from a venue could
+    silently orphan the venue_id on an Event that still names it.
+
+    Any VenueImage rows cascade-delete with the row (Venue.images carries
+    cascade="all, delete-orphan"), but that only removes the DB rows. This
+    function does NOT commit or touch the filesystem -- callers own the
+    transaction, same as every other function in this module. The image
+    file paths are handed back instead, so the CALLER can best-effort
+    unlink them only after ITS OWN commit() actually lands -- unlinking
+    before that commit would delete a real file underneath a transaction
+    that might still roll back, which is worse than the orphan-file problem
+    this is meant to solve. Same non-fatal post-commit ordering
+    entity_images.handle_delete uses, just pushed out one more frame.
+
+    Returns (deleted_ids, image_paths) -- image_paths is a list of Path
+    objects for the caller to unlink after its commit succeeds.
+    """
+    if venue_id is None:
+        return [], []
+    if db.session.query(Performance).filter_by(venue_id=venue_id).count() > 0:
+        return [], []
+    if db.session.query(Event).filter_by(venue_id=venue_id).count() > 0:
+        return [], []
+    venue = db.session.get(Venue, venue_id)
+    if not venue:
+        return [], []
+
+    deleted_id = venue.id
+    image_paths = []
+    if venue.images:
+        library_root = current_app.config.get("LIBRARY_ROOT", "")
+        images_dir = Path(library_root) / "_venues" / _sanitize_path(venue.name) / "_images"
+        image_paths = [images_dir / img.filename for img in venue.images]
+
+    db.session.delete(venue)   # VenueImage rows cascade-delete here
+    db.session.flush()
+
+    return [deleted_id], image_paths
+
+
+def prune_event_if_orphaned(event_id):
+    """
+    If an Event has no performances left, delete it. Mirrors
+    prune_performer_if_orphaned's trip-wire; called from
+    performances.update_performance right after event_id changes.
+
+    Returns [event_id] if deleted, else [].
+    """
+    if event_id is None:
+        return []
+    if db.session.query(Performance).filter_by(event_id=event_id).count() > 0:
+        return []
+    event = db.session.get(Event, event_id)
+    if not event:
+        return []
+
+    deleted_id = event.id
+    db.session.delete(event)
+    db.session.flush()
+    return [deleted_id]

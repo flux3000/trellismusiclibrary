@@ -22,7 +22,9 @@ from app.utils.personnel import (
     resolve_performance_personnel, sync_performance_personnel,
     set_performance_personnel_mode,
 )
-from app.utils.pruning import prune_performer_if_orphaned
+from app.utils.pruning import (
+    prune_performer_if_orphaned, prune_venue_if_orphaned, prune_event_if_orphaned,
+)
 from app.utils.folder_naming import rename_recording_folder
 
 bp = Blueprint("performances", __name__)
@@ -183,11 +185,25 @@ def update_performance(performance_id):
     if "members" in data or "guests" in data:
         sync_performance_personnel(p, data.get("members"), data.get("guests"))
 
+    # Capture the outgoing venue/event before the generic field loop
+    # overwrites them, so a repoint that leaves either with zero
+    # performances prunes the now-empty row -- same trip-wire as the
+    # Performer reassignment above via prune_performer_if_orphaned.
+    old_venue_id = p.venue_id
+    old_event_id = p.event_id
+
     for f in ["title", "stage", "start_year", "start_month", "start_day",
               "end_year", "end_month", "end_day", "venue_id", "event_id",
               "city", "state", "country", "notes"]:
         if f in data:
             setattr(p, f, data[f])
+
+    db.session.flush()
+    pending_venue_image_cleanup = []
+    if "venue_id" in data and old_venue_id != p.venue_id:
+        _, pending_venue_image_cleanup = prune_venue_if_orphaned(old_venue_id)
+    if "event_id" in data and old_event_id != p.event_id:
+        prune_event_if_orphaned(old_event_id)
 
     # Folder name follows the metadata (decided 2026-07-25, built 2026-08-09)
     # — date, venue, location and a performer reassignment all feed
@@ -202,6 +218,15 @@ def update_performance(performance_id):
                        if err]
 
     db.session.commit()
+
+    # Deferred from prune_venue_if_orphaned above: only unlink photo files
+    # for a deleted venue now that the row deletion has actually committed.
+    for _path in pending_venue_image_cleanup:
+        try:
+            if _path.exists():
+                _path.unlink()
+        except OSError:
+            pass
 
     resp = {"id": p.id, "reassigned_to": reassigned}
     if rename_errors:
