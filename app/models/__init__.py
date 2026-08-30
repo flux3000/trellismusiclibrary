@@ -19,3 +19,4 @@ from .recording_event import RecordingEvent
 from .track import Track
 from .play_log import PlayLog
 from .quality import QualityAnalysis, RecordingQuality
+from .node_setting import NodeSetting

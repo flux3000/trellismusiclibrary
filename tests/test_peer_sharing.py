@@ -155,7 +155,8 @@ def test_invite_valid_expired_consumed(app):
     _db.session.commit()
     assert fresh.is_valid() is True
     assert expired.is_valid() is False
-    assert consumed.is_valid() is False
+    # Reusable as of 2026-08-30 — consumed no longer means invalid, only expiry does.
+    assert consumed.is_valid() is True
 
 
 # ── access scoping ────────────────────────────────────────────────────────────
@@ -198,7 +199,7 @@ def test_revoking_grant_removes_access(app):
 
 # ── enrollment handshake ──────────────────────────────────────────────────────
 
-def test_enroll_mints_working_token_single_use(app):
+def test_enroll_mints_working_token_and_is_reusable(app):
     peer, _ = _make_peer(with_token=False)
     raw_code = generate_invite_code()
     _db.session.add(PeerInvite(peer_id=peer.id, code_hash=hash_secret(raw_code),
@@ -216,9 +217,18 @@ def test_enroll_mints_working_token_single_use(app):
     assert me.status_code == 200
     assert me.get_json()["peer_name"] == peer.name
 
-    # Invite is single-use — second enroll is rejected
+    # Reusable as of 2026-08-30 -- a second device can enroll with the SAME
+    # code and gets its own, independent token.
     resp2 = client.post("/api/share/enroll", json={"invite_code": raw_code})
-    assert resp2.status_code == 401
+    assert resp2.status_code == 201
+    token2 = resp2.get_json()["token"]
+    assert token2 and token2 != token
+
+    me2 = client.get("/api/share/me", headers=_auth(token2))
+    assert me2.status_code == 200
+    assert me2.get_json()["peer_name"] == peer.name
+
+    assert len(peer.tokens) == 2
 
 
 def test_enroll_rejects_bad_code(app):

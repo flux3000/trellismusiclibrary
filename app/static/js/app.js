@@ -2410,6 +2410,16 @@ const App = (() => {
       tabs: [{
         id: 'peers', label: 'Peers',
         html: `
+          <div class="peer-share-address">
+            <label class="set-label" for="peer-share-url">Public address</label>
+            <div class="set-actions">
+              <input class="set-input" type="text" id="peer-share-url"
+                     placeholder="https://share.example.com" autocomplete="off">
+              <button class="btn btn-primary btn-sm" id="peer-share-url-save">Save</button>
+              <span class="set-flash" id="peer-share-url-flash"></span>
+            </div>
+            <p class="set-hint" id="peer-share-url-hint">The address peer invites point at (your Cloudflare Tunnel hostname, or whatever's fronting this instance). Without this, invites show a bare code instead of a paste-able link.</p>
+          </div>
           <div class="peer-layout">
             <div class="peer-list" id="peer-list"></div>
             <div class="peer-detail" id="peer-detail"></div>
@@ -2417,6 +2427,41 @@ const App = (() => {
       }],
     }))
     wireEntityShell(mainContent, null)
+
+    // ── Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings ──
+    ;(async () => {
+      const input = document.getElementById('peer-share-url')
+      const hint = document.getElementById('peer-share-url-hint')
+      const saveBtn = document.getElementById('peer-share-url-save')
+      if (!input) return
+      let current = ''
+      try {
+        const s = await API.peers.getShareAddress()
+        current = s.share_base_url || ''
+        input.value = current
+        if (s.from_env) {
+          input.disabled = true
+          saveBtn.disabled = true
+          hint.textContent = 'Set via the SHARE_BASE_URL environment variable, which always wins — unset it there to edit this from here.'
+        }
+      } catch (e) { /* non-fatal — field just stays empty */ }
+      const commit = async () => {
+        const v = input.value.trim()
+        if (v === current) return
+        try {
+          const s = await API.peers.setShareAddress(v)
+          current = s.share_base_url || ''
+          input.value = current
+          _settingsSaved(document.getElementById('peer-share-url-flash'))
+        } catch (e) {
+          input.value = current
+          _settingsSaved(document.getElementById('peer-share-url-flash'), e.message)
+        }
+      }
+      input.addEventListener('blur', commit)
+      input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur() })
+      saveBtn?.addEventListener('click', commit)
+    })()
 
     function renderList() {
       const el = document.getElementById('peer-list')
@@ -2458,7 +2503,10 @@ const App = (() => {
           <h2 class="pp-block-title" id="peer-name" title="Click to edit">${esc(p.name)}</h2>
           ${p.is_active
             ? `<button class="btn btn-ghost btn-xs" id="peer-revoke" style="margin-left:auto; color:var(--red)">Revoke access</button>`
-            : `<span class="peer-badge peer-badge--revoked" style="margin-left:auto">Revoked</span>`}
+            : `<span style="margin-left:auto; display:flex; align-items:center; gap:8px">
+                 <span class="peer-badge peer-badge--revoked">Revoked</span>
+                 <button class="btn btn-ghost btn-xs" id="peer-unrevoke">Restore access</button>
+               </span>`}
         </div>
         <div class="pp-desc pp-editable ${p.contact_note ? '' : 'pp-empty'}" id="peer-note" title="Click to edit">${
           p.contact_note ? esc(p.contact_note) : 'Add a note — who is this?'}</div>
@@ -2567,7 +2615,7 @@ const App = (() => {
                 <span class="peer-invite-note">Shown once · expires ${esc(fmtDateAdded(inv.expires_at))}</span>
               </div>
               ${inv.base_url_set ? '' : `
-                <div class="peer-invite-warn">No public address configured, so this is the bare code. Set <code>SHARE_BASE_URL</code> and mint again to get a single paste-able string.</div>`}
+                <div class="peer-invite-warn">No public address set. Fill in the field above and mint again to get a single paste-able link instead of a bare code.</div>`}
             </div>`
           document.getElementById('peer-invite-copy').addEventListener('click', () => {
             navigator.clipboard?.writeText(inv.invite || inv.code)
@@ -2595,9 +2643,17 @@ const App = (() => {
         }))
 
       document.getElementById('peer-revoke')?.addEventListener('click', async () => {
-        if (!confirm(`Revoke all access for "${p.name}"?\n\nThis kills every grant and every device token at once. It cannot be undone — you would need to invite them again.`)) return
+        if (!confirm(`Revoke all access for "${p.name}"?\n\nThis kills every grant and every device token at once. You can restore it from this page afterward if you change your mind.`)) return
         try {
           await API.peers.revoke(p.id)
+          peers = await API.peers.list()
+          renderList(); renderDetail()
+        } catch (e) { alert('Failed: ' + e.message) }
+      })
+
+      document.getElementById('peer-unrevoke')?.addEventListener('click', async () => {
+        try {
+          await API.peers.unrevoke(p.id)
           peers = await API.peers.list()
           renderList(); renderDetail()
         } catch (e) { alert('Failed: ' + e.message) }

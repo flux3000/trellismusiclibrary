@@ -127,8 +127,12 @@ def enroll():
     if peer is None or not peer.is_active:
         return jsonify({"error": "This invite is no longer active"}), 403
 
-    # Consume the invite (single use) and mint a durable token.
-    invite.consumed_at = _utcnow()
+    # Invites are reusable (2026-08-30) -- only stamp the FIRST-use timestamp,
+    # never re-consume. This still drives the "Used · joined <date>" admin
+    # display; it no longer blocks a second device from enrolling with the
+    # same code.
+    if invite.consumed_at is None:
+        invite.consumed_at = _utcnow()
     raw_token = generate_token()
     token = PeerToken(
         peer_id=peer.id,

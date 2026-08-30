@@ -35,11 +35,16 @@ from app.models.collection import Collection
 from app.models.recording import Recording
 from app.models.track import Track
 from app.utils.peer_auth import generate_invite_code, hash_secret
+from app.utils.node_settings import get_share_base_url, set_share_base_url, share_base_url_from_env
 from app.utils.format import format_partial_date
 
 bp = Blueprint("peers", __name__)
 
-DEFAULT_INVITE_DAYS = 7
+# 100 years (Ryan, 2026-08-30) -- was 7 with a 90-day cap. Invites are
+# reusable now (see PeerInvite.is_valid()), so expiry is a formality, not a
+# real access control; it exists mainly so a truly ancient, forgotten invite
+# eventually ages out of the "pending" list on its own.
+DEFAULT_INVITE_DAYS = 36500
 
 
 def _utcnow():
@@ -176,6 +181,22 @@ def revoke_peer(peer_id):
     return jsonify(_peer_detail(peer))
 
 
+@bp.route("/<int:peer_id>/unrevoke", methods=["POST"])
+@admin_required
+def unrevoke_peer(peer_id):
+    """Undo a revoke (Ryan, 2026-08-30 — revoke had no way back, and an
+    accidental click was a dead end with real consequences). Clears
+    revoked_at only. Every grant and token this peer held before the revoke
+    reads as active again immediately — nothing else was touched by the
+    revoke, so nothing else needs restoring."""
+    peer = db.session.get(Peer, peer_id)
+    if not peer:
+        return jsonify({"error": "Not found"}), 404
+    peer.revoked_at = None
+    db.session.commit()
+    return jsonify(_peer_detail(peer))
+
+
 # ── Grants ────────────────────────────────────────────────────────────────────
 
 @bp.route("/<int:peer_id>/grants", methods=["POST"])
@@ -216,6 +237,35 @@ def revoke_grant(peer_id, collection_id):
     return jsonify({"ok": True})
 
 
+# ── Sharing settings (install-level, not per-peer) ────────────────────────────
+
+@bp.route("/settings/share-address", methods=["GET"])
+@admin_required
+def get_share_address():
+    """The public address peer invites point at (the Cloudflare Tunnel
+    hostname, or whatever's fronting this instance). Editable here because
+    the desktop app that mints invites gets no environment variables from
+    the Dock -- see app/utils/node_settings.py."""
+    return jsonify({
+        "share_base_url": get_share_base_url(),
+        "from_env": share_base_url_from_env(),
+    })
+
+
+@bp.route("/settings/share-address", methods=["PUT"])
+@admin_required
+def put_share_address():
+    if share_base_url_from_env():
+        return jsonify({
+            "error": "SHARE_BASE_URL is set in this process's environment and "
+                     "always wins over a stored value -- unset it there to "
+                     "edit this from the app instead.",
+        }), 409
+    data = request.get_json(silent=True) or {}
+    saved = set_share_base_url(data.get("share_base_url"))
+    return jsonify({"share_base_url": saved, "from_env": False})
+
+
 # ── Invites ───────────────────────────────────────────────────────────────────
 
 @bp.route("/<int:peer_id>/invites", methods=["POST"])
@@ -236,7 +286,7 @@ def mint_invite(peer_id):
         days = int(data.get("expires_days") or DEFAULT_INVITE_DAYS)
     except (TypeError, ValueError):
         days = DEFAULT_INVITE_DAYS
-    days = max(1, min(days, 90))
+    days = max(1, min(days, DEFAULT_INVITE_DAYS))
 
     raw_code = generate_invite_code()
     expires_at = _utcnow() + timedelta(days=days)
@@ -244,7 +294,7 @@ def mint_invite(peer_id):
         peer_id=peer.id, code_hash=hash_secret(raw_code), expires_at=expires_at))
     db.session.commit()
 
-    base_url = current_app.config.get("SHARE_BASE_URL")
+    base_url = get_share_base_url()
     invite_string = f"{base_url.rstrip('/')}#{raw_code}" if base_url else None
     return jsonify({
         "code":         raw_code,          # shown ONCE

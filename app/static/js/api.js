@@ -276,6 +276,9 @@ const API = (() => {
       create:      (data)         => post('/api/peers/', data),
       update:      (id, data)     => request('PATCH', `/api/peers/${id}`, data),
       revoke:      (id)           => post(`/api/peers/${id}/revoke`),
+      unrevoke:    (id)           => post(`/api/peers/${id}/unrevoke`),
+      getShareAddress: ()         => get(`/api/peers/settings/share-address`),
+      setShareAddress: (url)      => request('PUT', `/api/peers/settings/share-address`, { share_base_url: url }),
       addGrants:   (id, ids)      => post(`/api/peers/${id}/grants`, { collection_ids: ids }),
       revokeGrant: (id, colId)    => request('DELETE', `/api/peers/${id}/grants/${colId}`),
       // Returns the raw code ONCE — it is hashed at rest and unrecoverable.

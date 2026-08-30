@@ -94,23 +94,27 @@ class CollectionGrant(db.Model):
 
 
 class PeerInvite(db.Model):
-    """One-time, expiring enrollment code. Raw code shown to the sharer once;
-    only its SHA-256 hash is stored."""
+    """Reusable, expiring enrollment code. Raw code shown to the sharer once;
+    only its SHA-256 hash is stored.
+
+    Reusable as of 2026-08-30 (Ryan): the code is no longer burned on first
+    join, so the same link can enroll more than one device without minting a
+    fresh one each time. `consumed_at` is kept -- it still records WHEN it
+    was first used (drives the "Used · joined <date>" admin display), it just
+    no longer gates validity. Only expiry does that now."""
     __tablename__ = "peer_invite"
 
     id          = db.Column(db.Integer, primary_key=True)
     peer_id     = db.Column(db.Integer, db.ForeignKey("peer.id"), nullable=False, index=True)
     code_hash   = db.Column(db.String(64), unique=True, nullable=False, index=True)  # sha256 hex
     created_at  = db.Column(db.DateTime, default=_utcnow)
-    expires_at  = db.Column(db.DateTime, nullable=False)   # invites DO expire (grants don't)
-    consumed_at = db.Column(db.DateTime, nullable=True)    # single use
+    expires_at  = db.Column(db.DateTime, nullable=False)
+    consumed_at = db.Column(db.DateTime, nullable=True)    # first-use timestamp, display only
 
     peer = db.relationship("Peer", back_populates="invites")
 
     def is_valid(self, now=None):
         now = now or _utcnow()
-        if self.consumed_at is not None:
-            return False
         exp = self.expires_at
         # tolerate naive timestamps coming back from SQLite (stored UTC)
         if exp is not None and exp.tzinfo is None:

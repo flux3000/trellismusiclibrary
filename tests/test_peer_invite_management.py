@@ -139,3 +139,59 @@ def test_deleting_an_invite_requires_an_admin_session(app, peer):
     assert r.status_code in (401, 403), \
         "an unauthenticated caller must not reach this at all"
     assert _db.session.get(PeerInvite, inv.id) is not None
+
+
+# ── Unrevoke ─────────────────────────────────────────────────────────────────
+# Added 2026-08-30: "Revoke access" had no way back, and an accidental click
+# was a dead end with real consequences. See feedback that day.
+
+def test_unrevoke_restores_an_accidentally_revoked_peer(app, peer):
+    peer.revoked_at = _utcnow()
+    _db.session.commit()
+    assert peer.is_active is False
+
+    r = _admin(app).post(f"/api/peers/{peer.id}/unrevoke")
+    assert r.status_code == 200
+    assert r.get_json()["is_active"] is True
+    _db.session.refresh(peer)
+    assert peer.revoked_at is None
+    assert peer.is_active is True
+
+
+def test_unrevoke_requires_an_admin_session(app, peer):
+    peer.revoked_at = _utcnow()
+    _db.session.commit()
+    r = app.test_client().post(f"/api/peers/{peer.id}/unrevoke")
+    assert r.status_code in (401, 403)
+    _db.session.refresh(peer)
+    assert peer.is_active is False
+
+
+def test_unrevoke_unknown_peer_is_404(app):
+    assert _admin(app).post("/api/peers/999999/unrevoke").status_code == 404
+
+
+# ── Share address setting (node_setting-backed SHARE_BASE_URL) ───────────────
+
+def test_share_address_roundtrip(app):
+    c = _admin(app)
+
+    empty = c.get("/api/peers/settings/share-address").get_json()
+    assert empty["share_base_url"] is None
+    assert empty["from_env"] is False
+
+    put = c.put("/api/peers/settings/share-address",
+                json={"share_base_url": "https://share.example.com/"})
+    assert put.status_code == 200
+    # trailing slash stripped — invites concatenate "#code" onto this directly
+    assert put.get_json()["share_base_url"] == "https://share.example.com"
+
+    got = c.get("/api/peers/settings/share-address").get_json()
+    assert got["share_base_url"] == "https://share.example.com"
+
+
+def test_share_address_setting_requires_admin(app):
+    c = app.test_client()
+    assert c.get("/api/peers/settings/share-address").status_code in (401, 403)
+    assert c.put("/api/peers/settings/share-address",
+                 json={"share_base_url": "https://x.example.com"}).status_code in (401, 403)
