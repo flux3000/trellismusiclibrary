@@ -5,21 +5,37 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Trellis</title>
   <link rel="stylesheet" href="/css/main.css" />
-  <!-- apply saved theme + sidebar-collapse state before first paint to avoid
-       a flash/snap once app.js loads (Ryan, 2026-08-23 — same treatment as
-       fluxTheme above, for the same reason: both are per-machine display
-       state that must be correct on the very first frame). -->
+  <!-- The saved palette and sidebar-collapse state are applied at the top of
+       <body> below, before first paint, so the app never repaints itself in
+       front of the user once app.js loads. Both are per-machine display state
+       (localStorage, not the server) that must be correct on frame one. -->
 </head>
 <body>
   <!-- MOVED out of <head> 2026-08-23. It ran there for years touching
        document.body — which does not exist yet while <head> is parsing, so
-       every load threw "null is not an object" and NEITHER the saved theme nor
-       the saved sidebar state was ever restored. The error was invisible
+       every load threw "null is not an object" and NEITHER the saved palette
+       nor the saved sidebar state was ever restored. The error was invisible
        because an uncaught inline-script error does not stop parsing.
        Here, body exists and this still runs before any content paints, which
        was the whole point of putting it inline. -->
   <script>
-    if(localStorage.getItem('fluxTheme')==='light')document.body.classList.add('theme-light')
+    // The saved palette id goes straight onto <html> — it must be right on the
+    // very first frame or the app repaints itself in front of the user.
+    // Deliberately dumb: it validates nothing and knows nothing about which
+    // schemes are light. An unknown or missing id lands on the bare :root
+    // block in main.css, which is Cale, and app.js corrects the stored value
+    // on boot against the real registry.
+    ;(function () {
+      var id = localStorage.getItem('trellisPalette')
+      if (!id) {
+        // One-time migration off the old two-value key (2026-08-30). Light was
+        // Parchment, which Steely replaces; dark was Warm Ash, which is Cale
+        // unchanged. Written back so this runs once, not every load.
+        id = localStorage.getItem('fluxTheme') === 'light' ? 'steely' : 'cale'
+        localStorage.setItem('trellisPalette', id)
+      }
+      document.documentElement.setAttribute('data-palette', id)
+    })()
     if(localStorage.getItem('fluxSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
   </script>
 

@@ -44,50 +44,304 @@
   font-display: swap; src: url('/fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
 }
 
-:root {
-  /* Surfaces — Warm Ash (default / dark) */
-  --bg-0:  #141210;   /* page / deepest bg */
-  --bg-1:  #1c1916;   /* sidebar / player */
-  --bg-2:  #1a1714;   /* main content area */
-  --bg-3:  #252220;   /* cards, surfaces */
-  --bg-4:  #2e2a25;   /* hover */
-  --bg-5:  #38322c;   /* active / pressed */
+/* ── Palettes ────────────────────────────────────────────────────────────────
+   Seven named schemes, v1, chosen 2026-08-30. Each is one block below and each
+   block defines the WHOLE token surface — there is no base palette that the
+   others patch, because a partial override is how a scheme ends up wearing
+   another one's border colour.
 
-  /* Borders */
+   The attribute sits on <html>, not <body>. It used to be `body.theme-light`,
+   and that was a real bug: the waveform reads --t2 / --accent / --accent-lit
+   off document.documentElement, so a palette defined on <body> never reached
+   it and the light theme drew a dark-theme waveform. Anything that reads a
+   token from :root now gets the palette actually in force.
+
+   `:root` bare carries Cale, so an install with no preference stored, or one
+   carrying an id this build does not know, lands on the current dark theme
+   rather than on unstyled tokens.
+
+   Every value was measured before it was written, against bg-0..bg-3 — the
+   surfaces text actually sits on:
+       t0 ≥ 8.0   t1 ≥ 5.5   t2 ≥ 4.5   t3 ≥ 3.5   accent + semantics ≥ 4.0
+   t3 is deliberately NOT held to 4.5. It is the dim tier; holding it to the
+   body threshold erases the distinction the four-step ramp exists to make.
+   bg-4/bg-5 are hover and pressed — large-component territory, reported but
+   not gated.
+
+   ⚠ Cale is the previous dark theme carried over byte for byte, so it is the
+   one scheme that does NOT clear the contract: t2 measures 3.19 and t3 2.01,
+   the gap flagged when the light theme was scrubbed on 2026-08-24 and left
+   open on purpose. Tightening it is lightness-only — --t2: #94877c (4.53) and
+   --t3: #837468 (3.51) — and is Ryan's call, not a defect to fix in passing.
+
+   Adding a scheme: add a block here AND an entry in PALETTES in app.js. The
+   ids must match. Hexes live ONLY here; app.js carries id, label and blurb so
+   the two can never disagree about a colour. The `[data-pal-preview]` half of
+   each selector is what lets the Settings picker paint a real swatch of the
+   scheme without a single hex in the JS.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* Steely -- cool neutral paper, petrol accent */
+:root[data-palette="steely"], [data-pal-preview="steely"] {
+  --bg-0: #eff2f3;
+  --bg-1: #e6eaec;
+  --bg-2: #f3f5f6;
+  --bg-3: #ffffff;
+  --bg-4: #dde2e5;
+  --bg-5: #ccd3d7;
+
+  --bd-0: rgba(16,28,36,0.07);
+  --bd-1: rgba(16,28,36,0.11);
+  --bd-2: rgba(16,28,36,0.19);
+
+  --t0: #12171b;
+  --t1: #3b464e;
+  --t2: #4d5a63;
+  --t3: #5f6d77;
+
+  --accent:      #155e63;
+  --accent-lit:  #0f4a4e;
+  --accent-dim:  rgba(21,94,99,0.12);
+  --accent-dim2: rgba(21,94,99,0.2);
+
+  --green:   #1f6b45;
+  --amber:   #7a5712;
+  --red:     #a63232;
+  --blue:    #2b5f93;
+  --purple:  #63479b;
+
+  --sbd-bg:   rgba(31,107,69,0.12);  --sbd-fg:   #1f6b45;
+  --aud-bg:   rgba(122,87,18,0.12);  --aud-fg:   #7a5712;
+  --mtx-bg:   rgba(43,95,147,0.12);  --mtx-fg:   #2b5f93;
+  --fm-bg:    rgba(99,71,155,0.12);  --fm-fg:    #63479b;
+  --other-bg: rgba(77,90,99,0.12);  --other-fg: #4d5a63;
+}
+
+/* Krauss -- warm ivory, sage accent */
+:root[data-palette="krauss"], [data-pal-preview="krauss"] {
+  --bg-0: #f8f5ef;
+  --bg-1: #f0ece3;
+  --bg-2: #fbf9f4;
+  --bg-3: #ffffff;
+  --bg-4: #e9e3d7;
+  --bg-5: #dbd4c5;
+
+  --bd-0: rgba(40,34,22,0.07);
+  --bd-1: rgba(40,34,22,0.11);
+  --bd-2: rgba(40,34,22,0.19);
+
+  --t0: #1e1c16;
+  --t1: #474338;
+  --t2: #565144;
+  --t3: #67614f;
+
+  --accent:      #4d6b3f;
+  --accent-lit:  #3b5530;
+  --accent-dim:  rgba(77,107,63,0.12);
+  --accent-dim2: rgba(77,107,63,0.2);
+
+  --green:   #2f6a3f;
+  --amber:   #7a5712;
+  --red:     #a63a33;
+  --blue:    #2f5f8f;
+  --purple:  #68489c;
+
+  --sbd-bg:   rgba(47,106,63,0.12);  --sbd-fg:   #2f6a3f;
+  --aud-bg:   rgba(122,87,18,0.12);  --aud-fg:   #7a5712;
+  --mtx-bg:   rgba(47,95,143,0.12);  --mtx-fg:   #2f5f8f;
+  --fm-bg:    rgba(104,72,156,0.12);  --fm-fg:    #68489c;
+  --other-bg: rgba(86,81,68,0.12);  --other-fg: #565144;
+}
+
+/* Monk -- near-white, ink, one bold blue */
+:root[data-palette="monk"], [data-pal-preview="monk"] {
+  --bg-0: #f6f6f5;
+  --bg-1: #eeeeec;
+  --bg-2: #fbfbfa;
+  --bg-3: #ffffff;
+  --bg-4: #e6e6e3;
+  --bg-5: #d8d8d4;
+
+  --bd-0: rgba(0,0,0,0.09);
+  --bd-1: rgba(0,0,0,0.14);
+  --bd-2: rgba(0,0,0,0.22);
+
+  --t0: #0d0d0c;
+  --t1: #373734;
+  --t2: #484845;
+  --t3: #595955;
+
+  --accent:      #1a4a99;
+  --accent-lit:  #12376f;
+  --accent-dim:  rgba(26,74,153,0.12);
+  --accent-dim2: rgba(26,74,153,0.2);
+
+  --green:   #1f6b45;
+  --amber:   #7a5712;
+  --red:     #a82f2f;
+  --blue:    #0f6a78;
+  --purple:  #68489c;
+
+  --sbd-bg:   rgba(31,107,69,0.12);  --sbd-fg:   #1f6b45;
+  --aud-bg:   rgba(122,87,18,0.12);  --aud-fg:   #7a5712;
+  --mtx-bg:   rgba(15,106,120,0.12);  --mtx-fg:   #0f6a78;
+  --fm-bg:    rgba(104,72,156,0.12);  --fm-fg:    #68489c;
+  --other-bg: rgba(72,72,69,0.12);  --other-fg: #484845;
+}
+
+/* Cale -- warm ash, amber-tan accent (the original) */
+:root, :root[data-palette="cale"], [data-pal-preview="cale"] {
+  --bg-0: #141210;
+  --bg-1: #1c1916;
+  --bg-2: #1a1714;
+  --bg-3: #252220;
+  --bg-4: #2e2a25;
+  --bg-5: #38322c;
+
   --bd-0: rgba(255,255,255,0.05);
   --bd-1: rgba(255,255,255,0.09);
   --bd-2: rgba(255,255,255,0.16);
 
-  /* Text */
-  --t0: #e0d8ce;       /* primary */
-  --t1: #a89880;       /* secondary */
-  --t2: #7a6e64;       /* tertiary / disabled */
-  --t3: #5a5048;       /* very dim — hints, section labels */
+  --t0: #e0d8ce;
+  --t1: #a89880;
+  --t2: #7a6e64;
+  --t3: #5a5048;
 
-  /* Accent — warm amber-tan */
   --accent:      #c4956a;
   --accent-lit:  #d4aa82;
   --accent-dim:  rgba(196,149,106,0.14);
   --accent-dim2: rgba(196,149,106,0.24);
 
-  /* Semantic */
-  --green: #6ab880;
-  --amber: #c89b50;
-  --red:   #d96055;
-  --blue:  #6898c8;
-  --purple:#a07dc8;
+  --green:   #6ab880;
+  --amber:   #c89b50;
+  --red:     #d96055;
+  --blue:    #6898c8;
+  --purple:  #a07dc8;
 
-  /* Source badge colors */
-  --sbd-bg:  rgba(106,184,128,0.15); --sbd-fg:  #6ab880;
-  --aud-bg:  rgba(200,155,80,0.15);  --aud-fg:  #c89b50;
-  --mtx-bg:  rgba(104,152,200,0.15); --mtx-fg:  #6898c8;
-  --fm-bg:   rgba(160,125,200,0.15); --fm-fg:   #a07dc8;
-  --other-bg:rgba(122,110,100,0.15); --other-fg:#7a6e64;
+  --sbd-bg:   rgba(106,184,128,0.15);  --sbd-fg:   #6ab880;
+  --aud-bg:   rgba(200,155,80,0.15);  --aud-fg:   #c89b50;
+  --mtx-bg:   rgba(104,152,200,0.15);  --mtx-fg:   #6898c8;
+  --fm-bg:    rgba(160,125,200,0.15);  --fm-fg:    #a07dc8;
+  --other-bg: rgba(122,110,100,0.15);  --other-fg: #7a6e64;
+}
 
+/* Miles -- midnight blue-slate, icy blue accent */
+:root[data-palette="miles"], [data-pal-preview="miles"] {
+  --bg-0: #0d1116;
+  --bg-1: #151b22;
+  --bg-2: #11161c;
+  --bg-3: #1b222b;
+  --bg-4: #232c36;
+  --bg-5: #2c3742;
+
+  --bd-0: rgba(255,255,255,0.06);
+  --bd-1: rgba(255,255,255,0.10);
+  --bd-2: rgba(255,255,255,0.17);
+
+  --t0: #dfe7ee;
+  --t1: #a5b6c4;
+  --t2: #8ea1b0;
+  --t3: #77899a;
+
+  --accent:      #74b8d4;
+  --accent-lit:  #93cee6;
+  --accent-dim:  rgba(116,184,212,0.14);
+  --accent-dim2: rgba(116,184,212,0.24);
+
+  --green:   #63bd90;
+  --amber:   #c9a35c;
+  --red:     #dd6a63;
+  --blue:    #6fa8d8;
+  --purple:  #a58ad6;
+
+  --sbd-bg:   rgba(99,189,144,0.15);  --sbd-fg:   #63bd90;
+  --aud-bg:   rgba(201,163,92,0.15);  --aud-fg:   #c9a35c;
+  --mtx-bg:   rgba(111,168,216,0.15);  --mtx-fg:   #6fa8d8;
+  --fm-bg:    rgba(165,138,214,0.15);  --fm-fg:    #a58ad6;
+  --other-bg: rgba(142,161,176,0.15);  --other-fg: #8ea1b0;
+}
+
+/* Alice -- deep aubergine, gold accent */
+:root[data-palette="alice"], [data-pal-preview="alice"] {
+  --bg-0: #140f1a;
+  --bg-1: #1d1726;
+  --bg-2: #181220;
+  --bg-3: #251e30;
+  --bg-4: #2f273c;
+  --bg-5: #3b3249;
+
+  --bd-0: rgba(255,255,255,0.06);
+  --bd-1: rgba(255,255,255,0.10);
+  --bd-2: rgba(255,255,255,0.17);
+
+  --t0: #e7e0ee;
+  --t1: #b6a9c2;
+  --t2: #a094ad;
+  --t3: #8a7d97;
+
+  --accent:      #d9ae55;
+  --accent-lit:  #e8c477;
+  --accent-dim:  rgba(217,174,85,0.14);
+  --accent-dim2: rgba(217,174,85,0.24);
+
+  --green:   #6dbb8c;
+  --amber:   #cda45c;
+  --red:     #dd6a70;
+  --blue:    #7fa8dd;
+  --purple:  #b493e0;
+
+  --sbd-bg:   rgba(109,187,140,0.15);  --sbd-fg:   #6dbb8c;
+  --aud-bg:   rgba(205,164,92,0.15);  --aud-fg:   #cda45c;
+  --mtx-bg:   rgba(127,168,221,0.15);  --mtx-fg:   #7fa8dd;
+  --fm-bg:    rgba(180,147,224,0.15);  --fm-fg:    #b493e0;
+  --other-bg: rgba(160,148,173,0.15);  --other-fg: #a094ad;
+}
+
+/* Eno -- neutral graphite, chrome-blue accent */
+:root[data-palette="eno"], [data-pal-preview="eno"] {
+  --bg-0: #111111;
+  --bg-1: #181818;
+  --bg-2: #151515;
+  --bg-3: #1f1f1f;
+  --bg-4: #282828;
+  --bg-5: #333333;
+
+  --bd-0: rgba(255,255,255,0.06);
+  --bd-1: rgba(255,255,255,0.10);
+  --bd-2: rgba(255,255,255,0.18);
+
+  --t0: #e6e6e6;
+  --t1: #afafaf;
+  --t2: #979797;
+  --t3: #818181;
+
+  --accent:      #8fb4d1;
+  --accent-lit:  #aacbe4;
+  --accent-dim:  rgba(143,180,209,0.14);
+  --accent-dim2: rgba(143,180,209,0.24);
+
+  --green:   #69b98a;
+  --amber:   #c6a05c;
+  --red:     #d96a66;
+  --blue:    #7fa8cf;
+  --purple:  #a48ed4;
+
+  --sbd-bg:   rgba(105,185,138,0.15);  --sbd-fg:   #69b98a;
+  --aud-bg:   rgba(198,160,92,0.15);  --aud-fg:   #c6a05c;
+  --mtx-bg:   rgba(127,168,207,0.15);  --mtx-fg:   #7fa8cf;
+  --fm-bg:    rgba(164,142,212,0.15);  --fm-fg:    #a48ed4;
+  --other-bg: rgba(151,151,151,0.15);  --other-fg: #979797;
+}
+
+/* ── Not palette ─────────────────────────────────────────────────────────────
+   Type, scale and layout are the same in every scheme, so they stay in one
+   :root that no palette overrides. */
+
+:root {
   /* Type. --font is kept as an ALIAS for --font-ui so the ~60 existing
      `font-family: var(--font)` rules keep resolving — do not delete it.
      --font-display is identity only (wordmark, act names, page titles);
-     --font-mono is narrowing to the info file, see the audit note below. */
+     --font-mono is the info file and raw technical strings only. */
   --font-display: 'Archivo', -apple-system, BlinkMacSystemFont, sans-serif;
   /* The UI face. Both candidates are declared above; swapping this one line
      is the whole switch. 'IBM Plex Sans' is the live alternative. */
@@ -113,82 +367,71 @@
   --r-lg: 12px;
 }
 
-/* ── Light theme (Parchment) ────────────────────────────────────────────────── */
-/* Scrubbed for contrast 2026-08-24 (Ryan: "too washed out and the text too
-   faint in some places"). Measured against WCAG 2.1's 4.5:1 text threshold
-   before touching anything (a Python script computing relative luminance
-   per-token against every --bg-* this theme actually renders on) — t2 was
-   2.7–3.9:1 and t3 was 1.8–2.6:1 everywhere, badge/semantic colours (green,
-   amber, sbd-fg, etc.) were marginal on --bg-4/--bg-5. t0 and t1 already
-   cleared 4.5:1 with room to spare and are untouched.
-
-   Every darkened token here keeps its original hue and saturation — only
-   lightness moved, via HSL, so the palette still reads as the same warm
-   "Parchment" family. New values clear 4.5:1 against --bg-0 through --bg-3
-   (the surfaces body text and cards actually sit on) and land at 3.4–4.6:1
-   against --bg-4/--bg-5 (hover/pressed states — large-UI-component territory,
-   not running text). Borders (--bd-*) were checked too and left alone: their
-   contrast against a card (~1.2–1.5:1) is essentially identical to the DARK
-   theme's own borders (~1.2–1.7:1) — this app's borders are subtle by design
-   in both themes, not uniquely broken in light mode.
-
-   ⚠ The dark theme (:root) has the SAME t2/t3 proportions (t2 ~2.6–3.8:1, t3
-   ~1.6–2.4:1 there too) — this pass was scoped to light mode only, per what
-   was asked. Flag if Ryan wants dark mode's dim tiers tightened up to match. */
-
-body.theme-light {
-  --bg-0:  #f5f0e8;
-  --bg-1:  #ede8df;
-  --bg-2:  #f0ebe3;
-  --bg-3:  #faf7f2;
-  --bg-4:  #e4ddd4;
-  --bg-5:  #d8d0c6;
-
-  --bd-0: rgba(0,0,0,0.07);
-  --bd-1: rgba(0,0,0,0.10);
-  --bd-2: rgba(0,0,0,0.18);
-
-  --t0: #2a2218;
-  --t1: #5c4e3e;   /* nav items, secondary text */
-  --t2: #63574a;   /* breadcrumbs, labels, tertiary — darkened from #8a7a68, was 2.7–3.9:1, now 4.6–6.6:1 */
-  --t3: #7a6a54;   /* very dim — hints, placeholders — darkened from #a89880, was 1.8–2.6:1, now 3.4–4.9:1 */
-
-  --accent:      #745f43;   /* was #7b6547 */
-  --accent-lit:  #5e4c32;
-  --accent-dim:  rgba(116,95,67,0.12);
-  --accent-dim2: rgba(116,95,67,0.20);
-
-  --green: #2e6e4b;   /* was #3a8a5e */
-  --amber: #7f5c1a;   /* was #9a7020 */
-  --red:   #ae3939;   /* was #c04040 */
-  --blue:  #396594;   /* was #3a6898 */
-  --purple:#7151a9;   /* was #7a5ab0 */
-
-  --sbd-bg:  rgba(46,110,75,0.12);   --sbd-fg:  #2a6e48;   /* was #2e7a50 */
-  --aud-bg:  rgba(127,92,26,0.12);   --aud-fg:  #825b14;   /* was #886015 */
-  --mtx-bg:  rgba(57,101,148,0.12);  --mtx-fg:  #396594;   /* was #3a6898 */
-  --fm-bg:   rgba(113,81,169,0.12);  --fm-fg:   #7151a9;   /* was #7a5ab0 */
-  --other-bg:rgba(110,96,82,0.12);   --other-fg:#6e6052;   /* was #7a6a5a */
+/* The one rule that cares whether a scheme is light rather than which scheme
+   it is. Generated from the light half of the registry, so adding a light
+   scheme means adding its selector here too. */
+:root[data-palette="steely"] .info-file-textarea:focus,
+:root[data-palette="krauss"] .info-file-textarea:focus,
+:root[data-palette="monk"] .info-file-textarea:focus {
+  background: rgba(0,0,0,0.02);
 }
 
-body.theme-light .info-file-textarea:focus { background: rgba(0,0,0,0.02); }
+/* ── Palette picker (Settings › Appearance) ──────────────────────────────────
+   Each card paints a miniature of the scheme itself: page ground, nav, a card,
+   two lines of type and the accent. The miniature carries data-pal-preview, so
+   its colours come straight out of the palette blocks above — the picker holds
+   no hexes of its own and cannot drift. The card frame sits OUTSIDE the
+   preview, so the selected ring is drawn in the scheme currently in force. */
+
+.pal-picker { display: grid; gap: 20px; max-width: 720px; }
+.pal-group-title {
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--t3); margin-bottom: 9px;
+}
+.pal-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.pal-card {
+  display: block; padding: 0; font: inherit; text-align: left; cursor: pointer;
+  color: inherit; background: var(--bg-3);
+  border: 1px solid var(--bd-1); border-radius: var(--r-md); overflow: hidden;
+}
+.pal-card:hover { border-color: var(--bd-2); }
+.pal-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pal-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pal-mini { display: flex; height: 58px; background: var(--bg-0); }
+.pal-mini-nav { width: 27%; background: var(--bg-1); border-right: 1px solid var(--bd-0); }
+.pal-mini-body { flex: 1; padding: 8px; display: flex; align-items: center; }
+.pal-mini-card {
+  flex: 1; background: var(--bg-3); border: 1px solid var(--bd-1);
+  border-radius: 3px; padding: 6px 7px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.pal-mini-line { height: 3px; border-radius: 2px; }
+.pal-mini-line.a { width: 70%; background: var(--t0); }
+.pal-mini-line.b { width: 45%; background: var(--t2); }
+.pal-mini-line.c { width: 22%; background: var(--accent); }
+
+.pal-meta { padding: 8px 10px 9px; border-top: 1px solid var(--bd-0); }
+.pal-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--t0); }
+.pal-note { display: block; font-size: 10.5px; color: var(--t2); margin-top: 2px; }
 
 /* ── Peer mode (browsing someone else's library) ─────────────────────────────
    Ryan, 2026-08-08 — Cool Slate retint, REMOVED 2026-08-24 ("let's just get
    rid of the third theme for now and just have the host library show up the
-   same as the user's preferences define"). A peer's library now renders in
-   whichever of the two real themes (Warm Ash / Parchment) the viewer has
-   chosen, same as their own library — no third palette. This was the whole
-   point of layering peer-mode on <html> rather than <body>: composing with
-   theme-light was designed in from the start, it just no longer overrides
-   its colours.
+   same as the user's preferences define"). A peer's library renders in
+   whichever named palette the VIEWER has chosen, same as their own library —
+   there is no such thing as a host's palette travelling to a guest.
 
-   `html.peer-mode` ITSELF is not gone — it still exists as a structural/
-   permissions flag (the class is still toggled by applyPeerTheme() in
-   app.js) and drives the non-colour rules further down this file: hiding the
-   library-selector centre cluster, the drive-offline banner, and the
-   `[data-admin]` backstop. Only the --bg-*/--t*/--accent* overrides that used
-   to retint the chrome are deleted here. */
+   `html.peer-mode` ITSELF is not gone — it is a structural/permissions flag
+   (still toggled by applyPeerTheme() in app.js) and drives the non-colour
+   rules further down this file: hiding the library-selector centre cluster,
+   the drive-offline banner, and the `[data-admin]` backstop. It sets no
+   colours at all, which is also why it does not fight the palette attribute
+   now sitting on the same element — `.peer-mode` is one class, and every
+   palette selector is `:root[data-palette=…]`, which outranks it. */
 
 /* ── Reset ──────────────────────────────────────────────────────────────────── */
 

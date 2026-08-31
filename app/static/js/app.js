@@ -225,17 +225,62 @@ const App = (() => {
     }
   })
 
-  // ── Theme ──────────────────────────────────────────────────────────────────
-  // The ◑ button left the sidebar header on 2026-08-22 (that header is gone —
-  // the app name and icon moved to the App Header). Light/dark is a preference,
-  // set rarely, so it lives in Settings with the other preferences rather than
-  // taking permanent space in the chrome. Still localStorage, not the server:
-  // it is per-machine, and it must apply before the first paint.
-  function setTheme(light) {
-    document.body.classList.toggle('theme-light', light)
-    localStorage.setItem('fluxTheme', light ? 'light' : 'dark')
+  // ── Palette ────────────────────────────────────────────────────────────────
+  // Seven named schemes, v1, chosen 2026-08-30. This registry carries ids,
+  // labels and one line of description — NO colours. Every hex lives in the
+  // palette blocks in main.css, and the Settings picker paints its swatches
+  // straight from those blocks via [data-pal-preview], so the JS and the CSS
+  // cannot drift apart about what a scheme looks like. Adding a scheme means a
+  // block there and an entry here, with matching ids.
+  //
+  // The id sits on <html>, not on <body> the way the old theme class did. That
+  // was a real bug and not a stylistic choice: buildWaveform() reads --t2 /
+  // --accent / --accent-lit off document.documentElement, so a palette
+  // declared on <body> never reached it and light mode drew a dark-theme
+  // waveform. Anything reading a token off :root now gets the live scheme.
+  //
+  // Still localStorage rather than the server, unchanged from the old theme
+  // toggle: it is per-machine, and it must apply before the first paint — see
+  // the inline script in index.html, which stamps the saved id and knows
+  // nothing else about palettes.
+  const PALETTES = [
+    { id: 'steely', label: 'Steely', mode: 'light', note: 'Cool paper, petrol accent' },
+    { id: 'krauss', label: 'Krauss', mode: 'light', note: 'Warm ivory, sage accent' },
+    { id: 'monk',   label: 'Monk',   mode: 'light', note: 'Near-white, ink, bold blue' },
+    { id: 'cale',   label: 'Cale',   mode: 'dark',  note: 'Warm ash, amber-tan accent' },
+    { id: 'miles',  label: 'Miles',  mode: 'dark',  note: 'Midnight slate, icy blue' },
+    { id: 'alice',  label: 'Alice',  mode: 'dark',  note: 'Deep aubergine, gold accent' },
+    { id: 'eno',    label: 'Eno',    mode: 'dark',  note: 'Neutral graphite, chrome blue' },
+  ]
+  // Cale is the app default because it is the palette every existing install is
+  // already running — shipping a new set should not silently relight anyone's
+  // app. Moving the default is this one string.
+  const DEFAULT_PALETTE_ID = 'cale'
+  const PALETTE_KEY = 'trellisPalette'
+
+  const paletteById = id => PALETTES.find(p => p.id === id) || null
+
+  function currentPalette() {
+    return paletteById(document.documentElement.getAttribute('data-palette'))
+        || paletteById(DEFAULT_PALETTE_ID)
   }
-  function isLightTheme() { return document.body.classList.contains('theme-light') }
+
+  /** Apply and persist. Returns the palette, or null for an id we do not have,
+   *  so a caller can tell a no-op from a switch. */
+  function setPalette(id) {
+    const p = paletteById(id)
+    if (!p) return null
+    document.documentElement.setAttribute('data-palette', p.id)
+    localStorage.setItem(PALETTE_KEY, p.id)
+    return p
+  }
+
+  // The inline script stamps whatever string it found without validating it,
+  // because it has no registry to validate against. Correct it here, once, on
+  // load: an id left behind by a build that had a scheme this one does not
+  // would otherwise sit in localStorage forever, rendering as the :root
+  // fallback while Settings showed nothing selected.
+  setPalette(currentPalette().id)
 
   // ── Resizable sidebar ──────────────────────────────────────────────────────
   ;(function () {
@@ -7218,7 +7263,8 @@ const App = (() => {
     // specimen, the half that did not ship with the tier chips on 08-27).
     // A folder of hundreds is unreadable as cards, and the toggle is the whole
     // point: the dense list is for triage, the cards are for judgement.
-    // Persisted like fluxTheme / fluxViewMode — a display preference the user
+    // Persisted like trellisPalette / fluxViewMode — a display preference the
+    // user
     // set once, not a per-visit question.
     // folder_path -> which pane is open ('lq' | 'meta' | 'fp'). One piece of
     // state for both the caret and the Tab Strip, so they cannot disagree
@@ -12626,8 +12672,9 @@ const App = (() => {
     })
 
     // Sidebar collapse toggle (2026-08-23). Plain localStorage flag, same
-    // idiom as setTheme() above — applied before first paint by the inline
-    // head script in index.html so there's no flash, flipped on click here.
+    // idiom as setPalette() above — applied before first paint by the inline
+    // script at the top of <body> in index.html so there's no flash, flipped on
+    // click here.
     const sbToggle = document.getElementById('nav-sidebar-toggle')
     sbToggle?.setAttribute('aria-pressed', String(document.body.classList.contains('sidebar-collapsed')))
     sbToggle?.addEventListener('click', () => {
@@ -12865,6 +12912,42 @@ const App = (() => {
     return `<span class="set-avatar-initial">${esc(_settingsInitial(me.name))}</span>`
   }
 
+  /** The Appearance picker. Each card's miniature carries data-pal-preview, so
+   *  it is painted by that scheme's own block in main.css — this function
+   *  writes no colours at all. The card frame sits OUTSIDE the miniature on
+   *  purpose, so the selected ring is drawn in the palette currently in force
+   *  rather than in the one the card is advertising. */
+  function _palettePickerHtml() {
+    const active = currentPalette().id
+    const group = (title, mode) => `
+      <div class="pal-group">
+        <div class="pal-group-title">${title}</div>
+        <div class="pal-grid">
+          ${PALETTES.filter(p => p.mode === mode).map(p => `
+            <button type="button" class="pal-card${p.id === active ? ' active' : ''}"
+                    data-palette="${esc(p.id)}" aria-pressed="${p.id === active}">
+              <span class="pal-mini" data-pal-preview="${esc(p.id)}">
+                <span class="pal-mini-nav"></span>
+                <span class="pal-mini-body">
+                  <span class="pal-mini-card">
+                    <span class="pal-mini-line a"></span>
+                    <span class="pal-mini-line b"></span>
+                    <span class="pal-mini-line c"></span>
+                  </span>
+                </span>
+              </span>
+              <span class="pal-meta">
+                <span class="pal-name">${esc(p.label)}</span>
+                <span class="pal-note">${esc(p.note)}</span>
+              </span>
+            </button>`).join('')}
+        </div>
+      </div>`
+    return `<div class="pal-picker" id="set-palette" role="group" aria-label="Palette">
+        ${group('Light', 'light')}${group('Dark', 'dark')}
+      </div>`
+  }
+
   async function renderSettingsPage() {
     setActiveNav('settings')
     setNavCurrent('Settings')
@@ -12937,12 +13020,11 @@ const App = (() => {
         <section class="set-sec">
           <h2 class="set-sec-title">Appearance</h2>
           <div class="set-field">
-            <span class="set-label">Theme</span>
-            <div class="view-mode-toggle set-theme" id="set-theme" role="group" aria-label="Theme">
-              <button type="button" class="vm-opt" data-theme="dark">Dark</button>
-              <button type="button" class="vm-opt" data-theme="light">Light</button>
-            </div>
-            <p class="set-hint">Applies immediately, and only on this machine.</p>
+            <span class="set-label">Palette</span>
+            ${_palettePickerHtml()}
+            <p class="set-hint">Applies immediately, and only on this machine.
+              A waveform already on screen keeps the colours it was drawn with
+              until you open that recording again.</p>
           </div>
         </section>
 
@@ -13089,19 +13171,20 @@ const App = (() => {
       catch (e) { _settingsSaved($('set-avatar-flash'), e.message) }
     })
 
-    // ── Theme — applies live, so there is nothing to save ───────────────────
-    const themeWrap = $('set-theme')
-    const paintTheme = () => themeWrap?.querySelectorAll('.vm-opt').forEach(b => {
-      const on = (b.dataset.theme === 'light') === isLightTheme()
-      b.classList.toggle('active', on)
-      b.setAttribute('aria-pressed', on ? 'true' : 'false')
-    })
-    paintTheme()
-    themeWrap?.addEventListener('click', e => {
-      const b = e.target.closest('.vm-opt')
-      if (!b) return
-      setTheme(b.dataset.theme === 'light')
-      paintTheme()
+    // ── Palette — applies live, so there is nothing to save ─────────────────
+    // Repainted from the clicked card rather than from currentPalette(),
+    // because setPalette() returning null (an id this build does not carry)
+    // must leave the selection where it was instead of clearing every card.
+    const palWrap = $('set-palette')
+    palWrap?.addEventListener('click', e => {
+      const card = e.target.closest('.pal-card')
+      if (!card || !palWrap.contains(card)) return
+      if (!setPalette(card.dataset.palette)) return
+      palWrap.querySelectorAll('.pal-card').forEach(c => {
+        const on = c === card
+        c.classList.toggle('active', on)
+        c.setAttribute('aria-pressed', on ? 'true' : 'false')
+      })
     })
 
     // ── Menus — commit on change ────────────────────────────────────────────

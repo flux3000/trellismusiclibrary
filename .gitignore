@@ -73,3 +73,11 @@ import/
 # regenerates on demand). ~10MB per streamed track, so this is not something
 # to carry in the repo.
 cache/
+
+# Packaged release archives. `dist/` is already ignored, but the zip gets
+# built out to the repo root on its way to a GitHub Release, and at ~143MB it
+# is over GitHub's 100MB per-file push limit — a commit carrying one is
+# rejected outright. Even under the limit it does not belong here: git keeps
+# every version forever, so three releases would make a source clone bigger
+# than the app. Release binaries attach to the tag, not to the tree.
+Trellis-Music-Library-*.zip
