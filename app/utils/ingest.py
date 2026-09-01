@@ -23,6 +23,7 @@ import geonamescache as _geonamescache
 
 from app.utils.format import format_partial_date
 from app.utils.health import compute_health
+from app.utils.folder_naming import unique_folder_name
 
 
 # ── File classification ────────────────────────────────────────────────────────
@@ -1787,7 +1788,12 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         source_folder     : str  — absolute path to source folder
         library_root       : str  — LIBRARY_ROOT from config
         artist_name         : str  — canonical artist name (used as subdirectory)
-        folder_name        : str  — canonical folder name from build_folder_name()
+        folder_name        : str  — canonical folder name from build_folder_name().
+                              May be disambiguated with a "(2)"-style suffix if a
+                              folder by this name already exists under the artist
+                              directory — see unique_folder_name(). The caller should
+                              re-read the actual name from the returned path rather
+                              than assume this argument is what landed on disk.
         behavior           : "copy" | "move"
         progress_cb         : callable(copied_bytes, total_bytes) | None — progress
         audio_rename_map   : {rel_path_or_basename: new_filename}, from
@@ -1807,9 +1813,19 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     Returns:
         str — new folder path relative to library_root
     """
-    dest_dir    = Path(library_root) / _sanitize_path(artist_name)
-    dest_folder = dest_dir / folder_name
+    dest_dir = Path(library_root) / _sanitize_path(artist_name)
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Guard against silently merging into an already-existing folder of the
+    # same canonical name — e.g. two undated-source "Various Artists" shows
+    # at the same venue. Without this, mkdir(..., exist_ok=True) below would
+    # happily reuse the OTHER recording's folder and both recordings' files
+    # would land in one directory (2026-09-01, Ryman Auditorium 1964 bug
+    # report). Collisions get the same "(2)", "(3)", ... suffix
+    # rename_recording_folder() already applies post-ingest, via the shared
+    # unique_folder_name() helper — see its docstring.
+    folder_name = unique_folder_name(str(dest_dir), folder_name)
+    dest_folder = dest_dir / folder_name
     dest_folder.mkdir(parents=True, exist_ok=True)
 
     audio_rename_map = audio_rename_map or {}

@@ -167,6 +167,40 @@ def _dedupe_name(canonical_name, n):
     return f"{canonical_name} ({n})"
 
 
+def unique_folder_name(parent_abs, canonical_name, keep_abs=None):
+    """
+    Find a folder name under parent_abs (an absolute directory path) that
+    doesn't collide with anything already on disk there — starting from
+    canonical_name and walking _dedupe_name()'s "(2)", "(3)", ... suffixes
+    on each collision.
+
+    Shared by every path that plants or renames a recording folder to its
+    canonical name — ingest (move_to_library, app/utils/ingest.py) and
+    metadata-driven rename (rename_recording_folder, below) both go through
+    this, so two recordings with identical Artist/Date/Venue/Location/Source
+    (e.g. two undated-source "Various Artists" shows at the same venue) get
+    the same disambiguating suffix regardless of which path creates or
+    renames the collision. Before 2026-09-01 only the rename path had this
+    check — ingest had none, and would silently merge the second recording's
+    files into the first's folder (Ryman Auditorium 1964 bug report).
+
+    keep_abs: pass the CURRENT absolute path of the folder being renamed so
+    a no-op rename (the new name computes to the folder's own existing name)
+    doesn't count as a collision against itself. Omit for a brand-new folder
+    (ingest), where nothing should be excluded from the check.
+    """
+    name       = canonical_name
+    target_abs = os.path.join(parent_abs, name)
+    n = 2
+    while (os.path.exists(target_abs)
+           and (keep_abs is None
+                or os.path.normpath(target_abs) != os.path.normpath(keep_abs))):
+        name       = _dedupe_name(canonical_name, n)
+        target_abs = os.path.join(parent_abs, name)
+        n += 1
+    return name
+
+
 def rename_recording_folder(recording, library_root):
     """
     Rename a recording's on-disk folder to match its CURRENT metadata, if it
@@ -215,14 +249,9 @@ def rename_recording_folder(recording, library_root):
     if not os.path.isdir(old_abs):
         return f"Folder not found on disk, could not rename: {old_rel}"
 
-    target_name = new_name
-    target_abs  = os.path.join(str(library_root), parent_rel, target_name)
-    n = 2
-    while (os.path.exists(target_abs)
-           and os.path.normpath(target_abs) != os.path.normpath(old_abs)):
-        target_name = _dedupe_name(new_name, n)
-        target_abs  = os.path.join(str(library_root), parent_rel, target_name)
-        n += 1
+    parent_abs  = os.path.join(str(library_root), parent_rel)
+    target_name = unique_folder_name(parent_abs, new_name, keep_abs=old_abs)
+    target_abs  = os.path.join(parent_abs, target_name)
 
     try:
         os.rename(old_abs, target_abs)

@@ -988,6 +988,12 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         db.session.rollback()
         raise RuntimeError(f"File operation failed: {e}")
 
+    # move_to_library() may have deduped folder_name against a same-named
+    # folder already on disk (see unique_folder_name()) — resync so the
+    # "cataloging" phase message and the final response report the name
+    # actually written, not the pre-dedup one computed in step 5.
+    folder_name = os.path.basename(new_folder_path)
+
     _phase("cataloging", f"{len(tracks_in)} track{'' if len(tracks_in) == 1 else 's'}")
 
     # ── 7. Create Recording ───────────────────────────────────────────────────

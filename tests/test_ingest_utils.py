@@ -294,3 +294,66 @@ def test_audit_scopes_a_disc_subdir_fingerprint_to_that_disc(tmp_path):
     # Only CD1's track is a candidate, so exactly one row comes back.
     assert len(f["tracks"]) == 1
     assert f["matched_count"] == 1
+
+
+# ── Collision handling at ingest time (2026-09-01) ────────────────────────────
+# move_to_library() used to do dest_folder.mkdir(parents=True, exist_ok=True)
+# unconditionally — if a folder of the same canonical name already existed
+# under the artist directory (e.g. two undated-source "Various Artists" shows
+# at the same venue), that mkdir silently reused it and both recordings'
+# files landed in one folder. It must now dedupe the same way
+# rename_recording_folder() always has.
+
+def test_move_dedupes_against_an_existing_same_named_folder(tmp_path):
+    """The Ryman Auditorium 1964 bug: a second recording with an identical
+    canonical folder name must land in its own "(2)" folder, never merge
+    into the first one's."""
+    lib = tmp_path / "lib"; lib.mkdir()
+    artist_dir = lib / "Various Artists"
+    existing = artist_dir / "Various Artists - 1964 - Ryman Auditorium - Nashville, TN"
+    existing.mkdir(parents=True)
+    (existing / "existing_track.flac").write_bytes(b"x" * 10)
+
+    show = _make_show(
+        tmp_path / "Import", "Various Artists - 1964 - Ryman Auditorium - Nashville, TN",
+        filename="new_track.flac")
+
+    new_rel = move_to_library(
+        str(show), str(lib), "Various Artists",
+        "Various Artists - 1964 - Ryman Auditorium - Nashville, TN",
+        behavior="move")
+
+    assert new_rel == "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN (2)"
+    # The first recording's folder and its file are untouched...
+    assert (existing / "existing_track.flac").exists()
+    # ...and the second recording's file is in its own new folder, not mixed in.
+    new_folder = lib / new_rel
+    assert (new_folder / "new_track.flac").exists()
+    assert not (existing / "new_track.flac").exists()
+
+
+def test_move_does_not_dedupe_a_genuinely_new_folder_name(tmp_path):
+    """The common case — nothing on disk yet — must still get the plain
+    canonical name, no spurious "(2)"."""
+    lib = tmp_path / "lib"; lib.mkdir()
+    show = _make_show(tmp_path / "Import", "1994-07-30 Show")
+
+    new_rel = move_to_library(str(show), str(lib), "Performer Name",
+                              "1994-07-30 Show", behavior="move")
+
+    assert new_rel == "Performer Name/1994-07-30 Show"
+
+
+def test_move_dedupes_a_third_collision_past_the_second(tmp_path):
+    """Two prior collisions already on disk ("(2)" taken too) must roll to
+    "(3)", not clobber "(2)" or retry the bare name forever."""
+    lib = tmp_path / "lib"; lib.mkdir()
+    artist_dir = lib / "Various Artists"
+    (artist_dir / "Show").mkdir(parents=True)
+    (artist_dir / "Show (2)").mkdir(parents=True)
+
+    show = _make_show(tmp_path / "Import", "Show")
+    new_rel = move_to_library(str(show), str(lib), "Various Artists", "Show",
+                              behavior="move")
+
+    assert new_rel == "Various Artists/Show (3)"
