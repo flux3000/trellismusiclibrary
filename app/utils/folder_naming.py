@@ -201,6 +201,63 @@ def unique_folder_name(parent_abs, canonical_name, keep_abs=None):
     return name
 
 
+def unique_file_name(parent_abs, filename, keep_abs=None):
+    """
+    unique_folder_name()'s counterpart for a FILE: the disambiguating digit
+    goes before the extension ("01 - Song.flac" -> "01 - Song (2).flac"),
+    which is the convention compute_audio_rename_map() already uses for two
+    tracks that collide within a single ingest batch.
+
+    This exists because os.rename() on POSIX REPLACES an existing destination
+    FILE silently — unlike a directory, which at least errors when non-empty.
+    So a track retitled into another track's filename does not collide, it
+    DELETES that track's audio. Two tracks can reach the same name honestly:
+    same track number and same title, or any folder that ended up holding two
+    shows (both numbered from 01).
+
+    keep_abs: the file's own current absolute path, so a rename that resolves
+    back to where it already is isn't treated as a collision with itself.
+    """
+    stem, ext  = os.path.splitext(filename)
+    name       = filename
+    target_abs = os.path.join(parent_abs, name)
+    n = 2
+    while (os.path.exists(target_abs)
+           and (keep_abs is None
+                or os.path.normpath(target_abs) != os.path.normpath(keep_abs))):
+        name       = f"{stem} ({n}){ext}"
+        target_abs = os.path.join(parent_abs, name)
+        n += 1
+    return name
+
+
+def _other_recordings_in_folder(recording, folder_rel):
+    """
+    How many OTHER recordings claim this same folder_path.
+
+    Normally zero — but the ingest merge bug (fixed 2026-09-01) left real
+    libraries with folders shared by several recordings; Ryan's had eight
+    Opry transcription shows, 146 files, in one directory. Renaming a shared
+    folder to match ONE of them drags the other seven's audio along and
+    leaves their folder_path pointing at a directory that no longer exists.
+
+    Returns 0 when the question cannot be asked at all (no app/DB context —
+    a script, or a plain stand-in object in a unit test). That is the
+    permissive direction on purpose: outside a real session there is no
+    shared DB state to protect, and a naming helper must not hard-depend on
+    a database being present.
+    """
+    try:
+        from app.extensions import db
+        from app.models.recording import Recording
+        return (db.session.query(Recording)
+                .filter(Recording.folder_path == folder_rel,
+                        Recording.id != getattr(recording, "id", None))
+                .count())
+    except Exception:  # noqa: BLE001 — see docstring
+        return 0
+
+
 def rename_recording_folder(recording, library_root):
     """
     Rename a recording's on-disk folder to match its CURRENT metadata, if it
@@ -248,6 +305,17 @@ def rename_recording_folder(recording, library_root):
     old_abs    = os.path.join(str(library_root), old_rel)
     if not os.path.isdir(old_abs):
         return f"Folder not found on disk, could not rename: {old_rel}"
+
+    # A folder several recordings share is not this recording's to rename.
+    # Refuse rather than repair: renaming it would move the others' audio to
+    # a name that describes only THIS recording's metadata, and silently
+    # invalidate their folder_path. Non-fatal like every other failure here,
+    # so the metadata save itself still goes through. 2026-09-01.
+    shared = _other_recordings_in_folder(recording, old_rel)
+    if shared:
+        return (f"Folder not renamed — {shared} other recording"
+                f"{'' if shared == 1 else 's'} share this folder, and renaming "
+                f"it would move their files too: {old_rel}")
 
     parent_abs  = os.path.join(str(library_root), parent_rel)
     target_name = unique_folder_name(parent_abs, new_name, keep_abs=old_abs)

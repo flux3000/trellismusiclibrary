@@ -75,6 +75,12 @@ def server_app():
         yield app
         _db.session.remove()
     os.unlink(app._tmp_db_path)
+    # WAL sidecars leak if only the .db is unlinked — see conftest.py.
+    for _sidecar in (f"{app._tmp_db_path}-wal", f"{app._tmp_db_path}-shm"):
+        try:
+            os.unlink(_sidecar)
+        except OSError:
+            pass
 
 
 @pytest.fixture()
@@ -85,6 +91,12 @@ def normal_app():
         yield app
         _db.session.remove()
     os.unlink(app._tmp_db_path)
+    # WAL sidecars leak if only the .db is unlinked — see conftest.py.
+    for _sidecar in (f"{app._tmp_db_path}-wal", f"{app._tmp_db_path}-shm"):
+        try:
+            os.unlink(_sidecar)
+        except OSError:
+            pass
 
 
 # ── The absence guarantee ─────────────────────────────────────────────────────

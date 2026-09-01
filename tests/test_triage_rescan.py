@@ -53,6 +53,12 @@ def qapp():
         yield application
         _db.session.remove()
     os.unlink(path)
+    # WAL sidecars leak if only the .db is unlinked — see conftest.py.
+    for _sidecar in (f"{path}-wal", f"{path}-shm"):
+        try:
+            os.unlink(_sidecar)
+        except OSError:
+            pass
 
 
 def _seed(folder, source_dir):

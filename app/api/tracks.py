@@ -31,7 +31,7 @@ except Exception as _mpl_err:
 from app.extensions import db
 from app.models.track import Track
 from app.models.play_log import PlayLog
-from app.utils.folder_naming import _sanitize
+from app.utils.folder_naming import _sanitize, unique_file_name
 
 bp  = Blueprint("tracks", __name__)
 log = logging.getLogger(__name__)
@@ -96,6 +96,21 @@ def update_track(track_id):
 
         if new_abs != old_abs:
             if os.path.exists(old_abs):
+                # Never let a retitle destroy a sibling track's audio.
+                # os.rename() REPLACES an existing destination file silently
+                # (a directory at least errors), and two tracks can reach the
+                # same filename honestly — same number + same title, or any
+                # folder that ended up holding two shows, both numbered from
+                # 01. Dedupe with the same "(2)" convention used for folder
+                # names and for within-batch collisions at ingest.
+                # 2026-09-01, alongside the ingest folder-merge fix.
+                subdir        = os.path.dirname(new_file_path)
+                parent_abs    = os.path.join(library_root, rec.folder_path, subdir)
+                unique        = unique_file_name(parent_abs,
+                                                 os.path.basename(new_file_path),
+                                                 keep_abs=old_abs)
+                new_file_path = os.path.join(subdir, unique) if subdir else unique
+                new_abs       = os.path.join(library_root, rec.folder_path, new_file_path)
                 try:
                     os.rename(old_abs, new_abs)
                     t.file_path = new_file_path
