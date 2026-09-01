@@ -524,8 +524,16 @@ const App = (() => {
   // 12px rather than the old 10px because a 0.9px stroke reads smaller than a
   // 2.1px one at the same box size; this lands on the weight the Move button
   // had, which is the one that was liked.
-  function chevronIcon(cls) {
-    return `<svg class="caret-ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`
+  //
+  // `size` (Ryan, 2026-08-31): the Review & Ingest row-expand caret — the
+  // main, farthest-right control on every row — asked to be bigger and more
+  // prominent than a tab-strip or menu chevron earns. Same glyph, same
+  // stroke-width in SVG units, just rendered larger; scaling the whole icon
+  // up scales its visual stroke weight with it; the box is what to size, not
+  // stroke-width from svg. Still the ONE chevron shape in the app — every
+  // call site but that one still gets the default 12px.
+  function chevronIcon(cls, size = 12) {
+    return `<svg class="caret-ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`
   }
 
   // Canonical form for comparing filesystem paths client-side. macOS hands out
@@ -7285,14 +7293,20 @@ const App = (() => {
     copyProgress: new Map(),
     runTotal:     0,
     // ── Values applied to EVERY recording this queue ingests ────────────────
-    // One field today (Event), deliberately shaped as a bag so the next one is
-    // a line here and a line in the markup rather than a new mechanism.
-    //
-    // The case: a folder of shows all from Telluride Bluegrass Festival. The
-    // server already resolves `event_name` to an Event row, creating it if
-    // needed (_do_confirm step 3.5), so the queue only has to carry the string.
+    // Expanded 2026-08-31 (Ryan) from Event alone to the full set worth
+    // setting once for a whole folder: Performer, Venue (+ City/State/Country,
+    // locked to the venue's own values once picked from the database — same
+    // behaviour as the Add Recording form's venue picker), Event, Source,
+    // Lineage and Notes. The server already resolves/creates Performer, Venue
+    // and Event rows per-recording (_do_confirm), so the queue only ever has
+    // to carry the values themselves.
     // Uncommon enough that the whole area stays collapsed until asked for.
-    applyAll:     { event: '' },
+    applyAll: {
+      event: '', performer: '',
+      venue: { id: null, name: '' },
+      city: '', state: '', country: '',
+      source: '', lineage: '', notes: '',
+    },
     applyAllOpen: false,
     // Which run each lq.log entry belongs to. Bumped at the start of every
     // bulk run so the completion summary can describe one run rather than
@@ -8350,12 +8364,25 @@ const App = (() => {
       // is here because Ryan uses it as his actual review trigger (2026-08-02),
       // so it may not disappear just because the row got shorter.
       const h = row.health
+      // Sound Quality and Metadata now share ONE pill shape (Ryan, 2026-08-31)
+      // — Metadata used to be plain coloured text (.batch-score), which read
+      // as a different kind of thing next to the Sound Quality pill even
+      // though both are the same three-band read. Both are also buttons now:
+      // clicking either opens this row's drill-in straight to that tab
+      // (wired below via .lq-brow-pill), the same jump the Tab Strip inside
+      // the open panel already does — see lq-dtab.
       right = `
         <span class="lq-brow-band">${row.verdict_band
-          ? `<span class="lq-verdict lq-verdict--${row.verdict_band}">${
-              _LQ_BAND_TEXT[row.verdict_band]}</span>` : ''}</span>
-        <span class="lq-brow-meta batch-score--${h?.band || 'red'}">${
-          esc(_metaRating(h))}</span>
+          ? `<button type="button" class="lq-verdict lq-verdict--${row.verdict_band} lq-brow-pill"
+                     data-path="${esc(row.folder_path)}" data-tab="lq"
+                     title="Sound Quality — click for the full report">${
+              _LQ_BAND_TEXT[row.verdict_band]}</button>` : ''}</span>
+        <span class="lq-brow-meta">
+          <button type="button" class="lq-verdict lq-verdict--${h?.band || 'red'} lq-brow-pill"
+                  data-path="${esc(row.folder_path)}" data-tab="meta"
+                  title="Metadata Completeness — click for the full report">${
+            esc(_metaRating(h))}</button>
+        </span>
         ${_lqBrowFp(row)}`
     }
 
@@ -8386,7 +8413,7 @@ const App = (() => {
           ? '<span class="lq-brow-caret lq-brow-caret--spacer"></span>'
           : `<button type="button" class="lq-brow-caret" data-expand="${esc(row.folder_path)}"
                 title="${open ? 'Hide the detail' : 'Show the detail for this recording'}"
-                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down')}</button>`}
+                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`}
       </div>
       ${open ? _lqDetail(row, open) : ''}
     </div>`
@@ -8908,21 +8935,89 @@ const App = (() => {
     // a permanently visible empty form above the primary button would tax
     // every ordinary ingest for the sake of an occasional one. Stays open once
     // it holds a value, so a set value can never be invisible.
-    const anyApplied = !!lq.applyAll.event.trim()
+    //
+    // Expanded 2026-08-31 (Ryan) to the same field set the Add Recording form
+    // carries: Performer, Venue, City/State/Country, Event, Source, Lineage,
+    // Notes — one small form instead of one input, reusing the exact same
+    // `.ingest-field` / `.artist-picker-wrap` / `.venue-picker-wrap` markup and
+    // styling the review form already uses, so it reads as the same control.
+    const aa = lq.applyAll
+    const anyApplied = !!(aa.event.trim() || aa.performer.trim() || aa.venue.name.trim()
+      || aa.city.trim() || aa.state.trim() || aa.country.trim()
+      || aa.source.trim() || aa.lineage.trim() || aa.notes.trim())
+    // Locked exactly like the Add Recording form's own venue picker: an id
+    // means an existing Venue row was picked, so City/State/Country are that
+    // venue's own stored values and editing them here would do nothing — the
+    // server ignores them once venue_id is set (_do_confirm step 3).
+    const aaVenueLocked = !!aa.venue.id
     const applyAllBar = !lq.rows.length ? '' : (lq.applyAllOpen || anyApplied)
       ? `<div class="lq-applyall">
            <div class="lq-applyall-head">
              <span class="lq-applyall-h">Applies to every recording below</span>
-             ${anyApplied ? '' : `<button type="button" class="lq-applyall-x" id="lq-applyall-close"
-                                    title="Hide">Hide</button>`}
+             ${anyApplied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
+                               ${lq.running ? 'disabled' : ''}>Clear all</button>`
+                          : `<button type="button" class="lq-applyall-x" id="lq-applyall-close"
+                               title="Hide">Hide</button>`}
            </div>
-           <label class="bfilter">Event
-             <input type="text" id="lq-apply-event" class="lq-applyall-input"
-                    placeholder="e.g. Telluride Bluegrass Festival"
-                    value="${esc(lq.applyAll.event)}" ${lq.running ? 'disabled' : ''}>
-           </label>
-           ${anyApplied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
-                             ${lq.running ? 'disabled' : ''}>Clear</button>` : ''}
+           <div class="lq-applyall-grid">
+             <div class="ingest-field">
+               <label>Performer</label>
+               <div class="artist-picker-wrap">
+                 <input type="text" id="lq-apply-performer" autocomplete="off"
+                        placeholder="Search or type the act…"
+                        value="${esc(aa.performer)}" ${lq.running ? 'disabled' : ''}>
+                 <div class="artist-dropdown" id="lq-apply-performer-dropdown" style="display:none"></div>
+               </div>
+             </div>
+             <div class="ingest-field">
+               <label>Venue</label>
+               <div class="venue-picker-wrap">
+                 <input type="text" id="lq-apply-venue-name" autocomplete="off"
+                        placeholder="Search or type venue name…"
+                        value="${esc(aa.venue.name)}" ${lq.running ? 'disabled' : ''}>
+                 <input type="hidden" id="lq-apply-venue-id" value="${esc(String(aa.venue.id || ''))}">
+                 <div class="venue-dropdown" id="lq-apply-venue-dropdown" style="display:none"></div>
+               </div>
+             </div>
+             <div class="ingest-field">
+               <label>City</label>
+               <input type="text" id="lq-apply-city" value="${esc(aa.city)}"
+                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
+                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+             </div>
+             <div class="ingest-field">
+               <label>State</label>
+               <input type="text" id="lq-apply-state" maxlength="6" value="${esc(aa.state)}"
+                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
+                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+             </div>
+             <div class="ingest-field">
+               <label>Country</label>
+               <input type="text" id="lq-apply-country" value="${esc(aa.country)}"
+                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
+                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+             </div>
+             <div class="ingest-field">
+               <label>Event / Festival</label>
+               <input type="text" id="lq-apply-event"
+                      placeholder="e.g. Telluride Bluegrass Festival"
+                      value="${esc(aa.event)}" ${lq.running ? 'disabled' : ''}>
+             </div>
+             <div class="ingest-field">
+               <label>Source</label>
+               <input type="text" id="lq-apply-source" placeholder="SBD, AUD, MTX…"
+                      value="${esc(aa.source)}" ${lq.running ? 'disabled' : ''}>
+             </div>
+             <div class="ingest-field">
+               <label>Lineage</label>
+               <input type="text" id="lq-apply-lineage" value="${esc(aa.lineage)}"
+                      ${lq.running ? 'disabled' : ''}>
+             </div>
+             <div class="ingest-field lq-applyall-notes">
+               <label>Notes</label>
+               <textarea id="lq-apply-notes" ${lq.running ? 'disabled' : ''}>${esc(aa.notes)}</textarea>
+             </div>
+           </div>
          </div>`
       : `<button type="button" class="lq-applyall-open" id="lq-applyall-open">
            ${icon('plus', 'lq-applyall-ic')} Add a value for every recording</button>`
@@ -8930,19 +9025,23 @@ const App = (() => {
     setMainHTML(`
       <div class="batch-shell lq-shell">
         <div class="batch-header lq-header">
-          <div>
+          <div style="min-width:0">
             <h2>Review &amp; Ingest</h2>
             <p class="batch-subtitle">${lq.rows.length
               ? `${lq.rows.length} recording${lq.rows.length === 1 ? '' : 's'} found`
               : 'Nothing to review'}</p>
           </div>
+          <!-- The primary action, top-right (Ryan, 2026-08-31) — actions
+               centralize in the header the same way View Recording's do in
+               .rec-header-actions, rather than sitting in their own bar
+               beneath the settings/apply-all rows below. -->
+          <div class="lq-header-actions">${runBar}</div>
         </div>
 
         ${settingsBar}
         ${progressBar}
         ${errorBar}
         ${applyAllBar}
-        <div class="lq-runbar">${runBar}</div>
         ${_lqDoneStripHtml()}
         <div class="lq-cards lq-cards--compact" id="lq-cards">${cardsBody}</div>
       </div>`)
@@ -8968,32 +9067,121 @@ const App = (() => {
       renderTriageView({ preserveScroll: true })   // the rail's note tracks it
     })
 
-    // Apply-to-all. The input is read on INPUT rather than on change so the
-    // value is never lost by clicking straight from the field to Ingest, and
-    // it does NOT re-render on every keystroke — that would rebuild the field
-    // under the cursor and drop focus.
+    // Apply-to-all. Typed fields are read on INPUT rather than on change so
+    // a value is never lost by clicking straight from a field to Ingest, and
+    // typing does NOT re-render on every keystroke — that would rebuild the
+    // field under the cursor and drop focus. Blur repaints so the button
+    // count and the Clear/Hide control catch up with a value that was typed
+    // but never committed.
     document.getElementById('lq-applyall-open')?.addEventListener('click', () => {
       lq.applyAllOpen = true
       renderTriageView({ preserveScroll: true })
-      document.getElementById('lq-apply-event')?.focus()
+      document.getElementById('lq-apply-performer')?.focus()
     })
     document.getElementById('lq-applyall-close')?.addEventListener('click', () => {
       lq.applyAllOpen = false
       renderTriageView({ preserveScroll: true })
     })
     document.getElementById('lq-applyall-clear')?.addEventListener('click', () => {
-      lq.applyAll.event = ''
+      lq.applyAll = {
+        event: '', performer: '',
+        venue: { id: null, name: '' },
+        city: '', state: '', country: '',
+        source: '', lineage: '', notes: '',
+      }
       lq.applyAllOpen = false
       renderTriageView({ preserveScroll: true })
     })
-    document.getElementById('lq-apply-event')?.addEventListener('input', e => {
-      lq.applyAll.event = e.target.value
+
+    // Plain text/textarea fields — same input/blur pattern as the Event field
+    // always used.
+    ;[['lq-apply-event', 'event'], ['lq-apply-source', 'source'],
+      ['lq-apply-lineage', 'lineage'], ['lq-apply-notes', 'notes'],
+      ['lq-apply-city', 'city'], ['lq-apply-state', 'state'], ['lq-apply-country', 'country'],
+    ].forEach(([id, key]) => {
+      const el = document.getElementById(id)
+      if (!el) return
+      el.addEventListener('input', e => { lq.applyAll[key] = e.target.value })
+      el.addEventListener('blur', () => renderTriageView({ preserveScroll: true }))
     })
-    // Repaint once the field is left, so the button count and the Clear
-    // control catch up with a value that was typed but never committed.
-    document.getElementById('lq-apply-event')?.addEventListener('blur', () => {
-      renderTriageView({ preserveScroll: true })
-    })
+
+    // Performer — the same wirePickerDropdown() autocomplete the Members/
+    // Guests widget uses, minus the members machinery: this only ever needs
+    // one name, resolved/created server-side by name exactly like the Add
+    // Recording form's own Performer field.
+    ;(function () {
+      const el = document.getElementById('lq-apply-performer')
+      const dd = document.getElementById('lq-apply-performer-dropdown')
+      if (!el) return
+      el.addEventListener('input', e => { lq.applyAll.performer = e.target.value })
+      el.addEventListener('blur', () => renderTriageView({ preserveScroll: true }))
+      wirePickerDropdown(el, dd, API.artists.search, ({ name }) => {
+        lq.applyAll.performer = name
+        renderTriageView({ preserveScroll: true })
+      }, 'Use as typed')
+    })()
+
+    // Venue — autocomplete with the same lock/unlock of City/State/Country as
+    // the Add Recording form's venue picker (see the f-venue-name wiring
+    // below): picking an existing row locks the location fields to ITS
+    // stored values; typing or picking "+ Use as typed" unlocks them.
+    ;(function () {
+      const nameEl = document.getElementById('lq-apply-venue-name')
+      const idEl   = document.getElementById('lq-apply-venue-id')
+      const dropEl = document.getElementById('lq-apply-venue-dropdown')
+      if (!nameEl) return
+      let debounce = null
+      function closeDropdown() { dropEl.style.display = 'none'; dropEl.innerHTML = '' }
+      function showResults(venues, q) {
+        const rows = venues.map(v => {
+          const loc = [v.city, v.state, v.country].filter(Boolean).join(', ')
+          return `<div class="venue-result" data-id="${v.id}" data-name="${esc(v.name)}">
+            <span class="venue-result-name">${esc(v.name)}</span>
+            ${loc ? `<span class="venue-result-loc">${esc(loc)}</span>` : ''}
+          </div>`
+        }).join('')
+        const exact = venues.some(v => v.name.toLowerCase() === q.toLowerCase())
+        const createRow = (q && !exact)
+          ? `<div class="venue-result venue-result-create" data-id="" data-name="${esc(q)}">+ Use "${esc(q)}" as typed</div>`
+          : ''
+        dropEl.innerHTML = rows + createRow
+        dropEl.style.display = (rows || createRow) ? 'block' : 'none'
+        dropEl.querySelectorAll('.venue-result').forEach(el => {
+          el.addEventListener('mousedown', async e => {
+            e.preventDefault()
+            if (el.dataset.id) {
+              const id = parseInt(el.dataset.id)
+              lq.applyAll.venue = { id, name: el.dataset.name }
+              try {
+                const v = await API.venues.get(id)
+                if (!isPlaceholderVenue(v.name)) {
+                  lq.applyAll.city = v.city || ''
+                  lq.applyAll.state = v.state || ''
+                  lq.applyAll.country = v.country || ''
+                }
+              } catch (_) {}
+            } else {
+              lq.applyAll.venue = { id: null, name: q }
+            }
+            renderTriageView({ preserveScroll: true })
+          })
+        })
+      }
+      nameEl.addEventListener('input', () => {
+        idEl.value = ''
+        lq.applyAll.venue = { id: null, name: nameEl.value }
+        const q = nameEl.value.trim()
+        clearTimeout(debounce)
+        if (q.length < 2) { closeDropdown(); return }
+        debounce = setTimeout(async () => {
+          try { showResults(await API.venues.list(q), q) } catch (_) { closeDropdown() }
+        }, 220)
+      })
+      nameEl.addEventListener('blur', () => setTimeout(() => renderTriageView({ preserveScroll: true }), 200))
+      nameEl.addEventListener('focus', () => {
+        if (nameEl.value.trim().length >= 2) nameEl.dispatchEvent(new Event('input'))
+      })
+    })()
 
     // Mode. Persisted, and read at ingest time rather than captured at render
     // time, so switching it mid-queue affects the shows not yet started.
@@ -9001,6 +9189,19 @@ const App = (() => {
       lq.mode = e.target.value === 'full' ? 'full' : 'quick'
       try { localStorage.setItem('fluxIngestMode', lq.mode) } catch (_) { /* private mode */ }
     })
+
+    // Sound Quality / Metadata pills — click either to open (or switch) the
+    // row's drill-in straight to that tab. A separate handler from the Tab
+    // Strip's own .lq-dtab (rather than sharing the class) because .lq-dtab
+    // carries its OWN background/border/padding for the tab-strip look,
+    // which would fight .lq-verdict's pill styling on the same element if
+    // both classes landed on one button.
+    mainContent.querySelectorAll('.lq-brow-pill[data-tab]').forEach(btn =>
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        lq.compactOpen.set(btn.dataset.path, btn.dataset.tab)
+        renderTriageView({ preserveScroll: true })
+      }))
 
     // The caret opens and closes the drill-in beneath the row. It no longer
     // swaps the row for a different component, so nothing above it moves.
@@ -9283,7 +9484,12 @@ const App = (() => {
     lq.activePath = null
     lq.runTotal = 0
     lq.jobFinished = false
-    lq.applyAll = { event: '' }
+    lq.applyAll = {
+      event: '', performer: '',
+      venue: { id: null, name: '' },
+      city: '', state: '', country: '',
+      source: '', lineage: '', notes: '',
+    }
     lq.applyAllOpen = false
     lq.expanded.clear()
     lq.features.clear()
@@ -9315,29 +9521,39 @@ const App = (() => {
   // per-card Ingest button and the queue loop so the two can't drift apart.
   async function ingestOne(row) {
     try {
-      const e = row.extracted || {}
-      // Auto-ingest needs a performer name and cannot invent one. Failing here
-      // with something readable beats letting the server return a bare
-      // "artist_name is required" 400 from a button press.
-      if (!e.artist) {
+      const e  = row.extracted || {}
+      const aa = lq.applyAll
+      // Auto-ingest needs a performer name and cannot invent one — from the
+      // folder OR from Apply to all. Failing here with something readable
+      // beats letting the server return a bare "artist_name is required" 400
+      // from a button press.
+      if (!aa.performer.trim() && !e.artist) {
         throw new Error('No performer could be read from this folder. '
-                      + 'Use Review to fill it in.')
+                      + 'Use Review to fill it in, or set one in Apply to all.')
       }
       const scan = await API.recordings.scan(row.folder_path)
       const tracks = buildIngestTracks(scan)
 
       const { job_id } = await API.ingest.confirm({
         source_folder_path: row.folder_path,
-        artist_name: e.artist, start_year: e.year,
+        // Queue-level values (see lq.applyAll) win when set — "Applies to
+        // every recording below" is a plain statement, not a fallback. The
+        // server resolves/creates Performer, Venue and Event rows exactly as
+        // it does per-recording; City/State/Country are ignored server-side
+        // once venue_id is set, so what is sent there is harmless either way.
+        artist_name: aa.performer.trim() || e.artist,
+        start_year: e.year,
         start_month: e.month, start_day: e.day,
-        venue_name: e.venue || null, city: e.city || null,
-        state: e.state || null, country: e.country || null,
-        source: e.source || null, lineage: e.lineage || null,
+        venue_name: aa.venue.name.trim() || e.venue || null,
+        venue_id: aa.venue.id || null,
+        city: aa.city.trim() || e.city || null,
+        state: aa.state.trim() || e.state || null,
+        country: aa.country.trim() || e.country || null,
+        source: aa.source.trim() || e.source || null,
+        lineage: aa.lineage.trim() || e.lineage || null,
+        notes: aa.notes.trim() || null,
         is_complete: true,
-        // Queue-level value applied to every recording (see lq.applyAll).
-        // The server resolves the name to an Event row, creating it once and
-        // reusing it for the rest of the queue.
-        event_name: lq.applyAll.event.trim() || null,
+        event_name: aa.event.trim() || null,
         behavior: batch.behavior || 'move',
         // Quick Add. The server reads this to decide whether to enqueue the
         // Librosa track analysis; nothing else about the ingest changes.
@@ -11504,13 +11720,28 @@ const App = (() => {
         // Ingest — same server endpoint, opposite behaviour.
         skip_analysis: lq.mode !== 'full',
       }
-      // The queue-level Event applies here too — Review is the same ingest
-      // with a form in front of it, and a value set for the batch must not
-      // vanish because one show needed a closer look. An event typed into the
-      // form itself wins, since that is the more specific statement.
-      if (!payload.event_name && !payload.event_id && lq.applyAll.event.trim()) {
-        payload.event_name = lq.applyAll.event.trim()
+      // Apply to all applies here too — Review is the same ingest with a
+      // form in front of it, and a value set for the batch must not vanish
+      // because one show needed a closer look. Anything the form itself
+      // already has wins, since that is the more specific statement; only
+      // fields the form left empty fall back to the queue-level value.
+      const aaF = lq.applyAll
+      if (!payload.event_name && !payload.event_id && aaF.event.trim()) {
+        payload.event_name = aaF.event.trim()
       }
+      if (!payload.artist_name && aaF.performer.trim()) {
+        payload.artist_name = aaF.performer.trim()
+      }
+      if (!payload.venue_name && !payload.venue_id && aaF.venue.name.trim()) {
+        payload.venue_name = aaF.venue.name.trim()
+        payload.venue_id   = aaF.venue.id || null
+      }
+      if (!payload.city    && aaF.city.trim())    payload.city    = aaF.city.trim()
+      if (!payload.state   && aaF.state.trim())   payload.state   = aaF.state.trim()
+      if (!payload.country && aaF.country.trim()) payload.country = aaF.country.trim()
+      if (!payload.source  && aaF.source.trim())  payload.source  = aaF.source.trim()
+      if (!payload.lineage && aaF.lineage.trim()) payload.lineage = aaF.lineage.trim()
+      if (!payload.notes   && aaF.notes.trim())   payload.notes   = aaF.notes.trim()
 
       // Progress UI under the button (copy can take a while for big folders)
       const actions = btn.closest('.ingest-actions')

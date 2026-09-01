@@ -6356,10 +6356,8 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-progress-count { font-family: var(--font-mono); color: var(--t1); flex: none; }
 .lq-progress-current { color: var(--t2); flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lq-runbar {
-  display: flex; align-items: center; gap: 16px;
-  padding: 12px 0 16px; border-bottom: 1px solid var(--bd-0); margin-bottom: 16px;
-}
+/* Ingest button moved into .lq-header-actions, top-right of the page header
+   (Ryan, 2026-08-31) — .lq-runbar's own divider bar is gone with it. */
 .lq-run-note { font-size: 12.5px; color: var(--t2); }
 /* Tier chips — one-click filter into Sound Quality's own High/Medium/Low
    bands, feeding both the visible card list and "Ingest N" (Ryan, 2026-08-27,
@@ -6447,28 +6445,34 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-applyall-ic { width: 12px; height: 12px; }
 
 .lq-applyall {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-  padding: 10px 13px; margin-bottom: 12px;
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px 13px 14px; margin-bottom: 12px;
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
 }
-.lq-applyall-head { display: flex; align-items: center; gap: 10px; }
+.lq-applyall-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .lq-applyall-h {
   font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--t3); font-weight: 600;
 }
-.lq-applyall-input {
-  background: var(--bg-1); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
-  color: var(--t0); font-family: var(--font-ui); font-size: 12px;
-  letter-spacing: 0; text-transform: none; font-weight: 400;
-  padding: 4px 8px; min-width: 280px;
-}
-.lq-applyall-input:focus { outline: none; border-color: var(--accent); }
-.lq-applyall-input::placeholder { color: var(--t3); }
 .lq-applyall-x {
   background: none; border: 0; cursor: pointer; padding: 4px 6px;
   font-family: inherit; font-size: 11px; color: var(--t3);
 }
 .lq-applyall-x:hover { color: var(--t0); text-decoration: underline; }
+/* Performer / Venue / City / State / Country / Event / Source / Lineage —
+   eight fields where there used to be one (Ryan, 2026-08-31), laid out like
+   the Add Recording form's own rows rather than invented fresh. Notes spans
+   the full width underneath — the one field long enough to want its own line. */
+.lq-applyall-grid {
+  display: grid; gap: 10px 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.lq-applyall-grid .ingest-field label { color: var(--t2); }
+.lq-applyall-notes { grid-column: 1 / -1; }
+.lq-applyall-notes textarea { min-height: 44px; }
+@media (max-width: 900px) {
+  .lq-applyall-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ── Row drill-in (rebuilt 2026-08-28) ───────────────────────────────────── */
 /* The density toggle is GONE — compact is the only mode, so there is nothing to
@@ -6526,7 +6530,7 @@ a.member-chip-name:hover { color: var(--accent); }
    reason to put a score in a table. */
 .lq-brow {
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 22px;
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 30px;
   gap: 10px; align-items: center;
   padding: 7px 12px; background: var(--bg-3);
 }
@@ -6540,7 +6544,7 @@ a.member-chip-name:hover { color: var(--accent); }
    columns and cannot drift when the column widths change. */
 .lq-brow-head {
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 22px;
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 30px;
   gap: 10px; padding: 7px 12px; background: var(--bg-2);
   border-bottom: 1px solid var(--bd-1);
   font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
@@ -6572,12 +6576,15 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-brow-sub .sep { color: var(--bd-2); }
 .lq-brow-err { color: var(--red); white-space: nowrap; }
-.lq-brow-band { justify-self: start; }
-/* Tabular so a column of them lines up — the whole reason to put a score in a
-   table instead of on a card. Only ONE number survives here: the 0-100 Sound
-   Quality score was removed 2026-08-28 because the pill beside it already said
-   the same thing in a word. */
-.lq-brow-meta { font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; }
+/* Centered under the "Sound Quality" column header (Ryan, 2026-08-31) —
+   was left-aligned, the only one of the row's readings not sitting under
+   its own label. */
+.lq-brow-band { justify-self: center; }
+/* Was plain coloured text, right-aligned — now a .lq-verdict pill matching
+   Sound Quality's own, centered under the "Metadata" column header the same
+   way (Ryan, 2026-08-31). The wrapper is just a centering slot now; the pill
+   carries its own type. */
+.lq-brow-meta { justify-self: center; }
 /* Fingerprint verdict — a colour and a tooltip, where the card gives it a whole
    tab. At triage speed the only question is whether the checksums matched. */
 .lq-brow-fp { display: inline-flex; align-items: center; justify-content: center; }
@@ -6609,10 +6616,13 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-act-queued  { color: var(--t3); border: 1px dashed var(--bd-1); }
 .lq-act-running { color: var(--accent-lit); border: 1px solid var(--accent); }
+/* Bigger and more prominent than the app's other chevrons (Ryan, 2026-08-31)
+   — this is the main, farthest-right control on every row, the one thing
+   every row always has. 30px to match the grid column above. */
 .lq-brow-caret {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; padding: 0; cursor: pointer;
-  background: transparent; border: 0; color: var(--t3); border-radius: 3px;
+  width: 30px; height: 30px; padding: 0; cursor: pointer;
+  background: transparent; border: 0; color: var(--t3); border-radius: var(--r-sm);
 }
 .lq-brow-caret:hover { color: var(--accent-lit); background: var(--bg-5); }
 /* Rows with nothing to drill into (queued, errored, already ingested) keep the
@@ -6629,14 +6639,23 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-brow .lq-concerns { margin-top: 4px; }
 /* The card's verdict pill is sized for a card. In a row it is the tallest
    thing present and would set the row height on its own. */
-.lq-brow .lq-verdict { padding: 3px 8px; font-size: 11px; }
+/* Both are buttons now (Ryan, 2026-08-31) — click either to open the row's
+   drill-in straight to that tab, so they need button resets .lq-verdict's
+   card/detail usages elsewhere don't: pointer cursor, and the font inherited
+   rather than the browser's UA default for <button>. */
+.lq-brow .lq-verdict {
+  padding: 3px 8px; font-size: 11px;
+  cursor: pointer; font: inherit; letter-spacing: 0;
+}
+.lq-brow .lq-verdict:hover { filter: brightness(1.18); }
+.lq-brow .lq-verdict:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 
 /* Under ~900px the numbers and the facts line lose their columns before the
    name or the actions do. */
 @media (max-width: 900px) {
   .lq-brow,
-  .lq-brow-head { grid-template-columns: 3px minmax(0, 1fr) 66px 24px 214px 22px; gap: 9px; }
+  .lq-brow-head { grid-template-columns: 3px minmax(0, 1fr) 66px 24px 214px 30px; gap: 9px; }
   .lq-brow-meta, .lq-brow-head > :nth-child(4) { display: none; }
 }
 
@@ -7037,6 +7056,14 @@ a.member-chip-name:hover { color: var(--accent); }
    have no reason to stop short of the pane. */
 .lq-shell { max-width: none; }
 .lq-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+/* Primary action, top-right of the header — Ingest when idle, Cancel + a
+   running note mid-run. Truncates rather than wrapping: a running note can
+   be a whole sentence ("Ingesting <show name>…") and the header is not the
+   place for a second line. */
+.lq-header-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.lq-header-actions .lq-run-note {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 /* Review is a real choice, not a fallback (Ryan, 2026-08-28: "too dark").
    It sat at --t2, the same weight as Move, which read as disabled next to
    Ingest — and Review is the button you WANT someone reaching for when the

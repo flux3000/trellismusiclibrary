@@ -150,11 +150,18 @@ class Config:
     # one of these roots — otherwise arbitrary filesystem reads would be
     # possible for any logged-in user. Override via IMPORT_ROOTS env var
     # (":"-separated list of paths).
+    #
+    # Widened 2026-08-31 (Ryan) to include the home directory: Add Recordings
+    # was refusing any source folder outside LIBRARY_ROOT/Volumes with an
+    # unexplained 403, which meant an existing folder anywhere under ~ (an
+    # external drive aside) could never be used as a source. Still bounded —
+    # this is not "any path the process can read" — just widened to cover
+    # where a single-user Mac actually keeps files.
     _import_roots_env = os.environ.get("IMPORT_ROOTS", "").strip()
     if _import_roots_env:
         IMPORT_ROOTS = [p for p in _import_roots_env.split(":") if p]
     else:
-        IMPORT_ROOTS = [str(LIBRARY_ROOT), "/Volumes"]
+        IMPORT_ROOTS = [str(LIBRARY_ROOT), "/Volumes", str(Path.home())]
 
     # Where new material lands before ingest. This is the folder every "pick a
     # folder" box should open to. Defined here rather than hardcoded in the
