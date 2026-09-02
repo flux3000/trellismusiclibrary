@@ -112,6 +112,20 @@ def list_performers():
         .order_by(func.coalesce(Performer.sort_name, Performer.name))
         .all()
     )
+    # Primary photo id per performer, for the Performers index tiles
+    # (2026-09-01). One grouped query, not `p.images[0]` per row — this endpoint
+    # is called on every sidebar render, and on a 184-performer library that
+    # would be 184 extra round trips to draw a nav list that shows no photos at
+    # all. Primary first, oldest as the fallback, matching primary_for().
+    image_ids = {}
+    for pid, iid, _pr in (
+        db.session.query(PerformerImage.performer_id, PerformerImage.id,
+                         PerformerImage.is_primary)
+        .order_by(PerformerImage.performer_id, PerformerImage.is_primary.desc(),
+                  PerformerImage.sort_order, PerformerImage.id).all()
+    ):
+        image_ids.setdefault(pid, iid)
+
     return jsonify([
         {
             "id":              p.id,
@@ -123,6 +137,12 @@ def list_performers():
             # screen's "unassigned only" filter and pre-fill.
             "genre_id":        p.genre_id,
             "genre_name":      p.genre.name if p.genre else None,
+            # Colour added 2026-09-01 for the index tiles. May be None even when
+            # a genre exists — colour is nullable and NULL is a supported state
+            # that renders neutral. Never substitute a default here; the
+            # fallback belongs in one place, in the frontend.
+            "genre_color":     p.genre.color if p.genre else None,
+            "image_id":        image_ids.get(p.id),
         }
         for p, rc in rows
     ])

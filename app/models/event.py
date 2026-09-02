@@ -43,6 +43,11 @@ class Event(db.Model):
     # Relationships
     venue        = db.relationship("Venue",       back_populates="events")
     performances = db.relationship("Performance", back_populates="event")
+    # Photos (2026-09-01) — many, one flagged primary, ordered primary-first.
+    images       = db.relationship("EventImage", back_populates="event",
+                                   cascade="all, delete-orphan",
+                                   order_by="desc(EventImage.is_primary), "
+                                            "EventImage.sort_order, EventImage.id")
 
     def __repr__(self):
         return f"<Event {self.name}>"

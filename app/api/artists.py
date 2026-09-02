@@ -4,19 +4,50 @@ aggregation (the "everything by Béla Fleck" view). Used to pick members in the
 Add/Edit forms.
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required
 from sqlalchemy import func
 
 from app.extensions import db
 from app.models.artist import Artist, Membership
+from app.models.artist_image import ArtistImage
 from app.models.performer import Performer
+from app.models.performance import Performance
+from app.models.recording import Recording
 from app.models.performance_personnel import PerformancePersonnel
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_summary
 from app.utils.performers import resolve_or_create_performer
+from app.utils.ingest import _sanitize_path
+from app.utils import entity_images as ei
+from app.api.system import require_library
 
 bp = Blueprint("artists", __name__)
+
+
+# ── Photos (2026-09-01) ──────────────────────────────────────────────────────
+# Fourth photographed entity. Routes are generated, not written — see
+# ei.register_image_routes() for why, and models/artist_image.py for why this
+# reverses the 2026-08-07 "performer-level only" call for the PAGE while
+# leaving it standing for cards (a card keys off the act; a wall of identical
+# tiles is still the failure mode it was protecting against).
+
+_IMG_URL = "/api/artists/images"
+
+
+def _artist_images_dir(artist):
+    # LIBRARY_ROOT/_artists/<sanitized person name>/_images. The bucket matters:
+    # a person and an act share a name constantly (Bill Evans, Doc Watson), and
+    # performer photos live at the library root with no prefix at all.
+    return ei.entity_images_dir(current_app.config["LIBRARY_ROOT"],
+                                "_artists", artist.name, _sanitize_path)
+
+
+ei.register_image_routes(
+    bp, parent_model=Artist, image_model=ArtistImage, url_prefix=_IMG_URL,
+    images_dir_for=_artist_images_dir,
+    login_required=login_required, require_library=require_library,
+)
 
 
 @bp.route("/search")
@@ -37,8 +68,50 @@ def search_artists():
 def list_artists():
     rows = db.session.query(Artist).order_by(
         func.coalesce(Artist.sort_name, Artist.name)).all()
+
+    # ⚠ sort_name is NULL for every row in Ryan's library (CONTEXT.md trap —
+    # scripts/backfill_sort_names.py has never been run here), so COALESCE is
+    # load-bearing rather than decorative. Do not "simplify" it away.
+
+    # Counts and the primary-photo id, for the Artists index page. Grouped
+    # queries, not one lazy-load per person: the sidebar and the index both
+    # read this endpoint, and it is called on every sidebar render.
+    #
+    # A person's recordings are reached through the acts they are a member of,
+    # one hop further than a venue's — hence the join through membership.
+    # Guest-only sit-ins (performance_personnel rows on acts they are NOT a
+    # member of) are deliberately NOT counted here: they are counted on the
+    # detail page as a separate "Guest" stat, because folding them in would
+    # make a one-night sit-in read as a body of work.
+    rec_counts = dict(
+        db.session.query(Membership.artist_id, func.count(Recording.id))
+        .join(Performance, Performance.performer_id == Membership.performer_id)
+        .join(Recording, Recording.performance_id == Performance.id)
+        .group_by(Membership.artist_id).all()
+    )
+    perf_counts = dict(
+        db.session.query(Membership.artist_id,
+                         func.count(func.distinct(Membership.performer_id)))
+        .group_by(Membership.artist_id).all()
+    )
+    image_ids = {}
+    for aid, iid, _p in (
+        db.session.query(ArtistImage.artist_id, ArtistImage.id, ArtistImage.is_primary)
+        .order_by(ArtistImage.artist_id, ArtistImage.is_primary.desc(),
+                  ArtistImage.sort_order, ArtistImage.id).all()
+    ):
+        image_ids.setdefault(aid, iid)
+
     return jsonify([
-        {"id": a.id, "name": a.name, "sort_name": a.sort_name} for a in rows
+        {
+            "id":              a.id,
+            "name":            a.name,
+            "sort_name":       a.sort_name,
+            "recording_count": rec_counts.get(a.id, 0),
+            "performer_count": perf_counts.get(a.id, 0),
+            "image_id":        image_ids.get(a.id),
+        }
+        for a in rows
     ])
 
 
@@ -96,6 +169,8 @@ def get_artist(artist_id):
         "bio":        a.bio,
         "performers":         [{"id": p.id, "name": p.name} for p in performers],
         "guest_appearances":  guest_appearances,
+        "has_image":          bool(a.images),
+        "images":             [ei.image_payload(i, _IMG_URL) for i in a.images],
     })
 
 

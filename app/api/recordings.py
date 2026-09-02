@@ -455,8 +455,25 @@ def scan_recording():
     if not folder_path or not os.path.isdir(folder_path):
         return jsonify({"error": "Invalid or inaccessible folder path"}), 400
 
-    log_step(job, "request received", "POST /api/recordings/scan")
-    resp = build_scan_payload(folder_path)
+    # Rescan (2026-09-01): the reviewer edited the info file in the Details
+    # panel and asked for the inference to be re-run over it. The edited text
+    # rides on the request rather than being written to their disk first —
+    # "try again" must not be a silent modification of the collector's source
+    # folder, and the info file is the taper's own words.
+    #
+    # Absent key = an ordinary first scan, byte-for-byte as before. An empty
+    # STRING is a real value (the reviewer cleared the box), so the test is on
+    # presence, not truthiness.
+    info_override = None
+    if "info_file_content" in data:
+        info_override = {
+            "filename": (data.get("info_filename") or "").strip() or None,
+            "content":  data.get("info_file_content") or "",
+        }
+
+    log_step(job, "request received",
+             "POST /api/recordings/scan" + (" (rescan, edited info file)" if info_override else ""))
+    resp = build_scan_payload(folder_path, info_override=info_override)
     if resp is None:
         return jsonify({"error": "No audio files found in folder"}), 422
 

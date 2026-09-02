@@ -5,9 +5,11 @@ from .genre import Genre
 from .performer import Performer, PerformerResource
 from .performer_image import PerformerImage
 from .artist import Artist, Membership
+from .artist_image import ArtistImage
 from .venue import Venue
 from .venue_image import VenueImage
 from .event import Event
+from .event_image import EventImage
 from .performance import Performance
 from .performance_personnel import PerformancePersonnel
 from .recording import Recording, RecordingFingerprint

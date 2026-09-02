@@ -1309,20 +1309,20 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 }
 .pp-ph.is-primary .pp-ph-credit { padding-top: 20px; }   /* clear the Primary tag */
 
-/* Wikimedia lookup as a tile beside the drop zone — both are ways of getting a
-   photo in, so they sit together in the grid rather than one being a footnote
-   under the gallery. */
+/* Photo-source tiles sit IN the gallery grid beside the drop zone — uploading,
+   importing from Commons and searching the web are all ways of getting a photo
+   in, so they read as one row of doors rather than one tool plus footnotes
+   underneath. `.pp-fetch-tile` imports (Performer only — it needs the
+   MusicBrainz → Wikidata bridge); `.pp-link-tile` just opens a search in a new
+   tab and is a plain <a> wearing the same face, which every photographed
+   dimension gets (2026-09-01). */
 .pp-drop-sub { font-size: 10px; color: var(--t3); }
+.pp-link-tile { text-decoration: none; }
 .pp-fetch-tile.is-disabled {
   cursor: default; opacity: .55; border-style: dotted;
 }
 .pp-fetch-tile.is-disabled:hover { border-color: var(--bd-2); color: var(--t3); }
 .pp-fetch-tile.is-busy { border-color: var(--accent); color: var(--accent); cursor: progress; }
-
-/* Google Images tile — a plain external link wearing the same .pp-drop face
-   as the upload/Commons tiles, so all three read as one row of "ways to get a
-   photo in" rather than a fetch tool plus an odd link stuck on the end. */
-.pp-google-tile { text-decoration: none; }
 
 .pp-fetch-msg { font-size: 11px; color: var(--t2); margin-top: 12px; min-height: 14px; }
 .pp-fetch-msg.is-ok  { color: var(--green); }
@@ -2811,96 +2811,6 @@ input[type="number"]::-webkit-outer-spin-button {
 .genre-performer-name:hover { color: var(--accent-lit); }
 .genre-performer-count { font-size: 11px; color: var(--t2); }
 
-/* ── Venues admin page ────────────────────────────────────────────────────── */
-
-.venues-shell {
-  display: flex;
-  height: calc(100vh - var(--player-h) - 60px);
-  overflow: hidden;
-}
-
-.venues-list-panel {
-  width: 340px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--bd-1);
-  overflow: hidden;
-}
-
-.venues-search-bar {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--bd-0);
-  flex-shrink: 0;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.venues-search-bar input {
-  flex: 1;
-  font-size: 12px;
-}
-
-.venue-list-scroll {
-  flex: 1;
-  overflow-y: auto;
-}
-
-.venue-list-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  padding: 9px 14px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--bd-0);
-  transition: background 0.08s;
-  gap: 8px;
-}
-
-.venue-list-row:hover { background: var(--bg-4); }
-.venue-list-row.active { background: var(--accent-dim); }
-.venue-list-row.active .venue-row-name { color: var(--accent-lit); }
-
-.venue-row-name {
-  font-size: 12px;
-  color: var(--t0);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.venue-row-loc {
-  font-size: 11px;
-  color: var(--t2);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.venue-row-count {
-  font-size: 10px;
-  color: var(--t2);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.venues-detail-panel {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 20px 28px 40px;
-}
-
-.venue-detail-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  color: var(--t2);
-  font-size: 13px;
-}
-
 /* ── Artists index — performer linking ───────────────────────────────────────── */
 
 .ad-performer-row {
@@ -3558,7 +3468,9 @@ input[type="range"].progress-bar {
   flex-shrink: 0;
 }
 .ingest-topbar-title { margin: 0; font-size: 15px; font-weight: 500; color: var(--t0); }
-/* Title at the left, metadata chip pushed to the right edge of the same line. */
+/* Title at the left; the completeness readout and Rescan sit together at the
+   right edge of the same line. The title takes `min-width: 0` so a long folder
+   name truncates instead of pushing the controls off. */
 .ingest-topbar-line {
   display: flex;
   align-items: center;
@@ -3566,7 +3478,15 @@ input[type="range"].progress-bar {
   width: 100%;
   min-width: 0;
 }
-.ingest-topbar-line .iq-chip { margin-left: auto; }
+.ingest-topbar-line .ingest-topbar-title {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ingest-topbar-line .meta-readout { margin-left: auto; }
+.ingest-rescan-btn { flex-shrink: 0; white-space: nowrap; }
+.ingest-rescan-btn.is-busy { color: var(--accent); cursor: progress; }
+/* The icon spins while a rescan is in flight, so the click is acknowledged
+   before the server is — the same rule the folder picker's spinner follows. */
+.ingest-rescan-btn.is-busy .tic { animation: lq-spin 0.9s linear infinite; }
 
 /* Standardized back link (Ryan, 2026-07-15) — one consistent affordance at
    the top of the review page, above the title, reflecting how it was
@@ -3919,6 +3839,9 @@ input[type="range"].progress-bar {
 .mg-row {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
   padding: 6px 8px;
+  /* Every child is one chip tall — pills, and now the add input too — so the
+     row's height is a function of how many chips there are and nothing else.
+     Clicking cannot change it. */
   border-radius: var(--r-sm);
   /* Was var(--bg-1) — the SIDEBAR/player shade, not the main content area
      this actually sits in (var(--bg-2)), which read as a faint mismatched
@@ -3941,16 +3864,57 @@ input[type="range"].progress-bar {
   font-size: 13px; text-align: center; cursor: pointer;
 }
 .mg-add-btn:hover { color: var(--t0); border-color: var(--accent); }
-.mg-add-picker {
-  display: inline-flex; align-items: center;
-  border: 1px solid var(--bd-1); border-radius: var(--r-sm); background: var(--bg-2);
+/* ── The add control (redesigned 2026-09-01) ───────────────────────────────
+   It used to be a "+" button that revealed a 150px text box. `.mg-row` is a
+   WRAPPING flex row of chips, so revealing that box pushed the row onto a
+   second line whenever the chips already came near the edge — the row's height
+   doubled under the cursor, which is what Ryan reported. Resizing the input
+   would only have moved the threshold.
+
+   The input is permanent now, and shaped exactly like a `.member-chip`: same
+   height, same 14px radius, same box. Dashed rather than solid so it reads as
+   "add one" instead of as a filled value. The row's height is therefore the
+   height of one chip line no matter what, because clicking changes nothing
+   about what is in the row.
+
+   Matching the CHIPS rather than the form's other inputs is deliberate: this
+   control sits inside a row of chips, and the mismatch a reader actually sees
+   is a 32px form box wedged between 23px pills.
+
+   Two consumers share this: the Add Recording form (createMembersWidget) and
+   View Recording (recPersonnelHtml). Both must keep the same markup.        */
+.mg-add-picker { display: inline-flex; align-items: center; position: relative; }
+
+/* `.mg-add-picker .mg-role-input` (0,2,0) rather than a bare class, because on
+   the ingest form this input is inside `.ingest-field`, whose
+   `.ingest-field input` (0,1,1) would otherwise win and impose the 13px/7px
+   form-field metrics. This replaces the old `.member-input` !important stack —
+   specificity, stated once, beats five !importants. */
+.mg-add-picker .mg-role-input {
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 16px;
+  padding: 3px 10px;
+  width: 118px;
+  color: var(--t0);
+  background: transparent;
+  border: 1px dashed var(--bd-2);
+  border-radius: 14px;
+  outline: none;
+  box-shadow: none;
+  /* Width only. Never animate height here — a height transition on a wrapping
+     flex row is the jump this rework exists to remove. */
+  transition: width .12s ease, border-color .12s, background .12s;
 }
-/* .member-input (shared base, see "Members multi-select" above) is
-   deliberately borderless/transparent so it blends into whatever container
-   it sits in — .mg-add-picker supplies the visible box here, matching how
-   .artist-picker-wrap's parent used to. Only width needs overriding, same
-   pattern as the old .rec-art-input. */
-.mg-role-input { font-size: 11px; width: 150px; }
+.mg-add-picker .mg-role-input::placeholder { color: var(--t3); }
+.mg-add-picker .mg-role-input:hover { border-color: var(--accent); color: var(--t0); }
+.mg-add-picker .mg-role-input:focus {
+  width: 196px;
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--bg-2);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
 .member-chip {
   display: inline-flex;
   align-items: center;
@@ -4535,17 +4499,6 @@ a.member-chip-name:hover { color: var(--accent); }
   white-space: nowrap;
 }
 
-/* Performers index page */
-.artist-index-list { padding: 6px 0; }
-.artist-index-row {
-  display: flex; align-items: center; gap: 12px;
-  padding: 9px 20px; cursor: pointer;
-  border-bottom: 1px solid var(--bd-0);
-}
-.artist-index-row:hover { background: var(--bg-1); }
-.artist-index-name    { font-size: 13px; color: var(--t0); flex-shrink: 0; min-width: 180px; }
-.artist-index-members { flex: 1; font-size: 12px; color: var(--t2); }
-.artist-index-count   { font-size: 11px; color: var(--t3); white-space: nowrap; }
 .member-input {
   border: none !important;
   background: transparent !important;
@@ -4923,7 +4876,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 /* ── Flag pill multi-select ──────────────────────────────────────────────── */
-.flag-pill-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.flag-pill-row { display: flex; flex-wrap: wrap; gap: 5px; }
 
 .flag-pill {
   font-size: 11px; padding: 3px 9px; border-radius: 12px; cursor: pointer;
@@ -4962,34 +4915,64 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 /* ── Quick edit: track right-click popup ─────────────────────────────────── */
+/* Redesigned 2026-09-01 (Ryan). Three changes, all structural:
+   - Note and Songwriter STACK full width. Side by side in a 300px popup gave
+     each about 140px, narrower than most song titles.
+   - Flags are alphabetical — see TRACK_FLAGS in app.js for why the ordering
+     lives in the registry rather than in a sort here.
+   - Official release is a footer row of its own below a rule, not a borrowed
+     `.et-detail-field`. That wrapper's `label { display: block }` stacks a
+     label above its control, which is wrong for a checkbox, and only a second
+     more-specific rule pulled it back inline. Two rules fighting over one
+     element is where the line break came from.                              */
 .track-qmenu {
   position: fixed;
   z-index: 1000;
-  width: 300px;
+  width: 320px;
   max-width: calc(100vw - 16px);
   background: var(--bg-2);
   border: 1px solid var(--bd-2);
   border-radius: var(--r-sm);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
-  padding: 10px 12px 12px;
+  padding: 11px 13px 12px;
 }
 .track-qmenu-title {
   font-size: 12px;
   font-weight: 600;
   color: var(--t0);
-  margin-bottom: 8px;
+  padding-bottom: 9px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--bd-0);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* One field: its caption and its control, with the gap owned here rather than
+   by per-element margins that then have to be cancelled at the edges. */
+.track-qmenu-field { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .track-qmenu-label {
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--t3);
-  margin: 8px 0 4px;
 }
+/* Official release: one line, always. `nowrap` on the text is the guarantee —
+   the label cannot break from its checkbox at any popup width, which is the
+   whole point of the row. */
+.track-qmenu-official-row {
+  display: flex; flex-wrap: nowrap; align-items: center; gap: 7px;
+  margin: 12px -13px -12px;              /* full-bleed footer inside the padding */
+  padding: 9px 13px;
+  border-top: 1px solid var(--bd-0);
+  background: var(--bg-1);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+  font-size: 11.5px; color: var(--t1);
+  cursor: pointer; user-select: none;
+}
+.track-qmenu-official-row:hover { color: var(--t0); }
+.track-qmenu-official-row input[type="checkbox"] { cursor: pointer; flex: none; margin: 0; }
+.track-qmenu-official-row span { white-space: nowrap; }
 .track-qmenu-note {
   width: 100%;
   min-height: 48px;
@@ -5038,16 +5021,12 @@ a.member-chip-name:hover { color: var(--accent); }
 .et-row.playing .et-play { color: var(--accent-lit); }
 .et-row.playing td { background: var(--accent-dim); }
 
-/* Top row: Track notes (left) + Songwriter (right), each half width */
-.et-detail-grid2 {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: start;
-}
+/* `.et-detail-grid2` and `.et-detail-field .check-inline` were removed
+   2026-09-01 with the track popup redesign — the popup was their last
+   consumer. See `.track-qmenu-official-row` above for why the checkbox stopped
+   borrowing this block's `label { display: block }`.                        */
 .et-detail-field label {
   display: block; font-size: 10px; color: var(--t2); margin-bottom: 3px;
-}
-/* Keep the checkbox and its label together on one line */
-.et-detail-field .check-inline {
-  display: inline-flex; align-items: center; gap: 6px;
 }
 .et-detail-field input,
 .et-detail-field textarea {
@@ -5163,6 +5142,30 @@ a.member-chip-name:hover { color: var(--accent); }
   grid-template-columns: 96px 84px minmax(0, 1fr);
   gap: 10px;
 }
+/* Act row: Performer and Genre on one line (Ryan, 2026-09-01). Genre belongs
+   beside the act because it is a property OF the act — it is written to the
+   Performer row on Confirm, not to the recording. Performer takes twice the
+   width: it is the longest value on the form and the one most often typed,
+   where a genre is a short pick from a controlled list. */
+.ingest-row-act {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+/* Genre picker — same dropdown chrome as the Performer and Venue pickers
+   (.artist-dropdown / .artist-result), so all three autocompletes behave and
+   look identical. */
+.genre-picker-wrap { position: relative; width: 100%; }
+.genre-picker-wrap input { width: 100%; box-sizing: border-box; }
+/* A genre about to be CREATED rather than linked. Accent-coloured and italic,
+   matching `.artist-result-new` in the dropdown it was chosen from — a row is
+   about to be added to a controlled vocabulary, and that should be visible in
+   the field, not only in the menu that offered it. */
+#f-genre.is-new-genre {
+  color: var(--accent-lit);
+  font-style: italic;
+  border-color: var(--accent);
+}
 
 /* Add Recording's details panel. Carries .slide-panel--htabs as well, so the
    rail, the horizontal tab strip, the pane padding and the collapse behaviour
@@ -5197,23 +5200,37 @@ a.member-chip-name:hover { color: var(--accent); }
 .ingest-review-raw.resizing { transition: none; }
 .rev-resize-handle[hidden] { display: none; }
 
-/* Metadata completeness, as a chip in the topbar. It used to own a 34px bar of
-   its own alongside one button (Ryan, 2026-08-28). Shows the Low/Medium/High
-   rating, never the raw number. */
-.iq-chip {
+/* ── Metadata Completeness readout ─────────────────────────────────────────
+   Was `.iq-chip`, a tinted capsule, until 2026-09-01 (Ryan). A pill is a badge,
+   and a badge reads as a status ON the thing beside it — this one sat next to
+   the folder name and kept looking like a property of the folder. It is a
+   MEASUREMENT of the form below, so it is written as one: the name spelled out
+   in full, the value beside it, and the colour carried by the value alone.
+   Same three bands, same source of truth (utils/health.py RATING), never the
+   raw number.                                                               */
+.meta-readout {
   display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  padding: 3px 9px;
-  border-radius: 20px;
-  border: 1px solid var(--bd-1);
-  background: var(--bg-3);
-  color: var(--t2);
+  align-items: baseline;
+  gap: 7px;
   white-space: nowrap;
   flex-shrink: 0;
 }
-.iq-chip b { font-weight: 600; }
+.meta-readout-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+.meta-readout-value {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+}
+.meta-readout-value--green  { color: var(--green); }
+.meta-readout-value--yellow { color: var(--amber); }
+.meta-readout-value--red    { color: var(--red); }
 /* Not part of the chip above — the shared "AI Assist"-shaped button, still
    used by the performer dossier and the AI Assist retry button. It lost its
    third user when Add Recording's quality bar was removed (2026-08-28). */
@@ -5223,9 +5240,6 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 /* One size for the AI glyph wherever the button appears. */
 .pane-act .tic, .iq-ai-btn .tic { width: 12px; height: 12px; flex: none; }
-.iq-chip--green  { color: var(--green); border-color: rgba(106,184,128,0.40); background: rgba(106,184,128,0.10); }
-.iq-chip--yellow { color: var(--amber); border-color: rgba(200,155,80,0.40);  background: rgba(200,155,80,0.10); }
-.iq-chip--red    { color: var(--red);   border-color: rgba(217,96,85,0.40);   background: rgba(217,96,85,0.10); }
 
 
 /* Purple input borders mark fields the completeness scorer (app/utils/paula.py)
@@ -5630,8 +5644,25 @@ a.member-chip-name:hover { color: var(--accent); }
    the same ground and hairline as the topbar and the pane action row, so the
    page is bounded top and bottom by the same chrome and the accent is spent
    only on the button that earns it. */
+/* Redesigned 2026-09-01 (Ryan): clicking Add made the row jump and wrap.
+   Two causes, both fixed here rather than by shortening a word.
+
+   1. The button REWROTE ITS OWN LABEL. "Add & Return ↵" became "Adding to
+      library…", which is wider, so the button grew mid-click and shoved the
+      pair leftwards. It no longer does — the label is fixed and the busy
+      state is a spinner plus the progress bar that was already below. A
+      control that changes size at the moment it is pressed is a control that
+      moves out from under the cursor, the same objection that got the details
+      panel's rail moved on 2026-08-28.
+   2. The row could WRAP. `.ingest-actions` had no `flex-wrap`, so it used the
+      initial `nowrap` — but `.ingest-actions-left` holds a <select> whose
+      intrinsic width is its longest option ("Move into library (source
+      removed)"), and with nothing allowed to shrink, the two sides overflowed
+      and the buttons dropped. The left side may now shrink and truncate; the
+      buttons may not.                                                       */
 .ingest-actions {
   display: flex;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
   gap: 16px;
@@ -5644,11 +5675,24 @@ a.member-chip-name:hover { color: var(--accent); }
   display: flex;
   align-items: center;
   gap: 8px;
+  /* The side that gives. `min-width: 0` is what actually lets a flex item
+     shrink below its content's intrinsic width — `flex-shrink` alone does
+     not, which is why the select kept forcing the row wider. */
+  min-width: 0;
+  flex: 0 1 auto;
   min-width: 0;
 }
 /* The select itself is .bfilter's, shared with the Review & Ingest settings
    bar; it only needs a ceiling here so a long option cannot crowd the buttons. */
-.ingest-actions-left .bfilter select { max-width: 260px; }
+/* The one element on this row that gives. Its intrinsic width is its longest
+   option ("Move into library (source removed)"), and a <select> will not go
+   below that without BOTH `min-width: 0` and something to shrink against —
+   which is why the footer overflowed and wrapped before 2026-09-01. */
+.ingest-actions-left .bfilter { min-width: 0; flex: 0 1 auto; }
+.ingest-actions-left .bfilter select {
+  max-width: 260px; min-width: 0; flex: 0 1 auto;
+  text-overflow: ellipsis;
+}
 
 /* Tracks (N) header row + the relocated preview player, right-aligned
    opposite the title (Ryan, 2026-08-08). */
@@ -5742,7 +5786,23 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .ingest-actions-right {
   display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
+  /* The exits never shrink, never wrap and never change width. */
+  flex: 0 0 auto;
+}
+.ingest-actions-right .btn { white-space: nowrap; }
+/* Busy: the label stays put and a spinner appears in front of it, so the
+   button's width is identical before, during and after. The detailed progress
+   (Preparing… / Copying files… N%) lives in the bar below, which has room for
+   a sentence and does not move anything when it changes. */
+.ingest-actions-right .btn.is-busy { cursor: progress; opacity: .85; }
+.ingest-actions-right .btn.is-busy::before {
+  content: ''; display: inline-block;
+  width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px;
+  border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%;
+  animation: lq-spin .7s linear infinite;
 }
 
 /* Confirm step summary */
@@ -6433,30 +6493,51 @@ a.member-chip-name:hover { color: var(--accent); }
 /* Values that ride along with every recording in the queue. One field today
    (Event, for a folder of shows from one festival); shaped as a container so
    the next one is a line of markup rather than a new mechanism.
-   Collapsed to a single quiet link until asked for, because it is a rare case
-   and a permanent empty form above the primary button would tax every ordinary
-   ingest for the sake of an occasional one. */
-.lq-applyall-open {
-  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
-  background: none; border: 0; padding: 4px 0; margin-bottom: 10px;
-  font-family: inherit; font-size: 11.5px; color: var(--t3);
-}
-.lq-applyall-open:hover { color: var(--accent-lit); }
-.lq-applyall-ic { width: 12px; height: 12px; }
 
+   The HEADER IS PERMANENT and a +/- beside it opens and closes the fields
+   (Ryan, 2026-09-02). It was a "+ Add a value for every recording" link that
+   turned into a "Hide" link on the right-hand side once open — so the control
+   you clicked to open was never the control you clicked to close, and the
+   block's own title only existed in one of its two states. One title, one
+   toggle, always in the same place. */
 .lq-applyall {
   display: flex; flex-direction: column; gap: 12px;
   padding: 12px 13px 14px; margin-bottom: 12px;
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
 }
-.lq-applyall-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+/* Collapsed, the block is a header and nothing else, so the bottom padding
+   built for a form underneath just reads as a fat empty bar. */
+.lq-applyall.is-closed { padding: 7px 13px; gap: 0; }
+/* Left-aligned run: toggle, title, optional count — then Clear all pushed to
+   the far end by its own margin. `justify-content: space-between` cannot do
+   that with a variable number of children; it spread three items across the
+   full width the moment a count appeared. */
+.lq-applyall-head { display: flex; align-items: center; gap: 9px; }
 .lq-applyall-h {
   font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
   color: var(--t3); font-weight: 600;
 }
+/* Square, quiet, and the same 22px as the member-chip controls — this is an
+   ornament-free control, so it gets an icon and no word (see CONTEXT.md's
+   icon rule: a glyph standing alone as a control keeps its icon). */
+.lq-applyall-tog {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 20px; height: 20px; padding: 0; cursor: pointer;
+  background: transparent; border: 1px solid var(--bd-1); color: var(--t2);
+  border-radius: var(--r-sm);
+}
+.lq-applyall-tog:hover { border-color: var(--accent); color: var(--accent-lit); }
+.lq-applyall-ic { width: 12px; height: 12px; }
+/* Only rendered while COLLAPSED and holding something. The block used to be
+   un-closable once it held a value, on the grounds that a set value must never
+   be invisible; now that it closes on demand, this is what keeps that true. */
+.lq-applyall-n {
+  font-size: 10.5px; color: var(--accent-lit); font-variant-numeric: tabular-nums;
+}
 .lq-applyall-x {
   background: none; border: 0; cursor: pointer; padding: 4px 6px;
   font-family: inherit; font-size: 11px; color: var(--t3);
+  margin-left: auto;
 }
 .lq-applyall-x:hover { color: var(--t0); text-decoration: underline; }
 /* Performer / Venue / City / State / Country / Event / Source / Lineage —
@@ -6709,6 +6790,27 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-verdict--unknown { background: var(--bg-2); color: var(--t3); }
 
+/* The two pills ON A TRIAGE ROW are sized to the row's own buttons (Ryan,
+   2026-09-02: "make the same as the ingest/review buttons"). They sit in the
+   same horizontal run as Ingest / Review / Move, and a reading that is a
+   different height from the controls beside it reads as a different KIND of
+   thing — which is exactly backwards, since both of these are buttons too
+   (clicking one opens the drill-in on that tab).
+   Every metric here is copied from .lq-act deliberately; if that changes,
+   change this with it. `font-family: inherit` is doing more work than it looks
+   like it is: .lq-verdict never set one, and these two pills became <button>s
+   on 2026-08-31 — so they had been drawing in the USER AGENT's default button
+   face, not the app's, which is most of why they read as a different size from
+   everything around them. Weight stays at .lq-verdict's 600: the colour fill is
+   carrying a value, not a label, and at 400 inside a tinted box it goes soft.
+   .lq-verdict's own metrics are untouched — the Add Recording page and the
+   recording view both use it at its original size. */
+.lq-brow-pill {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 5px 12px; font-size: 12px; line-height: normal;
+  font-family: inherit; white-space: nowrap; cursor: pointer;
+}
+
 /* ── Tabs / detail ───────────────────────────────────────────────────────────
    Two half-width tabs replace the old full-width "Show details" bar
    (2026-08-02). Each carries its own reading and opens its own panel, so the
@@ -6831,11 +6933,9 @@ a.member-chip-name:hover { color: var(--accent); }
   border-bottom: 1px solid var(--bd-0); min-height: 34px;
 }
 .lq-samp h4 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--t2); flex: none; }
-/* Persistent — unlike .lq-trk-player's placeholder text, which only shows
-   until the first click, this stays up (Ryan, 2026-08-09: the hint that the
-   timestamps ARE the sampled windows, not just seek points, is worth keeping
-   visible rather than trading it away after one play). */
-.lq-samp-hint { font-size: 10.5px; color: var(--t3); flex: none; }
+/* `.lq-samp-hint` lived here and is gone (Ryan, 2026-09-02) — the header
+   carried two hints saying the same thing, and the survivor is
+   .lq-trk-player's ::before below, which also names the two ways to start. */
 
 /* One player per CARD, parked here. A slot under each track pushed its row
    apart from its neighbours every time it opened, so the list jumped around as
@@ -6846,7 +6946,26 @@ a.member-chip-name:hover { color: var(--accent); }
   content: 'Play a track, or click a timestamp to hear the analyzed moment';
   font-size: 11px; color: var(--t3);
 }
-.lq-preview-audio { width: 100%; height: 24px; display: block; }
+
+/* ── The preview player itself ───────────────────────────────────────────────
+   Was `<audio controls>` — the browser's own bar, the one control in this app
+   drawn by the OS rather than by us, sitting in the middle of a panel where
+   everything else is ours (Ryan, 2026-09-02).
+   Built from the MAIN PLAYER BAR's own parts rather than a lookalike:
+   .player-btn-play, .progress-bar and .player-time are applied verbatim in the
+   markup, so this inherits the app's play button, its range track and thumb,
+   and its tabular time readout, and follows all three if they are ever
+   restyled. Only the layout and the smaller play button are local. */
+.lq-mini { display: flex; align-items: center; gap: 9px; width: 100%; }
+/* 24px against the bar's 32: this sits in a panel header beside an 11px
+   heading, not in a window-wide transport. */
+.lq-mini .lq-mini-play { width: 24px; height: 24px; flex: none; }
+.lq-mini .lq-mini-play svg { width: 11px; height: 11px; }
+.lq-mini input[type="range"].progress-bar { flex: 1; min-width: 60px; }
+.lq-mini .player-time { min-width: 30px; }
+/* Scaffolding, not UI — the element is what actually plays; .lq-mini is what
+   you look at. */
+#lq-preview-player audio { display: none; }
 
 /* Rows are compact — the player left them, so there is nothing to make room
    for and the height was pure padding. */
@@ -7212,34 +7331,6 @@ a.member-chip-name:hover { color: var(--accent); }
   border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
   border-radius: 3px; padding: 1px 5px;
   font-size: 9px; font-weight: 700; letter-spacing: .12em;
-}
-
-/* ── Genre colour picker (2026-08-07) ────────────────────────────────────────
-   A native <input type="color"> paired with a hex field. The hex field is not
-   redundant: the colour input cannot express "no colour", and NULL is a real
-   state here — an uncoloured genre renders the same neutral grey as a
-   performer with no genre at all.                                           */
-.genre-color-row { display: flex; align-items: center; gap: 8px; }
-.genre-color-input {
-  width: 38px; height: 30px; padding: 2px; cursor: pointer;
-  background: var(--bg-1); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
-}
-.genre-color-hex {
-  width: 130px; font-family: var(--font-mono); font-size: 12px;
-}
-.genre-color-preview {
-  width: 26px; height: 26px; border-radius: 50%; display: inline-block;
-  background: var(--genre-fg); border: 1px solid var(--bd-1);
-}
-/* Swatch in the genre list — choosing colours is comparative work, so they
-   have to be visible side by side, not one detail pane at a time.
-   .venue-list-row is a 2-column grid (name | count); the swatch needs a third
-   column, so genre rows opt in rather than the shared row class changing for
-   every consumer of it. */
-.venue-list-row.has-swatch { grid-template-columns: auto 1fr auto; }
-.genre-row-swatch {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--genre-fg); margin-right: 9px;
 }
 
 /* ── Recording ROW card — RECENTLY ADDED MODULE ───────────────────────────────
@@ -8596,3 +8687,150 @@ select.set-input { max-width: 480px; }
   padding: 9px 14px 5px; font-size: 9.5px; letter-spacing: .1em;
   text-transform: uppercase; color: var(--t3); font-weight: 600;
 }
+
+/* ══ Dimension index pages (2026-09-01) ═════════════════════════════════════
+   One layout for Venues, Performers, Artists, Events and Genres. Replaces the
+   split list/detail admin screen (Venues, Genres) and the bare text list
+   (Performers) — see renderDimIndexPage in app.js for why all three went.
+
+   The page furniture above this is the entity SHELL, the same one each
+   dimension's own record page uses, so an index and a record look like two
+   views of one thing rather than two apps.                                  */
+
+.dim-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.dim-search {
+  flex: 0 1 260px; min-width: 160px;
+  font-size: 12px; padding: 6px 10px;
+  background: var(--bg-2); color: var(--t0);
+  border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+}
+.dim-search:focus { outline: none; border-color: var(--accent); }
+.dim-search::placeholder { color: var(--t3); }
+
+/* Sort as a segmented row of text buttons, matching .browse-sorts on the
+   Library view rather than inventing a second sort control. */
+.dim-sorts { display: flex; gap: 2px; }
+.dim-sort {
+  background: none; border: none; font: inherit; font-size: 11.5px;
+  color: var(--t2); cursor: pointer; padding: 5px 10px;
+  border-radius: var(--r-sm);
+}
+.dim-sort:hover { color: var(--t0); background: var(--bg-2); }
+.dim-sort.active { color: var(--accent-lit); background: var(--accent-dim); }
+
+.dim-count {
+  margin-left: auto; font-size: 11px; color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* auto-fill, not a fixed column count: these pages are opened at every window
+   width and a 4-up grid that never reflows leaves a third of a wide screen
+   empty and crushes a narrow one. */
+.dim-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+.dim-tile {
+  display: flex; align-items: center; gap: 12px; min-width: 0;
+  padding: 10px 12px; text-decoration: none; color: inherit;
+  background: var(--bg-3); border: 1px solid var(--bd-0);
+  border-radius: var(--r-md);
+  transition: border-color .12s, background .12s;
+}
+/* The accent is the genre colour where there is one (Performers, Genres) and
+   a neutral border elsewhere — genre colour is the most complete visual signal
+   this library owns, so it is what a tile lights up with. */
+.dim-tile:hover { border-color: var(--dim-fg, var(--bd-2)); background: var(--bg-4); }
+
+.dim-tile-art {
+  flex: 0 0 40px; height: 40px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--dim-fg, var(--bg-4));
+  border: 1px solid var(--bd-1);
+}
+.dim-tile-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Initials, never a silhouette: most records here have no photograph and never
+   will, so this IS the normal appearance and has to look deliberate. */
+.dim-tile-initials {
+  font-family: var(--font-display); font-size: 14px; font-weight: 700;
+  color: rgba(255,255,255,.62); letter-spacing: .02em;
+}
+
+/* Round for people and acts, square for buildings and events — the same
+   distinction the Venue record page has drawn since 2026-08-07 via its
+   `venue-page` class. A genre has no likeness at all, so its tile's face IS
+   the colour, which doubles as a live preview of what tints every card its
+   performers appear on. */
+.dim-grid--round  .dim-tile-art { border-radius: 50%; }
+.dim-grid--square .dim-tile-art { border-radius: var(--r-sm); }
+.dim-grid--swatch .dim-tile-art { border-radius: var(--r-sm); flex-basis: 26px; height: 26px; }
+
+.dim-tile-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.dim-tile-name { font-size: 13px; font-weight: 500; color: var(--t0); }
+.dim-tile-sub  { font-size: 11.5px; color: var(--t2); }
+.dim-tile-meta { font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
+
+.dim-empty {
+  grid-column: 1 / -1; padding: 28px 4px;
+  font-size: 12px; color: var(--t2); text-align: center;
+}
+
+/* ── "View all" — the door out of a sidebar dimension ─────────────────────── */
+/* Sits at the foot of an expanded dimension list. Before this, expanding a
+   dimension was a dead end: the index pages existed but nothing in the app
+   linked to them, which is how #/venues and #/genres stayed the
+   pre-entity-shell admin screens for a month without anyone noticing. */
+.nav-record--all {
+  color: var(--t2); font-style: normal;
+  border-top: 1px solid var(--bd-0); margin-top: 3px; padding-top: 6px;
+}
+.nav-record--all:hover { color: var(--accent-lit); }
+
+/* ── Event page: the Shows list on the About tab ──────────────────────────── */
+/* One row per performance. A festival's interesting shape is who played and on
+   what stage — the flat Recordings tab beside this flattens exactly that away,
+   so both exist rather than one standing in for the other. */
+.ev-perf {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 6px 2px; border-bottom: 1px solid var(--bd-0); font-size: 12px;
+}
+.ev-perf-date {
+  color: var(--t2); font-variant-numeric: tabular-nums;
+  flex: 0 0 86px; white-space: nowrap;
+}
+.ev-perf-name { color: var(--t0); text-decoration: none; flex: 1; min-width: 0; }
+.ev-perf-name:hover { color: var(--accent-lit); }
+.ev-perf-stage {
+  font-size: 10px; color: var(--t2); background: var(--bg-4);
+  padding: 1px 6px; border-radius: 999px; white-space: nowrap;
+}
+.ev-perf-count { font-size: 10.5px; color: var(--t3); white-space: nowrap; }
+
+/* ── Create-form additions (2026-09-01) ───────────────────────────────────── */
+.create-form-intro {
+  font-size: 12px; color: var(--t2); line-height: 1.5;
+  margin: 0 0 18px; max-width: 46ch;
+}
+/* A line under one input, for a FORMAT that cannot be guessed (partial dates)
+   or a consequence that cannot be seen (what a genre colour tints). Never for
+   restating the label. */
+.cf-hint { font-size: 10.5px; color: var(--t3); margin-top: 5px; line-height: 1.45; }
+.create-form-note {
+  font-size: 11px; color: var(--t3); line-height: 1.5;
+  margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--bd-0);
+  max-width: 46ch;
+}
+/* Native swatch + hex box, two views of one value. The hex box is not
+   redundant: <input type="color"> cannot express "no colour", and NULL is a
+   real state here — an uncoloured genre renders the same neutral grey as a
+   performer with no genre at all. */
+.cf-color { display: flex; align-items: center; gap: 8px; }
+.cf-color input[type="color"] {
+  flex: 0 0 34px; height: 30px; padding: 2px; cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
+}
+.cf-color input[type="text"] { flex: 1; font-family: var(--font-mono); }

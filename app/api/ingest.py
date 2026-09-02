@@ -31,6 +31,7 @@ from app.utils.personnel import sync_performance_personnel
 from app.utils.venues import is_placeholder_venue_name
 from app.models.venue import Venue
 from app.models.event import Event
+from app.models.genre import Genre
 from app.models.performance import Performance
 from app.models.recording import Recording, RecordingFingerprint
 from app.models.recording_event import RecordingEvent
@@ -574,6 +575,58 @@ def _run_ingest_job(job_id, app, data, user_id):
         job["status"] = "error"
 
 
+def _apply_performer_genre(performer, data):
+    """
+    Set the act's genre from an ingest payload. Does not commit.
+
+    Genre lives on the ACT, not the recording — an act's genre is the same on
+    every night it played, which is why there is no genre column on Recording
+    and should not be. So the Add Recording form's Genre field writes through
+    to the Performer row, and this is where that happens.
+
+    ⚠ This is the only place outside api/genres.py that can CREATE a Genre, and
+    it exists because Ryan asked for it (2026-09-01). The Genre design spec's
+    rule — nothing creates a genre implicitly — is kept where it was actually
+    protecting something: the client only sends `genre_name` when the user
+    clicked an explicit "+ Create genre: …" row in the dropdown, never for text
+    merely typed into the box. A near-miss spelling cannot mint a second
+    vocabulary entry by accident, which is the placeholder-venue contamination
+    story in another costume.
+
+    Four guards, because a background ingest job is a bad place to find out an
+    assumption was wrong:
+
+      - `genre_id` wins over `genre_name`. An id names a row that exists; a
+        name is a request to find or make one.
+      - a name is matched case-insensitively against existing rows FIRST, so
+        "bluegrass" links Bluegrass rather than creating a twin.
+      - an unknown id is IGNORED, not fatal. A stale id from a genre deleted in
+        another tab must not fail an ingest that is otherwise fine.
+      - ⚠ SILENCE IS NOT A CLEAR. An existing act's genre is only overwritten
+        when the payload actually carries one. Batch Import and Auto-Ingest
+        never visit the review form and send neither key; treating that
+        omission as "clear it" would strip the genre off every act they touch.
+        Exactly the None-vs-[] trap the members/guests payload documents below,
+        and the reason there is no `else: performer.genre_id = None` here.
+    """
+    genre_id_in   = data.get("genre_id")
+    genre_name_in = (data.get("genre_name") or "").strip()
+
+    genre = None
+    if genre_id_in:
+        genre = db.session.get(Genre, int(genre_id_in))
+    elif genre_name_in:
+        genre = db.session.query(Genre).filter(
+            func.lower(Genre.name) == genre_name_in.lower()).first()
+        if not genre:
+            genre = Genre(name=genre_name_in)
+            db.session.add(genre)
+            db.session.flush()
+
+    if genre and performer.genre_id != genre.id:
+        performer.genre_id = genre.id
+
+
 @bp.route("/confirm", methods=["POST"])
 @login_required
 def confirm_ingest():
@@ -828,6 +881,9 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     member_names = member_names_sync or []
     guest_names  = guest_names_sync  or []
     performer = resolve_or_create_performer(artist_name, member_names)
+
+    # ── 2. Genre, on the PERFORMER (2026-09-01) ───────────────────────────────
+    _apply_performer_genre(performer, data)
 
     # ── 3. Find or create Venue (optional) ────────────────────────────────────
     # Placeholder names ("Unknown Venue", "TBD", ...) are never linked as a

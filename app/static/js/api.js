@@ -107,6 +107,43 @@ const API = (() => {
   const post = (path, body)  => request('POST', path, body)
   const put  = (path, body)  => request('PUT',  path, body)
 
+  // ── Entity photos, one shape for every photographed dimension ─────────────
+  //
+  // Performer, Venue, Artist and Event all expose the identical five routes
+  // (app/utils/entity_images.py generates them server-side), so the client
+  // half is generated too — otherwise the fourth copy-paste of the FormData
+  // upload is where someone forgets `credentials: 'same-origin'` and photos
+  // 401 on one dimension only.
+  //
+  // `contextual` is opt-in and currently TRUE only for performers: an <img src>
+  // never passes through request(), so without it a photo URL resolves against
+  // localhost while viewing a remote library. It stays off for the other three
+  // because api/share.py exposes no proxy route for their images — turning it
+  // on would rewrite a URL to a door that isn't there, which per CONTEXT.md
+  // renders as an ordinary empty state rather than an error.
+  function entityImageApi(ns, { contextual = false } = {}) {
+    const url = imageId => `/api/${ns}/images/${imageId}`
+    return {
+      imageUrl:     (imageId) => contextual ? contextualise(url(imageId)) : url(imageId),
+      listImages:   (id)      => get(`/api/${ns}/${id}/images`),
+      // Accepts a FileList or an array — the whole drop goes in one request.
+      // Raw multipart, so it deliberately bypasses request()'s JSON.stringify
+      // and Content-Type: letting the browser set its own boundary is what
+      // makes a file upload parse server-side at all.
+      uploadImages: async (id, files) => {
+        const form = new FormData()
+        for (const f of Array.from(files)) form.append('image', f)
+        const res = await fetch(`/api/${ns}/${id}/images`,
+          { method: 'POST', body: form, credentials: 'same-origin' })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+        return data
+      },
+      setPrimaryImage: (imageId) => post(`${url(imageId)}/primary`),
+      removeImage:     (imageId) => request('DELETE', url(imageId)),
+    }
+  }
+
   return {
     // ── Library context ─────────────────────────────────────────────────────
     setLibraryContext: (nodeId) => { _libraryContext = nodeId },
@@ -186,6 +223,11 @@ const API = (() => {
       remove: (id)       => request('DELETE', `/api/artists/${id}`),
       addPerformer:    (id, data)   => post(`/api/artists/${id}/performers`, data),
       removePerformer: (id, perfId) => request('DELETE', `/api/artists/${id}/performers/${perfId}`),
+
+      // Photos (2026-09-01). A person is the one entity here that most
+      // obviously has a likeness; the 2026-08-07 "performer-level only" call
+      // was about CARD surfaces and still stands there.
+      ...entityImageApi('artists'),
     },
 
     // ── Collections ───────────────────────────────────────────────────────────
@@ -226,25 +268,16 @@ const API = (() => {
       // Contextualised: an <img src> never passes through request(), so it
       // would otherwise resolve against localhost while viewing a remote
       // library and 404 on every photo.
-      imageUrl:     (imageId) => contextualise(`/api/performers/images/${imageId}`),
-      listImages:   (id)      => get(`/api/performers/${id}/images`),
-      // Accepts a FileList or array — the whole drop goes in one request.
-      uploadImages: async (id, files) => {
-        const form = new FormData()
-        for (const f of Array.from(files)) form.append('image', f)
-        const res = await fetch(`/api/performers/${id}/images`,
-          { method: 'POST', body: form, credentials: 'same-origin' })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-        return data
-      },
-      // Wikidata → Wikimedia Commons photo lookup. Returns {found:false} when
-      // the act simply has no freely-licensed photo — an ordinary outcome, not
-      // an error, so it resolves rather than throwing.
+      ...entityImageApi('performers', { contextual: true }),
+      // Wikidata → Wikimedia Commons photo lookup. Performer-only: the bridge
+      // runs through this act's MusicBrainz match, and no other dimension has
+      // one. Returns {found:false} when the act simply has no freely-licensed
+      // photo — an ordinary outcome, not an error, so it resolves rather than
+      // throwing.
       fetchImage:      (id)            => post(`/api/performers/${id}/images/fetch`),
-      setPrimaryImage: (imageId)       => post(`/api/performers/images/${imageId}/primary`),
+      // Caption/credit edit. Also performer-only — a fetched CC photo carries
+      // an attribution requirement, and only fetched photos exist here.
       updateImage:     (imageId, data) => put(`/api/performers/images/${imageId}`, data),
-      removeImage:     (imageId)       => request('DELETE', `/api/performers/images/${imageId}`),
 
       // AI Assist — AI-drafted bio + suggested resource links, background job
       // (same shape as API.ingest.aiAssist*). The ROUTES keep the older
@@ -336,6 +369,15 @@ const API = (() => {
       // Sidebar Favorites. Complete rather than capped — see the endpoint.
       favorites:  ()          => get('/api/recordings/favorites'),
       scan:       (folder)   => post('/api/recordings/scan', { folder_path: folder }),
+      // Rescan — the same inference pass, re-run over an info file the reviewer
+      // has EDITED but not necessarily saved to disk. `content` is sent even
+      // when empty (a cleared box is a real edit); the server only treats it as
+      // an override because the key is present.
+      rescan:     (folder, filename, content) =>
+        post('/api/recordings/scan', {
+          folder_path: folder, info_filename: filename || null,
+          info_file_content: content == null ? '' : content,
+        }),
       update:     (id, data) => put(`/api/recordings/${id}`, data),
       // deleteFiles is an explicit opt-in from the confirm dialog's checkbox.
       // The server resolves the folder itself and refuses anything that does not
@@ -371,21 +413,10 @@ const API = (() => {
       remove: (id)       => request('DELETE', `/api/venues/${id}`),
 
       // Photos (2026-08-07) — same shapes and semantics as performers, sharing
-      // one server-side implementation (app/utils/entity_images.py), so the
-      // frontend gallery component works against either namespace unchanged.
-      imageUrl:        (imageId) => `/api/venues/images/${imageId}`,
-      listImages:      (id)      => get(`/api/venues/${id}/images`),
-      uploadImages:    async (id, files) => {
-        const form = new FormData()
-        for (const f of Array.from(files)) form.append('image', f)
-        const res = await fetch(`/api/venues/${id}/images`,
-          { method: 'POST', body: form, credentials: 'same-origin' })
-        const data = await res.json()
-        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
-        return data
-      },
-      setPrimaryImage: (imageId) => post(`/api/venues/images/${imageId}/primary`),
-      removeImage:     (imageId) => request('DELETE', `/api/venues/images/${imageId}`),
+      // one server-side implementation (app/utils/entity_images.py) and now one
+      // client-side one too, so the gallery component works against any
+      // namespace unchanged.
+      ...entityImageApi('venues'),
     },
 
     // ── Genres ───────────────────────────────────────────────────────────────
@@ -421,6 +452,12 @@ const API = (() => {
       get:    (id)       => get(`/api/events/${id}`),
       create: (data)     => post('/api/events/', data),
       update: (id, data) => put(`/api/events/${id}`, data),
+      remove: (id)       => request('DELETE', `/api/events/${id}`),
+
+      // Deliberately NOT in REMOTE_CAPABLE above: api/share.py exposes no
+      // event surface, so a peer reaches an event's shows through the
+      // recordings they were granted, never through an event page.
+      ...entityImageApi('events'),
     },
 
     // ── Preferences ──────────────────────────────────────────────────────────

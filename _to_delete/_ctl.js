@@ -42,30 +42,19 @@ const App = (() => {
   // ── Track flag registry — single source of truth ─────────────────────────
   // Every flag list/label/skip-set is derived from this one array. `nonMusic`
   // marks flags whose tracks are skipped by the "Skip non-music" filter.
-  //
-  // ALPHABETICAL BY LABEL (Ryan, 2026-09-01). The previous order was the order
-  // the flags were thought of in, which is not an order anyone can predict —
-  // twelve pills in an arbitrary sequence means reading all twelve every time
-  // to find one. Alphabetical is the only ordering a reader can navigate
-  // without learning it first.
-  //
-  // ⚠ Nothing may depend on this ORDER. `NON_MUSIC_FLAGS` and `FLAG_LABELS`
-  // below are both order-independent, and `trackChipsArray` iterates the
-  // TRACK'S own `flags` array rather than this one, so chip order on a row is
-  // unaffected. Keep it that way: this list is a vocabulary, not a sequence.
   const TRACK_FLAGS = [
-    { key: 'announcement',    label: 'Announcement',    nonMusic: true  },
-    { key: 'audience',        label: 'Audience',        nonMusic: true  },
-    { key: 'band_intros',     label: 'Band Intros',     nonMusic: true  },
-    { key: 'banter',          label: 'Banter',          nonMusic: true  },
+    { key: 'start_truncated', label: 'Start Truncated', nonMusic: false },
     { key: 'end_truncated',   label: 'End Truncated',   nonMusic: false },
     { key: 'incomplete',      label: 'Incomplete',      nonMusic: false },
+    { key: 'unknown_title',   label: 'Unknown Title',   nonMusic: false },
+    { key: 'banter',          label: 'Banter',          nonMusic: true  },
+    { key: 'tuning',          label: 'Tuning',          nonMusic: true  },
+    { key: 'audience',        label: 'Audience',        nonMusic: true  },
+    { key: 'medley',          label: 'Medley',          nonMusic: false },
+    { key: 'announcement',    label: 'Announcement',    nonMusic: true  },
     { key: 'interview',       label: 'Interview',       nonMusic: true  },
     { key: 'introduction',    label: 'Introduction',    nonMusic: true  },
-    { key: 'medley',          label: 'Medley',          nonMusic: false },
-    { key: 'start_truncated', label: 'Start Truncated', nonMusic: false },
-    { key: 'tuning',          label: 'Tuning',          nonMusic: true  },
-    { key: 'unknown_title',   label: 'Unknown Title',   nonMusic: false },
+    { key: 'band_intros',     label: 'Band Intros',     nonMusic: true  },
   ]
   const NON_MUSIC_FLAGS = TRACK_FLAGS.filter(f => f.nonMusic).map(f => f.key)
   const FLAG_LABELS     = Object.fromEntries(TRACK_FLAGS.map(f => [f.key, f.label]))
@@ -974,43 +963,17 @@ const App = (() => {
   // inline add-picker input on click. Removing a pill is a plain splice —
   // this is still draft form state until Confirm, no server round-trip.
   function createMembersWidget(store, ids) {
-    // Which role's input had focus when renderChips() was called, so the
-    // rebuild can hand it back. Module-level to the widget, not the DOM: the
-    // node it refers to is destroyed by the very render that needs to read it.
-    let _focusRole = null
     const pill = (p, i, role) => `
       <span class="member-chip ${role === 'guest' ? 'member-chip--guest' : ''}">
         ${esc(p.name)} <span class="member-chip-x" data-role="${role}" data-idx="${i}" title="Remove">${icon('x')}</span>
       </span>`
-    // The add control is ALWAYS an input — there is no show/hide any more
-    // (Ryan, 2026-09-01: "when clicking to add, the height of the element
-    // jumps").
-    //
-    // The jump was structural, not a stray margin. `.mg-row` is a wrapping
-    // flex row of chips; revealing a 150px input at the end of it pushes the
-    // row to a second line whenever the chips already come close to the edge,
-    // and the row's height doubles under the cursor. Sizing the input
-    // differently would only move the threshold, not remove it.
-    //
-    // So the input is a permanent member of the row, shaped and sized exactly
-    // like a chip: same height, same radius, same border box, dashed to read
-    // as "add one" rather than as a filled value. The row's height is then the
-    // height of one chip line whatever happens, because clicking changes
-    // nothing about what is in the row. It also removes a click — the old
-    // "+" was a button whose entire job was revealing a text box.
-    //
-    // Matching the CHIPS rather than the form's other inputs is deliberate:
-    // this control lives inside a row of chips, and local consistency is what
-    // a reader actually sees. A 32px form input wedged between 24px chips is
-    // the mismatch that reads as wrong.
     const row = (role, label, items) => `
       <div class="mg-row">
         <span class="mg-row-label">${label}</span>
         ${items.map((p, i) => pill(p, i, role)).join('')}
-        <span class="artist-picker-wrap mg-add-picker" data-role="${role}">
-          <input type="text" class="mg-role-input" data-role="${role}" autocomplete="off"
-                 aria-label="Add ${label === 'Members' ? 'a member' : 'a guest'}"
-                 placeholder="+ Add ${label === 'Members' ? 'member' : 'guest'}" />
+        <button type="button" class="mg-add-btn" data-role="${role}" title="Add ${label === 'Members' ? 'Member' : 'Guest'} Name">+</button>
+        <span class="artist-picker-wrap mg-add-picker" data-role="${role}" style="display:none">
+          <input type="text" class="member-input mg-role-input" data-role="${role}" autocomplete="off" placeholder="Add ${label === 'Members' ? 'Member' : 'Guest'} Name…" />
           <div class="artist-dropdown mg-role-dd" data-role="${role}" style="display:none"></div>
         </span>
       </div>`
@@ -1029,44 +992,35 @@ const App = (() => {
           renderChips()
         }))
 
+      field.querySelectorAll('.mg-add-btn').forEach(btn =>
+        btn.addEventListener('click', () => {
+          const picker = field.querySelector(`.mg-add-picker[data-role="${btn.dataset.role}"]`)
+          const input  = picker?.querySelector('.mg-role-input')
+          if (!picker || !input) return
+          const showing = picker.style.display !== 'none'
+          // Only one add-picker open at a time.
+          field.querySelectorAll('.mg-add-picker').forEach(p => { p.style.display = 'none' })
+          picker.style.display = showing ? 'none' : 'inline-flex'
+          if (!showing) input.focus()
+        }))
+
       field.querySelectorAll('.mg-role-input').forEach(input => {
         const role = input.dataset.role
         const dd   = field.querySelector(`.mg-role-dd[data-role="${role}"]`)
         wirePickerDropdown(input, dd, API.artists.search,
-          ({ id, name }) => { _focusRole = role; addMember(name, id, role) }, 'Add new artist')
+          ({ id, name }) => { addMember(name, id, role); input.value = '' }, 'Add new artist')
         input.addEventListener('keydown', e => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            if (!input.value.trim()) return
-            _focusRole = role
-            addMember(input.value, null, role)
-          }
+          if (e.key === 'Enter') { e.preventDefault(); addMember(input.value, null, role); input.value = '' }
         })
       })
-
-      // renderChips() rebuilds this whole block on every add and remove, which
-      // would drop focus in the middle of adding three people. The focused
-      // role is remembered across the rebuild and handed back here — LAST,
-      // after wirePickerDropdown has attached its own focus handler, so the
-      // restored focus behaves like any other.
-      if (_focusRole) {
-        const back = field.querySelector(`.mg-role-input[data-role="${_focusRole}"]`)
-        _focusRole = null
-        back?.focus()
-      }
     }
 
     function addMember(name, id, role = 'member') {
       name = (name || '').trim()
+      if (!name) return
       const list = role === 'guest' ? (store.guests = store.guests || []) : (store.members = store.members || [])
-      const dupe = !!name && list.some(m => m.name.toLowerCase() === name.toLowerCase())
-      if (name && !dupe) list.push(id ? { id, name } : { name })
-      // Re-render even when nothing was added. The rebuild is what CLEARS the
-      // input, and the two no-op cases are exactly where a stale value is
-      // worst: picking someone already in the row otherwise leaves their name
-      // sitting in the box looking like it failed. It also releases
-      // `_focusRole`, which would otherwise stay armed and steal focus on
-      // whatever render happened next.
+      if (list.some(m => m.name.toLowerCase() === name.toLowerCase())) return
+      list.push(id ? { id, name } : { name })
       renderChips()
     }
 
@@ -1081,46 +1035,19 @@ const App = (() => {
       store.performer_id   = id || null
       store.guests = []
       if (id) {
-        try {
-          const p = await API.performers.get(id)
-          store.members = (p.members || []).map(m => ({ id: m.id, name: m.name }))
-          // The act's existing genre comes with it (Ryan, 2026-09-01). Only
-          // ids.genreInput surfaces it — this widget is shared with surfaces
-          // that have no genre field, and setting store.genre_* on those would
-          // put a value into a payload nothing on screen ever showed.
-          if (ids.genreInput) setGenreFromPerformer(p.genre || null)
-        }
+        try { const p = await API.performers.get(id); store.members = (p.members || []).map(m => ({ id: m.id, name: m.name })) }
         catch (_) { store.members = [] }
       } else {
         store.members = []
-        // A NEW act has no genre to inherit. Deliberately does NOT clear a
-        // genre the user already picked by hand: they may be typing the act
-        // name last, and silently discarding a deliberate choice because a
-        // different field changed is the kind of quiet loss this app avoids.
       }
       renderChips()
-    }
-
-    // Reflects an act's genre into the ingest form's Genre field. Writes both
-    // the store and the DOM because the field is plain markup rather than part
-    // of renderChips()' rebuild.
-    function setGenreFromPerformer(genre) {
-      const input = document.getElementById(ids.genreInput)
-      const idEl  = ids.genreIdInput ? document.getElementById(ids.genreIdInput) : null
-      store.genre_id   = genre ? genre.id : null
-      store.genre_name = genre ? genre.name : ''
-      if (input) {
-        input.value = store.genre_name
-        input.classList.remove('is-new-genre')
-      }
-      if (idEl) idEl.value = store.genre_id || ''
     }
     function mount() {
       wirePickerDropdown(document.getElementById(ids.performerInput), document.getElementById(ids.performerDropdown),
         API.performers.search, onPerformerPick, 'Create new performer')
       renderChips()
     }
-    return { renderChips, addMember, onPerformerPick, setGenreFromPerformer, mount }
+    return { renderChips, addMember, onPerformerPick, mount }
   }
 
   // Splits a billed-act name into candidate individual-person names, for
@@ -1156,11 +1083,6 @@ const App = (() => {
         f.performer_id = exact.id
         const p = await API.performers.get(exact.id)
         f.members = (p.members || []).map(m => ({ id: m.id, name: m.name }))
-        // Same inheritance as picking the act by hand — the scanned name
-        // matching an existing act is the commonest way into this form, and a
-        // genre that only appears when you re-pick a name already in the box
-        // would look like the field was broken.
-        if (p.genre) { f.genre_id = p.genre.id; f.genre_name = p.genre.name }
       } else {
         const found = []
         for (const cand of splitPerformerNameCandidates(name)) {
@@ -1174,9 +1096,6 @@ const App = (() => {
       }
     } catch (_) { f.members = f.members || [] }
     widget.renderChips()
-    // The genre field is not part of renderChips()' markup, so it needs its own
-    // paint once the lookup above has resolved.
-    if (f.genre_name) widget.setGenreFromPerformer({ id: f.genre_id, name: f.genre_name })
   }
 
   function setMainHTML(html) {
@@ -5997,10 +5916,9 @@ const App = (() => {
           <span class="mg-row-label">${label}</span>
           ${items.map((p, i) => pill(p, i, role)).join('')}
           ${editable ? `
-            <span class="artist-picker-wrap mg-add-picker" data-role="${role}">
-              <input type="text" class="mg-role-input" data-role="${role}" autocomplete="off"
-                     aria-label="Add ${label === 'Members' ? 'a member' : 'a guest'}"
-                     placeholder="+ Add ${label === 'Members' ? 'member' : 'guest'}" />
+            <button type="button" class="mg-add-btn" data-role="${role}" title="Add ${label === 'Members' ? 'Member' : 'Guest'} Name">+</button>
+            <span class="artist-picker-wrap mg-add-picker" data-role="${role}" style="display:none">
+              <input type="text" class="member-input mg-role-input" data-role="${role}" autocomplete="off" placeholder="Add ${label === 'Members' ? 'Member' : 'Guest'} Name…" />
               <div class="artist-dropdown mg-role-dd" data-role="${role}" style="display:none"></div>
             </span>` : ''}
         </div>`
@@ -6389,10 +6307,7 @@ const App = (() => {
       // split purely on perf.personnel[].is_guest — Members = roster/explicit
       // non-guest rows, Guests = is_guest rows — same split used by the Add
       // Recording form's createMembersWidget, matched visually here (mg-row/
-      // mg-add-picker markup) so both surfaces look identical. ⚠ They share
-      // markup AND CSS, so a change to one is a change to both — the
-      // 2026-09-01 always-present-input rework had to be applied here in the
-      // same pass for exactly that reason.
+      // mg-add-btn/mg-add-picker markup) so both surfaces look identical.
       // The Inherit/Explicit mode is still a real field on Performance (case
       // 5 — dropping a roster member for this one show — still auto-flips it
       // under the hood), it just no longer has a manual UI control; nothing
@@ -6426,10 +6341,17 @@ const App = (() => {
             await persistPersonnelLists(newMembers, newGuests)
           }))
 
-        // The "+" button is gone (2026-09-01) — the input is permanent, so
-        // there is nothing left to reveal. See createMembersWidget's comment
-        // for why the reveal itself was the height jump; this surface shares
-        // the markup and the CSS, so it has to share the fix or the two drift.
+        box.querySelectorAll('.mg-add-btn').forEach(btn =>
+          btn.addEventListener('click', () => {
+            const picker = box.querySelector(`.mg-add-picker[data-role="${btn.dataset.role}"]`)
+            const input  = picker?.querySelector('.mg-role-input')
+            if (!picker || !input) return
+            const showing = picker.style.display !== 'none'
+            box.querySelectorAll('.mg-add-picker').forEach(p => { p.style.display = 'none' })
+            picker.style.display = showing ? 'none' : 'inline-flex'
+            if (!showing) input.focus()
+          }))
+
         box.querySelectorAll('.mg-role-input').forEach(input => {
           const role = input.dataset.role
           const dd   = box.querySelector(`.mg-role-dd[data-role="${role}"]`)
@@ -7192,7 +7114,7 @@ const App = (() => {
               ${summaryParts.map(p => `<span class="batch-meta-field">${esc(p)}</span>`).join('<span class="batch-meta-sep">·</span>')}
             </div>
           </div>
-          <span class="batch-score batch-score--${health.band}" title="Metadata Completeness">${esc(_metaRating(health))}</span>
+          <span class="batch-score batch-score--${health.band}" title="Metadata completeness">${esc(_metaRating(health))}</span>
           <div class="batch-item-actions">
             <span class="batch-ingest-status" id="batch-status-${item.path.replace(/[^a-zA-Z0-9]/g,'_')}"></span>
             ${actionBtn}
@@ -7732,8 +7654,6 @@ const App = (() => {
 
     const pickerEl = document.getElementById('lq-picker')
     const msgEl    = document.getElementById('lq-msg')
-    // `say('')` clears. Every caller that can SUCCEED must call it, or the
-    // message outlives the condition that produced it — see openPicker.
     const say = t => { msgEl.innerHTML = t ? `<div class="lq-err">${esc(t)}</div>` : '' }
 
     // Where the navigator currently is. Was previously read back out of the
@@ -7776,19 +7696,6 @@ const App = (() => {
       catch (e) { busy = false; say(e.message); paint(null); return }
       finally { busy = false }
       if (j.error) { say(j.error); paint(null); return }
-      // ⚠ CLEAR ON SUCCESS. Nothing did, so a message written by a failed
-      // navigation ("Outside the permitted import roots") stayed on screen for
-      // the rest of the session — the user browsed to a folder that IS
-      // permitted, the listing beside the message updated correctly, and the
-      // red line went on telling them they were somewhere forbidden (Ryan,
-      // 2026-09-01). An error that outlives its cause is worse than no error:
-      // it is a confident, wrong statement about the current state.
-      //
-      // Cleared HERE, on the success, rather than at the top of openPicker:
-      // clearing on click would blink the message off and back on for a
-      // navigation that fails again, which reads as a flicker rather than as
-      // an answer.
-      say('')
       here = j.path
       // The server climbs to the nearest surviving ancestor when a remembered
       // path has gone (routinely: ingesting an act's last show moves its folder
@@ -7975,7 +7882,7 @@ const App = (() => {
       const go  = e.target.closest('[data-go]')
       const use = e.target.closest('[data-use]')
       if (go) openPicker(go.dataset.go)
-      else if (use) startAnalysis(use.dataset.use, false, say)
+      else if (use) startAnalysis(use.dataset.use, false)
     })
     // Folder rows and expand carets are real controls, so they answer the
     // keyboard too.
@@ -7990,21 +7897,9 @@ const App = (() => {
     openPicker(here)
   }
 
-  // `report` is how this tells the caller's page that something went wrong.
-  // ⚠ It used to write into `#lq-status`, an element that EXISTS NOWHERE — the
-  // id is not in renderIngestSource's markup or anywhere else (checked
-  // 2026-09-01). So `statusEl` was always null and every guard around it was
-  // permanently false: "Review This Folder" on a path outside the import roots
-  // failed in total silence, the button just did nothing. That silence is also
-  // half of the stale-error report — the only red text on the page was the
-  // leftover from an earlier browse, so the failure appeared to be the OLD
-  // error rather than a new one.
-  //
-  // Passed in rather than looked up, because the two callers report
-  // differently: the source picker has a message line, the triage view has
-  // lq.error and its own banner.
-  async function startAnalysis(sourceDir, reanalyze, report) {
-    report?.('')
+  async function startAnalysis(sourceDir, reanalyze) {
+    const statusEl = document.getElementById('lq-status')
+    if (statusEl) statusEl.innerHTML = `<div class="empty-state">Resolving <code>${esc(sourceDir)}</code>…</div>`
     try {
       const res = await API.quality.analyze(sourceDir, reanalyze)
       _lqReset()                       // a new scan is a new session, wholesale
@@ -8021,7 +7916,8 @@ const App = (() => {
       renderTriageView()
       pollAnalysis()
     } catch (e) {
-      report?.(e.message)
+      if (statusEl) statusEl.innerHTML =
+        `<div class="empty-state" style="color:var(--red)">${esc(e.message)}</div>`
     }
   }
 
@@ -8861,11 +8757,7 @@ const App = (() => {
           <div class="lq-samp lq-samp--lead">
             <div class="lq-samp-head">
               <h4>Track Preview</h4>
-              <!-- Two hints said the same thing (Ryan, 2026-09-02). This one
-                   ("Timestamps mark where each sample was taken") is gone; the
-                   surviving line is .lq-trk-player's own ::before placeholder,
-                   "Play a track, or click a timestamp to hear the analyzed
-                   moment", which says it AND names the two ways to start. -->
+              <span class="lq-samp-hint">Timestamps mark where each sample was taken</span>
               <div class="lq-trk-player" data-slot-for="${esc(row.folder_path)}"></div>
             </div>
             ${tracks}
@@ -9060,50 +8952,10 @@ const App = (() => {
       </span></span>`
   }
 
-  // Where the caret was, so a repaint can put it back.
-  //
-  // renderTriageView() rebuilds the WHOLE page through setMainHTML(), and the
-  // page holds a form. Two things drive repaints the user did not ask for:
-  // pollAnalysis() fires one every ~900ms for the length of a scan, and every
-  // apply-all field repaints on blur. Both destroyed the element the caret was
-  // in — so typing into "Applies to every recording" while a scan was running
-  // lost the cursor once per analysed folder (Ryan, 2026-09-02), and Tab moved
-  // to the next field only for the blur repaint to delete it a millisecond
-  // later, which is why the form could not be tabbed through at all.
-  //
-  // The id is enough of a key: every field in this form has one, and an
-  // element with no id is not a field worth restoring to.
-  function _lqCaptureFocus() {
-    const el = document.activeElement
-    if (!el || !el.id || !mainContent.contains(el)) return null
-    const sel = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
-    return {
-      id: el.id,
-      // Only text-ish controls have a selection; reading it off a checkbox or
-      // a range input throws in Chrome.
-      start: sel && el.selectionStart != null ? el.selectionStart : null,
-      end:   sel && el.selectionEnd   != null ? el.selectionEnd   : null,
-    }
-  }
-
-  function _lqRestoreFocus(snap) {
-    if (!snap) return
-    const el = document.getElementById(snap.id)
-    if (!el) return
-    // preventScroll: the caret is being put back where it already was, so the
-    // browser's "scroll the focused element into view" would be a jump the
-    // user did not cause.
-    try { el.focus({ preventScroll: true }) } catch (_) { el.focus() }
-    if (snap.start != null) {
-      try { el.setSelectionRange(snap.start, snap.end) } catch (_) {}
-    }
-  }
-
   function renderTriageView({ preserveScroll = false } = {}) {
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
     const scrollY = preserveScroll ? window.scrollY : 0
-    const focusSnap = preserveScroll ? _lqCaptureFocus() : null
 
     // Anything still in the list is still a candidate — moving a show to
     // Backlog/Working physically removes it from the scanned folder, so the
@@ -9240,34 +9092,21 @@ const App = (() => {
     // venue's own stored values and editing them here would do nothing — the
     // server ignores them once venue_id is set (_do_confirm step 3).
     const aaVenueLocked = !!aa.venue.id
-    // How many queue-level values are actually set. Only shown when the block
-    // is COLLAPSED and holds something: the old rule was that the block could
-    // not be closed once it held a value, so a set value could never be
-    // invisible. The +/- toggle (Ryan, 2026-09-02) makes that unenforceable —
-    // the user can now close it whenever they like — so the invariant is kept
-    // by saying so on the header instead of by refusing the click.
-    const aaCount = [aa.performer, aa.venue.name, aa.city, aa.state, aa.country,
-                     aa.event, aa.source, aa.lineage, aa.notes]
-      .filter(v => (v || '').trim()).length
-    const aaOpen = lq.applyAllOpen
-    const applyAllBar = !lq.rows.length ? '' :
-      `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}">
+    const applyAllBar = !lq.rows.length ? '' : (lq.applyAllOpen || anyApplied)
+      ? `<div class="lq-applyall">
            <div class="lq-applyall-head">
-             <button type="button" class="lq-applyall-tog" id="lq-applyall-toggle"
-                     aria-expanded="${aaOpen}"
-                     title="${aaOpen ? 'Collapse' : 'Expand'}"
-                     >${icon(aaOpen ? 'minus' : 'plus', 'lq-applyall-ic')}</button>
              <span class="lq-applyall-h">Applies to every recording below</span>
-             ${!aaOpen && aaCount ? `<span class="lq-applyall-n">${aaCount} value${
-                 aaCount === 1 ? '' : 's'} set</span>` : ''}
              ${anyApplied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
-                               ${lq.running ? 'disabled' : ''}>Clear all</button>` : ''}
+                               ${lq.running ? 'disabled' : ''}>Clear all</button>`
+                          : `<button type="button" class="lq-applyall-x" id="lq-applyall-close"
+                               title="Hide">Hide</button>`}
            </div>
-           ${!aaOpen ? '' : `<div class="lq-applyall-grid">
+           <div class="lq-applyall-grid">
              <div class="ingest-field">
                <label>Performer</label>
                <div class="artist-picker-wrap">
                  <input type="text" id="lq-apply-performer" autocomplete="off"
+                        placeholder="Search or type the act…"
                         value="${esc(aa.performer)}" ${lq.running ? 'disabled' : ''}>
                  <div class="artist-dropdown" id="lq-apply-performer-dropdown" style="display:none"></div>
                </div>
@@ -9276,6 +9115,7 @@ const App = (() => {
                <label>Venue</label>
                <div class="venue-picker-wrap">
                  <input type="text" id="lq-apply-venue-name" autocomplete="off"
+                        placeholder="Search or type venue name…"
                         value="${esc(aa.venue.name)}" ${lq.running ? 'disabled' : ''}>
                  <input type="hidden" id="lq-apply-venue-id" value="${esc(String(aa.venue.id || ''))}">
                  <div class="venue-dropdown" id="lq-apply-venue-dropdown" style="display:none"></div>
@@ -9302,11 +9142,12 @@ const App = (() => {
              <div class="ingest-field">
                <label>Event / Festival</label>
                <input type="text" id="lq-apply-event"
+                      placeholder="e.g. Telluride Bluegrass Festival"
                       value="${esc(aa.event)}" ${lq.running ? 'disabled' : ''}>
              </div>
              <div class="ingest-field">
                <label>Source</label>
-               <input type="text" id="lq-apply-source"
+               <input type="text" id="lq-apply-source" placeholder="SBD, AUD, MTX…"
                       value="${esc(aa.source)}" ${lq.running ? 'disabled' : ''}>
              </div>
              <div class="ingest-field">
@@ -9318,8 +9159,10 @@ const App = (() => {
                <label>Notes</label>
                <textarea id="lq-apply-notes" ${lq.running ? 'disabled' : ''}>${esc(aa.notes)}</textarea>
              </div>
-           </div>`}
+           </div>
          </div>`
+      : `<button type="button" class="lq-applyall-open" id="lq-applyall-open">
+           ${icon('plus', 'lq-applyall-ic')} Add a value for every recording</button>`
 
     setMainHTML(`
       <div class="batch-shell lq-shell">
@@ -9347,165 +9190,6 @@ const App = (() => {
 
     if (preserveScroll) window.scrollTo(0, scrollY)
     _wireTriage()
-    // After wiring, not before: _wireTriage() is what attaches the listeners
-    // the restored element needs, and focusing a field with no listeners on it
-    // is how a keystroke goes nowhere.
-    _lqRestoreFocus(focusSnap)
-  }
-
-  // The <audio> element carries no `controls` any more (Ryan, 2026-09-02).
-  // The browser's default bar is the one control in this app drawn by the
-  // OS rather than by us — chrome, type, colours and all — and it sat in the
-  // middle of a panel where everything else is ours. So the element is
-  // silent scaffolding now and the visible player is `.lq-mini`, built from
-  // the same .player-btn-play / .progress-bar / .player-time parts the main
-  // player bar uses, so a preview reads as this app playing something.
-  //
-  // Still a SEPARATE element from the shared #audio-el, for the reason it
-  // always was: this is a pre-ingest file with no track ID and no queue, and
-  // routing it through Player would blow away whatever the user actually had
-  // on. Still exactly ONE of it, so a second click stops the first.
-  //
-  // The wrapper moves between slots as a unit; `_lqPreviewUI` holds the
-  // handful of nodes the tick handler writes to, so nothing is queried per
-  // frame.
-  let _lqPreviewUI = null
-  const _lqPreviewWrap = () => {
-    let wrap = document.getElementById('lq-preview-player')
-    if (wrap && _lqPreviewUI) return wrap
-
-    // Removing an <audio> from the DOM does NOT stop it. renderTriageView()
-    // rebuilds mainContent wholesale, so the previous wrapper is detached with
-    // its file still playing — and building a fresh one on top of that is two
-    // previews at once out of a component whose whole point is that there is
-    // only ever one. Silence the orphan before replacing it.
-    if (_lqPreviewUI?.el) { try { _lqPreviewUI.el.pause() } catch (_) {} }
-
-    wrap = document.createElement('div')
-    wrap.id = 'lq-preview-player'
-    wrap.className = 'lq-mini'
-    wrap.innerHTML = `
-      <button type="button" class="player-btn player-btn-play lq-mini-play"
-              title="Play / Pause">${icon('play')}</button>
-      <span class="player-time lq-mini-cur">0:00</span>
-      <input type="range" class="progress-bar lq-mini-bar"
-             min="0" max="100" value="0" step="0.1" aria-label="Seek">
-      <span class="player-time lq-mini-dur">0:00</span>
-      <audio id="lq-preview-audio" preload="metadata"></audio>`
-
-    const ui = {
-      play: wrap.querySelector('.lq-mini-play'),
-      bar:  wrap.querySelector('.lq-mini-bar'),
-      cur:  wrap.querySelector('.lq-mini-cur'),
-      dur:  wrap.querySelector('.lq-mini-dur'),
-      el:   wrap.querySelector('audio'),
-      // True while the user has the seek handle down. The timeupdate handler
-      // must not write to the bar during a drag, or the thumb fights the
-      // pointer and snaps back on every frame.
-      seeking: false,
-    }
-    _lqPreviewUI = ui
-
-    const paint = () => {
-      const d = ui.el.duration
-      ui.dur.textContent = isFinite(d) ? _mmss(d) : '0:00'
-      ui.cur.textContent = _mmss(ui.el.currentTime || 0)
-      if (!ui.seeking && isFinite(d) && d > 0) {
-        ui.bar.value = String(100 * (ui.el.currentTime || 0) / d)
-      }
-    }
-    const paintPlay = () => {
-      ui.play.innerHTML = icon(ui.el.paused ? 'play' : 'pause')
-    }
-
-    ui.el.addEventListener('timeupdate', paint)
-    ui.el.addEventListener('loadedmetadata', paint)
-    ui.el.addEventListener('play', paintPlay)
-    ui.el.addEventListener('pause', paintPlay)
-    // Reset to the start rather than leaving the bar pinned full and the
-    // button showing pause on a finished file.
-    ui.el.addEventListener('ended', () => { ui.bar.value = '0'; paintPlay() })
-
-    ui.play.addEventListener('click', () => {
-      if (!ui.el.src) return
-      if (ui.el.paused) ui.el.play(); else ui.el.pause()
-    })
-    ui.bar.addEventListener('pointerdown', () => { ui.seeking = true })
-    const endSeek = () => {
-      if (!ui.seeking) return
-      ui.seeking = false
-      const d = ui.el.duration
-      if (isFinite(d) && d > 0) {
-        try { ui.el.currentTime = d * (parseFloat(ui.bar.value) || 0) / 100 } catch (_) {}
-      }
-    }
-    ui.bar.addEventListener('pointerup', endSeek)
-    ui.bar.addEventListener('change', endSeek)
-    // Scrub live while dragging — the time readout is the only feedback
-    // there is until the pointer comes up.
-    ui.bar.addEventListener('input', () => {
-      const d = ui.el.duration
-      if (isFinite(d) && d > 0) ui.cur.textContent = _mmss(d * (parseFloat(ui.bar.value) || 0) / 100)
-    })
-    return wrap
-  }
-
-  const playAt = (folder, file, seek, slot) => {
-    const wrap = _lqPreviewWrap()
-    const el = _lqPreviewUI.el
-    const host = slot
-      ? mainContent.querySelector(`.lq-trk-player[data-slot-for="${CSS.escape(slot)}"]`)
-      : null
-    if (host && wrap.parentElement !== host) {
-      const prev = wrap.parentElement
-      wrap.remove()
-      if (prev && prev.classList.contains('lq-trk-player')) prev.classList.remove('on')
-      host.appendChild(wrap)
-    }
-    if (host) host.classList.add('on')
-    if (!wrap.isConnected) document.body.appendChild(wrap)
-
-    // The player no longer sits under the track, so the highlight is the
-    // only thing saying WHICH track is playing. It has to be reliable.
-    mainContent.querySelectorAll('.lq-trk.playing').forEach(r => r.classList.remove('playing'))
-    const btn = mainContent.querySelector(
-      `.lq-trk [data-file="${CSS.escape(file)}"][data-slot="${CSS.escape(slot || '')}"]`)
-    btn?.closest('.lq-trk')?.classList.add('playing')
-
-    const url = `/api/stream/ingest-preview?folder=${encodeURIComponent(folder)}`
-              + `&file=${encodeURIComponent(file)}`
-    if (el.dataset.src !== url) {
-      el.src = url; el.dataset.src = url
-      // A new file has a new length; leaving the old one up means the bar
-      // reads against a duration that no longer applies until the first
-      // timeupdate lands.
-      _lqPreviewUI.bar.value = '0'
-      _lqPreviewUI.dur.textContent = '0:00'
-    }
-    const go = () => { try { el.currentTime = seek } catch (_) {} ; el.play() }
-    // Seeking before metadata lands silently no-ops, so wait when cold.
-    if (el.readyState >= 1) go()
-    else el.addEventListener('loadedmetadata', go, { once: true })
-  }
-
-  // A repaint scheduled for AFTER the current event finishes.
-  //
-  // The apply-all fields repaint on blur so the Clear/Hide control and the
-  // Ingest button's count catch up with a value that was typed but never
-  // committed. Doing it synchronously inside the blur handler is what broke
-  // Tab: at that instant focus belongs to nobody (the old field has lost it,
-  // the new one has not gained it yet), so _lqCaptureFocus() sees `body`, the
-  // rebuild lands, and the field Tab was moving to no longer exists. One tick
-  // of delay is all it takes — focus has settled by then and the capture finds
-  // the right element. Coalesced, because a click from one field to another
-  // fires blur and change back to back and one repaint answers both.
-  let _lqRepaintTimer = null
-  function _lqRepaintSoon(delay = 0) {
-    clearTimeout(_lqRepaintTimer)
-    _lqRepaintTimer = setTimeout(() => {
-      _lqRepaintTimer = null
-      renderTriageView({ preserveScroll: true })
-    }, delay)
   }
 
   function _wireTriage() {
@@ -9531,15 +9215,14 @@ const App = (() => {
     // field under the cursor and drop focus. Blur repaints so the button
     // count and the Clear/Hide control catch up with a value that was typed
     // but never committed.
-    // One control, both directions (Ryan, 2026-09-02) — was a "+ Add a value
-    // for every recording" link that became a "Hide" link once open, so the
-    // thing you clicked to open was never the thing you clicked to close. The
-    // header is permanent now and the +/- sits beside it.
-    document.getElementById('lq-applyall-toggle')?.addEventListener('click', () => {
-      const opening = !lq.applyAllOpen
-      lq.applyAllOpen = opening
+    document.getElementById('lq-applyall-open')?.addEventListener('click', () => {
+      lq.applyAllOpen = true
       renderTriageView({ preserveScroll: true })
-      if (opening) document.getElementById('lq-apply-performer')?.focus()
+      document.getElementById('lq-apply-performer')?.focus()
+    })
+    document.getElementById('lq-applyall-close')?.addEventListener('click', () => {
+      lq.applyAllOpen = false
+      renderTriageView({ preserveScroll: true })
     })
     document.getElementById('lq-applyall-clear')?.addEventListener('click', () => {
       lq.applyAll = {
@@ -9548,6 +9231,7 @@ const App = (() => {
         city: '', state: '', country: '',
         source: '', lineage: '', notes: '',
       }
+      lq.applyAllOpen = false
       renderTriageView({ preserveScroll: true })
     })
 
@@ -9560,7 +9244,7 @@ const App = (() => {
       const el = document.getElementById(id)
       if (!el) return
       el.addEventListener('input', e => { lq.applyAll[key] = e.target.value })
-      el.addEventListener('blur', () => _lqRepaintSoon())
+      el.addEventListener('blur', () => renderTriageView({ preserveScroll: true }))
     })
 
     // Performer — the same wirePickerDropdown() autocomplete the Members/
@@ -9572,7 +9256,7 @@ const App = (() => {
       const dd = document.getElementById('lq-apply-performer-dropdown')
       if (!el) return
       el.addEventListener('input', e => { lq.applyAll.performer = e.target.value })
-      el.addEventListener('blur', () => _lqRepaintSoon())
+      el.addEventListener('blur', () => renderTriageView({ preserveScroll: true }))
       wirePickerDropdown(el, dd, API.artists.search, ({ name }) => {
         lq.applyAll.performer = name
         renderTriageView({ preserveScroll: true })
@@ -9635,7 +9319,7 @@ const App = (() => {
           try { showResults(await API.venues.list(q), q) } catch (_) { closeDropdown() }
         }, 220)
       })
-      nameEl.addEventListener('blur', () => _lqRepaintSoon(200))
+      nameEl.addEventListener('blur', () => setTimeout(() => renderTriageView({ preserveScroll: true }), 200))
       nameEl.addEventListener('focus', () => {
         if (nameEl.value.trim().length >= 2) nameEl.dispatchEvent(new Event('input'))
       })
@@ -9772,6 +9456,42 @@ const App = (() => {
     // playing". The element now relocates into the slot under the track that
     // was clicked. Still ONE element, so a second click stops the first: two
     // simultaneous previews is never what was wanted.
+    const playAt = (folder, file, seek, slot) => {
+      let el = document.getElementById('lq-preview-audio')
+      if (!el) {
+        el = document.createElement('audio')
+        el.id = 'lq-preview-audio'
+        el.controls = true
+        el.className = 'lq-preview-audio'
+      }
+      const host = slot
+        ? mainContent.querySelector(`.lq-trk-player[data-slot-for="${CSS.escape(slot)}"]`)
+        : null
+      if (host && el.parentElement !== host) {
+        const prev = el.parentElement
+        el.remove()
+        if (prev && prev.classList.contains('lq-trk-player')) prev.classList.remove('on')
+        host.appendChild(el)
+      }
+      if (host) host.classList.add('on')
+      if (!el.isConnected) document.body.appendChild(el)
+
+      // The player no longer sits under the track, so the highlight is the
+      // only thing saying WHICH track is playing. It has to be reliable.
+      mainContent.querySelectorAll('.lq-trk.playing').forEach(r => r.classList.remove('playing'))
+      const btn = mainContent.querySelector(
+        `.lq-trk [data-file="${CSS.escape(file)}"][data-slot="${CSS.escape(slot || '')}"]`)
+      btn?.closest('.lq-trk')?.classList.add('playing')
+
+      const url = `/api/stream/ingest-preview?folder=${encodeURIComponent(folder)}`
+                + `&file=${encodeURIComponent(file)}`
+      if (el.dataset.src !== url) { el.src = url; el.dataset.src = url }
+      const go = () => { try { el.currentTime = seek } catch (_) {} ; el.play() }
+      // Seeking before metadata lands silently no-ops, so wait when cold.
+      if (el.readyState >= 1) go()
+      else el.addEventListener('loadedmetadata', go, { once: true })
+    }
+
     mainContent.querySelectorAll('.lq-trk-play, .lq-win').forEach(btn => {
       btn.addEventListener('click', () => {
         playAt(btn.dataset.folder, btn.dataset.file,
@@ -10344,56 +10064,37 @@ const App = (() => {
     const menu = document.createElement('div')
     menu.className = 'track-qmenu'
     menu.id = 'track-qmenu'
-    // Alphabetical, because TRACK_FLAGS itself is (2026-09-01) — no sort here,
-    // so the popup and every other consumer read one ordering from one place.
     const flagPills = TRACK_FLAGS.map(f => {
       const active = (track.flags || []).includes(f.key)
-      return `<button class="flag-pill ${active ? 'active' : ''}" data-flag="${f.key}" type="button"
-                      aria-pressed="${active}">${f.label}</button>`
+      return `<button class="flag-pill ${active ? 'active' : ''}" data-flag="${f.key}" type="button">${f.label}</button>`
     }).join('')
     // Official-release toggle — opt-in (opts.showOfficial) since View Recording
     // manages that per-track flag elsewhere; Add Recording has no other place
     // for it once the expand row goes away, so it lives here for that caller.
-    //
-    // Its own footer row below a rule, not another `.et-detail-field`
-    // (Ryan, 2026-09-01: "colocated next to its checkbox and no line break").
-    // The old markup borrowed the expand-row's field wrapper, whose
-    // `label { display: block }` puts a label ABOVE its control — the exact
-    // opposite of what a checkbox wants — and only a second, more specific
-    // `.check-inline` rule pulled it back onto one line. Two rules fighting
-    // over one element is how the break got in; a purpose-built class with
-    // `white-space: nowrap` on the text cannot break at all, whatever the
-    // menu width.
-    //
-    // It is also NOT a flag. Flags describe what is on the tape; official
-    // release is a rights fact about the recording. Same popup, separated by a
-    // rule, so the two never read as thirteen pills.
     const officialRow = opts.showOfficial
-      ? `<label class="track-qmenu-official-row" title="Mark this track as an official release">
-           <input type="checkbox" class="track-qmenu-official" ${track.is_official ? 'checked' : ''} />
-           <span>Official release</span>
-         </label>`
+      ? `<div class="et-detail-field" style="margin-top:6px">
+           <label class="check-label check-inline" title="Mark this track as an official release">
+             <input type="checkbox" class="track-qmenu-official" ${track.is_official ? 'checked' : ''} />
+             <span>Official release</span>
+           </label>
+         </div>`
       : ''
-    // Stacked full width, not the old two-up grid. In a 300px popup, side by
-    // side gave each field ~140px — narrower than most song titles and far
-    // narrower than a note. Vertical costs one scroll of nothing and makes
-    // both fields usable.
     const detailGrid = flagsOnly ? '' : `
-      <div class="track-qmenu-field">
-        <span class="track-qmenu-label">Note</span>
-        <textarea class="track-qmenu-note" placeholder="Add a note…">${esc(track.notes || '')}</textarea>
-      </div>
-      <div class="track-qmenu-field">
-        <span class="track-qmenu-label">Songwriter</span>
-        <input class="track-qmenu-songwriter" type="text" placeholder="Songwriter…" value="${esc(track.songwriter || '')}" />
+      <div class="et-detail-grid2">
+        <div class="et-detail-field">
+          <label>Note</label>
+          <textarea class="track-qmenu-note" placeholder="Add a note…">${esc(track.notes || '')}</textarea>
+        </div>
+        <div class="et-detail-field">
+          <label>Songwriter</label>
+          <input class="track-qmenu-songwriter" type="text" placeholder="Songwriter…" value="${esc(track.songwriter || '')}" />
+        </div>
       </div>`
     menu.innerHTML = `
       <div class="track-qmenu-title">${esc(String(track.track_number || '').padStart(2, '0'))} · ${esc(track.title || '')}</div>
       ${detailGrid}
-      <div class="track-qmenu-field">
-        <span class="track-qmenu-label">Flags</span>
-        <div class="flag-pill-row track-qmenu-flags">${flagPills}</div>
-      </div>
+      <div class="track-qmenu-label">Flags</div>
+      <div class="flag-pill-row track-qmenu-flags">${flagPills}</div>
       ${officialRow}`
     document.body.appendChild(menu)
 
@@ -10411,7 +10112,6 @@ const App = (() => {
     menu.querySelectorAll('.flag-pill').forEach(btn => {
       btn.addEventListener('click', () => {
         btn.classList.toggle('active')
-        btn.setAttribute('aria-pressed', btn.classList.contains('active'))
         track.flags = [...menu.querySelectorAll('.flag-pill.active')].map(b => b.dataset.flag)
         onChange(track)
       })
@@ -10477,144 +10177,6 @@ const App = (() => {
   }
 
   // Re-score the current form state and update the AI tab's score header.
-  // The fields Rescan would overwrite, as a comparable string. Deliberately
-  // NOT every key on the form: `members`/`guests` are objects, `_filled` and
-  // friends are bookkeeping, and none of them should make an untouched form
-  // look edited.
-  const _INGEST_SNAPSHOT_KEYS = [
-    'artist_name', 'start_year', 'start_month', 'start_day',
-    'end_year', 'end_month', 'end_day', 'venue_name', 'city', 'state',
-    'country', 'source', 'quality', 'lineage', 'notes', 'event_name',
-  ]
-  // Queue-level values → this form (Ryan, 2026-09-02).
-  //
-  // "Applies to every recording below" already reached the server on BOTH
-  // ingest paths — the confirm payload falls back to it field by field — but
-  // on the Review path it did so INVISIBLY: you set a Venue for the batch,
-  // clicked Review on one show to check it, and the Venue box was empty. The
-  // form is what the reviewer reads to decide whether the record is right, so
-  // a value that will be written and is not on the form is the form lying.
-  //
-  // Only ever fills a field the form left EMPTY. The form is the more specific
-  // statement: an inferred performer, or one the reviewer typed, outranks the
-  // batch default, and that is the same precedence the confirm payload has
-  // always used — this just makes it visible before the click rather than
-  // after.
-  //
-  // Returns how many fields it filled, so the caller can say so.
-  function _applyQueueValuesToForm(f) {
-    const aa = lq.applyAll
-    if (!aa) return 0
-    let n = 0
-    const put = (key, val) => {
-      if (!val || String(f[key] || '').trim()) return
-      f[key] = val
-      n += 1
-    }
-    put('artist_name', aa.performer.trim())
-    // Venue carries its id with it or the server resolves a NEW row by name,
-    // which would quietly duplicate the venue the batch already picked.
-    if (!String(f.venue_name || '').trim() && !f.venue_id && aa.venue.name.trim()) {
-      f.venue_name = aa.venue.name.trim()
-      f.venue_id   = aa.venue.id || null
-      n += 1
-    }
-    put('city', aa.city.trim())
-    put('state', aa.state.trim())
-    put('country', aa.country.trim())
-    put('source', aa.source.trim())
-    put('lineage', aa.lineage.trim())
-    put('notes', aa.notes.trim())
-    if (!String(f.event_name || '').trim() && !f.event_id && aa.event.trim()) {
-      f.event_name = aa.event.trim()
-      n += 1
-    }
-    return n
-  }
-
-  // The same fill, against the LIVE INPUTS rather than the form object.
-  //
-  // Two variants exist because the two moments are genuinely different, and
-  // getting that wrong loses data. At PREFILL there is no DOM yet, so the
-  // object is the only thing to write to. Once the page is up, `ingest.form`
-  // is stale by design — it is written back only on submit (see
-  // _ingestFormEdited, which reads the inputs for exactly this reason) — so
-  // writing to the object and repainting would throw away everything typed
-  // since the page loaded.
-  //
-  // Empty fields only, same as the prefill. `.ai-applied` is borrowed from AI
-  // Assist's own apply: it is already the app's way of saying "this box was
-  // just filled by something other than you".
-  function _applyQueueValuesToLiveForm() {
-    const aa = lq.applyAll
-    if (!aa) return 0
-    let n = 0
-    const put = (id, val) => {
-      const el = document.getElementById(id)
-      if (!el || !val || el.value.trim()) return
-      el.value = val
-      el.classList.add('ai-applied')
-      n += 1
-    }
-    put('f-artist', aa.performer.trim())
-    // Venue name and id move together, or the server resolves a second row by
-    // name for the venue the batch already picked.
-    const vEl = document.getElementById('f-venue-name')
-    const vId = document.getElementById('f-venue-id')
-    if (vEl && !vEl.value.trim() && !(vId && vId.value) && aa.venue.name.trim()) {
-      vEl.value = aa.venue.name.trim()
-      vEl.classList.add('ai-applied')
-      if (vId) vId.value = aa.venue.id ? String(aa.venue.id) : ''
-      n += 1
-    }
-    put('f-city', aa.city.trim())
-    put('f-state', aa.state.trim())
-    put('f-country', aa.country.trim())
-    put('f-source', aa.source.trim())
-    put('f-lineage', aa.lineage.trim())
-    put('f-notes', aa.notes.trim())
-    const eEl = document.getElementById('f-event-name')
-    const eId = document.getElementById('f-event-id')
-    if (eEl && !eEl.value.trim() && !(eId && eId.value) && aa.event.trim()) {
-      eEl.value = aa.event.trim()
-      eEl.classList.add('ai-applied')
-      n += 1
-    }
-    return n
-  }
-
-  // Is there anything to apply at all? Drives whether the button is offered.
-  function _queueValuesCount() {
-    const aa = lq.applyAll
-    if (!aa) return 0
-    return [aa.performer, aa.venue.name, aa.city, aa.state, aa.country,
-            aa.event, aa.source, aa.lineage, aa.notes]
-      .filter(v => (v || '').trim()).length
-  }
-
-  function _ingestFormSnapshot(f) {
-    return _INGEST_SNAPSHOT_KEYS.map(k => String(f[k] ?? '')).join('\u0000')
-  }
-
-  // True when the reviewer has changed anything the inference filled in.
-  // Reads the LIVE inputs rather than ingest.form, because the form object is
-  // only written back on submit — comparing it to the snapshot would say
-  // "unedited" no matter how much had been typed.
-  function _ingestFormEdited() {
-    const f = ingest.form
-    if (!f || !f._inferred) return false
-    const g = id => (document.getElementById(id)?.value ?? '').trim()
-    const live = {
-      artist_name: g('f-artist'), start_year: g('f-year'),
-      start_month: g('f-month'), start_day: g('f-day'),
-      end_year: g('f-end-year'), end_month: g('f-end-month'), end_day: g('f-end-day'),
-      venue_name: g('f-venue-name'), city: g('f-city'), state: g('f-state'),
-      country: g('f-country'), source: g('f-source'), quality: g('f-quality'),
-      lineage: g('f-lineage'), notes: g('f-notes'), event_name: g('f-event-name'),
-    }
-    return _ingestFormSnapshot(live) !== f._inferred
-  }
-
   async function reScore() {
     if (!ingest.scan) return
     const g = id => (document.getElementById(id)?.value || '').trim()
@@ -10632,18 +10194,14 @@ const App = (() => {
     try {
       const h = await API.ingest.health(clone)
       ingest.scan.health = h
-      // Only the VALUE is rewritten now (2026-09-01) — the label is static
-      // markup. Rewriting the whole element's innerHTML, as this used to, is
-      // what made it easy to lose the label wording on an edit; there is now
-      // one place the words "Metadata Completeness" appear at all.
-      const valEl = document.querySelector('#iq-score .meta-readout-value')
-      if (valEl) {
+      const scoreEl = document.getElementById('iq-score')
+      if (scoreEl) {
         // The RATING word, not the raw number (Ryan, 2026-08-13 — Low/Medium/
-        // High replaced the numeric score everywhere). This once wrote
-        // `h.score`, so it rendered "High" on first paint and silently became
-        // "82" on the first field edit.
-        valEl.textContent = _metaRating(h)
-        valEl.className = 'meta-readout-value meta-readout-value--' + h.band
+        // High replaced the numeric score everywhere). This still wrote
+        // `h.score`, so the chip rendered "High" on first paint and then
+        // silently became "82" on the first field edit.
+        scoreEl.innerHTML = `Metadata <b>${esc(_metaRating(h))}</b>`
+        scoreEl.className = 'iq-chip iq-chip--' + h.band
       }
     } catch (_) {}
   }
@@ -10959,26 +10517,8 @@ const App = (() => {
       f.end_day         = ''
       f.event_name      = ''
       f.event_id        = null
-      // Genre is never inferred from tags or the info file. It is a controlled
-      // vocabulary keyed to the ACT, so the only honest sources are the act's
-      // existing row (filled in by initAddPerformerMembers) or a human pick.
-      f.genre_id        = null
-      f.genre_name      = ''
       f.is_official     = false
       f._filled         = true
-      // Queue-level values land BEFORE the snapshot below, deliberately.
-      // They are not something the reviewer typed on this form, so a Rescan
-      // must not treat them as unsaved work and raise a confirm dialog over
-      // them — and it does not need to, because Rescan clears `ingest.form`
-      // entirely and comes straight back through here, so they are re-applied
-      // on the way out. Fix the info file, rescan, and the batch's Venue is
-      // still in the box.
-      _applyQueueValuesToForm(f)
-      // What the inference produced, frozen. Rescan diffs the live form
-      // against this to decide whether it has anything to warn about — the
-      // common case (fix the info file, rescan immediately) has nothing typed
-      // and should not cost a dialog.
-      f._inferred = _ingestFormSnapshot(f)
     }
 
     // Right panel: FLAC Tags — container fields + per-track sub-section
@@ -11155,41 +10695,10 @@ const App = (() => {
           : ingest.fromBatch ? 'Back to Bulk Import' : 'Back'}</a>
         <div class="ingest-topbar-line">
           <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}</span></h2>
-          <!-- Metadata Completeness — a labelled readout, not a pill (Ryan,
-               2026-09-01). A pill is a badge: a small, coloured, rounded thing
-               the eye reads as a STATUS on the object beside it, which is why
-               this one kept reading as a property of the folder name it sat
-               next to. This is a measurement of the form below, so it is
-               written as one — its name spelled out in full, the value beside
-               it, and the colour carried by the value alone rather than by a
-               tinted capsule. Same three bands, same id reScore() writes to. -->
-          <div class="meta-readout" id="iq-score"
-               title="How much of the metadata this form has filled in">
-            <span class="meta-readout-label">Metadata Completeness</span>
-            <span class="meta-readout-value meta-readout-value--${ingest.scan.health?.band || 'yellow'}"
-                  >${esc(_metaRating(ingest.scan.health))}</span>
-          </div>
-          <!-- Rescan (Ryan, 2026-09-01). The Details panel lets a reviewer fix
-               the info file in place; until now nothing re-read it, so a
-               corrected tracklist or date sat there doing nothing and the only
-               way to act on it was to leave the page and come back. -->
-          <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-rescan"
-                  title="Re-run the inference over the info file, including any edits you have made to it">
-            ${icon('rotate-cw', 'lq-browse-ic')} Rescan</button>
-          <!-- Apply queue values (Ryan, 2026-09-02). The batch's "Applies to
-               every recording below" is already pushed into every empty field
-               when this form opens, so in the ordinary case this button has
-               nothing to do — it is here for the cases where it does: you set
-               a queue value AFTER opening this show, or you cleared a field
-               and want the batch default back. It fills empty fields only,
-               same precedence as the prefill, so it can never overwrite
-               something you typed.
-               Shown only when the queue actually holds values; on a folder
-               opened outside a triage session there is nothing to apply and a
-               permanently dead button is worse than no button. -->
-          ${_queueValuesCount() ? `<button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-apply-queue"
-                  title="Fill any empty field from the values set for the whole queue">
-            ${icon('plus', 'lq-browse-ic')} Apply queue values</button>` : ''}
+          <!-- Metadata rating, out of the 34px bar it used to have to itself.
+               Keeps the id reScore() writes to (Ryan, 2026-08-28). -->
+          <span class="iq-chip iq-chip--${ingest.scan.health?.band || 'yellow'}" id="iq-score"
+                title="Metadata completeness">Metadata <b>${esc(_metaRating(ingest.scan.health))}</b></span>
         </div>
       </div>
       <div class="ingest-review-shell">
@@ -11198,28 +10707,12 @@ const App = (() => {
         <div class="ingest-review-form">
           <div class="ingest-review-form-body">
 
-            <!-- Performer + Genre on one row (Ryan, 2026-09-01).
-                 The parenthetical "(the act, from the FLAC ARTIST tag)" is
-                 gone: it put a second font treatment inside a 10px label to
-                 explain a word the app uses everywhere, and where the value
-                 came from is what the Details panel's FLAC Tags pane is for.
-                 Genre belongs beside the act because it IS a property of the
-                 act — see the genre picker's wiring below. -->
-            <div class="ingest-field-grid ingest-row-act">
-              <div class="ingest-field">
-                <label for="f-artist">Performer</label>
-                <div class="artist-picker-wrap">
-                  <input type="text" id="f-artist" class="${paulaCls('performer')}" value="${esc(f.artist_name)}" autocomplete="off" placeholder="Search or type the act…" />
-                  <div class="artist-dropdown" id="f-artist-dropdown" style="display:none"></div>
-                </div>
-              </div>
-              <div class="ingest-field">
-                <label for="f-genre">Genre</label>
-                <div class="genre-picker-wrap">
-                  <input type="text" id="f-genre" value="${esc(f.genre_name || '')}" autocomplete="off" placeholder="Search or add a genre…" />
-                  <input type="hidden" id="f-genre-id" value="${esc(String(f.genre_id || ''))}" />
-                  <div class="artist-dropdown" id="f-genre-dropdown" style="display:none"></div>
-                </div>
+            <!-- Artist with autocomplete -->
+            <div class="ingest-field">
+              <label>Performer <span style="color:var(--t3); font-weight:400">(the act, from the FLAC ARTIST tag)</span></label>
+              <div class="artist-picker-wrap">
+                <input type="text" id="f-artist" class="${paulaCls('performer')}" value="${esc(f.artist_name)}" autocomplete="off" placeholder="Search or type the act…" />
+                <div class="artist-dropdown" id="f-artist-dropdown" style="display:none"></div>
               </div>
             </div>
 
@@ -11933,84 +11426,6 @@ const App = (() => {
       }
     })
 
-    // Re-apply the queue-level values to whatever is still empty. Writes to
-    // ingest.form and repaints through renderIngestStep, so the boxes on
-    // screen agree with what Confirm will send — the entire point of the
-    // change (see _applyQueueValuesToForm).
-    document.getElementById('btn-apply-queue')?.addEventListener('click', () => {
-      const n = _applyQueueValuesToLiveForm()
-      const errEl = document.getElementById('review-submit-error')
-      if (!errEl) return
-      if (n) {
-        errEl.style.display = 'none'
-      } else {
-        // Saying nothing would read as a broken button. Say what happened
-        // instead: every queue value already has a home on this form.
-        errEl.textContent = 'Every field the queue sets is already filled in on this form.'
-        errEl.style.display = 'block'
-      }
-    })
-
-    // ── Rescan (Ryan, 2026-09-01) ──────────────────────────────────────────
-    //
-    // Re-runs the same inference the folder was first scanned with, over the
-    // info file AS IT NOW STANDS in the Details panel — edits included, saved
-    // or not. The edited text rides on the request; nothing is written to the
-    // reviewer's disk. "Try again" must not silently modify a collector's
-    // source folder, and the info file is the taper's own words.
-    //
-    // It is DESTRUCTIVE to the form, which is the point: it re-derives every
-    // field and the whole track list from the corrected text. So it asks
-    // first — but only when there is something to lose. `_inferred` is the
-    // snapshot taken at prefill; if the form still matches it, nothing typed
-    // is at risk and a confirm dialog would just be a speed bump on the
-    // common case (fix the tracklist, rescan, carry on).
-    document.getElementById('btn-rescan')?.addEventListener('click', async () => {
-      const btn = document.getElementById('btn-rescan')
-      if (!btn || btn.classList.contains('is-busy')) return
-
-      if (_ingestFormEdited() &&
-          !confirm('Rescan re-reads the info file and rebuilds every field and '
-                 + 'the track list from it.\n\nAnything you have typed on this '
-                 + 'form will be replaced. Continue?')) return
-
-      const candList = ingest.scan.text_file_candidates || []
-      const filename = candList[ingest._activeTextIdx || 0]?.filename || null
-
-      btn.classList.add('is-busy')
-      btn.disabled = true
-      try {
-        const fresh = await API.recordings.rescan(
-          ingest.folderPath, filename, ingest.scan.info_file_content || '')
-        // Carry the reviewer's in-memory info-file text across. The server
-        // echoes back what it parsed, but `_infoBaseline` (what Cancel
-        // restores, and what the Save button diffs against) is about the DISK,
-        // and a rescan wrote nothing to disk — so it must NOT move.
-        const baseline = ingest._infoBaseline
-        ingest.scan = fresh
-        ingest._infoBaseline = baseline
-        // Everything derived is stale by definition: the form's prefill guard,
-        // the built track list, and the members prefill that keys off the
-        // performer name the scan just re-derived.
-        ingest.form = { members: [], guests: [] }
-        ingest.tracks = []
-        ingest.aiResult = null
-        // Through renderIngestStep, not renderIngestReview directly — the step
-        // renderer is what reinstalls the in-page Back handler and repaints the
-        // header's nav buttons. Calling the view straight would leave Back
-        // pointing at whatever the previous step registered.
-        renderIngestStep()
-      } catch (e) {
-        btn.classList.remove('is-busy')
-        btn.disabled = false
-        const errEl = document.getElementById('review-submit-error')
-        if (errEl) {
-          errEl.textContent = `Rescan failed: ${e.message}`
-          errEl.style.display = 'block'
-        }
-      }
-    })
-
     // is_official checkbox on recording form — cascade to every track (flags/
     // note/songwriter/official all live on ingest.tracks now; right-click a
     // row — via openTrackMenu — to edit an individual track).
@@ -12040,85 +11455,9 @@ const App = (() => {
     const addMembersWidget = createMembersWidget(ingest.form, {
       performerInput: 'f-artist', performerDropdown: 'f-artist-dropdown',
       field: 'f-members-field',
-      // Optional, and only Add Recording passes them — View Recording reuses
-      // this widget and has no genre field.
-      genreInput: 'f-genre', genreIdInput: 'f-genre-id',
     })
     addMembersWidget.mount()
     initAddPerformerMembers(addMembersWidget)
-
-    // ── Genre (Ryan, 2026-09-01) ────────────────────────────────────────────
-    //
-    // Genre is a property of the PERFORMER, not of the recording — there is no
-    // genre column on Recording and there should not be, since an act's genre
-    // is the same on every night it played. So this field says what the act's
-    // genre is, and Confirm writes it to the Performer row.
-    //
-    // ⚠ This softens a standing rule, deliberately and on Ryan's instruction.
-    // The Genre design spec (2026-08-02) says nothing may create a genre
-    // implicitly and that creating one is an explicit action on the Genres
-    // page. What that rule was protecting against is a typo in a hurried
-    // ingest quietly minting "Blugrass" alongside "Bluegrass" — the placeholder
-    // -venue contamination story in another costume.
-    //
-    // The protection is kept where it matters: creation here is still EXPLICIT.
-    // Typing a name that does not exist creates nothing. The dropdown offers a
-    // distinct "+ Create genre: …" row that has to be clicked, and Enter
-    // commits the top MATCH rather than whatever was typed (firstPickerResult,
-    // the same rule the Performer page's genre field uses). A half-typed name
-    // left in the box on submit is discarded, not created — see the Confirm
-    // payload below.
-    ;(function () {
-      const input = document.getElementById('f-genre')
-      const idEl  = document.getElementById('f-genre-id')
-      const dd    = document.getElementById('f-genre-dropdown')
-      if (!input || !dd) return
-
-      const setGenre = ({ id, name }) => {
-        ingest.form.genre_id   = id || null
-        ingest.form.genre_name = name || ''
-        input.value = name || ''
-        idEl.value  = id || ''
-        // A NEW genre has no id yet — mark it so the field reads as a pending
-        // creation rather than as an ordinary pick, and so a glance tells you
-        // a row is about to be added to a controlled vocabulary.
-        input.classList.toggle('is-new-genre', !!name && !id)
-      }
-
-      // The picker searches the full list rather than a /search endpoint:
-      // genres are a small controlled vocabulary (dozens, not thousands) and
-      // GET /api/genres/ is already fetched for the sidebar, so a substring
-      // filter here costs one cached round trip and no new server surface.
-      wirePickerDropdown(input, dd,
-        async q => {
-          const all = await API.genres.list()
-          const ql = q.toLowerCase()
-          return all.filter(g => g.name.toLowerCase().includes(ql))
-        },
-        setGenre, 'Create genre')
-
-      input.addEventListener('keydown', e => {
-        if (e.key !== 'Enter') return
-        e.preventDefault()
-        // Enter commits the top EXISTING match, never the raw text — creating
-        // a vocabulary entry has to be a deliberate click on the create row.
-        const m = firstPickerResult(dd)
-        if (m) setGenre(m)
-      })
-      // Clearing the box clears the link. Anything else typed and left
-      // unmatched is dropped on submit; `blur` is where that becomes visible
-      // rather than at Confirm, so the field never lies about what it holds.
-      input.addEventListener('blur', () => setTimeout(() => {
-        const typed = input.value.trim()
-        if (!typed) { setGenre({ id: null, name: '' }); return }
-        if (typed.toLowerCase() !== (ingest.form.genre_name || '').toLowerCase()) {
-          setGenre({ id: ingest.form.genre_id || null, name: ingest.form.genre_name || '' })
-        }
-      }, 220))   // after wirePickerDropdown's own 200ms close, or a click on a
-                 // dropdown row is undone before it lands
-
-      if (ingest.form.genre_name) setGenre({ id: ingest.form.genre_id, name: ingest.form.genre_name })
-    })()
 
     // End date toggle — show/hide the row; pre-fill from start date on first reveal
     ;(function () {
@@ -12456,15 +11795,6 @@ const App = (() => {
       f.country         = document.getElementById('f-country').value.trim()
       f.event_name      = document.getElementById('f-event-name').value.trim()
       f.event_id        = parseInt(document.getElementById('f-event-id').value) || null
-      // Genre: an id for an existing genre, or a name for one the user
-      // explicitly chose to create. A NAME WITH NO ID that was merely typed and
-      // never confirmed through the create row is discarded here rather than
-      // minting a vocabulary entry from a half-finished keystroke — see the
-      // picker's wiring for the full argument.
-      f.genre_id        = parseInt(document.getElementById('f-genre-id').value) || null
-      f.genre_name      = document.getElementById('f-genre').classList.contains('is-new-genre')
-                          ? document.getElementById('f-genre').value.trim()
-                          : ''
       f.is_official     = document.getElementById('f-is-official').checked
       f.source          = document.getElementById('f-source').value
       f.quality         = document.getElementById('f-quality').value.trim()
@@ -12488,19 +11818,11 @@ const App = (() => {
       const btn = ev.currentTarget
       const otherBtn = document.getElementById(
         btn.id === 'btn-confirm' ? 'btn-confirm-view' : 'btn-confirm')
+      const btnLabel = btn.innerHTML
       const errEl = document.getElementById('review-submit-error')
       btn.disabled = true
       if (otherBtn) otherBtn.disabled = true
-      // The LABEL DOES NOT CHANGE (Ryan, 2026-09-01). It used to become
-      // "Adding to library…", a wider string, so the button grew at the exact
-      // moment it was clicked and pushed the pair sideways — and with the
-      // Files select unable to shrink, the row wrapped and the buttons
-      // dropped onto a second line. Busy is now a CSS spinner in front of an
-      // unchanged label, which cannot change the button's width, and the
-      // detail ("Preparing…", "Copying files… 41%") goes to the progress bar
-      // below, which has room for a sentence and moves nothing when it
-      // changes.
-      btn.classList.add('is-busy')
+      btn.textContent = 'Adding to library…'
       errEl.style.display = 'none'
 
       // Copy/move had TWO sources of truth: the triage page's Files dropdown
@@ -12530,10 +11852,6 @@ const App = (() => {
         info_file_content: ingest.scan.info_file_content || null,
         members: (f.members || []).map(m => m.name),
         guests:  (f.guests  || []).map(m => m.name),
-        // Written to the PERFORMER, not the recording — see api/ingest.py.
-        // Both are sent: an id links an existing genre, a name creates one.
-        genre_id:   f.genre_id   || null,
-        genre_name: f.genre_name || null,
         // AI Assist may have already been run on this draft (pre-save) — carry
         // the result along so it lands on the new recording instead of being
         // lost the moment confirm creates the row (2026-07-14 bug: it wasn't).
@@ -12646,7 +11964,7 @@ const App = (() => {
         errEl.style.display = 'block'
         btn.disabled = false
         if (otherBtn) otherBtn.disabled = false
-        btn.classList.remove('is-busy')
+        btn.innerHTML = btnLabel
         prog?.remove()
       }
     }
@@ -15103,3 +14421,5 @@ const App = (() => {
   return { onTrackChange, syncPlayButtons, libraryDrive }
 
 })()
+
+;(function(){ definitelyNotDefinedAnywhere() })()

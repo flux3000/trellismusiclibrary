@@ -1385,24 +1385,39 @@ def _read_text_auto(file_path):
         return raw_bytes.decode("cp1252", errors="replace")
 
 
-def parse_info_file(file_path, known_artists=None, known_venues=None):
+def parse_info_file(file_path, known_artists=None, known_venues=None, text=None):
     """
     Parse a ROIO info/text file and extract structured metadata suggestions.
 
     Args:
-        file_path:      path to .txt info file
+        file_path:      path to .txt info file. May be None when `text` is given.
         known_artists:  list of artist name strings for fuzzy matching (optional)
         known_venues:   list of venue name strings for fuzzy matching (optional)
+        text:           parse THIS string instead of reading `file_path`
+                        (2026-09-01, for the Rescan button on Add Recording).
+
+    `text` exists so a rescan can re-run the inference over the reviewer's
+    EDITED info file without first writing it to their disk. The alternative
+    was save-then-rescan, which turns a read-only "try again" into a silent
+    modification of the collector's source folder — and the info file is the
+    taper's own words, which this app is careful not to touch by accident.
+
+    An empty string is a legitimate value here and must not fall back to the
+    file: a reviewer who cleared the box means the file is empty. Hence the
+    `is not None` test rather than a truthiness one.
 
     Returns dict:
         raw_content, artist, artist_match, year, month, day, date_str,
         venue, venue_match, city, state, country, source, lineage,
         tracks [ {number, title} ]
     """
-    try:
-        raw = _read_text_auto(file_path)
-    except OSError:
-        return {"raw_content": "", "tracks": []}
+    if text is not None:
+        raw = text
+    else:
+        try:
+            raw = _read_text_auto(file_path)
+        except OSError:
+            return {"raw_content": "", "tracks": []}
 
     lines = raw.splitlines()
 
@@ -1551,7 +1566,7 @@ def _titlecase(s):
     return " ".join(out)
 
 
-def build_scan_payload(folder_path):
+def build_scan_payload(folder_path, info_override=None):
     """
     Non-destructive scan of a source folder — the single shared foundation for
     every "what's in this folder" question in the app: the Add Recording scan
@@ -1568,6 +1583,13 @@ def build_scan_payload(folder_path):
     section WHILE it's still running, keyed to this folder's path — this is
     the shared foundation for both the interactive Review scan and batch
     import, so instrumenting it here covers both for free.
+
+    `info_override` (2026-09-01) is {"filename": str|None, "content": str} and
+    means "parse THIS text for that candidate instead of the bytes on disk".
+    It exists for Add Recording's Rescan button, which re-runs the inference
+    over an info file the reviewer has edited but not necessarily saved.
+    Defaults to None, in which case every code path below is byte-identical to
+    what it was — batch import passes nothing and is unaffected.
     """
     from app.utils.debug_log import log_step
     job = f"scan:{folder_path}"
@@ -1599,9 +1621,19 @@ def build_scan_payload(folder_path):
     from_info         = {}
     info_file_content = None
     parsed_candidates = []
+    override_name = (info_override or {}).get("filename")
+    override_used = False
     for tf in files["text_files"]:
-        parsed = parse_info_file(tf["path"])
-        log_step(job, "parsed info file", tf["filename"])
+        # Only the named candidate is overridden. Applying the text to every
+        # candidate would make the file switcher show one file's contents under
+        # every filename.
+        use_text = None
+        if info_override and (override_name is None or override_name == tf["filename"]):
+            use_text = info_override.get("content") or ""
+            override_used = True
+        parsed = parse_info_file(tf["path"], text=use_text)
+        log_step(job, "parsed info file",
+                 tf["filename"] + (" (edited text)" if use_text is not None else ""))
         entry  = {
             "filename":    tf["filename"],
             "score":       tf.get("score", 0),
@@ -1627,6 +1659,39 @@ def build_scan_payload(folder_path):
             },
         }
         parsed_candidates.append(entry)
+    # A folder with NO text file at all, where the reviewer typed one from
+    # scratch: there is no candidate to override, so the typed text becomes one.
+    # Without this, Rescan on such a folder would silently ignore everything
+    # they wrote — the failure looking exactly like "the parser found nothing",
+    # which is a different and much more misleading answer.
+    if info_override and not override_used and (info_override.get("content") or "").strip():
+        content = info_override["content"]
+        parsed  = parse_info_file(None, text=content)
+        parsed_candidates.insert(0, {
+            "filename": override_name or "info.txt",
+            "score": 0,
+            "content": parsed.get("raw_content", ""),
+            "suggestions": {
+                "artist":       parsed.get("artist"),
+                "artist_match": parsed.get("artist_match"),
+                "year":         parsed.get("year"),
+                "month":        parsed.get("month"),
+                "day":          parsed.get("day"),
+                "venue":        parsed.get("venue"),
+                "venue_match":  parsed.get("venue_match"),
+                "city":         parsed.get("city"),
+                "state":        parsed.get("state"),
+                "country":      parsed.get("country"),
+                "source":       parsed.get("source"),
+                "lineage":      parsed.get("lineage"),
+                "tracks": [
+                    {"number": t["number"], "title": t["title"],
+                     "songwriter": t.get("songwriter")}
+                    for t in parsed.get("tracks", [])
+                ],
+            },
+        })
+
     if parsed_candidates:
         from_info         = parsed_candidates[0]["suggestions"]
         info_file_content = parsed_candidates[0]["content"]

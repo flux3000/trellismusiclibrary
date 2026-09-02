@@ -26,6 +26,14 @@ class Artist(db.Model):
 
     memberships = db.relationship("Membership", back_populates="artist",
                                   cascade="all, delete-orphan")
+    # Photos (2026-09-01) — many, one flagged primary. Ordered primary-first so
+    # `images[0]` is always the face this person shows, matching Performer and
+    # Venue. See models/artist_image.py for why this reverses the 2026-08-07
+    # "photos are performer-level only" call for the PAGE but not for cards.
+    images      = db.relationship("ArtistImage", back_populates="artist",
+                                  cascade="all, delete-orphan",
+                                  order_by="desc(ArtistImage.is_primary), "
+                                           "ArtistImage.sort_order, ArtistImage.id")
 
     def __repr__(self):
         return f"<Artist {self.name}>"

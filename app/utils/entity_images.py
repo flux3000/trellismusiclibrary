@@ -180,3 +180,118 @@ def handle_delete(img, images_dir):
         pass
 
     return jsonify({"ok": True})
+
+
+# ── Route registrar (2026-09-01) ─────────────────────────────────────────────
+#
+# The endpoint BODIES have been shared since 2026-08-07; the five route
+# DECLARATIONS around them were still copy-pasted per blueprint. With four
+# photographed entities (Performer, Venue, Artist, Event) that is four places
+# to forget `require_library`, four URL shapes to get subtly different, and
+# four chances for a `has_image` to mean something slightly else.
+#
+# So the declarations move here too. One call per blueprint mounts the whole
+# standard set:
+#
+#     GET    <bp>/<id>/images            list
+#     POST   <bp>/<id>/images            upload (multipart, repeated `image`)
+#     GET    <bp>/images/<image_id>      serve bytes
+#     POST   <bp>/images/<image_id>/primary
+#     DELETE <bp>/images/<image_id>
+#
+# Note the asymmetry, which is deliberate and predates this: list/upload are
+# addressed by PARENT, everything else by IMAGE ID. A parent now has several
+# images, so "the venue's image" no longer identifies one.
+#
+# api/performers.py deliberately does NOT use this. It carries two extra routes
+# (the Wikimedia Commons fetch and a PUT for caption/credit) whose bodies are
+# not shared, and its wrappers are already thin. Rewriting a working, tested
+# surface to save five decorators is the wrong trade; if a fifth photographed
+# entity ever appears, revisit.
+
+
+def register_image_routes(bp, *, parent_model, image_model, url_prefix,
+                          images_dir_for, login_required, require_library):
+    """
+    Mount the five standard photo routes on `bp`.
+
+    parent_model    the owning model (Venue, Artist, Event)
+    image_model     its image table (VenueImage, ArtistImage, EventImage)
+    url_prefix      public prefix for image URLs, e.g. '/api/venues/images'
+    images_dir_for  fn(parent) -> pathlib.Path of that parent's _images dir
+    login_required / require_library
+                    passed in rather than imported, so this module stays free
+                    of a Flask-Login and app.api.system dependency and can be
+                    unit-tested on its own.
+
+    Endpoint names are namespaced by the blueprint, so two blueprints
+    registering these cannot collide.
+    """
+    kind = parent_model.__tablename__          # 'venue', 'artist', 'event'
+
+    def _parent_or_404(parent_id):
+        return db.session.get(parent_model, parent_id)
+
+    @bp.route(f"/<int:{kind}_id>/images", methods=["GET"],
+              endpoint=f"list_{kind}_images")
+    @login_required
+    def _list(**kw):
+        parent = _parent_or_404(kw[f"{kind}_id"])
+        if not parent:
+            return jsonify({"error": "Not found"}), 404
+        return jsonify([image_payload(i, url_prefix) for i in parent.images])
+
+    @bp.route(f"/<int:{kind}_id>/images", methods=["POST"],
+              endpoint=f"upload_{kind}_images")
+    @login_required
+    def _upload(**kw):
+        parent = _parent_or_404(kw[f"{kind}_id"])
+        if not parent:
+            return jsonify({"error": "Not found"}), 404
+        return handle_upload(parent, image_model, images_dir_for(parent), url_prefix)
+
+    # kind="image" returns a placeholder SVG rather than a broken image when
+    # the library drive is away — a red X in a gallery reads as data loss.
+    @bp.route("/images/<int:image_id>", methods=["GET"],
+              endpoint=f"serve_{kind}_image")
+    @login_required
+    @require_library(kind="image")
+    def _serve(image_id):
+        img = db.session.get(image_model, image_id)
+        if not img:
+            return jsonify({"error": "No image"}), 404
+        return handle_serve(img, images_dir_for(getattr(img, kind)))
+
+    @bp.route("/images/<int:image_id>/primary", methods=["POST"],
+              endpoint=f"make_{kind}_image_primary")
+    @login_required
+    def _primary(image_id):
+        img = db.session.get(image_model, image_id)
+        if not img:
+            return jsonify({"error": "Not found"}), 404
+        set_primary(img)
+        db.session.commit()
+        return jsonify(image_payload(img, url_prefix))
+
+    @bp.route("/images/<int:image_id>", methods=["DELETE"],
+              endpoint=f"delete_{kind}_image")
+    @login_required
+    def _delete(image_id):
+        img = db.session.get(image_model, image_id)
+        if not img:
+            return jsonify({"error": "Not found"}), 404
+        return handle_delete(img, images_dir_for(getattr(img, kind)))
+
+
+def entity_images_dir(library_root, bucket, name, sanitize):
+    """
+    LIBRARY_ROOT/<bucket>/<sanitized name>/_images.
+
+    `bucket` is '_venues' / '_artists' / '_events' — an underscore-prefixed
+    namespace so an entity and an ACT sharing a name ("Fillmore", "Bill Evans")
+    cannot write into one folder. Performers deliberately have no bucket: their
+    photos have lived beside their recording folders since 2026-07-22 and
+    moving them would orphan every existing file.
+    """
+    from pathlib import Path
+    return Path(library_root) / bucket / sanitize(name) / "_images"
