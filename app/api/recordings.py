@@ -186,12 +186,53 @@ def _select_diverse(candidates, limit, perf_by_rec, genre_by_performer):
     return picks[:limit]
 
 
+def _diverse_sequence(candidates, perf_by_rec, genre_by_performer):
+    """
+    The WHOLE pool, ordered so no Performer comes round again until every
+    other Performer has had a turn.
+
+    This is what makes the Top Shelf a record bin (Ryan, 2026-09-02) rather
+    than a single draw of six: the strip is now flipped through one tile at a
+    time, left to right, until the pool runs out. A cursor into a stable
+    sequence is the right shape for that — the alternative, asking the server
+    for "one more, excluding these 47 ids", grows the request with every click
+    and gives the diversity rule nothing to reason about.
+
+    Built as repeated rounds of `_select_diverse`, so **round one is
+    byte-for-byte the old six-tile draw** and the existing behaviour (and its
+    tests) are a prefix of the new sequence rather than a special case of it.
+    Rounds after the first relax nothing: each is again at most one recording
+    per Performer.
+    """
+    seq = []
+    remaining = list(candidates)
+    while remaining:
+        round_picks = _select_diverse(remaining, len(remaining),
+                                      perf_by_rec, genre_by_performer)
+        if not round_picks:
+            break                      # nothing pickable; stop rather than spin
+        seq.extend(round_picks)
+        picked = {r.id for r in round_picks}
+        remaining = [r for r in remaining if r.id not in picked]
+    return seq
+
+
 @bp.route("/recommended")
 @login_required
 def recommended_recordings():
     limit = request.args.get("limit", 3, type=int) or 3
-    limit = max(1, min(limit, 12))
+    # Raised from 12 on 2026-09-03. The Top Shelf now asks for as many tiles as
+    # the window has room for, and a wide monitor fits more than twelve — the
+    # old cap would have answered short and left exactly the gap the measuring
+    # was added to remove.
+    limit = max(1, min(limit, 24))
     reroll = request.args.get("reroll", 0, type=int) or 0
+    # Cursor into the ordered sequence (2026-09-02). Absent or 0 reproduces the
+    # old single-draw behaviour exactly, which is why nothing else had to
+    # change: offset 0 IS the first round of `_diverse_sequence`. Past the end
+    # of the pool this returns `[]`, and that empty answer is what tells the
+    # Top Shelf its bin is empty and the right-hand chevron should go.
+    offset = max(0, request.args.get("offset", 0, type=int) or 0)
 
     pool = _card_eager(_recommended_pool_query()).all()
     if not pool:
@@ -222,7 +263,14 @@ def recommended_recordings():
     rnd.shuffle(played)
     ordered = unplayed + played   # unplayed strongly preferred, never excluded
 
-    picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_performer)
+    if offset:
+        picks = _diverse_sequence(ordered, perf_by_rec,
+                                  genre_by_performer)[offset:offset + limit]
+    else:
+        # The common case — the first paint — still runs the single-round
+        # picker. Building the whole sequence to take the first six of it
+        # would be the same answer for more work on every Browse load.
+        picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_performer)
     # No waveform as of 2026-08-07: the Browse card is a handbill rendered from
     # metadata, so shipping downsampled peaks here was pure payload. The
     # serializer's opt-in param is untouched and still tested.

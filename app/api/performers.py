@@ -171,6 +171,21 @@ def all_recordings():
     per-parent order across the whole call — same nullslast-ascending
     semantics, just computed once each on the already-fetched list.
     """
+    # Primary photo id per performer, for Browse's row avatars (2026-09-02).
+    # ONE grouped query, deliberately, not `selectinload(Performer.images)` —
+    # this endpoint is the full-catalog dump and eager-loading every image row
+    # for 184 performers to read one id off each is the same shape of waste the
+    # 2026-08-24 rewrite existed to remove. Primary first, oldest as the
+    # fallback, matching `primary_for()` and `list_performers()` above.
+    image_ids = {}
+    for pid, iid, _pr in (
+        db.session.query(PerformerImage.performer_id, PerformerImage.id,
+                         PerformerImage.is_primary)
+        .order_by(PerformerImage.performer_id, PerformerImage.is_primary.desc(),
+                  PerformerImage.sort_order, PerformerImage.id).all()
+    ):
+        image_ids.setdefault(pid, iid)
+
     performers = (
         db.session.query(Performer)
         .options(
@@ -231,6 +246,12 @@ def all_recordings():
             "performer_name":    pf.name,
             "genre":             g.name  if g else None,
             "genre_color":       g.color if g else None,
+            # Browse's flat list draws a photo where there is one and the
+            # genre-coloured initials square where there is not (2026-09-02).
+            # It had only ever had the initials — not because the photos were
+            # missing (103 of 184 performers have one) but because this payload
+            # never carried the id to fetch them with.
+            "image_id":          image_ids.get(pf.id),
             "performance_count": len(perf_list),
             "recording_count":   sum(len(p["recordings"]) for p in perf_list),
             "performances":      perf_list,

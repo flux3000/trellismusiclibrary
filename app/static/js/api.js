@@ -355,8 +355,12 @@ const API = (() => {
       // (stable within a day). `reroll` is an incrementing counter kept in
       // memory client-side, not persisted — bumping it is the "Show me
       // three more" control.
-      recommended: (limit, reroll) =>
-        get(`/api/recordings/recommended?limit=${limit || 3}&reroll=${reroll || 0}`),
+      // `offset` is a cursor into the ordered sequence, for the Top Shelf's
+      // one-tile-at-a-time flip (2026-09-02). Omitted, it behaves exactly as
+      // it always did — a single diverse draw of `limit`.
+      recommended: (limit, reroll, offset) =>
+        get(`/api/recordings/recommended?limit=${limit || 3}&reroll=${reroll || 0}`
+            + `&offset=${offset || 0}`),
       // Browse's On This Day module — recordings whose date matches today's
       // month/day, any year. Empty most days; the module hides itself then.
       // Sends the BROWSER's month/day. "Today" depends on where the reader is
@@ -514,6 +518,11 @@ const API = (() => {
       // per-folder. Triage verifies FFP/ST5 for free; MD5 waits for this.
       verifyFingerprints: (folder_path) =>
         post('/api/quality/verify-fingerprints', { folder_path }),
+      // Shorten / WAV → FLAC, in place (2026-09-02). Background job: start
+      // returns a job_id; poll until the status is not 'running'.
+      convert:       (folder_path) => post('/api/quality/convert', { folder_path }),
+      convertStatus: (jobId) => get(`/api/quality/convert/${jobId}`),
+      convertCancel: (jobId) => post(`/api/quality/convert/${jobId}/cancel`, {}),
     },
   }
 })()

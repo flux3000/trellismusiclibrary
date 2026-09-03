@@ -4248,6 +4248,17 @@ a.member-chip-name:hover { color: var(--accent); }
   opacity: 0; transition: opacity 0.12s;
 }
 .nav-dim:hover .nav-dim-actions { opacity: 1; }
+/* Collections carries the same "+" and refresh, on a STATIC head rather than
+   a .nav-dim (2026-09-03) — it is always shown, so it has no caret and no
+   expand behaviour, but it is still a list you create into and refresh. It
+   needs its own display rule because .nav-shelf-head--static is not a flex
+   row on its own. */
+.nav-shelf-head--acts { display: flex; align-items: center; gap: 8px; }
+.nav-shelf-head--acts:hover .nav-dim-actions { opacity: 1; }
+/* The actions ARE controls even though the header they sit on is not — the
+   --static rule turns the pointer off for the whole row, so turn it back on
+   for these two. */
+.nav-shelf-head--acts .nav-action { cursor: pointer; }
 .nav-action { cursor: pointer; color: var(--t3); font-size: 13px; line-height: 1; }
 .nav-action:hover { color: var(--t0); }
 
@@ -4305,6 +4316,12 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .nav-pm-box .tic { width: 11px; height: 11px; }
 .nav-record--flush:hover .nav-pm-box { border-color: var(--t2); color: var(--t0); }
+/* Two targets on one row (2026-09-03): the +/- box expands in place, the NAME
+   opens the collection's page. The name gets the pointer and the hover
+   colour, so which half does what is legible before you click rather than
+   after — a row where only part of it navigates has to say so. */
+.nav-col-name { cursor: pointer; }
+.nav-col-name:hover { color: var(--accent-lit); text-decoration: underline; }
 .nav-caret--pm .pm-minus { display: none; }
 .nav-caret--pm.open .pm-plus { display: none; }
 .nav-caret--pm.open .pm-minus { display: inline-block; }
@@ -6456,6 +6473,19 @@ a.member-chip-name:hover { color: var(--accent); }
 /* The folder is a BUTTON, not a select — it opens the picker rather than
    listing options, and it should not pretend otherwise. Sized to sit level
    with the two selects beside it. */
+/* Reprocess sits inside the "Source folder" group, sharing its label with the
+   path button — it acts on that path, so it belongs to it rather than to the
+   row of settings. Quieter than the path button (no folder icon weight, no
+   border until hover) because the path is the thing you read and this is the
+   thing you occasionally press. */
+.lq-setbar-re {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  background: transparent; border: 1px solid transparent; color: var(--t3);
+  border-radius: var(--r-sm); padding: 3px 7px; margin-left: 4px;
+  font-family: inherit; font-size: 11px; white-space: nowrap;
+}
+.lq-setbar-re:hover { color: var(--accent-lit); border-color: var(--accent); }
+.lq-setbar-re:disabled { opacity: .45; cursor: default; }
 .lq-setbar-path {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0;
@@ -6534,6 +6564,32 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-applyall-n {
   font-size: 10.5px; color: var(--accent-lit); font-variant-numeric: tabular-nums;
 }
+/* Apply Values — the press that makes the blanket values real. Given real
+   button weight, unlike the quiet .lq-applyall-x link beside it: it is the
+   only thing on this block that changes what will be written, and until it is
+   pressed the eight fields above it do nothing at all. */
+.lq-applyall-go {
+  background: var(--accent-dim); border: 1px solid var(--accent);
+  color: var(--accent-lit); cursor: pointer;
+  font-family: inherit; font-size: 11px; font-weight: 600;
+  padding: 4px 11px; border-radius: var(--r-sm); white-space: nowrap;
+  margin-left: auto;
+}
+.lq-applyall-go:hover { background: var(--accent); color: var(--bg-0); }
+.lq-applyall-go:disabled { opacity: .5; cursor: default; }
+/* The settled state. Not a disabled button — a button you cannot press reads
+   as broken, where a plain confirmation reads as done. It reappears as the
+   button the moment any field changes, which is what tells you whether what is
+   on screen is what is staged. */
+.lq-applyall-ok {
+  display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
+  font-size: 11px; color: var(--green); white-space: nowrap;
+}
+.lq-applyall-ok .tic { width: 12px; height: 12px; }
+/* Clear all follows whichever of the two came before it, rather than claiming
+   the auto margin for itself. */
+.lq-applyall-go ~ .lq-applyall-x,
+.lq-applyall-ok ~ .lq-applyall-x { margin-left: 0; }
 .lq-applyall-x {
   background: none; border: 0; cursor: pointer; padding: 4px 6px;
   font-family: inherit; font-size: 11px; color: var(--t3);
@@ -7195,6 +7251,23 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-act--review:hover {
   color: var(--accent-lit); border-color: var(--accent); background: var(--bg-5);
 }
+/* Convert / Compress to FLAC (2026-09-02). Amber rather than the green of
+   Ingest: this is not the action that files the recording, it is the one that
+   has to happen first — a colour that says "attend to this" rather than
+   "you're done". Same box as every other .lq-act, so the row's controls stay
+   one family. */
+.lq-act--convert { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 38%, transparent); }
+.lq-act--convert:hover {
+  border-color: var(--amber); color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 9%, transparent);
+}
+/* Retry on a row whose ANALYSIS failed. Accent, not green: it is not the
+   action that files the recording, it is the one that gets the row back to a
+   state where filing is even possible. */
+.lq-act--retry { color: var(--accent-lit); border-color: var(--accent); }
+.lq-act--retry:hover { background: var(--accent-dim); }
+.lq-act--cancel { color: var(--t3); }
+.lq-act--cancel:hover { border-color: var(--red); color: var(--red); }
 .lq-act--move { color: var(--t2); }
 .lq-act--move:hover { color: var(--accent-lit); }
 /* One chevron across the app now (2026-08-28) — chevronIcon() only. This is
@@ -7213,6 +7286,27 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .lib-module-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .lib-module-head h2 { font-size: 14px; font-weight: 500; color: var(--t0); }
+
+/* ── The Top Shelf, hoisted above the page header (Ryan, 2026-09-02) ───────
+   It now mounts into #lib-topshelf, which renderLibraryView() puts BEFORE
+   .artist-header, so the first thing in the window is the shelf itself. It
+   sits outside .lib-modules and therefore carries its own vertical rhythm —
+   .lib-modules' 8px top padding and 32px gap belong to the column below. */
+#lib-topshelf:empty { display: none; }
+.lib-module--tops { padding: 18px 0 20px; }
+/* Deliberately NOT `.lib-module-head h2`'s 14px medium. The heading is a
+   label on a rack of album art; at full title weight it competed with the
+   tiles for the first look, which is backwards — the tiles are the content
+   and the words are the shelf edge. Same small all-caps treatment the app
+   already uses for section labels (.lq-samp h4, .lq-applyall-h). */
+.lib-module-head--quiet { padding: 0 28px; margin-bottom: 10px; }
+.lib-module-head--quiet h2 {
+  font-size: 10px; font-weight: 600; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--t3);
+}
+/* The Shuffle button shrinks with its heading, or it becomes the loudest
+   thing in a band that was just made quiet. */
+.lib-module-head--quiet .lib-reroll-btn { font-size: 10.5px; padding: 3px 8px; }
 
 .lib-reroll-btn {
   background: none; border: 1px solid var(--bd-1); color: var(--t2);
@@ -8423,14 +8517,29 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    aspect-ratio was buying nothing an explicit height doesn't do more
    reliably — this makes the square unconditional, not layout-dependent. */
 .tops-shelf { position: relative; }
+/* ⚠ `scroll-behavior: smooth` was here and is DELIBERATELY GONE (2026-09-02).
+   It turned every programmatic move — including a plain `scrollLeft = n`
+   assignment — into an animation, and in a webview that is not ticking
+   animation frames that animation never runs and the strip never moves, with
+   no error anywhere. The nav buttons decide whether a move animates now; see
+   _topsScrollTo in app.js, which asks for smooth and then checks. */
 .tops-grid {
   display: flex; gap: 10px; padding: 0 28px;
-  overflow-x: auto; scroll-behavior: smooth;
+  overflow-x: auto;
   scrollbar-width: none; -ms-overflow-style: none;
 }
 .tops-grid::-webkit-scrollbar { display: none; }
+/* Width and height both come from --tops-tile, set on .tops-grid by
+   _topsLayout() in app.js: the count of tiles is measured off the window and
+   the width is then whatever divides the track exactly (Ryan, 2026-09-03 —
+   six fixed 168px tiles left a hand's width of dead space on a laptop).
+   The 168px fallback is the pre-measurement paint and the no-JS case.
+   ⚠ Height is set from the same variable rather than by `aspect-ratio`:
+   aspect-ratio on a tile whose only children are absolutely positioned
+   collapsed these to a 2px sliver in 2026-08-24. Keep them square this way. */
 .top-tile {
-  position: relative; display: block; flex: 0 0 168px; height: 168px;
+  position: relative; display: block;
+  flex: 0 0 var(--tops-tile, 168px); height: var(--tops-tile, 168px);
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-md);
   overflow: hidden; text-decoration: none; color: inherit;
   transition: border-color .12s;
@@ -8475,10 +8584,13 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    ICONS (app.js), not the small-caret chevronIcon() helper used for
    dropdown/tree carets elsewhere — that one is a different, deliberately
    plainer glyph family and looked inconsistent next to it (Ryan, 2026-08-24).
-   Right is unconditional; only left starts hidden and toggles with scroll
-   position (2026-08-24 fix — see _updateTopsNav's comment in app.js for why
-   right can't be conditioned on overflow: on a wide-enough window all 6
-   tiles fit and it would never appear at all). */
+
+   ⚠ The visibility rule CHANGED 2026-09-02. Right used to be unconditional,
+   because the button only scrolled and a scroll button that hides when
+   nothing overflows never appeared on a wide window. It now DEALS a new
+   record onto the shelf, so "there are no more" is a real state: right hides
+   when the sequence is spent, left when there is nothing behind you. See
+   _updateTopsNav in app.js. */
 .tops-nav {
   position: absolute; top: 50%; transform: translateY(-50%);
   width: 26px; height: 26px; border-radius: 50%; z-index: 2;
@@ -8534,9 +8646,36 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 /* The list itself. Genre colour on every row is the page's main source of
    vibrance — 566 of 580 recordings have one, against 312 with a photo. */
 .brows { display: flex; flex-direction: column; padding: 0 28px 8px; }
+/* Six FIXED-shape columns and one flexible one (2026-09-02). The last column
+   used to be `auto` — a `.brow-tail` holding whatever the row happened to
+   have — so a row WITH a letter grade was wider than a row without one, and
+   the difference came out of the columns to its left. Every row on the page
+   sat at a slightly different place depending on whether it was graded
+   (Ryan). Source and grade are their own reserved cells now; an ungraded row
+   renders an empty one and nothing moves.
+
+   The performer column is also CAPPED rather than proportional. At 1.1fr it
+   took a SHARE OF THE WINDOW — about 480px at 1400px wide — so a short name
+   like "Phish" left a hand's width of dead space before the venue, and the
+   wider the monitor the worse it got. That is the horizontal eye travel Ryan
+   asked to remove (2026-09-02).
+
+   200px, measured against the real library: performer names run 20 characters
+   at the median and 26 at the 75th percentile, so this fits three quarters of
+   them whole and ellipsises the four-name jazz summits that no sane column
+   width would have held anyway. A grid column is one width for every row by
+   definition, so this is the trade — a cap that suits the common name, not
+   the longest one. */
 .brow {
   display: grid;
-  grid-template-columns: 3px 26px 116px minmax(0, 1.1fr) minmax(0, 1.4fr) auto;
+  grid-template-columns:
+    3px                    /* genre spine   */
+    26px                   /* photo         */
+    104px                  /* date          */
+    minmax(110px, 200px)   /* performer     */
+    minmax(0, 1fr)         /* venue + place */
+    46px                   /* source        */
+    26px;                  /* grade         */
   gap: 12px; align-items: center;
   height: 44px; padding-right: 10px;
   border-bottom: 1px solid var(--bd-0);
@@ -8550,6 +8689,10 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   font-size: 9px; font-weight: 600; color: var(--t2);
   background: var(--bg-4); border: 1.5px solid var(--genre-fg, var(--bd-1));
 }
+/* The photo variant. Same box as the initials square so the two cases are
+   interchangeable in the grid — `object-fit: cover` because a performer
+   photo is any aspect ratio and a squashed face is worse than a cropped one. */
+.brow-av--img { object-fit: cover; padding: 0; }
 .brow-date { font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
 .brow-perf {
   font-family: var(--font-display); font-size: 13px; color: var(--t0);
@@ -8559,13 +8702,20 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   font-size: 11.5px; color: var(--t2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.brow-tail { display: flex; gap: 7px; align-items: center; justify-content: flex-end; }
+/* Reserved cells. `.brow-srccell` is the cell, `.brow-src` the pill inside
+   it — two elements because the pill is content-width (a badge that hugged
+   the cell would stretch "SBD" to 46px) while the cell must hold its column
+   whether or not there is a pill in it. */
+.brow-srccell { display: flex; justify-content: flex-start; overflow: hidden; }
 .brow-src {
   font-size: 8.5px; font-weight: 700; letter-spacing: .1em;
   border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
-  border-radius: 3px; padding: 1px 4px;
+  border-radius: 3px; padding: 1px 4px; white-space: nowrap;
 }
-.brow-grade { font-size: 11px; font-weight: 600; color: var(--accent-lit); }
+.brow-grade {
+  font-size: 11px; font-weight: 600; color: var(--accent-lit);
+  text-align: right; font-variant-numeric: tabular-nums;
+}
 
 /* Endless-scroll furniture for the flat list (2026-08-24) — same idiom as
    Recently Added's (.recent-sentinel), just under the `.brows` list's own
@@ -8834,3 +8984,73 @@ select.set-input { max-width: 480px; }
   background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
 }
 .cf-color input[type="text"] { flex: 1; font-family: var(--font-mono); }
+
+
+/* ── Collection page: add search + per-card remove (Ryan, 2026-09-03) ──────
+   The page could show a collection and delete it, but not change what was in
+   it — the only way to add was to right-click a recording somewhere else and
+   pick this collection off a menu, which means knowing what you want before
+   you arrive. */
+.col-add { display: flex; align-items: center; gap: 12px; margin: 10px 0 18px; }
+.col-add-wrap { position: relative; flex: 1; max-width: 460px; }
+.col-add-input {
+  width: 100%; box-sizing: border-box;
+  background: var(--bg-2); border: 1px solid var(--bd-1); color: var(--t0);
+  border-radius: var(--r-sm); padding: 7px 11px;
+  font-family: inherit; font-size: 12.5px;
+}
+.col-add-input:focus { outline: none; border-color: var(--accent); }
+.col-add-hint { font-size: 11px; color: var(--t3); }
+/* Same shape as the venue/artist pickers elsewhere, so a dropdown of results
+   reads the same wherever it appears. */
+.col-add-drop {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+  background: var(--bg-3); border: 1px solid var(--bd-2);
+  border-radius: var(--r-md); margin-top: 3px;
+  max-height: 320px; overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.col-add-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--bd-0);
+}
+.col-add-row:last-child { border-bottom: 0; }
+.col-add-row:hover { background: var(--bg-4); }
+.col-add-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.col-add-perf {
+  font-size: 12.5px; color: var(--t0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.col-add-sub {
+  font-size: 11px; color: var(--t3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.col-add-act { font-size: 11px; color: var(--accent-lit); flex: none; }
+/* Already in the collection. Shown and marked rather than hidden: a show you
+   know you added looking MISSING from the search is how you end up adding it
+   twice from somewhere else. */
+.col-add-row.is-in { cursor: default; }
+.col-add-row.is-in:hover { background: none; }
+.col-add-row.is-in .col-add-perf { color: var(--t2); }
+.col-add-row.is-in .col-add-act { color: var(--green); }
+.col-add-none { padding: 8px 12px; font-size: 11.5px; color: var(--t3); }
+
+/* The remove control is a SIBLING of the card, not a child: the card is an
+   <a>, and a button inside an anchor is invalid markup that browsers repair
+   in inconsistent ways. Absolutely positioned over the corner, revealed on
+   hover so a wall of cards is not a wall of delete buttons. */
+.col-card-wrap { position: relative; }
+.col-card-x {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+  width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-0); border: 1px solid var(--bd-2); color: var(--t2);
+  cursor: pointer; opacity: 0; transition: opacity .12s, color .12s, border-color .12s;
+}
+.col-card-wrap:hover .col-card-x { opacity: 1; }
+/* Keyboard users never hover, so focus must reveal it too. */
+.col-card-x:focus-visible { opacity: 1; outline: 2px solid var(--accent); }
+.col-card-x:hover { color: var(--red); border-color: var(--red); }
+.col-card-x:disabled { opacity: .4; cursor: default; }
+.col-card-x .tic { width: 12px; height: 12px; }

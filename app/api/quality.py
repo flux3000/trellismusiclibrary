@@ -29,6 +29,7 @@ part: a restart mid-run loses the progress bar, not the analysis.
 
 import os
 import threading
+import time as _time
 import traceback as _tb
 import unicodedata
 import uuid
@@ -46,6 +47,43 @@ bp = Blueprint("quality", __name__)
 
 # job_id → {status, total, done, current, folders, error}
 _QUALITY_JOBS = {}
+
+# How long a FINISHED job stays readable, and how many are kept.
+#
+# ⚠ 2026-09-03: this used to be zero — `analyze_status` popped the job the
+# instant a terminal status was read, so the very next poll answered
+# `{"error": "unknown job"}` with a 404. The client reads that as "the job
+# died", clears the queue's progress and marks every folder it had not reached
+# yet as "Analysis failed", so a scan that COMPLETED could present as a page of
+# failures under a red "unknown job" banner (Ryan, screenshot 2026-09-03;
+# first reported 2026-08-29 and not reproduced then). Reprocessing the same
+# folder worked first time, which is what says the folders were never the
+# problem.
+#
+# A second poll is not an error condition, it is ordinary: two poll loops can
+# overlap for one tick when a scan is restarted (the client-side half of this
+# is fixed in pollAnalysis), a request can be retried, a slow response can be
+# overtaken. So a finished job stays answerable for a while and is swept
+# later. The cost is a few dict entries; the alternative is a completed job
+# that reports itself as a failure to whoever asks second.
+_JOB_RETAIN_SECONDS = 600
+_JOB_RETAIN_MAX = 40
+
+
+def _sweep_finished_jobs():
+    """Drop finished jobs once nobody plausibly still wants them."""
+    now = _time.time()
+    done = [(j.get("finished_at") or now, jid)
+            for jid, j in _QUALITY_JOBS.items() if j.get("finished_at")]
+    for fin, jid in done:
+        if now - fin > _JOB_RETAIN_SECONDS:
+            _QUALITY_JOBS.pop(jid, None)
+    # Hard cap as well as a clock, so a long session cannot grow this without
+    # bound if something keeps starting jobs faster than the window expires.
+    done = sorted((j["finished_at"], jid) for jid, j in _QUALITY_JOBS.items()
+                  if j.get("finished_at"))
+    for _fin, jid in done[:max(0, len(done) - _JOB_RETAIN_MAX)]:
+        _QUALITY_JOBS.pop(jid, None)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -235,6 +273,12 @@ def analyze_status(job_id):
     fill in as each ~2 s analysis lands rather than the user watching a bar for
     a minute.  The job entry is kept until the client has seen "done" once.
     """
+    # Swept BEFORE the lookup, not after: an entry past its window must not be
+    # served just because the sweep happens to run later in the same request.
+    # It is a scan of at most _JOB_RETAIN_MAX dict entries, so doing it on
+    # every poll costs nothing.
+    _sweep_finished_jobs()
+
     job = _QUALITY_JOBS.get(job_id)
     if not job:
         return jsonify({"error": "unknown job"}), 404
@@ -291,10 +335,15 @@ def analyze_status(job_id):
     _attach_metadata(payload["results"])
     _attach_fingerprints(payload["results"])
     _attach_concerns(payload["results"])
+    _attach_convertible(payload["results"])
     if job["status"] == "error":
         payload["error"] = job["error"]
-    if job["status"] in ("done", "error"):
-        _QUALITY_JOBS.pop(job_id, None)
+    # Terminal jobs are RETAINED, not popped — see _JOB_RETAIN_SECONDS. The
+    # clock starts at the first terminal read rather than when the worker
+    # finished, so the window is "how long after someone looked", which is the
+    # thing that actually needs covering.
+    if job["status"] in ("done", "error") and not job.get("finished_at"):
+        job["finished_at"] = _time.time()
     return jsonify(payload)
 
 
@@ -654,6 +703,38 @@ def _attach_concerns(results):
         r["concerns"] = concerns
 
 
+def _attach_convertible(results):
+    """
+    Mark rows whose folder is Shorten or WAV and holds no FLAC (2026-09-02).
+
+    Two different situations wearing one mechanism.  A `.shn` folder is
+    BROKEN from the ingest's point of view — `.shn` has been in
+    RESOLVE_AUDIO_EXTS since 2026-08-26 only so the folder is visible enough
+    to be explained, and `_analyse_one` has nothing it can decode, so the row
+    arrives with an error and a blank score.  A `.wav` folder, by contrast,
+    works perfectly; converting it is an offer about disk, not a repair.
+
+    The row carries the same field either way and the UI decides the wording,
+    because the ACTION is identical and splitting it into two payload shapes
+    would mean two code paths for one button.
+
+    Runs on rows with an error too — that is the SHN case, and skipping
+    errored rows (as the other _attach_* passes do, sensibly, since they read
+    an analysis that does not exist) would leave the one row that most needs
+    the offer without it.
+    """
+    from app.utils.audio_convert import detect_convertible
+
+    for r in results:
+        r["convertible"] = None
+        if not r.get("exists") or r.get("recording_id"):
+            continue
+        try:
+            r["convertible"] = detect_convertible(r["folder_path"])
+        except Exception:  # noqa: BLE001
+            _tb.print_exc()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Triage
 # ═════════════════════════════════════════════════════════════════════════════
@@ -684,6 +765,155 @@ def verify_fingerprints():
     except Exception as e:  # noqa: BLE001
         _tb.print_exc()
         return jsonify({"error": str(e)}), 500
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Format conversion — SHN / WAV → FLAC
+# ═════════════════════════════════════════════════════════════════════════════
+# job_id → {status, done, total, current, error, folder, result}
+#
+# Background, like the analysis and confirm jobs, and for the same reason: a
+# 20-track Shorten set is minutes of decoding, and the request would time out
+# long before it finished. In-memory, also like them — a restart mid-convert
+# loses the progress bar, not the work, because every file that finished is
+# already a FLAC on disk and a re-run skips it.
+_CONVERT_JOBS = {}
+
+
+def _run_convert_job(job_id, app, folder, ffmpeg, ext):
+    job = _CONVERT_JOBS[job_id]
+    try:
+        with app.app_context():
+            from app.utils.audio_convert import convert_folder
+
+            def progress(done, total, name):
+                job["done"], job["total"], job["current"] = done, total, name
+
+            res = convert_folder(
+                folder, ffmpeg, ext,
+                on_progress=progress,
+                should_cancel=lambda: job.get("cancel"),
+            )
+            job["result"] = res
+            job["status"] = "cancelled" if res["cancelled"] else "done"
+            # A run where every single file failed is a FAILURE, not a
+            # completed job with a footnote. Saying "done" over 20 errors is
+            # the "never report a failure as a different failure" rule from
+            # CONTEXT.md, pointed the other way.
+            if res["failed"] and not res["converted"]:
+                job["status"] = "error"
+                job["error"] = res["failed"][0].get("error") or "Every file failed to convert."
+    except Exception as e:  # noqa: BLE001
+        _tb.print_exc()
+        job["status"] = "error"
+        job["error"] = str(e)
+
+
+@bp.route("/convert", methods=["POST"])
+@login_required
+def convert_folder_start():
+    """
+    POST /api/quality/convert  { "folder_path": "..." }
+
+    Convert a Shorten or WAV folder to FLAC in place, keeping the originals in
+    a `_originals/` subfolder. Returns a job id to poll.
+
+    The format is decided HERE, by re-reading the folder, and never taken from
+    the client — the row's `convertible` field is a rendering hint that may be
+    a minute old, and acting on a stale one would run a WAV job over a folder
+    somebody has since replaced.
+    """
+    from app.utils.audio_convert import detect_convertible, probe_decoder
+    from app.utils.transcode import resolve_ffmpeg
+
+    data = request.get_json() or {}
+    folder = (data.get("folder_path") or "").strip()
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"error": f"Folder not found: {folder!r}"}), 400
+    if not _within_import_roots(folder):
+        return jsonify({"error": "Outside the permitted import roots"}), 403
+
+    what = detect_convertible(folder)
+    if not what:
+        return jsonify({"error": "Nothing in this folder needs converting."}), 400
+
+    ffmpeg = resolve_ffmpeg()
+    if not probe_decoder(ffmpeg, what["ext"]):
+        # Named precisely, because the two causes need different answers from
+        # the user: no ffmpeg at all is an install, an ffmpeg without the
+        # Shorten decoder is a different build.
+        return jsonify({
+            "error": f"This copy of ffmpeg ({ffmpeg}) cannot decode "
+                     f"{what['ext']} files. Install ffmpeg, or a build with "
+                     f"the shorten decoder, and try again."
+        }), 503
+
+    job_id = uuid.uuid4().hex
+    _CONVERT_JOBS[job_id] = {
+        "status": "running", "done": 0, "total": what["count"],
+        "current": None, "error": None, "folder": qs.norm_path(folder),
+        "kind": what["kind"], "result": None, "cancel": False,
+    }
+    threading.Thread(
+        target=_run_convert_job,
+        args=(job_id, current_app._get_current_object(), folder, ffmpeg, what["ext"]),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id, "total": what["count"],
+                    "kind": what["kind"]}), 202
+
+
+@bp.route("/convert/<job_id>", methods=["GET"])
+@login_required
+def convert_status(job_id):
+    """
+    Poll a conversion job.
+
+    The entry is dropped once a terminal status has been READ, matching
+    analyze_status — the client needs exactly one look at the outcome, and
+    holding finished jobs forever is a slow leak in a long session.
+    """
+    job = _CONVERT_JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "unknown job"}), 404
+    payload = {k: job[k] for k in
+               ("status", "done", "total", "current", "error", "kind", "result")}
+    if job["status"] in ("done", "error", "cancelled"):
+        _CONVERT_JOBS.pop(job_id, None)
+        # The staging row was written against files that no longer exist under
+        # those names. Dropping it means the re-scan the client runs next
+        # analyses the FLACs fresh instead of adopting a row whose analysis
+        # describes the Shorten set — and, for the SHN case, whose `error`
+        # would otherwise still be sitting on the card after a successful
+        # conversion.
+        if job["status"] == "done":
+            try:
+                row = qs.get_staging(job["folder"])
+                if row is not None and row.recording_id is None:
+                    db.session.delete(row)
+                    db.session.commit()
+            except Exception:  # noqa: BLE001
+                db.session.rollback()
+                _tb.print_exc()
+    return jsonify(payload)
+
+
+@bp.route("/convert/<job_id>/cancel", methods=["POST"])
+@login_required
+def convert_cancel(job_id):
+    """
+    Stop after the file currently being encoded.
+
+    Not mid-file: an encode is one ffmpeg process writing to a `.part` name,
+    and letting it finish costs seconds where killing it costs a partial file
+    to clean up. Everything already converted stays converted — the folder is
+    left in a resumable state, and re-running picks up where this stopped.
+    """
+    job = _CONVERT_JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "unknown job"}), 404
+    job["cancel"] = True
+    return jsonify({"ok": True})
 
 
 def _within_import_roots(path):
@@ -1103,6 +1333,7 @@ def staging():
     _attach_metadata(results)
     _attach_fingerprints(results)
     _attach_concerns(results)
+    _attach_convertible(results)
     return jsonify({
         "source_dir": qs.norm_path(source_dir),
         "results": results,

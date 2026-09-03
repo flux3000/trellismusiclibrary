@@ -1390,10 +1390,21 @@ const App = (() => {
           const open = _colOpenIds.has(c.id)
           return `
             <div class="nav-col-item">
-              <div class="nav-record nav-record--flush" data-col-id="${c.id}">
+              <!-- TWO targets, two meanings (Ryan, 2026-09-03). The +/- box
+                   keeps the 2026-08-23 behaviour — expand the recordings in
+                   place, without leaving whatever you were looking at — and
+                   the NAME is now a link to the collection's own page, which
+                   is where you add, remove and delete.
+                   Splitting them rather than choosing: the in-place list is
+                   for a glance, the page is for work, and one row cannot mean
+                   both from a single click target. Same split the dimension
+                   sections already use for their caret. -->
+              <div class="nav-record nav-record--flush" data-col-row="${c.id}">
                 <span class="nav-caret nav-caret--pm nav-pm-box ${open ? 'open' : ''}"
+                      data-col-toggle="${c.id}" title="${open ? 'Hide' : 'Show'} this collection's recordings"
                       >${icon('plus', 'pm-plus')}${icon('minus', 'pm-minus')}</span>
-                <span class="truncate">${esc(c.name)}</span>
+                <span class="truncate nav-col-name" data-col-open="${c.id}"
+                      title="Open ${esc(c.name)}">${esc(c.name)}</span>
               </div>
               <div class="nav-col-recs" id="nav-col-recs-${c.id}" style="display:${open ? '' : 'none'}"></div>
             </div>`
@@ -1402,8 +1413,15 @@ const App = (() => {
            <span class="truncate">${esc(r.name)}</span>${r.recording_count ? `<span class="nav-record-count">${r.recording_count}</span>` : ''}
          </div>`).join('')
     if (dim === 'collections') {
-      box.querySelectorAll('.nav-record--flush[data-col-id]').forEach(el =>
-        el.addEventListener('click', () => _toggleCollectionRow(parseInt(el.dataset.colId, 10))))
+      box.querySelectorAll('[data-col-toggle]').forEach(el =>
+        el.addEventListener('click', e => {
+          e.stopPropagation()   // the row is a link now; the box is not
+          _toggleCollectionRow(parseInt(el.dataset.colToggle, 10))
+        }))
+      box.querySelectorAll('[data-col-open]').forEach(el =>
+        el.addEventListener('click', () => {
+          window.location.hash = `#/collection/${el.dataset.colOpen}`
+        }))
       _colOpenIds.forEach(id => { if (document.getElementById(`nav-col-recs-${id}`)) _renderCollectionRecs(id) })
     } else {
       // "View all" sits at the FOOT of the expanded list, not on the section
@@ -1429,7 +1447,7 @@ const App = (() => {
   // (checked API.collections and app/api/collections.py before building this;
   // see get_collection()).
   async function _toggleCollectionRow(id) {
-    const row   = document.querySelector(`.nav-record--flush[data-col-id="${id}"]`)
+    const row   = document.querySelector(`.nav-record--flush[data-col-row="${id}"]`)
     const box   = document.getElementById(`nav-col-recs-${id}`)
     const caret = row?.querySelector('.nav-caret')
     if (_colOpenIds.has(id)) {
@@ -1471,6 +1489,21 @@ const App = (() => {
       state.expandedDims.add(dim); if (box) box.style.display = ''; caret?.classList.add('open')
       _renderDimRecords(dim)
     }
+  }
+
+  // Collections' own refresh. NOT _refreshDim: that one calls _toggleDim to
+  // ensure the section is open, and Collections stopped being a collapsible
+  // section on 2026-08-23 — it is always shown. Routing it through there would
+  // quietly add 'collections' to state.expandedDims, a flag for a control that
+  // no longer exists.
+  //
+  // Drops the per-collection recording caches as well as the list itself: a
+  // refresh that re-read the names but served a stale expanded list from
+  // memory would be the more confusing half-answer.
+  function _refreshCollections() {
+    _dimCache.collections = null
+    Object.keys(_colRecCache).forEach(k => delete _colRecCache[k])
+    _renderDimRecords('collections')
   }
 
   function _refreshDim(dim) {
@@ -1923,7 +1956,20 @@ const App = (() => {
         <a class="nav-item" data-nav="library" href="#/">${icon('library', 'nav-ic')}Browse</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
         <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
-        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Collections</div>
+        <!-- Collections was the ONE section with no actions on its header
+             (Ryan, 2026-09-03) — every dimension in .nav-dims-foot has had a
+             "+" and a refresh since the sidebar was built, and this one was
+             skipped because it is a static header rather than a _dimSection.
+             Same two controls, same order, same icons; the header itself
+             stays static (it does not expand, so it has no caret). -->
+        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced nav-shelf-head--acts">
+          <span class="nav-dim-label truncate">Collections</span>
+          <span class="nav-dim-actions">
+            ${canEditLibrary() ? `<span class="nav-action" data-col-new data-admin
+                     title="Create new collection">${icon('plus')}</span>` : ''}
+            <span class="nav-action" data-col-refresh title="Refresh collections">${icon('rotate-cw')}</span>
+          </span>
+        </div>
         <div class="nav-records" id="nav-records-collections"></div>
         <div class="nav-favorites" id="nav-favorites-flat"></div>
       </div>
@@ -1949,10 +1995,22 @@ const App = (() => {
     nav.querySelectorAll('.nav-action').forEach(el => {
       el.addEventListener('click', e => {
         e.stopPropagation()
-        const dim = el.closest('.nav-dim').dataset.dim
-        if (el.dataset.act === 'refresh') _refreshDim(dim)
-        else createInDim(dim)
+        // ⚠ Collections' header carries .nav-action too now, but it is a
+        // static shelf head, not a .nav-dim — `closest` returns null there and
+        // reading .dataset off it is a TypeError that kills every listener
+        // this loop had not yet attached. Its two actions are wired
+        // separately, just below.
+        const dimEl = el.closest('.nav-dim')
+        if (!dimEl) return
+        if (el.dataset.act === 'refresh') _refreshDim(dimEl.dataset.dim)
+        else createInDim(dimEl.dataset.dim)
       })
+    })
+    nav.querySelector('[data-col-new]')?.addEventListener('click', e => {
+      e.stopPropagation(); createInDim('collections')
+    })
+    nav.querySelector('[data-col-refresh]')?.addEventListener('click', e => {
+      e.stopPropagation(); _refreshCollections()
     })
     state.expandedDims.forEach(dim => _renderDimRecords(dim))
     _renderDimRecords('collections')   // always rendered — no longer a toggle
@@ -3199,51 +3257,146 @@ const App = (() => {
     try { c = await API.collections.get(id) }
     catch (e) { setMainHTML(`<div class="empty-state"><div class="empty-title">Collection not found</div></div>`); return }
     setNavCurrent(c.name)
-    const colRows = c.recordings || []
-    const descText = c.description && c.description.trim()
     const navBack = state.navBack
 
-    // HANDBILL CARDS, no Browse/List toggle (Ryan, 2026-08-07). The toggle used
-    // to put this page into the global dashboard — Recommended, Performers, On
-    // This Day — instead of the collection's own recordings, which is the one
-    // place the global-preference decision produced a plainly wrong result
-    // (flagged as a judgment call on 08-02, now resolved by removing the
-    // choice). A collection is a curated set; cards are the right register for
-    // it and there is no second mode to pick.
+    // ⚠ A SYSTEM collection (Full Library) is a sharing primitive, not
+    // curation: its membership is a live query and the server refuses both
+    // membership edits and deletion with a 409. So the page must not offer
+    // them — a Delete button that always fails is worse than no button, and
+    // this page had been rendering one since it was built.
+    const editable = canEditLibrary() && !c.is_system
+
+    // ── Render, from a local list, so add and remove repaint without a round
+    //    trip to re-read the whole collection ──────────────────────────────
+    let rows = c.recordings || []
+
+    const cardsHtml = () => rows.length
+      ? `<div class="lib-module-grid">${rows.map(r => editable
+          ? `<div class="col-card-wrap">${recCardHtml(r)}
+               <button type="button" class="col-card-x" data-remove="${r.id}"
+                       title="Remove from this collection">${icon('x')}</button>
+             </div>`
+          : recCardHtml(r)).join('')}</div>`
+      : `<div class="empty-state" style="min-height:160px">
+           <div class="empty-title">Empty collection</div>
+           <div class="empty-sub">${editable
+             ? 'Search above to add recordings, or right-click a recording anywhere in the app.'
+             : 'Nothing here yet.'}</div>
+         </div>`
+
+    const descText = c.description && c.description.trim()
+
+    // The add bar. A collection is the one surface whose whole job is putting
+    // recordings INTO it, and until now the only way was to right-click a
+    // recording somewhere else and pick this collection off a menu — which
+    // means knowing what you want before you arrive (Ryan, 2026-09-03).
+    const addBarHtml = !editable ? '' : `
+      <div class="col-add">
+        <div class="col-add-wrap">
+          <input type="text" id="col-add-q" class="col-add-input" autocomplete="off"
+                 placeholder="Search recordings to add…">
+          <div class="col-add-drop" id="col-add-drop" style="display:none"></div>
+        </div>
+        <span class="col-add-hint" id="col-add-hint"></span>
+      </div>`
+
     setMainHTML(entityShellHtml({
       navBack,
       title: esc(c.name),
       titleId: 'col-name',
-      titleEditable: true,
-      stats: [[colRows.length, colRows.length === 1 ? 'Recording' : 'Recordings']],
-      actions: `<button class="btn btn-ghost btn-sm pp-delete" id="col-delete" title="Delete collection">Delete</button>`,
+      titleEditable: editable,
+      stats: [[rows.length, rows.length === 1 ? 'Recording' : 'Recordings']],
+      // Refresh sits with Delete rather than in the nav: this one re-reads
+      // THIS collection, where the sidebar's refresh re-reads the list of them.
+      actions: `
+        <button class="btn btn-ghost btn-sm" id="col-refresh" title="Re-read this collection from the library">
+          ${icon('rotate-cw', 'lq-browse-ic')} Refresh</button>
+        ${editable ? `<button class="btn btn-ghost btn-sm pp-delete" id="col-delete" title="Delete collection">Delete</button>` : ''}`,
       tabs: [{
         id: 'recordings', label: 'Recordings',
         html: `
           <div class="pp-sec">Description</div>
-          <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="col-desc" title="Click to edit">${descText ? esc(c.description) : 'Add a description\u2026'}</div>
+          <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="col-desc" title="Click to edit">${descText ? esc(c.description) : 'Add a description…'}</div>
           <div class="pp-sec" style="margin-top:24px">Recordings</div>
-          ${colRows.length
-            ? `<div class="lib-module-grid">${colRows.map(recCardHtml).join('')}</div>`
-            : `<div class="empty-state" style="min-height:160px"><div class="empty-title">Empty collection</div><div class="empty-sub">Right-click a recording anywhere to add it here.</div></div>`}`,
+          ${addBarHtml}
+          <div id="col-cards">${cardsHtml()}</div>`,
       }],
     }))
     wireEntityShell(mainContent, navBack)
 
+    // Repaint just the cards and the count. Re-rendering the whole shell would
+    // tear down the search box the user is typing in — the same lesson the
+    // triage page learned the hard way (see _lqCaptureFocus).
+    function repaintCards() {
+      const box = document.getElementById('col-cards')
+      if (box) box.innerHTML = cardsHtml()
+      // The hero stat, patched in place — entityShellHtml renders it as
+      // .pp-stat-n / .pp-stat-l (checked, not guessed: inventing class names
+      // here would fail silently and leave the count wrong after every add).
+      const stat = mainContent.querySelector('.pp-stat-n')
+      if (stat) stat.textContent = String(rows.length)
+      const statLabel = mainContent.querySelector('.pp-stat-l')
+      if (statLabel) statLabel.textContent = rows.length === 1 ? 'Recording' : 'Recordings'
+      wireRemove()
+    }
 
-    const refreshSidebar = () => { _dimCache.collections = null; if (state.expandedDims.has('collections')) _renderDimRecords('collections') }
+    function wireRemove() {
+      mainContent.querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          // The card is an <a>. Without both of these the click navigates to
+          // the recording and the removal is never seen.
+          e.preventDefault(); e.stopPropagation()
+          const rid = parseInt(btn.dataset.remove, 10)
+          btn.disabled = true
+          try {
+            await API.collections.removeRecording(id, rid)
+            rows = rows.filter(r => r.id !== rid)
+            _colRecCache[id] = rows
+            repaintCards()
+            refreshSidebar()
+          } catch (err) {
+            btn.disabled = false
+            alert('Could not remove: ' + err.message)
+          }
+        })
+      })
+    }
+
+    const refreshSidebar = () => {
+      _dimCache.collections = null
+      delete _colRecCache[id]
+      _renderDimRecords('collections')
+    }
     async function saveField(patch) {
       try { await API.collections.update(id, patch); refreshSidebar() }
       catch (e) { alert('Save failed: ' + e.message) }
     }
-    makeInlineEditable(document.getElementById('col-name'), {
-      get: () => c.name,
-      onSave: async v => { v = v.trim(); if (!v || v === c.name) return; c.name = v; await saveField({ name: v }) },
-    })
-    makeInlineEditable(document.getElementById('col-desc'), {
-      multiline: true, placeholder: 'Add a description…',
-      get: () => c.description || '',
-      onSave: async v => { v = v.trim(); c.description = v; await saveField({ description: v || null }) },
+    if (editable) {
+      makeInlineEditable(document.getElementById('col-name'), {
+        get: () => c.name,
+        onSave: async v => { v = v.trim(); if (!v || v === c.name) return; c.name = v; await saveField({ name: v }) },
+      })
+      makeInlineEditable(document.getElementById('col-desc'), {
+        multiline: true, placeholder: 'Add a description…',
+        get: () => c.description || '',
+        onSave: async v => { v = v.trim(); c.description = v; await saveField({ description: v || null }) },
+      })
+    }
+    wireRemove()
+
+    document.getElementById('col-refresh')?.addEventListener('click', async () => {
+      const btn = document.getElementById('col-refresh')
+      btn.disabled = true
+      try {
+        const fresh = await API.collections.get(id)
+        c = fresh
+        rows = fresh.recordings || []
+        _colRecCache[id] = rows
+        repaintCards()
+        refreshSidebar()
+      } catch (e) {
+        alert('Refresh failed: ' + e.message)
+      } finally { btn.disabled = false }
     })
 
     onAdminClick('col-delete', async () => {
@@ -3251,6 +3404,99 @@ const App = (() => {
       try { await API.collections.remove(id); refreshSidebar(); window.location.hash = '#/collections' }
       catch (e) { alert(e.message) }
     })
+
+    // ── The add search ────────────────────────────────────────────────────
+    //
+    // Reuses the global search's `recordings` group rather than inventing an
+    // endpoint: it already matches act, person, venue and date, which is
+    // exactly how a collector looks for a show, and it is already paged.
+    //
+    // Results the collection ALREADY holds are shown and marked, not hidden.
+    // Hiding them makes a show you know you added look missing, and the user
+    // then adds it again from somewhere else; saying "Added" answers the
+    // question the search was really asking.
+    ;(function wireAdd() {
+      const q    = document.getElementById('col-add-q')
+      const drop = document.getElementById('col-add-drop')
+      const hint = document.getElementById('col-add-hint')
+      if (!q) return
+      let debounce = null
+      let lastQuery = ''
+
+      const close = () => { drop.style.display = 'none'; drop.innerHTML = '' }
+
+      function paint(items, total) {
+        if (!items.length) {
+          drop.innerHTML = `<div class="col-add-none">No recordings match that.</div>`
+          drop.style.display = 'block'
+          return
+        }
+        const have = new Set(rows.map(r => r.id))
+        drop.innerHTML = items.map(it => {
+          const inSet = have.has(it.id)
+          const line2 = [it.date, it.venue, [it.city, it.state].filter(Boolean).join(', ')]
+            .filter(Boolean).join(' · ')
+          return `<div class="col-add-row${inSet ? ' is-in' : ''}" data-add="${it.id}" ${inSet ? 'data-in="1"' : ''}>
+            <span class="col-add-main">
+              <span class="col-add-perf">${esc(it.performer || '(unknown)')}</span>
+              ${line2 ? `<span class="col-add-sub">${esc(line2)}</span>` : ''}
+            </span>
+            <span class="col-add-act">${inSet ? 'Added' : 'Add'}</span>
+          </div>`
+        }).join('')
+          + (total > items.length
+              ? `<div class="col-add-none">${total - items.length} more match — narrow the search.</div>`
+              : '')
+        drop.style.display = 'block'
+
+        drop.querySelectorAll('[data-add]').forEach(el => {
+          // mousedown, not click: the input's blur would close the dropdown
+          // out from under a click before it landed.
+          el.addEventListener('mousedown', async ev => {
+            ev.preventDefault()
+            if (el.dataset.in) return
+            const rid = parseInt(el.dataset.add, 10)
+            el.classList.add('is-in'); el.dataset.in = '1'
+            el.querySelector('.col-add-act').textContent = 'Added'
+            try {
+              await API.collections.addRecording(id, rid)
+              // Re-read only to get the CARD shape — the search item carries a
+              // different, thinner set of fields than recCardHtml needs, and
+              // building a half-populated card would render a handbill with no
+              // genre colour and no photo.
+              const fresh = await API.collections.get(id)
+              c = fresh
+              rows = fresh.recordings || []
+              _colRecCache[id] = rows
+              repaintCards()
+              refreshSidebar()
+              if (hint) hint.textContent = `${rows.length} in this collection`
+            } catch (err) {
+              el.classList.remove('is-in'); delete el.dataset.in
+              el.querySelector('.col-add-act').textContent = 'Add'
+              if (hint) hint.textContent = 'Could not add: ' + err.message
+            }
+          })
+        })
+      }
+
+      q.addEventListener('input', () => {
+        const text = q.value.trim()
+        clearTimeout(debounce)
+        if (text.length < 2) { close(); return }
+        debounce = setTimeout(async () => {
+          lastQuery = text
+          try {
+            const res = await API.search.group(text, 'recordings', 12, 0)
+            if (lastQuery !== text) return      // a later keystroke already won
+            paint(res.items || [], res.total || 0)
+          } catch (_) { close() }
+        }, 220)
+      })
+      q.addEventListener('blur', () => setTimeout(close, 180))
+      q.addEventListener('focus', () => { if (drop.innerHTML) drop.style.display = 'block' })
+      q.addEventListener('keydown', e => { if (e.key === 'Escape') { close(); q.blur() } })
+    })()
   }
 
   // Artist (person) page — editable info + Performer associations + appearances,
@@ -3651,69 +3897,306 @@ const App = (() => {
   // that same stable default, not wherever the reroll was left.
   let _libRecommendedReroll = 0
 
+  // ── The Top Shelf as a record bin (Ryan, 2026-09-02) ─────────────────────
+  //
+  // It was six tiles and a scrollbar. It is now a bin you flip through: every
+  // click of the right chevron pulls ONE more recording off the ordered
+  // sequence, appends it to the right, and slides the leftmost tile out of
+  // view. Click until something catches your eye; go back with the left
+  // chevron. When the pool is spent, the right chevron GOES — the strip
+  // refusing to move with no explanation was the thing to avoid, and a
+  // disappearing control says "that's all of them" without a word of copy.
+  //
+  // `_topsShown` is how far into the sequence we have drawn, and doubles as
+  // the server-side offset — see /api/recordings/recommended's `offset`.
+  // `_topsNext` is one tile fetched ahead, so a click paints immediately
+  // instead of waiting on a round trip; its emptiness is also how exhaustion
+  // is discovered, one click before the user would have hit it.
+  let _topsShown = 0
+  let _topsNext  = null
+  let _topsBusy  = false
+
+  // ── How many records the shelf holds is a function of the WINDOW ──────────
+  //
+  // It was six, always, and six 168px tiles leave a hand's width of dead space
+  // on an ordinary laptop and a chasm on anything wider (Ryan, 2026-09-03).
+  // A shelf that does not reach the end of its own shelf reads as broken
+  // furniture.
+  //
+  // So the count is measured, not chosen, and the tiles are then sized to fill
+  // the track EXACTLY. Both halves are needed: picking a count alone still
+  // leaves up to one tile-width of remainder, and stretching six tiles alone
+  // makes them bigger rather than showing more records, which is not what a
+  // bin is for.
+  //
+  // MIN is the smallest a tile may be before another one stops fitting; the
+  // real width lands between MIN and just under 2×MIN. Height tracks width so
+  // the art stays square — ⚠ it must be set explicitly and not by
+  // `aspect-ratio`, which collapsed these tiles to a 2px sliver in 2026-08-24
+  // because their only children are absolutely positioned.
+  const TOPS_TILE_MIN = 168
+  const TOPS_GAP      = 10
+
+  function _topsFit(width) {
+    if (!width || width < TOPS_TILE_MIN) return 1
+    return Math.max(1, Math.floor((width + TOPS_GAP) / (TOPS_TILE_MIN + TOPS_GAP)))
+  }
+
+  // The usable track, with the strip's own 28px gutters taken off.
+  function _topsTrackWidth() {
+    const grid = document.getElementById('tops-grid')
+    if (grid && grid.clientWidth) {
+      const cs = getComputedStyle(grid)
+      return grid.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0)
+    }
+    // The FIRST fetch happens before the strip is painted, so fall back to the
+    // content column.
+    //
+    // ⚠ NOT #lib-topshelf, the shelf's own mount. It carries
+    // `#lib-topshelf:empty { display: none }` so an absent shelf leaves no gap
+    // — and it is empty at exactly this moment, so it measures ZERO and the
+    // first fetch asked for the six-tile floor on every window however wide.
+    // Confirmed live: a 1920px load painted six tiles and a 394px gap, then
+    // corrected itself a beat later when the observer fired. Measuring the
+    // column the shelf will occupy gets it right on the first paint instead.
+    const host = mainContent
+    return Math.max(0, (host ? host.clientWidth : 0) - 56)
+  }
+
+  // Size the tiles to fill the track exactly, and report how many fit.
+  function _topsLayout() {
+    const grid = document.getElementById('tops-grid')
+    if (!grid) return 0
+    const w = _topsTrackWidth()
+    const n = _topsFit(w)
+    // Floor, not round: a fractional pixel per tile accumulated across nine of
+    // them is enough to push the last one into overflow and put a scrollbar on
+    // a row that fits.
+    const tile = Math.floor((w - TOPS_GAP * (n - 1)) / n)
+    if (tile > 0) grid.style.setProperty('--tops-tile', tile + 'px')
+    return n
+  }
+
+  // Widening deals more records rather than stretching the ones already out.
+  // Narrowing deals none: the extra tiles stay loaded and simply scroll off,
+  // which is what the left chevron is for — throwing away records the user has
+  // already been shown would be a worse answer than letting them slide.
+  async function _topsFillTo(want) {
+    const grid = document.getElementById('tops-grid')
+    if (!grid) return
+    let have = grid.querySelectorAll('.top-tile').length
+    if (want <= have) return
+
+    // The look-ahead tile is already paid for; spend it before asking for more,
+    // or it would be requested a second time at the same offset and appear
+    // twice.
+    if (_topsNext) {
+      grid.insertAdjacentHTML('beforeend', _topTileHtml(_topsNext))
+      _topsShown += 1; _topsNext = null; have += 1
+    }
+    if (want > have) {
+      try {
+        const more = await API.recordings.recommended(want - have, _libRecommendedReroll, _topsShown)
+        ;(more || []).forEach(r => {
+          grid.insertAdjacentHTML('beforeend', _topTileHtml(r))
+          _topsShown += 1
+        })
+      } catch (_) { /* a shelf that did not grow is not worth a banner */ }
+    }
+    _updateTopsNav()
+    _topsPrefetch()
+  }
+
+  // ⚠ A ResizeObserver, not window.onresize. The content column also changes
+  // width when the sidebar is collapsed from the header, which fires no window
+  // resize at all — the shelf would have stayed six-wide in exactly the case
+  // that gains the most room.
+  //
+  // One observer for the app, re-pointed at each new strip: renderBrowseModules
+  // runs on every visit to Browse, and attaching a fresh observer each time
+  // would leave the old ones alive against detached nodes.
+  let _topsRO = null
+  let _topsResizeT = null
+
+  // One debounced re-layout, shared by both triggers. Debounced because a drag
+  // of the window edge fires continuously and each widening step would
+  // otherwise start its own fetch.
+  function _topsRelayoutSoon() {
+    clearTimeout(_topsResizeT)
+    _topsResizeT = setTimeout(() => {
+      const want = _topsLayout()
+      if (want) _topsFillTo(want)
+    }, 160)
+  }
+
+  // ⚠ TWO triggers, and each covers what the other misses.
+  //
+  // ResizeObserver is the one that matters — it catches the content column
+  // changing width when the SIDEBAR is collapsed, which fires no window resize
+  // at all, and that is the case that gains the most room.
+  //
+  // But RO callbacks are delivered as part of the rendering lifecycle, so a
+  // window that is not painting frames never receives them. Measured
+  // directly: in a hidden pane a freshly-created observer did not even fire
+  // its initial observation, and fired the instant the pane painted. That is
+  // the same starvation that makes a smooth scroll a no-op here (see
+  // _topsScrollTo). `resize` is a plain event and is not gated that way, so it
+  // is the belt to RO's braces for the ordinary window-drag case.
+  //
+  // Registered ONCE for the app. renderBrowseModules runs on every visit to
+  // Browse, and a listener per visit would pile up against detached shelves.
+  let _topsResizeBound = false
+  function _observeTops() {
+    const shelf = document.getElementById('tops-grid')
+    if (_topsRO) _topsRO.disconnect()
+    if (!_topsResizeBound) {
+      window.addEventListener('resize', () => {
+        if (document.getElementById('tops-grid')) _topsRelayoutSoon()
+      })
+      _topsResizeBound = true
+    }
+    if (shelf && typeof ResizeObserver !== 'undefined') {
+      _topsRO = new ResizeObserver(_topsRelayoutSoon)
+      _topsRO.observe(shelf)
+    }
+    // Synchronously, so the first paint is already the right shape rather than
+    // reflowing a beat later.
+    const want = _topsLayout()
+    if (want) _topsFillTo(want)
+  }
+
+  // Look one past the end. Returns nothing and leaves _topsNext null when the
+  // sequence is spent, which _updateTopsNav() reads as "hide the right nav".
+  async function _topsPrefetch() {
+    if (_topsNext || _topsBusy) return
+    _topsBusy = true
+    try {
+      const more = await API.recordings.recommended(1, _libRecommendedReroll, _topsShown)
+      _topsNext = more && more.length ? more[0] : null
+    } catch (_) {
+      _topsNext = null
+    } finally {
+      _topsBusy = false
+      _updateTopsNav()
+    }
+  }
+
   // Shuffle. Replaces only the TILES, not the whole section — re-rendering the
   // heading and its button meant re-wiring the button every time, which is how
   // the old version worked and one listener leak away from not working.
+  //
+  // A shuffle is a NEW BIN: the reroll counter advances, so the sequence is a
+  // different draw, and everything flipped past is forgotten. Resetting
+  // `_topsShown` is what makes that true — leaving it would have the fresh
+  // bin start six deep into its own sequence.
   async function _refreshRecommendedModule() {
     const grid = document.getElementById('tops-grid')
     if (!grid) return
     _libRecommendedReroll++
     let recs = []
-    try { recs = await API.recordings.recommended(BROWSE_TOP_N, _libRecommendedReroll) } catch (_) {}
+    // The same measured count, or a shuffle on a wide window would refill the
+    // shelf to six and reintroduce the gap it was just widened out of.
+    const want = Math.max(BROWSE_TOP_N, _topsFit(_topsTrackWidth()))
+    try { recs = await API.recordings.recommended(want, _libRecommendedReroll, 0) } catch (_) {}
     if (!recs.length) { document.getElementById('lib-mod-tops')?.remove(); return }
     grid.innerHTML = recs.map(_topTileHtml).join('')
     grid.scrollLeft = 0
+    _topsShown = recs.length
+    _topsNext  = null
+    _topsLayout()
     _updateTopsNav()
+    _topsPrefetch()
   }
 
-  // Top Shelf left/right nav (2026-08-24, fixed same day — see below). The
-  // strip scrolls natively (mouse wheel, trackpad, touch); these two buttons
-  // are an explicit affordance for it and the reason cards no longer wrap to
-  // a second row at narrow widths — see .tops-grid in main.css.
+  // Left nav appears once there is anything to go back to; right nav lives
+  // exactly as long as the bin has another record in it.
   //
-  // FIX 1: the right button used to start with .hidden and only clear it once
-  // the strip actually overflowed — on a wide enough window all 6 tiles fit
-  // with room to spare, so the button never appeared at all ("I am not
-  // seeing the left-right icons," Ryan). The spec only ever conditioned the
-  // LEFT button on scroll position ("only if the user has scrolled to the
-  // right already"); the right one was always supposed to be there. Right is
-  // now unconditional — rendered without .hidden and never toggled — a click
-  // with nothing left to scroll is just a harmless no-op. Left still starts
-  // hidden and only appears once scrolled.
-  //
-  // FIX 2 (2026-08-24): nav used to scroll by 80% of the visible viewport —
-  // a "paging" jump that could carry 3+ tiles at once depending on how many
-  // fit on screen. Ryan's spec is a one-at-a-time shift: click right, the
-  // leftmost tile slides fully out of view on the left and exactly one
-  // previously-offscreen tile comes into view on the right. The scroll
-  // distance now equals exactly one tile's width plus the grid's gap,
-  // measured live off the DOM (_topsStep) rather than hardcoded, so it stays
-  // correct if the tile width or gap ever changes in CSS.
-  //
-  // Wired fresh on every renderBrowseModules() call; a Shuffle re-uses the
-  // same grid and button elements, so it only needs to recompute the left
-  // button's visibility, not rewire anything.
+  // ⚠ Right used to be UNCONDITIONAL, and deliberately so (2026-08-24): the
+  // strip scrolled natively, all six tiles fit on a wide window, and a button
+  // that only appeared on overflow never appeared at all. That reasoning does
+  // not survive the rebuild — the button no longer scrolls, it DEALS, so
+  // "nothing left to deal" is a real state and hiding it is the honest answer
+  // rather than a no-op click.
   function _updateTopsNav() {
     const grid = document.getElementById('tops-grid')
     const navL = document.getElementById('tops-nav-l')
+    const navR = document.getElementById('tops-nav-r')
     if (!grid || !navL) return
     navL.classList.toggle('hidden', grid.scrollLeft <= 2)
+    // Hidden only once a completed prefetch has come back empty. While one is
+    // in flight the button stays put: flickering it away and back on every
+    // click would read as a bug, and a click during that window is queued by
+    // _topsAdvance rather than lost.
+    if (navR) navR.classList.toggle('hidden', !_topsNext && !_topsBusy)
   }
+
+  // Move the strip, and MAKE SURE IT MOVED.
+  //
+  // ⚠ Found live, 2026-09-02: a smooth scroll is a silent no-op in some
+  // webviews. `scrollTo({behavior:'smooth'})` schedules an animation driven by
+  // animation frames, and in a pane that is not ticking them the animation
+  // never starts, never finishes, and never reports anything — scrollLeft
+  // simply stays where it was. `scroll-behavior: smooth` in CSS is worse,
+  // because it hijacks a plain `el.scrollLeft = n` assignment into the same
+  // dead animation, so even the obvious fallback fails. Verified all three
+  // combinations against the running app: CSS-smooth + JS-smooth, CSS-auto +
+  // JS-smooth, and CSS-auto + JS-instant. Only the last one moved.
+  //
+  // So: ask for the animation, then check. If nothing has moved a quarter of a
+  // second later, put it where it belongs outright. The strip arriving without
+  // a glide is a cosmetic loss; a chevron that does nothing is a broken
+  // control, and this is a DEALING button now — the tile has already been
+  // appended by the time we get here, so a failed scroll would leave the shelf
+  // silently growing off the right-hand edge.
+  //
+  // The CSS `scroll-behavior: smooth` came off .tops-grid in the same pass:
+  // one place decides whether a movement animates, and it is here.
+  async function _topsScrollTo(grid, left) {
+    const from = grid.scrollLeft
+    grid.scrollTo({ left, behavior: 'smooth' })
+    await new Promise(r => setTimeout(r, 250))
+    if (Math.abs(grid.scrollLeft - from) < 1) grid.scrollLeft = left
+  }
+
   function _topsStep(grid) {
     const tile = grid.querySelector('.top-tile')
     if (!tile) return grid.clientWidth
     const gap = parseFloat(getComputedStyle(grid).columnGap) || 0
     return tile.getBoundingClientRect().width + gap
   }
+
+  // One flip right: append the prefetched tile, slide one tile-width along,
+  // and look ahead again.
+  async function _topsAdvance() {
+    const grid = document.getElementById('tops-grid')
+    if (!grid) return
+    // A click that lands while the look-ahead is still out waits for it rather
+    // than doing nothing — on a slow first click that is the difference
+    // between "the button is broken" and "the button is thinking".
+    if (!_topsNext && _topsBusy) {
+      while (_topsBusy) await new Promise(r => setTimeout(r, 40))
+    }
+    if (!_topsNext) { _updateTopsNav(); return }
+
+    grid.insertAdjacentHTML('beforeend', _topTileHtml(_topsNext))
+    _topsShown += 1
+    _topsNext = null
+    await _topsScrollTo(grid, grid.scrollLeft + _topsStep(grid))
+    _updateTopsNav()
+    _topsPrefetch()
+  }
+
   function _wireTopsNav() {
     const grid = document.getElementById('tops-grid')
     const navL = document.getElementById('tops-nav-l')
     const navR = document.getElementById('tops-nav-r')
     if (!grid || !navL || !navR) return
-    navL.addEventListener('click', () => grid.scrollBy({ left: -_topsStep(grid), behavior: 'smooth' }))
-    navR.addEventListener('click', () => grid.scrollBy({ left: _topsStep(grid), behavior: 'smooth' }))
+    navL.addEventListener('click', () =>
+      _topsScrollTo(grid, Math.max(0, grid.scrollLeft - _topsStep(grid))).then(_updateTopsNav))
+    navR.addEventListener('click', _topsAdvance)
     grid.addEventListener('scroll', _updateTopsNav)
     _updateTopsNav()
+    _topsPrefetch()
   }
 
   // Builds and mounts all five Browse modules into `mountEl`. Each module is
@@ -3768,7 +4251,10 @@ const App = (() => {
 
   let _browseRows = []
   let _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
-  let _browseSort = 'az'
+  // Recently added, not A–Z (Ryan, 2026-09-02). What a collector wants on
+  // opening a library they add to constantly is what arrived since last time;
+  // alphabetical is a lookup order, and lookup is what Search is for.
+  let _browseSort = 'added'
   let _browseVisibleCount = 0
   let _browseListIO = null
 
@@ -3823,17 +4309,28 @@ const App = (() => {
       .map(w => w[0]).join('').toUpperCase()
     const loc = fmtLocation(r.city, r.state, r.country)
     const c = r.genre_color || 'var(--t2)'
+    // The photo, where there is one (Ryan, 2026-09-02 — it had always drawn
+    // initials). 103 of 184 performers have one; the initials square is the
+    // NORMAL case for the rest, so it stays exactly as it was rather than
+    // becoming a broken-image placeholder. `image_id` rides on the performer
+    // in /api/performers/all-recordings, added the same day.
+    const av = r.image_id
+      ? `<img class="brow-av brow-av--img" src="${API.performers.imageUrl(r.image_id)}" alt="" loading="lazy">`
+      : `<span class="brow-av">${esc(initials)}</span>`
+    // Source and grade are their own CELLS now, always emitted even when
+    // empty. They used to share one auto-width `.brow-tail`, so a row WITH a
+    // letter grade was wider than a row without one and dragged every column
+    // left of it out of line (Ryan, 2026-09-02). A reserved cell cannot do
+    // that whatever it holds.
     return `
       <a class="brow" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
         <span class="brow-spine"></span>
-        <span class="brow-av">${esc(initials)}</span>
+        ${av}
         <span class="brow-date">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '—')}</span>
         <span class="brow-perf">${esc(r.performer || '')}</span>
         <span class="brow-venue">${esc([r.venue, loc].filter(Boolean).join(', ') || '(unknown venue)')}</span>
-        <span class="brow-tail">
-          ${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}
-          ${r.quality ? `<span class="brow-grade">${esc(r.quality)}</span>` : ''}
-        </span>
+        <span class="brow-srccell">${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}</span>
+        <span class="brow-grade">${r.quality ? esc(r.quality) : ''}</span>
       </a>`
   }
 
@@ -3906,10 +4403,14 @@ const App = (() => {
     _libRecommendedReroll = 0
     _browseRows = rows || []
     _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
-    _browseSort = 'az'
+    _browseSort = 'added'
 
+    // How many fit RIGHT NOW, measured off the mount point before the strip
+    // is painted. BROWSE_TOP_N is only the floor for a window so narrow that
+    // the measurement is not worth trusting.
+    const wantTops = Math.max(BROWSE_TOP_N, _topsFit(_topsTrackWidth()))
     const [tops, collections] = await Promise.all([
-      API.recordings.recommended(BROWSE_TOP_N, 0).catch(() => []),
+      API.recordings.recommended(wantTops, 0).catch(() => []),
       API.collections.list().catch(() => []),
     ])
 
@@ -3924,9 +4425,17 @@ const App = (() => {
     // the app, and reads as a mismatched icon family next to the rest of
     // this Lucide-built page (Ryan, 2026-08-24: "we do not need to use
     // inconsistent chevrons that are not from our icon package").
+    // The bin starts here, not at zero — the first paint has already dealt
+    // `tops.length` records off the sequence. Length of the RESULT, not of the
+    // request: a pool with fewer records than the window has room for returns
+    // short, and counting the ask would leave the cursor past records never
+    // shown.
+    _topsShown = tops.length
+    _topsNext  = null
+
     const topsHtml = tops.length ? `
-      <section class="lib-module" id="lib-mod-tops">
-        <div class="lib-module-head">
+      <section class="lib-module lib-module--tops" id="lib-mod-tops">
+        <div class="lib-module-head lib-module-head--quiet">
           <h2>The Top Shelf</h2>
           <button type="button" class="lib-reroll-btn" id="browse-shuffle">
             ${icon('rotate-cw')} Shuffle
@@ -3942,16 +4451,25 @@ const App = (() => {
     const opt = (v, label, n) =>
       `<option value="${esc(v)}">${esc(label)}${n != null ? ` (${n})` : ''}</option>`
 
+    // The shelf goes ABOVE the "Browse My Library" header (Ryan, 2026-09-02).
+    // It is the one part of this page you look AT rather than read past, so it
+    // gets the top of the window; the H1 becomes the label on the list below
+    // it, which is what it actually names. Its own mount point, because it now
+    // sits outside the module column entirely — renderLibraryView() lays out
+    // #lib-topshelf, then the header, then this.
+    const topsMount = document.getElementById('lib-topshelf')
+    if (topsMount) topsMount.innerHTML = topsHtml
+
     mountEl.innerHTML = `
-      ${topsHtml}
+      ${topsMount ? '' : topsHtml}
 
       <section class="lib-module" id="lib-mod-all">
         <div class="browse-bar">
           <div class="browse-sorts" id="browse-sorts">
-            <button class="sortb on" data-sort="az">A–Z</button>
+            <button class="sortb" data-sort="az">A–Z</button>
             <button class="sortb" data-sort="newest">Newest</button>
             <button class="sortb" data-sort="oldest">Oldest</button>
-            <button class="sortb" data-sort="added">Recently added</button>
+            <button class="sortb on" data-sort="added">Recently added</button>
           </div>
           <div class="browse-filters">
             <label class="bfilter">Quality
@@ -3992,8 +4510,9 @@ const App = (() => {
 
     _browseDrawList()
     _wireTopsNav()
+    _observeTops()
 
-    mountEl.querySelector('#browse-shuffle')?.addEventListener('click', _refreshRecommendedModule)
+    document.getElementById('browse-shuffle')?.addEventListener('click', _refreshRecommendedModule)
     mountEl.querySelectorAll('#browse-sorts .sortb').forEach(b =>
       b.addEventListener('click', () => {
         _browseSort = b.dataset.sort
@@ -4044,8 +4563,15 @@ const App = (() => {
         <span class="top-overlay">
           <span class="top-perf">${esc(r.performer || '')}</span>
           ${r.venue ? `<span class="top-venue">${esc(r.venue)}</span>` : ''}
-          <span class="top-meta">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '')}${
-            r.quality ? ` · ${esc(r.quality)}` : ''}</span>
+          <span class="top-meta">${[
+            handbillDate(r.start_year, r.start_month, r.start_day) || '',
+            // Source between the date and the grade (Ryan, 2026-09-02). On a
+            // shelf of A/A+ shows the grade barely separates them; SBD vs AUD
+            // is the thing that actually decides whether you pull the record
+            // out of the bin.
+            r.source || '',
+            r.quality || '',
+          ].filter(Boolean).map(esc).join(' · ')}</span>
         </span>
       </a>`
   }
@@ -4104,6 +4630,7 @@ const App = (() => {
         p.recordings.map(r => ({
           id: r.id, performer: artist.performer_name,
           genre: artist.genre, genre_color: artist.genre_color,
+          image_id: artist.image_id,
           start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
           venue: p.venue_name, city: p.city, state: p.state, country: p.country,
           source: r.source, quality: r.quality,
@@ -4112,7 +4639,8 @@ const App = (() => {
         }))
       )
     )
-    setMainHTML(`${headerHtml}<div class="lib-modules" id="lib-modules-mount"></div>`)
+    setMainHTML(`<div id="lib-topshelf"></div>${headerHtml}`
+              + `<div class="lib-modules" id="lib-modules-mount"></div>`)
     await renderBrowseModules(document.getElementById('lib-modules-mount'), rows)
   }
 
@@ -7209,8 +7737,11 @@ const App = (() => {
 
     // Default the file-behavior choice from the shared preference, once per session.
     if (batch.behavior == null) {
+      // Hydrate the cache from the stored preference. loadPrefs() also fills
+      // `appPrefs`, which fileBehavior() falls back to, so this is belt and
+      // braces rather than the only path.
       try {
-        const prefs = await API.preferences.get()
+        const prefs = await getPrefs()
         batch.behavior = prefs.ingest_file_behavior || 'move'
       } catch (_) { batch.behavior = 'move' }
     }
@@ -7256,8 +7787,8 @@ const App = (() => {
           <div class="batch-behavior-row">
             <label class="batch-behavior-label" for="batch-behavior-select">File handling</label>
             <select id="batch-behavior-select">
-              <option value="move" ${batch.behavior !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
-              <option value="copy" ${batch.behavior === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
+              <option value="move" ${fileBehavior() !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
+              <option value="copy" ${fileBehavior() === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
             </select>
           </div>
           <div class="batch-tier-pills" style="margin-top:10px">
@@ -7280,8 +7811,7 @@ const App = (() => {
     // ── Events ──────────────────────────────────────────────────────────────
 
     document.getElementById('batch-behavior-select')?.addEventListener('change', async e => {
-      batch.behavior = e.target.value
-      try { await API.preferences.update({ ingest_file_behavior: batch.behavior }) } catch (_) {}
+      await setFileBehavior(e.target.value)
     })
 
     document.getElementById('batch-rescan-btn')?.addEventListener('click', () => {
@@ -7455,6 +7985,37 @@ const App = (() => {
   // within a session, and there is deliberately NO bare `prefs` global — the
   // only other `prefs` in this file is a local inside renderSettingsPage().
   let appPrefs = null
+
+  // ── File handling: ONE setting, four controls (Ryan, 2026-09-02) ──────────
+  //
+  // Copy-vs-move is offered in four places — Bulk Import's bar, the Review &
+  // Ingest settings bar, the Add Recording form, and Settings — and they did
+  // not agree. Choosing "Copy into library" on the ingest queue set
+  // `batch.behavior` and nothing else, while the Add Recording form drew its
+  // <select> from `appPrefs.ingest_file_behavior`; so the queue said Copy and
+  // the form, one click later, said Move. Only ONE of the four wrote the
+  // preference back.
+  //
+  // It is a property of the library, not of a screen. So there is one reader
+  // and one writer, both below, and `batch.behavior` is a cache of the
+  // preference rather than a second opinion about it.
+  function fileBehavior() {
+    return (batch.behavior || appPrefs?.ingest_file_behavior || 'move')
+  }
+
+  // Writes all three: the in-memory cache, the cached prefs object every
+  // render reads, and the server. Updating the first two locally is what makes
+  // the change visible on the NEXT screen without waiting on (or trusting) the
+  // round trip — and the write is fire-and-forget for the same reason the
+  // other preference menus are, since a failure here costs a setting, not
+  // data.
+  async function setFileBehavior(value) {
+    const v = value === 'copy' ? 'copy' : 'move'
+    batch.behavior = v
+    if (appPrefs) appPrefs.ingest_file_behavior = v
+    try { await API.preferences.update({ ingest_file_behavior: v }) } catch (_) {}
+    return v
+  }
   async function getPrefs() {
     if (appPrefs) return appPrefs
     try { appPrefs = await API.preferences.get() } catch (_) { appPrefs = {} }
@@ -7463,9 +8024,16 @@ const App = (() => {
 
   // Listening Quality triage state.
   const lq = {
-    sourceDir: null,
+    sourceDir: null,        // what the SERVER resolved the pick to
+    // What the user actually PICKED, kept so Reprocess can run the same scan
+    // again without sending them back to the folder picker (2026-09-03).
+    scanDir:   null,
     rows:      [],          // serialized staging rows (+ health/extracted)
     jobId:     null,
+    // Generation stamp for poll loops. Bumped on every startAnalysis, so a
+    // loop left over from an earlier scan can tell that it no longer speaks
+    // for this page and exit without writing anything — see pollAnalysis.
+    pollSeq:   0,
     progress:  null,        // { done, total, current } while analysing
     // folder_path → 'lq' | 'meta'. A Map rather than a Set since 2026-08-02:
     // the card now has two tabs, so "open" is no longer a boolean but a
@@ -7511,6 +8079,11 @@ const App = (() => {
     queued:       new Set(),
     activePath:   null,
     copyProgress: new Map(),
+    // folder_path → { jobId, done, total, current, kind } while a SHN/WAV
+    // conversion runs on that row (2026-09-02). A Map keyed by folder rather
+    // than a single active job, because a conversion is per-row and nothing
+    // stops a second one being started on another row while the first runs.
+    converting:   new Map(),
     runTotal:     0,
     // ── Values applied to EVERY recording this queue ingests ────────────────
     // Expanded 2026-08-31 (Ryan) from Event alone to the full set worth
@@ -7528,6 +8101,11 @@ const App = (() => {
       source: '', lineage: '', notes: '',
     },
     applyAllOpen: false,
+    // What was PRESSED, as opposed to what is typed (2026-09-03). Null until
+    // Apply Values is clicked; a plain {key: value} snapshot of the non-empty
+    // fields at that moment, plus venue_id. THE INGEST PATHS READ ONLY THIS —
+    // see the block comment above _applyQueueValuesToForm.
+    applied:      null,
     // Which run each lq.log entry belongs to. Bumped at the start of every
     // bulk run so the completion summary can describe one run rather than
     // every ingest since the folder was scanned.
@@ -8017,33 +8595,66 @@ const App = (() => {
         triage_status: 'pending', listening_quality: null, _pending: true,
       }))
       lq.progress = { done: 0, total: res.folders.length, current: null }
+      // Remember what produced this queue, so Reprocess can run it again
+      // without asking the user to find the folder a second time.
+      lq.scanDir = sourceDir
       ingest.step = 'triage'
       renderTriageView()
-      pollAnalysis()
+      // Each poll loop owns its OWN job id, and a generation stamp says whether
+      // it is still the loop that speaks for this page. See pollAnalysis.
+      lq.pollSeq = (lq.pollSeq || 0) + 1
+      pollAnalysis(res.job_id, lq.pollSeq)
     } catch (e) {
       report?.(e.message)
     }
   }
 
-  async function pollAnalysis() {
+  // ⚠ `jobId` and `seq` are ARGUMENTS, not reads of lq (2026-09-03).
+  //
+  // This used to loop on `while (lq.jobId)` and poll `lq.jobId` — module
+  // state, shared by every loop. Start a second scan and the first loop, still
+  // sleeping, wakes up and polls the SECOND job. Two loops, one job id. The
+  // one that reads the terminal status first used to make the server drop the
+  // job, and the other then got a 404 and reported the finished scan as a
+  // failure. That is half of the "unknown job" report (the server keeps
+  // finished jobs readable now, which is the other half).
+  //
+  // So each loop carries its own id and a generation stamp. A loop whose
+  // generation is no longer `lq.pollSeq` has been superseded by a newer scan
+  // and exits without touching a single piece of shared state — it must not
+  // write progress, errors or rows belonging to a queue it no longer speaks
+  // for.
+  async function pollAnalysis(jobId, seq) {
     const sleep = ms => new Promise(r => setTimeout(r, ms))
-    while (lq.jobId) {
+    const mine = () => lq.pollSeq === seq && lq.jobId === jobId
+    while (mine()) {
       await sleep(900)
+      if (!mine()) return
       let s
       try {
-        s = await API.quality.analyzeStatus(lq.jobId, lq.sourceDir)
+        s = await API.quality.analyzeStatus(jobId, lq.sourceDir)
       } catch (e) {
+        if (!mine()) return
         // A failed poll used to `break` in silence. Every card then sat on
         // "Analysing…" with nothing said anywhere and nothing in the debug
         // drawer — exactly the stall Ryan reported on 2026-08-25. A stop we
         // cannot explain is still a stop the user has to be told about.
         lq.jobId   = null
         lq.progress = null
-        lq.error   = e.message || 'Lost contact with the analysis job.'
+        // Name the ONE cause that is actually recoverable rather than passing
+        // the server's wording through. "unknown job" is a 404 from a job the
+        // server no longer holds — almost always because it was restarted —
+        // and it says nothing about the folders, which is exactly why the page
+        // it produced was so misleading.
+        lq.error = (e.status === 404 || /unknown job/i.test(e.message || ''))
+          ? 'Lost track of the analysis job — the app was most likely restarted '
+            + 'while the scan was running. The folders are fine; use Reprocess to run it again.'
+          : (e.message || 'Lost contact with the analysis job.')
         _retirePendingRows()
         if (ingest.step === 'triage') renderTriageView({ preserveScroll: true })
         return
       }
+      if (!mine()) return
       _mergeAnalysisRows(s.results || [], s.ingested || [])
       lq.progress = { done: s.done, total: s.total, current: s.current }
       if (s.status !== 'running') {
@@ -8103,10 +8714,19 @@ const App = (() => {
   // Nothing may still read "Analysing…" once the job is over. A placeholder
   // with no server row and no explanation is a real problem, so it becomes a
   // visible error card rather than a spinner that never resolves.
+  // ⚠ These rows were never ANALYSED, let alone found wanting.
+  //
+  // A retired placeholder is a folder the run never reached, and the old
+  // wording ("Analysis finished without returning a result for this folder")
+  // read as a verdict on the folder. Under the "unknown job" bug that put
+  // "Analysis failed" beside eight perfectly good shows, and reprocessing the
+  // same directory filed every one of them (Ryan, 2026-09-03). Say what is
+  // actually known — nothing — and the Retry on the row says what to do about
+  // it.
   function _retirePendingRows() {
     lq.rows = lq.rows.map(r => r._pending
-      ? { ...r, _pending: false,
-          error: 'Analysis finished without returning a result for this folder.' }
+      ? { ...r, _pending: false, _unreached: true,
+          error: 'The scan stopped before reaching this folder — it has not been analysed yet.' }
       : r)
   }
 
@@ -8585,7 +9205,10 @@ const App = (() => {
       right = _lqBrowBlank()
     } else if (row._pending) {
       const base   = (row.folder_path || '').split('/').pop()
-      const active = !!lq.progress && lq.progress.current === base
+      // `_reanalyzing` is a single-row Retry, which has no lq.progress behind
+      // it — without this the row would read "Queued" for the whole run.
+      const active = row._reanalyzing
+                  || (!!lq.progress && lq.progress.current === base)
       sub = active
         ? `<span class="lq-spin"></span><span>Analyzing now…</span>`
         : 'Queued'
@@ -9007,10 +9630,62 @@ const App = (() => {
         <span class="lq-act-cancelled" title="${esc(row.folder_path)}">Folder moved</span>
       </div>`
     }
+    // ── Convert offer (Ryan, 2026-09-02) ──────────────────────────────────
+    // Placed ABOVE the error branch on purpose. A Shorten folder arrives with
+    // an analysis error, because there was nothing this app could decode —
+    // and the answer to that error is not "Retry", it is "convert it first".
+    // Offering Retry on a format we cannot read is offering the same failure
+    // again.
+    const cv = lq.converting.get(row.folder_path)
+    if (cv) {
+      return `<div class="lq-actions">
+        <span class="lq-act-running" data-convert-for="${esc(row.folder_path)}">
+          <span class="lq-spin"></span>${esc(_lqConvertText(cv))}</span>
+        <button class="lq-act lq-act--cancel" data-convert-cancel="${esc(row.folder_path)}">Stop</button>
+      </div>`
+    }
+    if (row.convertible && !lq.running) {
+      const k = row.convertible.kind
+      const n = row.convertible.count
+      return `<div class="lq-actions">
+        ${row.convertError ? _lqErrorChip(row.convertError, 'Could not convert this folder') : ''}
+        <button class="lq-act lq-act--convert" data-convert="${esc(row.folder_path)}"
+                title="${k === 'shn'
+                  ? `Decode ${n} Shorten file${n === 1 ? '' : 's'} to FLAC, keeping the originals in an _originals folder, then re-run the scan.`
+                  : `Re-encode ${n} WAV file${n === 1 ? '' : 's'} to FLAC at the same bit depth — same audio, about half the size. Originals are kept in an _originals folder.`}"
+                >${k === 'shn' ? 'Convert to FLAC' : 'Compress to FLAC'}</button>
+        ${k === 'wav' ? _lqReviewMove(row) : `
+          <div class="lq-move-wrap">
+            <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
+            <div class="lq-move-menu" hidden>
+              <button class="lq-move-opt" data-dest="backlog" data-path="${esc(row.folder_path)}">Backlog</button>
+              <button class="lq-move-opt" data-dest="workshop" data-path="${esc(row.folder_path)}">Workshop</button>
+            </div>
+          </div>`}
+      </div>`
+    }
+
     if (done?.status === 'error') {
       return `<div class="lq-actions">
         ${_lqErrorChip(done.error || 'The ingest failed.', 'Could not add this recording')}
         <button class="lq-act lq-act--ingest" data-path="${esc(row.folder_path)}">Retry</button>
+        ${_lqReviewMove(row)}
+      </div>`
+    }
+
+    // A row whose ANALYSIS failed (Ryan, 2026-09-03). Distinct from the ingest
+    // failure above: nothing has been attempted on the library yet, so the
+    // action is to analyse it again, not to file it again. It offered Ingest /
+    // Review / Move — three buttons, none of which can work on a row with no
+    // analysis behind it, and the one thing that does work was not there.
+    //
+    // Re-analyses THIS FOLDER only. Reprocess in the settings bar is the
+    // whole-scan version; a single bad row should not cost a re-run of
+    // twenty good ones.
+    if (row.error && !row._reanalyzing) {
+      return `<div class="lq-actions">
+        <button class="lq-act lq-act--retry" data-reanalyze="${esc(row.folder_path)}"
+                title="Analyse this folder again">Retry</button>
         ${_lqReviewMove(row)}
       </div>`
     }
@@ -9025,6 +9700,15 @@ const App = (() => {
               title="Auto-ingest using the metadata shown">Ingest</button>
       ${_lqReviewMove(row)}
     </div>`
+  }
+
+  // "Converting 4 of 17 · d1t04.shn". The filename is worth the width here in
+  // a way it is not during an ingest copy: a conversion can fail on ONE bad
+  // file out of twenty, and knowing which one it stopped on is the whole
+  // diagnosis.
+  function _lqConvertText(cv) {
+    const head = `Converting${cv.total ? ` ${Math.min(cv.done + 1, cv.total)} of ${cv.total}` : ''}`
+    return cv.current ? `${head} · ${cv.current}` : head
   }
 
   // Review + Move. Shared so the failure state offers exactly what the normal
@@ -9197,12 +9881,23 @@ const App = (() => {
                   title="Choose another folder. Currently ${esc(lq.sourceDir || '')}">
             ${icon('folder-open', 'lq-setbar-ic')}
             <span>${esc(_lqShortPath(lq.sourceDir))}</span></button>
+          <!-- Reprocess (Ryan, 2026-09-03). Re-runs the whole scan over the
+               same directory with reanalyze=true, so it redoes the work rather
+               than adopting the rows already stored. It exists because the
+               recovery for a run that stopped badly used to be "go back to the
+               picker and find the folder again" — several clicks, and the
+               folder you want is the one you are already looking at. Beside
+               the path it acts on, not in the header: it is a property of this
+               scan, like the two selects to its right. -->
+          <button class="lq-setbar-re" id="lq-reprocess-btn" ${dis}
+                  title="Run the scan again over this folder, re-analysing every recording from scratch">
+            ${icon('rotate-cw', 'lq-setbar-ic')}<span>Reprocess</span></button>
         </span>
 
         <label class="bfilter" title="What happens to each source folder once its recording is filed">Source files
           <select id="lq-behavior" ${dis}>
-            <option value="move"${batch.behavior !== 'copy' ? ' selected' : ''}>Move into library</option>
-            <option value="copy"${batch.behavior === 'copy' ? ' selected' : ''}>Copy, keep originals</option>
+            <option value="move"${fileBehavior() !== 'copy' ? ' selected' : ''}>Move into library</option>
+            <option value="copy"${fileBehavior() === 'copy' ? ' selected' : ''}>Copy, keep originals</option>
           </select>
         </label>
 
@@ -9213,9 +9908,9 @@ const App = (() => {
           </select>
         </label>
 
-        <span class="lq-setbar-note" title="${batch.behavior === 'copy'
+        <span class="lq-setbar-note" title="${fileBehavior() === 'copy'
           ? 'Originals stay in the source folder, so a later scan will offer them again.'
-          : 'The source folder is removed once the recording is filed.'}">${batch.behavior === 'copy'
+          : 'The source folder is removed once the recording is filed.'}">${fileBehavior() === 'copy'
           ? 'Originals stay in the source folder, so a later scan will offer them again.'
           : 'The source folder is removed once the recording is filed.'}</span>
       </div>`
@@ -9246,9 +9941,9 @@ const App = (() => {
     // invisible. The +/- toggle (Ryan, 2026-09-02) makes that unenforceable —
     // the user can now close it whenever they like — so the invariant is kept
     // by saying so on the header instead of by refusing the click.
-    const aaCount = [aa.performer, aa.venue.name, aa.city, aa.state, aa.country,
-                     aa.event, aa.source, aa.lineage, aa.notes]
-      .filter(v => (v || '').trim()).length
+    const aaTyped = _aaTyped()
+    const aaCount = _aaCount(aaTyped)
+    const aaState = _aaState()
     const aaOpen = lq.applyAllOpen
     const applyAllBar = !lq.rows.length ? '' :
       `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}">
@@ -9260,7 +9955,28 @@ const App = (() => {
              <span class="lq-applyall-h">Applies to every recording below</span>
              ${!aaOpen && aaCount ? `<span class="lq-applyall-n">${aaCount} value${
                  aaCount === 1 ? '' : 's'} set</span>` : ''}
-             ${anyApplied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
+             <!-- Apply Values (Ryan, 2026-09-03). The blanket values do
+                  NOTHING until this is pressed — not on the Review form, not
+                  on auto-Ingest — and once pressed they OVERWRITE whatever the
+                  scan inferred. Both halves are deliberate: overwriting is
+                  what the box promises, and a deliberate press is what earns
+                  the right to overwrite.
+                  Three states, because "typed" and "staged" are different
+                  facts and the difference is the whole feature.
+                  ⚠ No number in this label. It said "Applied to all 4",
+                  meaning four VALUES, and it read as four RECORDINGS (Ryan,
+                  2026-09-03) — the one number a reader expects beside "applied
+                  to all" is how many recordings it hit. The value count is
+                  already on the collapsed header, where "4 values set" says
+                  what it counts. -->
+             ${aaState === 'empty' ? '' : aaState === 'applied'
+               ? `<span class="lq-applyall-ok" title="These values overwrite the inferred metadata on every recording in this queue.">
+                    ${icon('check', 'lq-applyall-ic')} Applied to all recordings</span>`
+               : `<button type="button" class="lq-applyall-go" id="lq-applyall-apply"
+                          ${lq.running ? 'disabled' : ''}
+                          title="Stage these values for every recording below. They will replace whatever the scan inferred for those fields.">
+                    Apply Values</button>`}
+             ${anyApplied || lq.applied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
                                ${lq.running ? 'disabled' : ''}>Clear all</button>` : ''}
            </div>
            ${!aaOpen ? '' : `<div class="lq-applyall-grid">
@@ -9488,6 +10204,162 @@ const App = (() => {
     else el.addEventListener('loadedmetadata', go, { once: true })
   }
 
+  // ── SHN / WAV → FLAC, driven from one triage row ──────────────────────────
+  //
+  // The interaction Ryan asked for is that the row handles it: click Convert,
+  // watch the count, and end up with a normally-analysed recording sitting in
+  // the same place in the queue. So this does the whole arc — start the job,
+  // poll it, then re-scan that one folder and drop the fresh row in where the
+  // old one was.
+  //
+  // ⚠ Position in the list is preserved deliberately. `startAnalysis` sorts
+  // rows by score and a converted show suddenly HAS a score, so letting the
+  // list re-sort would slide the row the user is watching somewhere else on
+  // the page at the exact moment they were told it finished.
+  async function _lqConvert(folderPath) {
+    const row = lq.rows.find(r => r.folder_path === folderPath)
+    if (!row || lq.converting.has(folderPath)) return
+    row.convertError = null
+
+    let start
+    try {
+      start = await API.quality.convert(folderPath)
+    } catch (e) {
+      // Onto the ROW, not into lq.error's page-wide banner: this failed for
+      // one folder, and a banner over a 30-row queue does not say which.
+      row.convertError = e.message || 'Could not start the conversion.'
+      renderTriageView({ preserveScroll: true })
+      return
+    }
+
+    lq.converting.set(folderPath, {
+      jobId: start.job_id, done: 0, total: start.total || 0,
+      current: null, kind: start.kind,
+    })
+    renderTriageView({ preserveScroll: true })
+
+    const sleep = ms => new Promise(r => setTimeout(r, ms))
+    let final = null
+    while (true) {
+      await sleep(900)
+      let st
+      try {
+        st = await API.quality.convertStatus(start.job_id)
+      } catch (e) {
+        // Same rule as pollAnalysis: a stop we cannot explain is still a stop
+        // the user has to be told about.
+        row.convertError = e.message || 'Lost contact with the conversion job.'
+        break
+      }
+      const cv = lq.converting.get(folderPath)
+      if (cv) {
+        cv.done = st.done || 0
+        cv.total = st.total || cv.total
+        cv.current = st.current || null
+        // Patch the one live node rather than repainting: a full render every
+        // 900ms would close any menu open elsewhere in the list, and would
+        // fight the apply-all form the same way pollAnalysis used to.
+        _lqPaintConvert(folderPath)
+      }
+      if (st.status !== 'running') { final = st; break }
+    }
+
+    lq.converting.delete(folderPath)
+
+    if (!final || final.status === 'error') {
+      row.convertError = row.convertError
+        || final?.error || 'The conversion failed.'
+      renderTriageView({ preserveScroll: true })
+      return
+    }
+    if (final.status === 'cancelled') {
+      // Not an error, and not silence either. Whatever finished IS converted,
+      // so the folder has changed and the row must be re-read rather than
+      // left describing a state that no longer exists.
+      await _lqRescanRow(folderPath)
+      return
+    }
+
+    // Done. Some files may still have failed — report those on the row while
+    // showing the freshly analysed result for the ones that worked.
+    const failed = final.result?.failed || []
+    await _lqRescanRow(folderPath)
+    if (failed.length) {
+      const r2 = lq.rows.find(x => x.folder_path === folderPath)
+      if (r2) {
+        r2.convertError = `${failed.length} file${failed.length === 1 ? '' : 's'} `
+                        + `could not be converted (${failed[0].name}: ${failed[0].error}).`
+        renderTriageView({ preserveScroll: true })
+      }
+    }
+  }
+
+  // In-place repaint of one row's conversion label — the same treatment
+  // _lqPaintProgress gives an ingest copy, and for the same reason.
+  function _lqPaintConvert(folderPath) {
+    const cv = lq.converting.get(folderPath)
+    if (!cv) return
+    const el = mainContent.querySelector(
+      `[data-convert-for="${CSS.escape(folderPath)}"]`)
+    if (!el) return
+    const spin = el.querySelector('.lq-spin')
+    el.textContent = _lqConvertText(cv)
+    if (spin) el.prepend(spin)
+  }
+
+  // Re-analyse ONE folder and swap its row in place.
+  //
+  // The staging row was deleted server-side when the conversion finished (see
+  // convert_status), so this is a genuine fresh analysis of the FLACs, not an
+  // adopted row still carrying the Shorten set's error.
+  async function _lqRescanRow(folderPath) {
+    const idx = lq.rows.findIndex(r => r.folder_path === folderPath)
+    if (idx < 0) return
+    // Placeholder while it runs, so the row says something rather than
+    // reverting to its old pre-conversion reading for a few seconds.
+    // `_reanalyzing` is what makes it read "Analyzing now…" instead of
+    // "Queued": a single-row retry has no lq.progress behind it.
+    lq.rows[idx] = { ...lq.rows[idx], _pending: true, _reanalyzing: true,
+                     error: null, convertible: null, convertError: null }
+    renderTriageView({ preserveScroll: true })
+
+    try {
+      const res = await API.quality.analyze(folderPath, true)
+      // Poll that little job to completion, then take the one row we want.
+      const sleep = ms => new Promise(r => setTimeout(r, ms))
+      let rows = []
+      for (let i = 0; i < 400; i++) {
+        await sleep(700)
+        const st = await API.quality.analyzeStatus(res.job_id, res.source_dir)
+        rows = st.results || []
+        if (st.status !== 'running') break
+      }
+      const fresh = rows.find(r => r.folder_path === qsNorm(folderPath))
+                 || rows[0]
+      if (fresh) {
+        // The row keeps its SLOT. See the ⚠ above.
+        const at = lq.rows.findIndex(r => r.folder_path === folderPath)
+        if (at >= 0) lq.rows[at] = fresh
+      } else {
+        const at = lq.rows.findIndex(r => r.folder_path === folderPath)
+        if (at >= 0) lq.rows[at] = { ...lq.rows[at], _pending: false, _reanalyzing: false,
+                                     error: 'The re-scan returned nothing for this folder.' }
+      }
+    } catch (e) {
+      const at = lq.rows.findIndex(r => r.folder_path === folderPath)
+      if (at >= 0) lq.rows[at] = { ...lq.rows[at], _pending: false, _reanalyzing: false,
+                                   error: `The re-scan failed: ${e.message}` }
+    }
+    renderTriageView({ preserveScroll: true })
+  }
+
+  // The server keys staging rows on an NFC-normalised path. macOS hands the
+  // client decomposed filenames, so a raw comparison misses every accented
+  // folder — the same trap CONTEXT.md records for the database side.
+  function qsNorm(p) {
+    return (p || '').normalize('NFC').replace(/\/+$/, '')
+  }
+
   // A repaint scheduled for AFTER the current event finishes.
   //
   // The apply-all fields repaint on blur so the Clear/Hide control and the
@@ -9514,14 +10386,29 @@ const App = (() => {
       ingest.step = 'source'
       renderIngestSource()
     })
+    document.getElementById('lq-reprocess-btn')?.addEventListener('click', () => {
+      // `lq.scanDir` is what the user PICKED; `lq.sourceDir` is what the server
+      // resolved it to. They are the same in the ordinary case, and where they
+      // differ the picked one is the honest thing to re-run — re-scanning the
+      // resolved path of a single show would silently narrow a directory-wide
+      // scan to one folder.
+      const dir = lq.scanDir || lq.sourceDir
+      if (!dir) return
+      lq.error = null
+      startAnalysis(dir, true, msg => { lq.error = msg || null })
+    })
     document.getElementById('lq-alldone-more')?.addEventListener('click', () => {
       _lqReset()
       ingest.step = 'source'
       renderIngestSource()
     })
 
-    document.getElementById('lq-behavior')?.addEventListener('change', e => {
-      batch.behavior = e.target.value
+    document.getElementById('lq-behavior')?.addEventListener('change', async e => {
+      // Was `batch.behavior = …` and nothing else, which is the whole bug:
+      // the choice lived in one screen's memory and the Add Recording form
+      // read the stored preference, so Review one row later showed "Move"
+      // over a queue set to Copy (Ryan, 2026-09-02).
+      await setFileBehavior(e.target.value)
       renderTriageView({ preserveScroll: true })   // the rail's note tracks it
     })
 
@@ -9541,6 +10428,13 @@ const App = (() => {
       renderTriageView({ preserveScroll: true })
       if (opening) document.getElementById('lq-apply-performer')?.focus()
     })
+    document.getElementById('lq-applyall-apply')?.addEventListener('click', () => {
+      // A SNAPSHOT, not a reference. Editing a field afterwards must leave the
+      // staged set alone and put the button back to "Apply Values" — that is
+      // what tells the user whether what is on screen is what is staged.
+      lq.applied = _aaTyped()
+      renderTriageView({ preserveScroll: true })
+    })
     document.getElementById('lq-applyall-clear')?.addEventListener('click', () => {
       lq.applyAll = {
         event: '', performer: '',
@@ -9548,6 +10442,9 @@ const App = (() => {
         city: '', state: '', country: '',
         source: '', lineage: '', notes: '',
       }
+      // Both, or the queue would keep overwriting from a snapshot whose fields
+      // the user just emptied — the staged set is the one that actually acts.
+      lq.applied = null
       renderTriageView({ preserveScroll: true })
     })
 
@@ -9779,6 +10676,27 @@ const App = (() => {
       })
     })
 
+    // ── Convert to FLAC (Ryan, 2026-09-02) ────────────────────────────────
+    //
+    // Start, poll, and on success re-scan JUST THIS FOLDER — not the whole
+    // directory. A full re-scan would restart every other row's analysis and
+    // throw away a queue the user may be halfway through triaging, to learn
+    // one thing about one folder.
+    mainContent.querySelectorAll('[data-reanalyze]').forEach(btn => {
+      btn.addEventListener('click', () => _lqRescanRow(btn.dataset.reanalyze))
+    })
+    mainContent.querySelectorAll('[data-convert]').forEach(btn => {
+      btn.addEventListener('click', () => _lqConvert(btn.dataset.convert))
+    })
+    mainContent.querySelectorAll('[data-convert-cancel]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const cv = lq.converting.get(btn.dataset.convertCancel)
+        if (!cv) return
+        btn.disabled = true
+        try { await API.quality.convertCancel(cv.jobId) } catch (_) {}
+      })
+    })
+
     // Deep fingerprint verification — the expensive MD5 pass, on demand.
     mainContent.querySelectorAll('.lq-fp-verify').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -9898,6 +10816,10 @@ const App = (() => {
     lq.rows = []
     lq.log = []
     lq.jobId = null
+    // NOT pollSeq — it only ever counts up. Resetting it could let a stale
+    // loop's captured generation match a later one and speak for a queue it
+    // has nothing to do with, which is the exact bug the stamp exists to stop.
+    lq.scanDir = null
     lq.progress = null
     lq.error = null
     lq.running = false
@@ -9913,11 +10835,13 @@ const App = (() => {
       source: '', lineage: '', notes: '',
     }
     lq.applyAllOpen = false
+    lq.applied = null
     lq.expanded.clear()
     lq.features.clear()
     lq.compactOpen.clear()
     lq.queued.clear()
     lq.copyProgress.clear()
+    lq.converting.clear()
   }
 
   function _lqRemoveRow(folderPath) {
@@ -9932,6 +10856,13 @@ const App = (() => {
         && !r._ingestedElsewhere                  // already a Recording
         && r.exists !== false                     // folder still on disk
         && !r.recording_id                        // not already in the library
+        // A Shorten folder holds nothing this app can read a track from, so a
+        // bulk run would reach it, fail, and log an error the user then has to
+        // clear before they can do the thing that actually helps (2026-09-02).
+        // WAV is NOT excluded — it ingests perfectly; converting it is an
+        // offer about disk space, not a precondition.
+        && !(r.convertible && r.convertible.kind === 'shn')
+        && !lq.converting.has(r.folder_path)      // mid-conversion
         && !lq.log.some(l => l.folder_path === r.folder_path)
   }
 
@@ -9943,40 +10874,47 @@ const App = (() => {
   // per-card Ingest button and the queue loop so the two can't drift apart.
   async function ingestOne(row) {
     try {
-      const e  = row.extracted || {}
-      const aa = lq.applyAll
+      const e = row.extracted || {}
+      // ⚠ `lq.applied`, never `lq.applyAll` (2026-09-03). Typed-but-unapplied
+      // values do nothing on this path either — "Apply is the only path"
+      // (Ryan). A queue set up and never applied ingests from the scan alone,
+      // which is exactly what it did before anyone typed anything.
+      const a = lq.applied || {}
       // Auto-ingest needs a performer name and cannot invent one — from the
-      // folder OR from Apply to all. Failing here with something readable
-      // beats letting the server return a bare "artist_name is required" 400
-      // from a button press.
-      if (!aa.performer.trim() && !e.artist) {
-        throw new Error('No performer could be read from this folder. '
-                      + 'Use Review to fill it in, or set one in Apply to all.')
+      // folder OR from the applied blanket values. Failing here with something
+      // readable beats letting the server return a bare "artist_name is
+      // required" 400 from a button press.
+      if (!a.performer && !e.artist) {
+        throw new Error('No performer could be read from this folder. Use '
+                      + 'Review to fill it in, or set one above and press Apply Values.')
       }
       const scan = await API.recordings.scan(row.folder_path)
       const tracks = buildIngestTracks(scan)
 
       const { job_id } = await API.ingest.confirm({
         source_folder_path: row.folder_path,
-        // Queue-level values (see lq.applyAll) win when set — "Applies to
-        // every recording below" is a plain statement, not a fallback. The
+        // Applied blanket values win outright — "Applies to every recording
+        // below" is a plain statement, not a fallback. The
         // server resolves/creates Performer, Venue and Event rows exactly as
         // it does per-recording; City/State/Country are ignored server-side
         // once venue_id is set, so what is sent there is harmless either way.
-        artist_name: aa.performer.trim() || e.artist,
+        artist_name: a.performer || e.artist,
         start_year: e.year,
         start_month: e.month, start_day: e.day,
-        venue_name: aa.venue.name.trim() || e.venue || null,
-        venue_id: aa.venue.id || null,
-        city: aa.city.trim() || e.city || null,
-        state: aa.state.trim() || e.state || null,
-        country: aa.country.trim() || e.country || null,
-        source: aa.source.trim() || e.source || null,
-        lineage: aa.lineage.trim() || e.lineage || null,
-        notes: aa.notes.trim() || null,
+        venue_name: a.venue || e.venue || null,
+        // Only ever the APPLIED venue's id. Pairing a staged name with the
+        // scan's id would file the show against a venue whose name is not the
+        // one being sent.
+        venue_id: a.venue ? (a.venue_id || null) : null,
+        city: a.city || e.city || null,
+        state: a.state || e.state || null,
+        country: a.country || e.country || null,
+        source: a.source || e.source || null,
+        lineage: a.lineage || e.lineage || null,
+        notes: a.notes || null,
         is_complete: true,
-        event_name: aa.event.trim() || null,
-        behavior: batch.behavior || 'move',
+        event_name: a.event || null,
+        behavior: fileBehavior(),
         // Quick Add. The server reads this to decide whether to enqueue the
         // Librosa track analysis; nothing else about the ingest changes.
         skip_analysis: lq.mode !== 'full',
@@ -10502,37 +11440,104 @@ const App = (() => {
   // after.
   //
   // Returns how many fields it filled, so the caller can say so.
-  function _applyQueueValuesToForm(f) {
+  // ── Blanket values: staged, and they WIN ──────────────────────────────────
+  //
+  // Reversed 2026-09-03 (Ryan), and the reversal is the whole point, so read
+  // this before touching any of it.
+  //
+  // These used to fill only fields the inference had left EMPTY, on the
+  // reasoning that the form is the more specific statement. That is wrong for
+  // what the control is actually for: a queue of twenty shows from one festival
+  // where the taper's own info files each guessed a slightly different venue
+  // string. The human typing one venue into "applies to every recording below"
+  // knows more than twenty parsers do, and having their value quietly lose to
+  // whatever a text file said is the opposite of what the box promises.
+  //
+  // So a staged value OVERWRITES. And because overwriting is destructive, it
+  // does not happen on its own: nothing propagates until **Apply Values** is
+  // pressed. `lq.applyAll` is what is typed; `lq.applied` is what was pressed.
+  // Only `lq.applied` is ever read by the ingest paths — typing alone changes
+  // nothing, anywhere, including auto-Ingest (Ryan's call: "Apply is the only
+  // path"). That is a deliberate trade of convenience for the guarantee that
+  // nothing overwrites a parsed value without a deliberate press.
+  //
+  // Empty blanket fields are NOT staged. "Apply" means "use the values I
+  // typed", never "blank out the eight fields I left alone".
+
+  // The nine fields, in one place, so the snapshot, the dirty check and both
+  // writers cannot drift. `form`/`live` are the ids each value lands on.
+  const _AA_FIELDS = [
+    { key: 'performer', form: 'artist_name', live: 'f-artist' },
+    { key: 'venue',     form: 'venue_name',  live: 'f-venue-name' },   // + id
+    { key: 'city',      form: 'city',        live: 'f-city' },
+    { key: 'state',     form: 'state',       live: 'f-state' },
+    { key: 'country',   form: 'country',     live: 'f-country' },
+    { key: 'event',     form: 'event_name',  live: 'f-event-name' },   // + id
+    { key: 'source',    form: 'source',      live: 'f-source' },
+    { key: 'lineage',   form: 'lineage',     live: 'f-lineage' },
+    { key: 'notes',     form: 'notes',       live: 'f-notes' },
+  ]
+
+  // What is currently TYPED, normalised: {key: value} for non-empty fields
+  // only, plus venue_id when a real Venue row was picked.
+  function _aaTyped() {
     const aa = lq.applyAll
-    if (!aa) return 0
+    if (!aa) return {}
+    const out = {}
+    for (const f of _AA_FIELDS) {
+      const v = String((f.key === 'venue' ? aa.venue.name : aa[f.key]) || '').trim()
+      if (v) out[f.key] = v
+    }
+    if (out.venue && aa.venue.id) out.venue_id = aa.venue.id
+    return out
+  }
+
+  // Compared as a string, not field by field, so a venue id changing under an
+  // unchanged venue NAME still counts as a change worth re-applying.
+  function _aaFingerprint(o) {
+    return JSON.stringify(Object.keys(o || {}).sort().map(k => [k, o[k]]))
+  }
+
+  function _aaCount(o) {
+    return Object.keys(o || {}).filter(k => k !== 'venue_id').length
+  }
+
+  // Three states, and the button reads them: nothing typed, typed-but-not-
+  // applied (or changed since), and applied-and-unchanged.
+  function _aaState() {
+    const typed = _aaTyped()
+    const n = _aaCount(typed)
+    if (!n && !lq.applied) return 'empty'
+    return _aaFingerprint(typed) === _aaFingerprint(lq.applied) ? 'applied' : 'dirty'
+  }
+
+  // Write the STAGED values over a form object, at prefill, before the DOM
+  // exists. Returns how many fields it set.
+  //
+  // ⚠ Overwrites unconditionally — that is the change. The inferred value is
+  // not lost forever: Rescan re-derives the whole form from the info file, and
+  // re-applies whatever is staged afterwards.
+  function _applyQueueValuesToForm(f) {
+    const a = lq.applied
+    if (!a) return 0
     let n = 0
-    const put = (key, val) => {
-      if (!val || String(f[key] || '').trim()) return
-      f[key] = val
+    for (const fld of _AA_FIELDS) {
+      const v = a[fld.key]
+      if (!v) continue
+      f[fld.form] = v
       n += 1
     }
-    put('artist_name', aa.performer.trim())
-    // Venue carries its id with it or the server resolves a NEW row by name,
-    // which would quietly duplicate the venue the batch already picked.
-    if (!String(f.venue_name || '').trim() && !f.venue_id && aa.venue.name.trim()) {
-      f.venue_name = aa.venue.name.trim()
-      f.venue_id   = aa.venue.id || null
-      n += 1
-    }
-    put('city', aa.city.trim())
-    put('state', aa.state.trim())
-    put('country', aa.country.trim())
-    put('source', aa.source.trim())
-    put('lineage', aa.lineage.trim())
-    put('notes', aa.notes.trim())
-    if (!String(f.event_name || '').trim() && !f.event_id && aa.event.trim()) {
-      f.event_name = aa.event.trim()
-      n += 1
-    }
+    // An id and a name must move together, or the server resolves a SECOND row
+    // by name for the very venue the batch picked. Clearing the id when the
+    // blanket venue was typed rather than picked is equally load-bearing:
+    // leaving the inferred row's id behind would file the show against a venue
+    // whose name is no longer on the form.
+    if (a.venue) f.venue_id = a.venue_id || null
+    if (a.event) f.event_id = null
     return n
   }
 
-  // The same fill, against the LIVE INPUTS rather than the form object.
+  // The same write, against the LIVE INPUTS.
   //
   // Two variants exist because the two moments are genuinely different, and
   // getting that wrong loses data. At PREFILL there is no DOM yet, so the
@@ -10542,54 +11547,34 @@ const App = (() => {
   // writing to the object and repainting would throw away everything typed
   // since the page loaded.
   //
-  // Empty fields only, same as the prefill. `.ai-applied` is borrowed from AI
-  // Assist's own apply: it is already the app's way of saying "this box was
-  // just filled by something other than you".
+  // `.ai-applied` is borrowed from AI Assist's own apply: it is already the
+  // app's way of saying "this box was filled by something other than you",
+  // which matters more now that the fill can replace something.
   function _applyQueueValuesToLiveForm() {
-    const aa = lq.applyAll
-    if (!aa) return 0
+    const a = lq.applied
+    if (!a) return 0
     let n = 0
-    const put = (id, val) => {
-      const el = document.getElementById(id)
-      if (!el || !val || el.value.trim()) return
-      el.value = val
+    for (const fld of _AA_FIELDS) {
+      const v = a[fld.key]
+      if (!v) continue
+      const el = document.getElementById(fld.live)
+      if (!el) continue
+      el.value = v
       el.classList.add('ai-applied')
       n += 1
     }
-    put('f-artist', aa.performer.trim())
-    // Venue name and id move together, or the server resolves a second row by
-    // name for the venue the batch already picked.
-    const vEl = document.getElementById('f-venue-name')
     const vId = document.getElementById('f-venue-id')
-    if (vEl && !vEl.value.trim() && !(vId && vId.value) && aa.venue.name.trim()) {
-      vEl.value = aa.venue.name.trim()
-      vEl.classList.add('ai-applied')
-      if (vId) vId.value = aa.venue.id ? String(aa.venue.id) : ''
-      n += 1
-    }
-    put('f-city', aa.city.trim())
-    put('f-state', aa.state.trim())
-    put('f-country', aa.country.trim())
-    put('f-source', aa.source.trim())
-    put('f-lineage', aa.lineage.trim())
-    put('f-notes', aa.notes.trim())
-    const eEl = document.getElementById('f-event-name')
+    if (a.venue && vId) vId.value = a.venue_id ? String(a.venue_id) : ''
     const eId = document.getElementById('f-event-id')
-    if (eEl && !eEl.value.trim() && !(eId && eId.value) && aa.event.trim()) {
-      eEl.value = aa.event.trim()
-      eEl.classList.add('ai-applied')
-      n += 1
-    }
+    if (a.event && eId) eId.value = ''
     return n
   }
 
-  // Is there anything to apply at all? Drives whether the button is offered.
+  // How many blanket values are STAGED. Drives whether the Review form offers
+  // its re-apply button at all — unstaged values have no effect anywhere, so
+  // offering to apply them would be offering a no-op.
   function _queueValuesCount() {
-    const aa = lq.applyAll
-    if (!aa) return 0
-    return [aa.performer, aa.venue.name, aa.city, aa.state, aa.country,
-            aa.event, aa.source, aa.lineage, aa.notes]
-      .filter(v => (v || '').trim()).length
+    return _aaCount(lq.applied)
   }
 
   function _ingestFormSnapshot(f) {
@@ -11176,19 +12161,19 @@ const App = (() => {
           <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-rescan"
                   title="Re-run the inference over the info file, including any edits you have made to it">
             ${icon('rotate-cw', 'lq-browse-ic')} Rescan</button>
-          <!-- Apply queue values (Ryan, 2026-09-02). The batch's "Applies to
-               every recording below" is already pushed into every empty field
-               when this form opens, so in the ordinary case this button has
-               nothing to do — it is here for the cases where it does: you set
-               a queue value AFTER opening this show, or you cleared a field
-               and want the batch default back. It fills empty fields only,
-               same precedence as the prefill, so it can never overwrite
-               something you typed.
-               Shown only when the queue actually holds values; on a folder
-               opened outside a triage session there is nothing to apply and a
-               permanently dead button is worse than no button. -->
+          <!-- Re-apply the queue's applied values (2026-09-02, precedence
+               reversed 2026-09-03). They are already written over the
+               inference when this form opens, so in the ordinary case this has
+               nothing to do. It is here for the cases where it does: you
+               pressed Apply Values AFTER opening this show, or you Rescanned
+               and want the blanket values back over the freshly parsed ones.
+               It overwrites, like the prefill — the point of a blanket value
+               is that it wins.
+               Shown only when values are actually STAGED. Typed-but-unapplied
+               values do nothing anywhere, so offering to apply them here would
+               be offering a no-op. -->
           ${_queueValuesCount() ? `<button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-apply-queue"
-                  title="Fill any empty field from the values set for the whole queue">
+                  title="Overwrite this form's Performer, Venue, Event and the rest with the values applied to the whole queue">
             ${icon('plus', 'lq-browse-ic')} Apply queue values</button>` : ''}
         </div>
       </div>
@@ -11384,8 +12369,8 @@ const App = (() => {
               <span class="bfilter">
                 <label for="ingest-behavior-select">Files</label>
                 <select id="ingest-behavior-select" title="What happens to the source folder once this recording is filed">
-                <option value="move" ${(appPrefs?.ingest_file_behavior !== 'copy') ? 'selected' : ''}>Move into library (source removed)</option>
-                <option value="copy" ${(appPrefs?.ingest_file_behavior === 'copy') ? 'selected' : ''}>Copy into library (keep source)</option>
+                <option value="move" ${fileBehavior() !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
+                <option value="copy" ${fileBehavior() === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
                 </select>
               </span>
             </div>
@@ -11933,6 +12918,13 @@ const App = (() => {
       }
     })
 
+    // The form's own Files dropdown writes the preference like every other
+    // copy/move control does (2026-09-02) — otherwise changing it here would
+    // apply to this one recording and silently revert for the next.
+    document.getElementById('ingest-behavior-select')?.addEventListener('change', e => {
+      setFileBehavior(e.target.value)
+    })
+
     // Re-apply the queue-level values to whatever is still empty. Writes to
     // ingest.form and repaints through renderIngestStep, so the boxes on
     // screen agree with what Confirm will send — the entire point of the
@@ -11944,9 +12936,9 @@ const App = (() => {
       if (n) {
         errEl.style.display = 'none'
       } else {
-        // Saying nothing would read as a broken button. Say what happened
-        // instead: every queue value already has a home on this form.
-        errEl.textContent = 'Every field the queue sets is already filled in on this form.'
+        // Saying nothing would read as a broken button.
+        errEl.textContent = 'No values have been applied to this queue yet — '
+                          + 'set them on Review & Ingest and press Apply Values.'
         errEl.style.display = 'block'
       }
     })
@@ -12506,20 +13498,18 @@ const App = (() => {
       // Copy/move had TWO sources of truth: the triage page's Files dropdown
       // (batch.behavior) and the saved preference read here. A user who set the
       // dropdown to Copy could still get a Move, because Review submitted
-      // through this path (2026-07-31). When the review was opened from triage,
-      // the dropdown the user was just looking at wins.
-      let behavior = 'move'
+      // through this path (2026-07-31). It was patched then by preferring
+      // whichever screen the user came from — three branches, and a fourth
+      // control (Settings) that none of them saw.
+      //
+      // 2026-09-02: there is now ONE source of truth. Every control writes the
+      // preference through setFileBehavior(), so this reads fileBehavior() and
+      // the question of which screen wins does not arise. The form's own
+      // <select> is still consulted first, but only because it may have been
+      // changed on THIS page and not yet blurred — and it renders from the
+      // same accessor, so in every other case the two already agree.
       const behaviorSel = document.getElementById('ingest-behavior-select')
-      if (ingest.fromTriage && batch.behavior) {
-        behavior = batch.behavior
-      } else if (behaviorSel) {
-        behavior = behaviorSel.value
-      } else {
-        try {
-          const prefs = await API.preferences.get()
-          behavior = prefs.ingest_file_behavior || 'move'
-        } catch (_) { /* fall back to copy */ }
-      }
+      const behavior = behaviorSel ? behaviorSel.value : fileBehavior()
 
       const payload = {
         source_folder_path: ingest.folderPath,
@@ -12544,28 +13534,20 @@ const App = (() => {
         // Ingest — same server endpoint, opposite behaviour.
         skip_analysis: lq.mode !== 'full',
       }
-      // Apply to all applies here too — Review is the same ingest with a
-      // form in front of it, and a value set for the batch must not vanish
-      // because one show needed a closer look. Anything the form itself
-      // already has wins, since that is the more specific statement; only
-      // fields the form left empty fall back to the queue-level value.
-      const aaF = lq.applyAll
-      if (!payload.event_name && !payload.event_id && aaF.event.trim()) {
-        payload.event_name = aaF.event.trim()
-      }
-      if (!payload.artist_name && aaF.performer.trim()) {
-        payload.artist_name = aaF.performer.trim()
-      }
-      if (!payload.venue_name && !payload.venue_id && aaF.venue.name.trim()) {
-        payload.venue_name = aaF.venue.name.trim()
-        payload.venue_id   = aaF.venue.id || null
-      }
-      if (!payload.city    && aaF.city.trim())    payload.city    = aaF.city.trim()
-      if (!payload.state   && aaF.state.trim())   payload.state   = aaF.state.trim()
-      if (!payload.country && aaF.country.trim()) payload.country = aaF.country.trim()
-      if (!payload.source  && aaF.source.trim())  payload.source  = aaF.source.trim()
-      if (!payload.lineage && aaF.lineage.trim()) payload.lineage = aaF.lineage.trim()
-      if (!payload.notes   && aaF.notes.trim())   payload.notes   = aaF.notes.trim()
+      // ⚠ NO blanket-value fallback here any more (2026-09-03).
+      //
+      // This used to re-apply `lq.applyAll` field by field to anything the
+      // payload had left empty — a safety net from when the values were
+      // invisible on this form. They are not invisible now: applied values are
+      // written into the form at prefill, over the top of the inference, and
+      // the form shows them highlighted. So what is on screen IS what gets
+      // sent, and a net underneath it would only reintroduce the divergence it
+      // was built to paper over — worse, it would silently undo a deliberate
+      // edit the reviewer made to a blanket value for this one show, which is
+      // precisely why they opened Review.
+      //
+      // The re-apply button on this form (btn-apply-queue) is the deliberate
+      // way to pull the staged values back in after a Rescan or an edit.
 
       // Progress UI under the button (copy can take a while for big folders)
       const actions = btn.closest('.ingest-actions')
@@ -14171,7 +15153,7 @@ const App = (() => {
     const keySet     = prefs.has_api_key
     const noKeychain = prefs.keychain_available === false
     const model      = prefs.ai_model || 'claude-sonnet-5'
-    const behavior   = prefs.ingest_file_behavior || 'move'
+    const behavior   = batch.behavior || prefs.ingest_file_behavior || 'move'
 
     setMainHTML(`
       <div class="set-wrap">
@@ -14394,10 +15376,20 @@ const App = (() => {
     const menu = (id, key) => $(id)?.addEventListener('change', async e => {
       try {
         await API.preferences.update({ [key]: e.target.value })
+        // Keep the cached prefs object honest, or the next screen to read it
+        // renders the value this page just replaced.
+        if (appPrefs) appPrefs[key] = e.target.value
         _settingsSaved($(`${id}-flash`))
       } catch (err) { _settingsSaved($(`${id}-flash`), err.message) }
     })
-    menu('set-behavior', 'ingest_file_behavior')
+    // File handling goes through the shared writer instead of the generic
+    // menu helper: it has an in-memory cache (`batch.behavior`) that the
+    // ingest screens read, and Settings must move it too or changing the
+    // setting here would be invisible to a triage session already open.
+    $('set-behavior')?.addEventListener('change', async e => {
+      await setFileBehavior(e.target.value)
+      _settingsSaved($('set-behavior-flash'))
+    })
     menu('set-model',    'ai_model')
 
     // ── The one explicit Save: a secret you paste and cannot read back ──────
