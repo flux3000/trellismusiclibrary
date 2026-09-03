@@ -81,7 +81,21 @@ du -sh "$APP"
 echo
 echo "── Done ───────────────────────────────────────────────────────"
 echo "  $APP"
-echo
-echo "  First launch on ANY Mac, including yours, will be refused by Gatekeeper"
-echo "  because the app is unsigned. Right-click it → Open → Open. Once per"
-echo "  machine. Signing it properly costs \$99/year and can wait."
+
+# ── Signing ─────────────────────────────────────────────────────────────────
+# Opt-in, on purpose. With no signing identity in the environment this script
+# behaves exactly as it did before signing existed, so a build never fails
+# because of a certificate on a machine that has no reason to hold one.
+if [[ -n "${TRELLIS_SIGN_IDENTITY:-}" ]]; then
+  echo
+  ./tools/sign_macos.sh
+else
+  echo
+  echo "  This build is UNSIGNED, so the first launch on any Mac, including"
+  echo "  yours, is refused by Gatekeeper. Right-click → Open → Open. Once per"
+  echo "  machine."
+  echo
+  echo "  To ship it instead: set TRELLIS_SIGN_IDENTITY and"
+  echo "  TRELLIS_NOTARY_PROFILE, then rebuild. tools/sign_macos.sh explains"
+  echo "  where both come from."
+fi

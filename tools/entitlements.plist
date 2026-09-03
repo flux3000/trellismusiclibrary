@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  tools/entitlements.plist — the exceptions Python needs under the hardened
+  runtime, for DEVELOPER ID distribution (direct download).
+
+  Notarization REQUIRES the hardened runtime (codesign -o runtime). The
+  hardened runtime then forbids several things CPython does as a matter of
+  course, so an app signed without these entitlements passes notarization and
+  then dies on launch, which is the worst of both outcomes.
+
+  Each key below is here because something concrete breaks without it. Do not
+  add a key speculatively: every entitlement is a security guarantee given
+  back, and Apple asks about the unusual ones.
+
+  allow-unsigned-executable-memory
+      CPython writes and then executes memory it just wrote. ctypes closures
+      and libffi trampolines both do it, and both are on the path for
+      soundfile and anything else that binds a C library. numba, which this
+      app ships, JITs by definition.
+
+  disable-library-validation
+      Library validation demands every loaded dylib be signed by the SAME team
+      as the host, or by Apple. A PyInstaller bundle is full of dylibs shipped
+      by NumPy, llvmlite, librosa and libsndfile that are signed by their own
+      vendors or by nobody. Without this, the first `import` of a compiled
+      extension fails.
+
+      ⚠ THIS ONE MAY NOW BE UNNECESSARY, AND IT IS WORTH TEN MINUTES TO FIND
+      OUT. sign_macos.sh re-signs all ~344 nested binaries with OUR identity
+      before signing the app. Once they all carry the same team ID, library
+      validation has nothing left to object to. It was written in when signing
+      was theoretical and every dylib still carried a vendor signature.
+
+      Test it, once, after the first signed build succeeds: comment this key
+      out, rebuild, and let the signed startup self-test run. If the app
+      starts, delete the key for good. Dropping it is a security improvement
+      on its own — and it is the single biggest thing standing between this
+      app and the Mac App Store (see below).
+
+  If the signed app refuses to launch, the next two to try, IN THIS ORDER, are
+  com.apple.security.cs.allow-jit and
+  com.apple.security.cs.allow-dyld-environment-variables. Add one, rebuild,
+  test. Adding both at once teaches you nothing about which was needed.
+
+  ── On the Mac App Store, and why nothing here forecloses it ────────────────
+
+  Developer ID and the Mac App Store are PARALLEL pipelines, not a sequence.
+  Different certificates (Apple Distribution, plus an installer certificate),
+  an embedded provisioning profile, a .pkg instead of a .dmg, upload instead
+  of notarization, and App Review instead of an automated scan. One codebase
+  can feed both. Choosing Developer ID now costs nothing later, and this file
+  would simply gain a sibling — entitlements-mas.plist — rather than change.
+
+  What a Mac App Store build WOULD require, recorded now so nobody has to
+  rediscover it:
+
+  1.  com.apple.security.app-sandbox is mandatory. It is deliberately absent
+      here, because Developer ID does not require it and an unsandboxed app
+      reads a library folder with no ceremony.
+
+      ⚠ An earlier version of this comment claimed a sandboxed Trellis could
+      not read a user-chosen library folder at all, and called that "the
+      product." That was wrong, and it mattered, because it read as a closed
+      door. The sandbox grants access to any folder the user picks in an open
+      panel (com.apple.security.files.user-selected.read-write), and
+      SECURITY-SCOPED BOOKMARKS persist that access across launches. That is
+      precisely the mechanism a library-folder app is supposed to use. The
+      real cost is engineering, not permission: bookmarks are an AppKit API,
+      so it means PyObjC work at the settings layer, and network volumes such
+      as /Volumes/music need the same treatment.
+
+  2.  Network access needs com.apple.security.network.client and
+      com.apple.security.network.server, which are routine and granted freely.
+      Peer sharing over a Cloudflare Tunnel is not itself a problem: cloudflared
+      is a separate process the user installs, and this app never ships or
+      launches it. Shipping it INSIDE the bundle would be the problem — App
+      Review guideline 2.5.2 does not love an app that carries its own daemon.
+
+  3.  disable-library-validation is the genuine blocker. App Review treats it
+      as an exception needing justification, and often declines. See the note
+      above: it may already be removable.
+
+  4.  allow-unsigned-executable-memory is broader than App Review likes;
+      com.apple.security.cs.allow-jit is the entitlement that is normally
+      accepted for the same need. If MAS ever becomes real, test whether
+      allow-jit alone is enough for numba and ctypes.
+
+  So the order of operations, if this is ever taken up: drop
+  disable-library-validation, narrow the memory entitlement to allow-jit, then
+  do the sandbox and security-scoped-bookmark work. The first two are cheap
+  and improve the Developer ID build regardless. The third is a real project.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
