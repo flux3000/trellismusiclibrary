@@ -92,10 +92,46 @@ if [[ -n "${TRELLIS_SIGN_IDENTITY:-}" ]]; then
 else
   echo
   echo "  This build is UNSIGNED, so the first launch on any Mac, including"
-  echo "  yours, is refused by Gatekeeper. Right-click → Open → Open. Once per"
-  echo "  machine."
+  echo "  yours, is refused by Gatekeeper with no Open button anywhere."
+  echo "  Control-click → Open has NOT worked since macOS Sequoia. Either:"
+  echo "    xattr -dr com.apple.quarantine \"$APP\""
+  echo "  or open it, dismiss the dialog, then System Settings → Privacy &"
+  echo "  Security → Open Anyway. Once per machine. README.md and the"
+  echo "  website's /download page both say the same thing; keep them in step."
   echo
   echo "  To ship it instead: set TRELLIS_SIGN_IDENTITY and"
   echo "  TRELLIS_NOTARY_PROFILE, then rebuild. tools/sign_macos.sh explains"
   echo "  where both come from."
+fi
+
+# ── What to do next ─────────────────────────────────────────────────────────
+# version.py says which Trellis this is; a git tag says which commit produced
+# it. They live in two systems, neither can read the other at the moment it
+# matters, and nothing makes them agree — which is why v0.1.2 and v0.1.3 were
+# both tagged while version.py still said 0.1.1, shipping two releases that
+# misreported themselves in the About box and in CFBundleVersion.
+#
+# This enforces nothing and never blocks a build. It prints the commands with
+# the number already filled in, at the one moment the number is on screen
+# anyway, so there is nothing to retype and no ordering to remember.
+#
+# Guarded so a missing tag or a missing git is not an error: this is the last
+# thing a successful build does, and it must not be what makes one fail.
+echo
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  :                                  # not a checkout (unpacked tarball) — nothing to say
+elif git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+  # The dangerous case, and the reason this block earns its keep. Two different
+  # binaries now claim one version, and nothing downstream can tell them apart.
+  TAGGED=$(git rev-list -n1 "v${VERSION}" 2>/dev/null | cut -c1-7)
+  echo "  ⚠ Tag v${VERSION} ALREADY EXISTS, pointing at ${TAGGED}."
+  echo "    This build is a SECOND, different binary claiming that version."
+  echo "    Bump version.py before this goes anywhere."
+else
+  echo "  Next, once you are happy with it:"
+  if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+    echo "    git commit -am \"Version ${VERSION}\""
+  fi
+  echo "    git tag -a v${VERSION} -m \"v${VERSION}\""
+  echo "    git push origin main && git push origin v${VERSION}"
 fi

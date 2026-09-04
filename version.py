@@ -7,9 +7,16 @@ disagrees with itself, and "which build is Jim actually running?" is the first
 question every support conversation starts with.
 
 Bump this, then tag the commit to match.
+
+⚠ That second half has been skipped before. Tags v0.1.2 and v0.1.3 were both
+cut while this file still said 0.1.1, so two releases shipped identifying
+themselves as a version they were not — in the About box, in CFBundleVersion,
+and in the debug drawer. From 0.2.0 the version is sealed inside a signed,
+notarized bundle, where renaming the download cannot correct it. Bump here
+FIRST, build, then tag the commit you built.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 # The app has two names on purpose (Ryan, 2026-08-25 — "we should be calling it
 # Trellis Music Library, not just Trellis").
