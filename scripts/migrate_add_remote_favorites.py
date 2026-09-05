@@ -13,9 +13,9 @@ door has no write endpoints by design, and a listener's taste is not the
 sharer's business).
 
 ⚠ Run this on the CONSUMER node — the one doing the browsing. On a two-node dev
-rig that means pointing FLUX_DB_PATH at the listener's database:
+rig that means pointing TRELLIS_DB_PATH at the listener's database:
 
-    FLUX_DB_PATH=$PWD/db/node_matt.db python3 scripts/migrate_add_remote_favorites.py
+    TRELLIS_DB_PATH=$PWD/db/node_matt.db python3 scripts/migrate_add_remote_favorites.py
 
 Additive and idempotent — safe to re-run.
 """

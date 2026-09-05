@@ -15,8 +15,8 @@ right for the Mac app and wrong for two situations:
 Usage
 -----
     # Node B for the dev rig — own DB, own port, own identity
-    FLUX_DB_PATH=/tmp/fluxnode_b.db \
-    FLUX_PORT=5758 \
+    TRELLIS_DB_PATH=/tmp/fluxnode_b.db \
+    TRELLIS_PORT=5758 \
     SHARE_BASE_URL=http://127.0.0.1:5758 \
     SHARE_NODE_NAME="Node B" \
     SHARE_OWNER_NAME="Test Peer" \

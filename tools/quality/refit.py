@@ -63,7 +63,7 @@ def _engine():
     return mods
 
 CACHE = os.path.join(_HERE, "labelled_corpus.json")
-DB = os.path.join(_REPO, "db", "fluxaudio.db")
+DB = os.path.join(_REPO, "db", "trellis.db")
 LIB = os.environ.get("LIBRARY_ROOT", "/Volumes/music/Flux Audio/Library")
 
 # Letter grade -> points. Mid-band of each letter; the exact spacing matters

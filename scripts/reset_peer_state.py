@@ -29,7 +29,7 @@ remote no longer recognises — every proxied call 401s and the UI reports
 bounces with an error that looks like a bad invite. Leaving the stale row is
 therefore not a cosmetic problem; it blocks recovery.
 
-⚠ Respects FLUX_DB_PATH, so it can be pointed at node B. It prints which
+⚠ Respects TRELLIS_DB_PATH, so it can be pointed at node B. It prints which
 database it resolved BEFORE doing anything — read that line.
 
 Dry run by default. Nothing is written without --commit.

@@ -39,7 +39,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 
-from app.utils.net import SSL_CONTEXT
+from app.utils.net import SSL_CONTEXT, USER_AGENT
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +47,8 @@ _BASE = "https://musicbrainz.org/ws/2"
 
 # MusicBrainz REQUIRES a descriptive User-Agent identifying the application and
 # a contact. Requests with a generic agent are rejected or throttled hard.
-_UA = "FluxAudio/1.0 ( https://github.com/flux3000/fluxaudio )"
+# It lives in app/utils/net.py, with the rest of how this app presents itself
+# on the wire — see that file for why it used to be wrong.
 
 # Their published rate limit is 1 request/second on the free endpoint. We make
 # at most a couple of calls per Performer creation, so a simple process-wide
@@ -125,7 +126,7 @@ def _get(path, params):
     url = f"{_BASE}/{path}?{urllib.parse.urlencode(params)}"
     if tripped():
         return None
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         _throttle()
         with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:

@@ -1,5 +1,5 @@
 """
-config.py — Flux Audio application configuration.
+config.py — Trellis Music Library application configuration.
 
 Reads from environment variables when present (via .env),
 falls back to safe defaults for local development.
@@ -96,14 +96,47 @@ def _env_flag(name, default=False):
 DEV_SECRET_DEFAULT = "dev-secret-change-me"
 
 
+# ── Renamed environment variables (2026-09-04) ───────────────────────────────
+# FLUX_DB_PATH / FLUX_PORT / FLUX_COOKIE_NAME became TRELLIS_*. There is no
+# compatibility fallback, deliberately.
+#
+# ⚠ But ignoring a stale one silently is worse than merely wrong here, because
+# both have defaults that collide with the desktop app:
+#
+#   FLUX_PORT unread        -> share node falls back to 5757, the port the
+#                              desktop app already binds.
+#   FLUX_COOKIE_NAME unread -> share node falls back to "session", the cookie
+#                              name the desktop app already uses. Cookies are
+#                              scoped by HOST, not by port, so the two would
+#                              overwrite each other's login.
+#   FLUX_DB_PATH unread     -> a node meant to serve a test database serves
+#                              the real library instead.
+#
+# None of those announce themselves. So refuse to start, and name the fix.
+_RENAMED_ENV = {
+    "FLUX_DB_PATH":     "TRELLIS_DB_PATH",
+    "FLUX_PORT":        "TRELLIS_PORT",
+    "FLUX_COOKIE_NAME": "TRELLIS_COOKIE_NAME",
+}
+_stale_env = [(old, new) for old, new in _RENAMED_ENV.items() if os.environ.get(old)]
+if _stale_env:
+    raise RuntimeError(
+        "These environment variables were renamed on 2026-09-04 and are no "
+        "longer read:\n  "
+        + "\n  ".join(f"{old}  ->  {new}" for old, new in _stale_env)
+        + "\nUpdate whatever sets them. Continuing would silently put this "
+          "process on the desktop app's port, cookie or database."
+    )
+
+
 class Config:
     # ── Security ──────────────────────────────────────────────
     SECRET_KEY = os.environ.get("SECRET_KEY", DEV_SECRET_DEFAULT)
 
     # ── Database ──────────────────────────────────────────────
-    # FLUX_DB_PATH exists for the two-node peer-sharing dev rig (2026-08-08):
+    # TRELLIS_DB_PATH exists for the two-node peer-sharing dev rig (2026-08-08):
     # a second instance needs its own database, and the path was hardcoded.
-    # Prefixed (unlike LIBRARY_ROOT / IMPORT_DIR) on purpose — see FLUX_PORT.
+    # Prefixed (unlike LIBRARY_ROOT / IMPORT_DIR) on purpose — see TRELLIS_PORT.
     # Everything this machine WRITES hangs off DATA_DIR. Same relative layout
     # in both cases (db/, cache/), so only the root differs and no other code
     # has to know which mode it is in.
@@ -113,12 +146,15 @@ class Config:
     # library into Application Support was the moment to stop deferring, since
     # it was being moved anyway.
     #
-    # The ~20 scripts and tools that hardcode `db/fluxaudio.db` keep working:
-    # the repo's db/ holds symlinks under BOTH names pointing at the one real
-    # file. A symlink's name has nothing to do with its target's.
+    # A `db/fluxaudio.db` symlink pointed at the same real file until
+    # 2026-09-04, so that ~20 scripts hardcoding the old name kept working.
+    # It is gone. The live tools were updated; the one-shot migration scripts
+    # that still name it were deliberately NOT touched, because they are a
+    # record of schema changes that already happened and rewriting history to
+    # keep dead code runnable is a bad trade.
     DATA_DIR = Path(os.environ.get("TRELLIS_DATA_DIR") or _default_data_dir())
 
-    DB_PATH = Path(os.environ.get("FLUX_DB_PATH") or (DATA_DIR / "db" / "trellis.db"))
+    DB_PATH = Path(os.environ.get("TRELLIS_DB_PATH") or (DATA_DIR / "db" / "trellis.db"))
 
     # utils/transcode.py has always honoured this key and fallen back to a path
     # relative to the app package. That fallback lands INSIDE the bundle once
@@ -196,13 +232,13 @@ class Config:
     # minted by one node authenticates against the other. Give each node its
     # own cookie name — and its own SECRET_KEY — and the two stop colliding.
     # Irrelevant in production, where nodes are distinct hosts.
-    SESSION_COOKIE_NAME = os.environ.get("FLUX_COOKIE_NAME") or "session"
+    SESSION_COOKIE_NAME = os.environ.get("TRELLIS_COOKIE_NAME") or "session"
 
     HOST  = "127.0.0.1"
-    # FLUX_PORT, not PORT: a bare PORT is set by all sorts of tooling and
+    # TRELLIS_PORT, not PORT: a bare PORT is set by all sorts of tooling and
     # shells, and a node silently binding somewhere other than 5757 is a
     # miserable thing to debug. The prefix costs nothing and can't collide.
-    PORT  = int(os.environ.get("FLUX_PORT") or 5757)   # internal Flask port used by PyWebView
+    PORT  = int(os.environ.get("TRELLIS_PORT") or 5757)   # internal Flask port used by PyWebView
 
     # ── Dev mode ──────────────────────────────────────────────
     # When True, skips login entirely — auto-logs in the first admin user.

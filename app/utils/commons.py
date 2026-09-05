@@ -37,11 +37,10 @@ import urllib.parse
 import urllib.request
 import urllib.error
 
-from app.utils.net import SSL_CONTEXT
+from app.utils.net import SSL_CONTEXT, USER_AGENT
 
 log = logging.getLogger(__name__)
 
-_UA = "FluxAudio/1.0 ( https://github.com/flux3000/fluxaudio )"
 _TIMEOUT = 12.0          # higher than MusicBrainz: this downloads image bytes
 _MIN_INTERVAL = 0.4      # Wikimedia is more permissive than MB, but be polite
 _last_call = [0.0]
@@ -76,7 +75,7 @@ def _get_json(url):
     wbgetclaims `property` bug below). Errors are now surfaced at WARNING, not
     swallowed: a systematic failure has to look different from an ordinary miss.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         _throttle()
         with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
@@ -255,7 +254,7 @@ def download(url, max_bytes=_MAX_BYTES):
     """
     if not url:
         return None, None
-    req = urllib.request.Request(url, headers={"User-Agent": _UA})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         _throttle()
         with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:

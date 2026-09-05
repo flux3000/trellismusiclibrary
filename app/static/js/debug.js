@@ -24,7 +24,7 @@
  * Instrumentation is installed BEFORE the admin check, so an error thrown
  * during boot is captured even though the UI does not exist yet.
  *
- * Exports: window.fluxDebug = { open, close, toggle, refresh }
+ * Exports: window.trellisDebug = { open, close, toggle, refresh }
  */
 
 ;(function initDebug() {
@@ -143,7 +143,7 @@
     if (!me || me.role !== 'admin') {
       // Boot races login: on a cold start nobody is authenticated yet. Re-check
       // once the app announces a user rather than polling.
-      window.addEventListener('flux:user', ev => {
+      window.addEventListener('trellis:user', ev => {
         if (ev.detail && ev.detail.role === 'admin' && !els) build()
       }, { once: true })
       return
@@ -464,7 +464,7 @@
     els.drawer.classList.contains('is-open') ? close() : open()
   }
 
-  window.fluxDebug = { open, close, toggle, refresh: render }
+  window.trellisDebug = { open, close, toggle, refresh: render }
 
   // ══ Helpers ═══════════════════════════════════════════════════════════════
 

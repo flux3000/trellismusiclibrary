@@ -1,5 +1,5 @@
 /**
- * app.js — Flux Audio SPA: router, state, and view renderers.
+ * app.js — Trellis Music Library SPA: router, state, and view renderers.
  *
  * Hash-based routing:
  *   #/                  → catalog (artist selected or empty state)
@@ -297,7 +297,7 @@ const App = (() => {
   ;(function () {
     const MIN = 200, MAX = 460
     const setW = w => document.documentElement.style.setProperty('--sidebar-w', Math.round(w) + 'px')
-    const saved = parseInt(localStorage.getItem('fluxSidebarW'), 10)
+    const saved = parseInt(localStorage.getItem('trellisSidebarW'), 10)
     if (saved && saved >= MIN && saved <= MAX) setW(saved)
 
     const handle = document.getElementById('sidebar-resizer')
@@ -321,7 +321,7 @@ const App = (() => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
       const cur = getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w').trim()
-      localStorage.setItem('fluxSidebarW', parseInt(cur, 10))
+      localStorage.setItem('trellisSidebarW', parseInt(cur, 10))
     })
   })()
 
@@ -786,12 +786,12 @@ const App = (() => {
     // whatever mode you had it in before.
     if (libraryState.activeId != null) return 'playback'
     if (!hasEditRole()) return 'playback'
-    return localStorage.getItem('fluxViewMode') === 'playback' ? 'playback' : 'admin'
+    return localStorage.getItem('trellisViewMode') === 'playback' ? 'playback' : 'admin'
   }
 
   function setViewMode(mode) {
     const next = mode === 'playback' ? 'playback' : 'admin'
-    localStorage.setItem('fluxViewMode', next)
+    localStorage.setItem('trellisViewMode', next)
     document.documentElement.classList.toggle('playback-mode', next === 'playback')
     paintViewModeToggle()
     // Re-render both halves of the chrome: the sidebar drops its admin entries
@@ -4859,7 +4859,7 @@ const App = (() => {
             </div>
 
             <!-- Reframed from "Resources" to sources the ENRICHMENT JOBS should
-                 trust. Flux already knows to consult Wikipedia and setlist.fm;
+                 trust. Trellis already knows to consult Wikipedia and setlist.fm;
                  what it can't know is the act-specific archive a collector
                  knows about. Ordered last because it's what you fill in AFTER
                  seeing what the automated passes missed. -->
@@ -8053,13 +8053,13 @@ const App = (() => {
     // checksums and carries the quality score across; only waveform/BPM/
     // spectral are deferred, and Re-Analyze fills those in later against the
     // same rows. Persisted like the other display/behaviour preferences.
-    mode: localStorage.getItem('fluxIngestMode') === 'full' ? 'full' : 'quick',
+    mode: localStorage.getItem('trellisIngestMode') === 'full' ? 'full' : 'quick',
     // Compact mode — one scannable row per recording instead of a full metrics
     // card (Ryan, 2026-08-28; Direction A "The Belt" from the ingest-redesign
     // specimen, the half that did not ship with the tier chips on 08-27).
     // A folder of hundreds is unreadable as cards, and the toggle is the whole
     // point: the dense list is for triage, the cards are for judgement.
-    // Persisted like trellisPalette / fluxViewMode — a display preference the
+    // Persisted like trellisPalette / trellisViewMode — a display preference the
     // user
     // set once, not a per-visit question.
     // folder_path -> which pane is open ('lq' | 'meta' | 'fp'). One piece of
@@ -10542,7 +10542,7 @@ const App = (() => {
     // time, so switching it mid-queue affects the shows not yet started.
     document.getElementById('lq-mode')?.addEventListener('change', e => {
       lq.mode = e.target.value === 'full' ? 'full' : 'quick'
-      try { localStorage.setItem('fluxIngestMode', lq.mode) } catch (_) { /* private mode */ }
+      try { localStorage.setItem('trellisIngestMode', lq.mode) } catch (_) { /* private mode */ }
     })
 
     // Sound Quality / Metadata pills — click either to open (or switch) the
@@ -11064,7 +11064,7 @@ const App = (() => {
       ingest.scan = scan
       ingest.step = 'review'
       renderIngestStep()
-      window.fluxDebug?.refresh()   // update the debug panel's Paula section if it's already open
+      window.trellisDebug?.refresh()   // update the debug panel's Paula section if it's already open
     } catch (e) {
       // Clear the remembered folder: if it has gone away, keeping it means the
       // next visit to this page fails the same way.
@@ -14843,7 +14843,7 @@ const App = (() => {
     sbToggle?.setAttribute('aria-pressed', String(document.body.classList.contains('sidebar-collapsed')))
     sbToggle?.addEventListener('click', () => {
       const collapsed = document.body.classList.toggle('sidebar-collapsed')
-      localStorage.setItem('fluxSidebarCollapsed', collapsed ? '1' : '0')
+      localStorage.setItem('trellisSidebarCollapsed', collapsed ? '1' : '0')
       sbToggle.setAttribute('aria-pressed', String(collapsed))
     })
   }
@@ -15919,7 +15919,7 @@ const App = (() => {
   //
   // Two inputs, deliberately:
   //   * a 30s poll, so the banner appears even if you touch nothing
-  //   * a 'flux:library-disconnected' event from api.js the instant any
+  //   * a 'trellis:library-disconnected' event from api.js the instant any
   //     request 503s, so you never sit inside the poll window wondering
   //
   // Repair is not our job — tools/mount_library.py owns mounting. When the
@@ -15984,7 +15984,7 @@ const App = (() => {
       setInterval(check, POLL_MS)
 
       // Instant signal from any 503 — see api.js.
-      window.addEventListener('flux:library-disconnected', (e) => {
+      window.addEventListener('trellis:library-disconnected', (e) => {
         render({ connected: false, ...(e.detail || {}) })
       })
 
@@ -16036,7 +16036,7 @@ const App = (() => {
       // Announced rather than polled: debug.js loads before login and needs to
       // know the moment a user exists, without asking repeatedly whether one
       // does. Any other boot-time listener can use the same event.
-      window.dispatchEvent(new CustomEvent('flux:user', { detail: user }))
+      window.dispatchEvent(new CustomEvent('trellis:user', { detail: user }))
       showApp()
       libraryDrive.start()
       // Before the sidebar renders: the library selector reads
@@ -16082,7 +16082,7 @@ const App = (() => {
   })
 
   // Expose minimal state for debug panel
-  window.fluxState = {
+  window.trellisState = {
     get recordingId() { return state.currentRecId },
     get trackCount()  { return state._lastTrackCount || null },
     // Paula's full scan-time breakdown (score + every flag/component per

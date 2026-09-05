@@ -1,4 +1,4 @@
-/* ── Flux Audio — Design System ─────────────────────────────────────────────── */
+/* ── Trellis Music Library — Design System ─────────────────────────────────────────────── */
 
 /* ── Typefaces (2026-08-23) ─────────────────────────────────────────────────
    Chosen against real library screens in tools/design/font-specimen.html.
@@ -8,7 +8,7 @@
    close second, so that was a swap to an already-vetted face — but Plex is
    still in play and stays declared and on disk. Do not remove it. All three are OFL-1.1 variable
    fonts, latin subset, self-hosted in app/static/fonts/ — 180KB total.
-   Self-hosted deliberately: Flux runs local and over LAN to peer nodes, so a
+   Self-hosted deliberately: Trellis runs local and over LAN to peer nodes, so a
    Google Fonts CDN link would mean unstyled type exactly when the network is
    the thing that is broken.                                                 */
 @font-face {
@@ -481,7 +481,7 @@ body {
 
 /* Sidebar collapse (2026-08-23, Ryan) — the App Header toggle left of Back.
    Overrides the grid column rather than touching --sidebar-w: that variable
-   is the user's resized WIDTH (persisted separately to fluxSidebarW), and
+   is the user's resized WIDTH (persisted separately to trellisSidebarW), and
    collapsing shouldn't discard it — expanding again should return to
    whatever width they'd set, not a default. */
 body.sidebar-collapsed .app-shell { grid-template-columns: 0 1fr; }

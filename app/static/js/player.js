@@ -235,7 +235,7 @@ const Player = (() => {
   })
 
   // Expose state for debug panel
-  window.fluxPlayer = {
+  window.trellisPlayer = {
     get currentTitle() { return currentTrack()?.title ?? null },
     get queueLength()  { return queue.length },
     get queueIdx()     { return queueIdx },

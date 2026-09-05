@@ -7,7 +7,7 @@ script produces that remote.
 
 What it does
 ------------
-1. Copies the live `fluxaudio.db` to a scratch DB (node B's own database)
+1. Copies the live `trellis.db` to a scratch DB (node B's own database)
 2. Wipes node B's peer tables — the copy otherwise carries Roy and Trevor
 3. Renames node B's collections with a `[NODE B]` suffix
 4. Creates one peer ("Node A"), grants it one collection, mints an invite
@@ -39,7 +39,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 REPO = Path(__file__).parent.parent
-SOURCE_DB = REPO / "db" / "fluxaudio.db"
+SOURCE_DB = REPO / "db" / "trellis.db"
 NODE_B_DB = REPO / "db" / "node_b.db"          # *.db is gitignored
 NODE_B_PORT = 5758                              # node A is 5757
 NODE_B_NAME = "Node B — Test Library"
@@ -71,9 +71,9 @@ def build_database(force):
 def seed(force):
     build_database(force)
 
-    # create_app() reads FLUX_DB_PATH, so point it at node B BEFORE importing
+    # create_app() reads TRELLIS_DB_PATH, so point it at node B BEFORE importing
     # anything that builds the engine.
-    os.environ["FLUX_DB_PATH"] = str(NODE_B_DB)
+    os.environ["TRELLIS_DB_PATH"] = str(NODE_B_DB)
     os.environ["SHARE_NODE_NAME"] = NODE_B_NAME
     os.environ["SHARE_OWNER_NAME"] = NODE_B_OWNER
     os.environ["SHARE_BASE_URL"] = f"http://127.0.0.1:{NODE_B_PORT}"
@@ -180,10 +180,10 @@ def seed(force):
     print("Start node B with:")
     print()
     print(f"    cd {REPO} && \\")
-    print(f"    FLUX_DB_PATH={NODE_B_DB} \\")
-    print(f"    FLUX_PORT={NODE_B_PORT} \\")
+    print(f"    TRELLIS_DB_PATH={NODE_B_DB} \\")
+    print(f"    TRELLIS_PORT={NODE_B_PORT} \\")
     print(f"    SECRET_KEY=node-b-not-node-a \\")
-    print(f"    FLUX_COOKIE_NAME=session_node_b \\")
+    print(f"    TRELLIS_COOKIE_NAME=session_node_b \\")
     print(f'    SHARE_BASE_URL=http://127.0.0.1:{NODE_B_PORT} \\')
     print(f'    SHARE_NODE_NAME="{NODE_B_NAME}" \\')
     print(f'    SHARE_OWNER_NAME="{NODE_B_OWNER}" \\')
@@ -191,7 +191,7 @@ def seed(force):
     print()
     print("Node A stays as it is: `DEV_MODE=true python3 run.py` on 5757.")
     print()
-    print("SECRET_KEY and FLUX_COOKIE_NAME are NOT optional. Browser cookies")
+    print("SECRET_KEY and TRELLIS_COOKIE_NAME are NOT optional. Browser cookies")
     print("are scoped by host and ignore the port, so without both, node A's")
     print("admin session authenticates you against node B — and each node's")
     print("cookie silently overwrites the other's.")

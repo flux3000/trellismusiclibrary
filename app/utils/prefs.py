@@ -15,7 +15,12 @@ try:
 except ImportError:
     _HAS_KEYRING = False
 
-_SERVICE = "flux_audio"
+# Renamed from "flux_audio" 2026-09-04, with no migration by Ryan's call.
+# ⚠ Every credential stored under the old service name becomes invisible the
+# moment this line changes: peer tokens and the Anthropic API key both. They
+# are not deleted, they are orphaned, and nothing will ever clean them up.
+# Re-join any peer and re-enter the API key once.
+_SERVICE = "trellis"
 
 
 def get_pref(user_id, key, default=None):
@@ -69,7 +74,7 @@ def delete_api_key(user_id):
 #
 # Unlike the inbound peer_token, this CANNOT be hashed — it has to be replayed
 # verbatim on every proxied request. Keychain or plaintext were the only two
-# options, and fluxaudio.db gets copied to dev rigs and backed up.
+# options, and trellis.db gets copied to dev rigs and backed up.
 
 def _remote_account(node_id):
     return "remote_token:%s" % node_id

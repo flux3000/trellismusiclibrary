@@ -31,12 +31,12 @@
         // One-time migration off the old two-value key (2026-08-30). Light was
         // Parchment, which Steely replaces; dark was Warm Ash, which is Cale
         // unchanged. Written back so this runs once, not every load.
-        id = localStorage.getItem('fluxTheme') === 'light' ? 'steely' : 'cale'
+        id = localStorage.getItem('trellisTheme') === 'light' ? 'steely' : 'cale'
         localStorage.setItem('trellisPalette', id)
       }
       document.documentElement.setAttribute('data-palette', id)
     })()
-    if(localStorage.getItem('fluxSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
+    if(localStorage.getItem('trellisSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
   </script>
 
   <!-- ── Login ──────────────────────────────────────────────────────────────── -->

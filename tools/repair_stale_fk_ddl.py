@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 tools/repair_stale_fk_ddl.py — Repair stale FOREIGN KEY clauses baked into
-the on-disk schema of fluxaudio.db.
+the on-disk schema of trellis.db.
 
 Background
 ----------
@@ -61,11 +61,11 @@ closed.
 
 Usage
 -----
-    python3 tools/repair_stale_fk_ddl.py /path/to/copy_of_fluxaudio.db --yes
+    python3 tools/repair_stale_fk_ddl.py /path/to/copy_of_trellis.db --yes
 
 Safety
 ------
-- Refuses to run against anything whose path ends in db/fluxaudio.db
+- Refuses to run against anything whose path ends in db/trellis.db
   (the live DB) even with --yes — copy it first.
 - Refuses to run at all without --yes (explicit opt-in).
 - Verifies PRAGMA foreign_key_check == 0 rows and PRAGMA integrity_check
@@ -148,12 +148,16 @@ CREATE TABLE user_artist_permission (
 
 def refuse_if_live_db(db_path: Path):
     """Hard stop if pointed at the live DB file, even with --yes."""
-    if db_path.name == "fluxaudio.db" and db_path.parent.name == "db":
+    # Both names on purpose. This is a REFUSAL list, so a stale entry is
+    # harmless and a missing one is not: db/fluxaudio.db was a symlink to
+    # the live file until 2026-09-04, and any copy of this repo that still
+    # has one must still be refused.
+    if db_path.name in {"trellis.db", "fluxaudio.db"} and db_path.parent.name == "db":
         print(
             "REFUSING TO RUN: this looks like the live DB "
             f"({db_path}).\n"
             "Copy it first, e.g.:\n"
-            f"  cp {db_path} /tmp/fluxaudio_repair.db\n"
+            f"  cp {db_path} /tmp/trellis_repair.db\n"
             "then run this script against the COPY.",
             file=sys.stderr,
         )
@@ -238,11 +242,11 @@ def main():
     parser = argparse.ArgumentParser(
         description=(
             "Rebuild stale-FK tables (performance, user_artist_permission) "
-            "in a fluxaudio.db COPY so the on-disk DDL matches the ORM "
+            "in a trellis.db COPY so the on-disk DDL matches the ORM "
             "models. NEVER point this at the live DB."
         )
     )
-    parser.add_argument("db_path", help="Path to a COPY of fluxaudio.db")
+    parser.add_argument("db_path", help="Path to a COPY of trellis.db")
     parser.add_argument(
         "--yes", action="store_true",
         help="Required. Confirms you understand this rewrites schema in place "

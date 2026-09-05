@@ -64,8 +64,8 @@ SINGLE_USER_DESKTOP=true python3 run.py
 Neither is needed once the app is built: the packaged `.app` sets this
 automatically and the login screen never appears.
 
-Headless mode is configured by environment variables: `FLUX_PORT`,
-`FLUX_DB_PATH`, `SHARE_BASE_URL`, `SECRET_KEY`, `FLUX_COOKIE_NAME`.
+Headless mode is configured by environment variables: `TRELLIS_PORT`,
+`TRELLIS_DB_PATH`, `SHARE_BASE_URL`, `SECRET_KEY`, `TRELLIS_COOKIE_NAME`.
 
 Sharing over the internet runs as a **second process**, in share-only mode
 (`SERVER_MODE=true`), exposed via an outbound Cloudflare Tunnel — no router

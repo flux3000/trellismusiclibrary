@@ -4,7 +4,7 @@ scripts/init_db.py — Initialize the database and seed an admin user.
 Run once after setting up the project:
     python scripts/init_db.py
 
-Creates db/fluxaudio.db with all tables, then prompts for admin credentials.
+Creates db/trellis.db with all tables, then prompts for admin credentials.
 Safe to re-run — will not overwrite an existing admin user.
 """
 

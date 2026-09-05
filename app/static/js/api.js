@@ -1,5 +1,5 @@
 /**
- * api.js — Thin wrapper around fetch for all Flux Audio API calls.
+ * api.js — Thin wrapper around fetch for all Trellis Music Library API calls.
  * All functions return parsed JSON or throw on non-2xx responses.
  * Authentication is cookie-based (Flask-Login session).
  */
@@ -70,7 +70,7 @@ const API = (() => {
     // announce it immediately. Dispatched as an event rather than calling
     // App directly: api.js loads before app.js and must not depend on it.
     if (res.status === 503 && data && data.code === 'library_disconnected') {
-      window.dispatchEvent(new CustomEvent('flux:library-disconnected', { detail: data }))
+      window.dispatchEvent(new CustomEvent('trellis:library-disconnected', { detail: data }))
     }
 
     if (!res.ok) {

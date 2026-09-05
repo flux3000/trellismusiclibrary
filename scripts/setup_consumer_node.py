@@ -63,7 +63,7 @@ def main():
 
     # create_app() resolves DB_PATH from config at import time, so the
     # environment has to be set BEFORE anything builds the engine.
-    os.environ["FLUX_DB_PATH"] = str(db_path)
+    os.environ["TRELLIS_DB_PATH"] = str(db_path)
     os.environ["SHARE_NODE_NAME"] = node_name
     os.environ["SHARE_OWNER_NAME"] = args.name
     os.environ["SHARE_BASE_URL"] = f"http://127.0.0.1:{args.port}"
@@ -113,10 +113,10 @@ def main():
     print()
     print(f"    cd {REPO} && \\")
     print(f"    DEV_MODE=true \\")
-    print(f"    FLUX_DB_PATH={db_path} \\")
-    print(f"    FLUX_PORT={args.port} \\")
+    print(f"    TRELLIS_DB_PATH={db_path} \\")
+    print(f"    TRELLIS_PORT={args.port} \\")
     print(f"    SECRET_KEY={slug}-node-secret \\")
-    print(f"    FLUX_COOKIE_NAME=session_{slug} \\")
+    print(f"    TRELLIS_COOKIE_NAME=session_{slug} \\")
     print(f'    SHARE_BASE_URL=http://127.0.0.1:{args.port} \\')
     print(f'    SHARE_NODE_NAME="{node_name}" \\')
     print(f'    SHARE_OWNER_NAME="{args.name}" \\')
@@ -126,7 +126,7 @@ def main():
     print(f"  machine. It will be empty until a library is joined.")
     print("─" * 68)
     print()
-    print("SECRET_KEY and FLUX_COOKIE_NAME are NOT optional: browser cookies are")
+    print("SECRET_KEY and TRELLIS_COOKIE_NAME are NOT optional: browser cookies are")
     print("scoped by host and ignore the port, so without both, the two nodes")
     print("authenticate as each other and overwrite each other's sessions.")
 

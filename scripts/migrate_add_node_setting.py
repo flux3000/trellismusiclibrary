@@ -21,7 +21,7 @@ this on both the Public address save and Create invite.)
 Additive and idempotent — safe to re-run.
 
     python3 scripts/migrate_add_node_setting.py
-    FLUX_DB_PATH=/path/to/other.db python3 scripts/migrate_add_node_setting.py
+    TRELLIS_DB_PATH=/path/to/other.db python3 scripts/migrate_add_node_setting.py
 """
 
 import sys

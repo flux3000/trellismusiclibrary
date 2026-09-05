@@ -16,7 +16,7 @@ notarized bundle, where renaming the download cannot correct it. Bump here
 FIRST, build, then tag the commit you built.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # The app has two names on purpose (Ryan, 2026-08-25 — "we should be calling it
 # Trellis Music Library, not just Trellis").

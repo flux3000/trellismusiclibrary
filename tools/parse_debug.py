@@ -57,7 +57,7 @@ def load_known_names_from_db():
     except ImportError:
         pass
 
-    db_path = os.environ.get("DATABASE_URL", str(REPO_ROOT / "db" / "fluxaudio.db"))
+    db_path = os.environ.get("DATABASE_URL", str(REPO_ROOT / "db" / "trellis.db"))
     db_path = db_path.replace("sqlite:///", "")
 
     import sqlite3

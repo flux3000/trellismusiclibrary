@@ -56,8 +56,8 @@ from pathlib import Path
 # Env-overridable so the helper is testable against a scratch share without
 # editing this file. Defaults mirror config.py.
 
-SHARE_URL  = os.environ.get("FLUX_SHARE_URL",  "smb://SynologyRB.local/music")
-MOUNTPOINT = os.environ.get("FLUX_MOUNTPOINT", "/Volumes/music")
+SHARE_URL  = os.environ.get("TRELLIS_SHARE_URL",  "smb://SynologyRB.local/music")
+MOUNTPOINT = os.environ.get("TRELLIS_MOUNTPOINT", "/Volumes/music")
 
 # The path we actually care about. `mount` succeeding tells us the kernel is
 # happy; only reading this tells us the app will work.
@@ -67,7 +67,7 @@ MOUNTPOINT = os.environ.get("FLUX_MOUNTPOINT", "/Volumes/music")
 # override, so a stale default here means it perceives a perfectly healthy
 # mount as broken forever, escalating all the way to killing Finder every
 # cycle (see MAX_GENTLE_ATTEMPTS below) — not a cosmetic miss.
-SENTINEL = os.environ.get("FLUX_SENTINEL", "/Volumes/music/Trellis/Library")
+SENTINEL = os.environ.get("TRELLIS_SENTINEL", "/Volumes/music/Trellis/Library")
 
 # Share name as it appears in `smbutil statshares -a` (last path component).
 SHARE_NAME = SHARE_URL.rstrip("/").rsplit("/", 1)[-1]
