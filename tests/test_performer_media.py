@@ -149,21 +149,49 @@ def _db_performer(pid):
     return _db.session.get(Performer, pid)
 
 
-# ── Shared AI-cost helper (ai_assist.py, reused by performer_research.py) ───
+# ── Shared AI usage helper (ai_assist.py, reused by performer_research.py) ──
+# Currency was removed 2026-09-07 — these assert TOKENS AND SEARCHES, and the
+# absence of any priced field is part of what they check. A `cost_cents` key
+# reappearing here is a regression, not a bonus.
 
-def test_compute_cost_matches_pricing_table():
+def test_usage_summary_reports_tokens_not_currency():
     from types import SimpleNamespace
-    from app.utils.ai_assist import _compute_cost
+    from app.utils.ai_assist import _usage_summary
 
     usage = SimpleNamespace(
         input_tokens=5000, output_tokens=1200,
         cache_read_input_tokens=0, cache_creation_input_tokens=0,
         server_tool_use=SimpleNamespace(web_search_requests=3),
     )
-    sonnet = _compute_cost(usage, "claude-sonnet-5")
-    assert sonnet["cost_cents"] == 5.2   # (5000/1e6*2 + 1200/1e6*10)*100 + 3
+    got = _usage_summary(usage)
+    assert got["input_tokens"] == 5000
+    assert got["output_tokens"] == 1200
+    assert got["total_tokens"] == 6200
+    assert got["web_search_requests"] == 3
+    assert "cost_cents" not in got
 
-    haiku = _compute_cost(usage, "claude-haiku-4-5")
-    assert haiku["cost_cents"] == 4.1
+    # Cache counts are kept SEPARATE from plain input on purpose — folding them
+    # in would make a cached turn look like a full-price one.
+    cached = _usage_summary(SimpleNamespace(
+        input_tokens=800, output_tokens=200,
+        cache_read_input_tokens=60000, cache_creation_input_tokens=0,
+        server_tool_use=None))
+    assert cached["cache_read_input_tokens"] == 60000
+    assert cached["input_tokens"] == 800
+    assert cached["web_search_requests"] == 0
 
-    assert _compute_cost(usage, "some-unknown-model") is None
+    # No usage object at all is "not measured", which is not the same as zero.
+    assert _usage_summary(None) is None
+
+
+def test_estimate_tokens_is_a_range_that_grows_with_searches():
+    from app.utils.ai_assist import estimate_tokens, MAX_SEARCHES, MAX_SEARCHES_WITH_QUESTION
+
+    low, high = estimate_tokens()
+    assert low < high
+    # The ceiling is the search cap, which is a real bound rather than a guess.
+    assert high == MAX_SEARCHES * 15_000 + 1_500
+
+    # A run carrying a human question is allowed to dig further, so its ceiling
+    # is higher. If these two ever match, the question is buying nothing.
+    assert estimate_tokens(MAX_SEARCHES_WITH_QUESTION)[1] > high

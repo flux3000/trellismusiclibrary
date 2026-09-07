@@ -4840,6 +4840,19 @@ const App = (() => {
             <div class="pp-artists" id="pp-artists"></div>
             <div class="pp-stint-editor" id="pp-stint-editor" style="display:none"></div>
 
+            <!-- Lineup research is its OWN button, not a section of the
+                 Description's AI Assist (Ryan, 2026-09-07). Two reasons: it is
+                 far more search-hungry than a biography, and AI Assist
+                 overwrites the description — so folding lineup in would make
+                 anyone who wanted tenure dates accept a rewritten description
+                 they never asked for. It also lands here, beside the roster it
+                 is about, rather than up on the Description header. -->
+            <div class="pp-lineup-ai">
+              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn" id="pp-lineup-run">${icon('sparkles')} Research lineup</button>
+              <span class="pp-sec-msg" id="pp-lineup-msg"></span>
+            </div>
+            <div class="pp-lineup-results" id="pp-lineup-results"></div>
+
             <!-- AI Assist sits ON the Description header: it's an enrichment
                  action for this one field, not a research panel, so it belongs
                  where its output lands. Clicking it OVERWRITES the description
@@ -4850,7 +4863,13 @@ const App = (() => {
               <button type="button" class="btn btn-ghost btn-xs iq-ai-btn" id="pp-dossier-run">${icon('sparkles')} AI Assist</button>
               <span class="pp-sec-msg" id="pp-dossier-msg"></span>
             </div>
+            <input type="text" class="ai-ask-input pp-ai-ask" id="pp-ai-question" autocomplete="off"
+                   placeholder="Anything specific you want covered? (optional)" />
             <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pp-desc" title="Click to edit">${descText ? esc(performer.bio) : 'Add a description\u2026'}</div>
+            <!-- An answer to the human's question lives here, not in the
+                 description: it is a reply to them, not part of the act's
+                 biography, and pasting it into a saved field would be wrong. -->
+            <div class="pp-ai-answer ai-res-section" id="pp-ai-answer"></div>
 
             <div class="pp-block">
               <h2 class="pp-block-title">MusicBrainz</h2>
@@ -5518,8 +5537,11 @@ const App = (() => {
       const tick = setInterval(() => {
         msg.textContent = `Researching the web… ${Math.round((Date.now() - t0) / 1000)}s`
       }, 1000)
+      const qEl = document.getElementById('pp-ai-question')
+      const question = (qEl?.value || '').trim() || undefined
+      if (qEl) qEl.value = ''   // never silently reuse a question on the next run
       try {
-        const { job_id } = await API.performers.startDossier(performerId)
+        const { job_id } = await API.performers.startDossier(performerId, { question })
         const result = await pollDossierJob(performerId, job_id, t0)
         clearInterval(tick)
 
@@ -5536,10 +5558,19 @@ const App = (() => {
           descEl.classList.remove('pp-empty')
         }
         msg.className = 'pp-sec-msg is-ok'
-        // formatAiCost returns an HTML badge, so this must be innerHTML —
+        // formatAiUsage returns an HTML badge, so this must be innerHTML —
         // textContent rendered the literal <span …> markup on the page.
         msg.innerHTML = 'Description updated' +
-          (result.usage ? ' · ' + formatAiCost(result.usage) : '')
+          (result.usage ? ' · ' + formatAiUsage(result.usage) : '')
+        // An answer to the human's question is not part of the biography and
+        // must not be pasted into it. It gets its own block under the
+        // description, where it can be read and then ignored.
+        const ansBox = document.getElementById('pp-ai-answer')
+        if (ansBox) {
+          ansBox.innerHTML = result.answer
+            ? `<div class="ai-res-title">Answer</div><p class="ai-summary">${esc(stripCitations(result.answer))}</p>`
+            : ''
+        }
         btn.textContent = 'AI Assist'
         btn.disabled = false
       } catch (e) {
@@ -5551,16 +5582,159 @@ const App = (() => {
     }
     document.getElementById('pp-dossier-run')?.addEventListener('click', runDossier)
 
-    // Cost range on the button's tooltip. Fetched rather than hardcoded so it
-    // follows the model chosen in Settings, and fire-and-forget because a
-    // failed estimate must never stop the button working.
-    API.performers.aiEstimate().then(est => {
+    // ── Lineup research ──────────────────────────────────────────────────────
+    // Returns date-bounded STINTS for review. NOTHING is applied automatically,
+    // at any confidence: tenure dates are the same failure class as the wrong
+    // date that got auto-apply deleted in the first place (see the AI Assist
+    // Refinement spec), and the internet routinely disagrees with itself about
+    // who was in a band in which year.
+    let lineupRows = []
+
+    function lineupDates(m) {
+      const a = (m.start || '').trim(), b = (m.end || '').trim()
+      if (!a && !b) return 'entire history of the act'
+      return `${a || '?'} – ${b || 'present'}`
+    }
+
+    // "1974-10-19" -> [1974, 10, 19]; missing parts stay null, which is exactly
+    // what Membership's nullable partial-date columns want.
+    function splitPartialDate(str) {
+      const p = String(str || '').trim().split('-')
+      const n = i => (p[i] && /^\d+$/.test(p[i]) ? parseInt(p[i], 10) : null)
+      return [n(0), n(1), n(2)]
+    }
+
+    function renderLineupResults(result) {
+      const box = document.getElementById('pp-lineup-results')
+      if (!box) return
+      lineupRows = result.members || []
+      if (!lineupRows.length) {
+        box.innerHTML = `<p class="ai-res-note">No sourced lineup could be established for this act.</p>`
+        return
+      }
+      // A row with no source url is shown but NOT actionable — the prompt is
+      // told this, and it is the only thing keeping an unsourced guess from
+      // being one click from the roster.
+      const rows = lineupRows.map((m, i) => `
+        <div class="pp-lineup-row">
+          <span class="pp-lineup-name">${esc(m.name || '')}</span>
+          <span class="pp-lineup-inst">${esc(m.instrument || '')}</span>
+          <span class="pp-lineup-dates">${esc(lineupDates(m))}</span>
+          <span class="ai-res-conf">${esc(m.confidence || '')}</span>
+          ${m.url ? `<a class="ai-link" href="${esc(m.url)}" target="_blank" rel="noopener">source</a>`
+                  : `<span class="pp-lineup-nosrc" title="No source given, so this cannot be added">no source</span>`}
+          ${m.url ? `<button class="btn btn-ghost btn-xs pp-lineup-add" data-idx="${i}">Add to roster</button>` : ''}
+          ${m.note ? `<span class="pp-lineup-note">${esc(m.note)}</span>` : ''}
+        </div>`).join('')
+
+      box.innerHTML = `
+        <div class="ai-res-section">
+          <div class="ai-res-title">Lineup found ${formatAiUsage(result.usage)}</div>
+          ${result.answer ? `<p class="ai-summary">${esc(stripCitations(result.answer))}</p>` : ''}
+          ${result.thinking ? `<p class="ai-summary">${esc(stripCitations(result.thinking))}</p>` : ''}
+          <div class="pp-lineup-rows">${rows}</div>
+        </div>`
+
+      box.querySelectorAll('.pp-lineup-add').forEach(btn =>
+        btn.addEventListener('click', () => applyLineupRow(parseInt(btn.dataset.idx), btn)))
+    }
+
+    async function applyLineupRow(idx, btn) {
+      const m = lineupRows[idx]
+      if (!m || !m.name) return
+      btn.disabled = true
+      btn.textContent = 'Adding…'
+      try {
+        // 1. Make sure the person is on the roster. set_performer_members
+        //    creates the Artist if this is a new name, which is why adding
+        //    someone for the first time goes through the plain name list
+        //    rather than the stint endpoint (see api/performers.py::add_stint).
+        let member = members.find(x => x.name.toLowerCase() === m.name.toLowerCase())
+        if (!member) {
+          members.push({ name: m.name })
+          await persistMembers()
+          await refreshRoster()
+          member = members.find(x => x.name.toLowerCase() === m.name.toLowerCase())
+        }
+        if (!member) throw new Error('Could not add ' + m.name + ' to the roster')
+
+        const [sy, sm, sd] = splitPartialDate(m.start)
+        const [ey, em, ed] = splitPartialDate(m.end)
+        const dates = { start_year: sy, start_month: sm, start_day: sd,
+                        end_year: ey, end_month: em, end_day: ed }
+
+        // 2. A person added just now (or a pre-existing "always a member" row)
+        //    carries ONE unbounded stint. Adding a second, bounded stint beside
+        //    it would leave the record saying both "always a member" and "a
+        //    member from 1974 to 1979" — contradictory, and the personnel
+        //    resolver takes the union, so the bounds would do nothing. Fill the
+        //    unbounded row in instead; only a member who already has real dates
+        //    gets a second stint.
+        const stints = member.stints || []
+        const blank = stints.find(isUnbounded)
+        if (blank) await API.performers.updateStint(blank.id, dates)
+        else       await API.performers.addStint(performerId, member.id, dates)
+
+        await refreshRoster()
+        renderArtists()
+        renderStintEditor()
+        btn.textContent = 'Added'
+        btn.classList.add('applied')
+      } catch (e) {
+        btn.disabled = false
+        btn.textContent = 'Add to roster'
+        alert('Could not add: ' + e.message)
+      }
+    }
+
+    async function runLineup() {
+      const btn = document.getElementById('pp-lineup-run')
+      const msg = document.getElementById('pp-lineup-msg')
+      if (!btn || btn.disabled) return
+      const qEl = document.getElementById('pp-ai-question')
+      const question = (qEl?.value || '').trim() || undefined
+      if (qEl) qEl.value = ''
+      btn.disabled = true
+      const t0 = Date.now()
+      msg.className = 'pp-sec-msg'
+      const tick = setInterval(() => {
+        msg.textContent = `Researching the lineup… ${Math.round((Date.now() - t0) / 1000)}s`
+      }, 1000)
+      msg.textContent = 'Researching the lineup… this takes a minute or two'
+      try {
+        const { job_id } = await API.performers.startDossier(performerId, { mode: 'lineup', question })
+        const result = await pollDossierJob(performerId, job_id, t0)
+        clearInterval(tick)
+        msg.className = 'pp-sec-msg is-ok'
+        msg.textContent = 'Review each person below — nothing is added until you say so'
+        renderLineupResults(result)
+      } catch (e) {
+        clearInterval(tick)
+        msg.className = 'pp-sec-msg is-err'
+        msg.textContent = 'Lineup research failed: ' + e.message
+      } finally {
+        btn.disabled = false
+      }
+    }
+    document.getElementById('pp-lineup-run')?.addEventListener('click', runLineup)
+
+
+    // Token range on the button's tooltip. Fetched rather than hardcoded so a
+    // change to the search budget can't leave a stale promise in the UI, and
+    // fire-and-forget because a failed estimate must never stop the button
+    // working.
+    aiEstimatePromise().then(est => {
+      if (!est || est.low_tokens == null) return
+      const tail = `${aiTokenRange(est)}, depending on how many searches it needs. `
+                 + `Billed by Anthropic to your key.`
       const b = document.getElementById('pp-dossier-run')
-      if (!b || est.low_cents == null) return
-      b.title = `Researches the web and rewrites the description. `
-              + `Roughly ${est.low_cents}–${est.high_cents}¢ per run, `
-              + `depending on how many searches it needs.`
-    }).catch(() => {})
+      if (b) b.title = `Researches the web and rewrites the description. ${tail}`
+      // Lineup research digs harder than a biography does, so it sits at the
+      // top of that range rather than the middle. Saying so is the point of
+      // the line — nobody should be surprised by what a run costs.
+      const l = document.getElementById('pp-lineup-run')
+      if (l) l.title = `Researches who was in this act and when, for review. ${tail}`
+    })
 
     if (performer.dossier) {
       // A previous run exists on the record. Nothing is rendered from it any
@@ -5651,10 +5825,12 @@ const App = (() => {
     // The button lives inside the (already-open) AI pane; running replaces it.
     const body = document.getElementById('ai-results')
     if (!body) return
+    // Read the question BEFORE the pane is overwritten by the spinner.
+    const question = takeAiQuestion()
     body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web — this can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
     const t0 = Date.now()
     try {
-      const { job_id } = await API.ingest.aiAssistRecording(recordingId)
+      const { job_id } = await API.ingest.aiAssistRecording(recordingId, { question })
       const result = await pollAiJob(job_id, t0)
       if (rec) rec.ai_research = result   // keep local state in sync (server has already saved it)
       renderRecAiResults(result, body, recordingId, rec, perf)
@@ -5665,8 +5841,10 @@ const App = (() => {
         : `AI Assist failed after ${secs}s: ${esc(e.message)}`
       body.innerHTML = `<div class="ai-assist-cta">
         <p class="ai-res-note" style="color:var(--red)">${msg}</p>
+        ${aiAskBoxHtml('Research the web to verify and fill this recording\'s metadata.')}
         <button class="btn btn-primary btn-sm iq-ai-btn" id="btn-ai-assist-retry">${icon('sparkles')} Try again</button>
       </div>`
+      paintAiAskNote()
       document.getElementById('btn-ai-assist-retry')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
     }
   }
@@ -5737,19 +5915,102 @@ const App = (() => {
   // clearly regardless of where the proposal ends up getting applied.
   const AI_VENUE_FIELDS = ['city', 'state', 'country']
 
-  // Cost badge — reads the usage block ai_assist.py::_compute_cost attaches
-  // to every result (2026-07-21, Problem 3 of the AI Assist Refinement spec).
-  // r.usage is null when the model has no pricing entry (see _PRICING in
-  // ai_assist.py) rather than showing a misleading "free" — that's the one
-  // case this renders nothing.
-  function formatAiCost(usage) {
+  // Pre-run token range, fetched once per page and cached. Fire-and-forget:
+  // a failed estimate must never stop a button working, so every consumer
+  // handles the null.
+  let _aiEstimate = null
+  function aiEstimatePromise() {
+    return API.performers.aiEstimate()
+      .then(est => { _aiEstimate = est; return est })
+      .catch(() => null)
+  }
+
+  // The ask box: one text field and one honest sentence about what a run
+  // costs, shared by all three AI Assist surfaces so they cannot drift.
+  //
+  // The QUESTION is the whole of the dialogue feature for now (Ryan,
+  // 2026-09-07). Asked BEFORE the run, it is just more context for the one
+  // call we were already making. Asked after, it would be a second call that
+  // resends every web-search result still sitting in the context window —
+  // which is why the chat surface was deferred rather than built.
+  //
+  // The expectation line replaces a cost tooltip nobody hovered. Tokens, not
+  // currency, and a range rather than a figure: how many searches the model
+  // decides it needs is not knowable in advance.
+  function aiAskBoxHtml(hint) {
+    return `
+      <div class="ai-ask">
+        <div class="ai-assist-hint">${esc(hint)}</div>
+        <input type="text" class="ai-ask-input" id="ai-question" autocomplete="off"
+               placeholder="Anything specific you want checked? (optional)" />
+        <div class="ai-ask-note" id="ai-ask-note"></div>
+      </div>`
+  }
+
+  // Fills #ai-ask-note once the estimate lands. Separate from the markup above
+  // because the estimate is async and the box must render immediately.
+  function paintAiAskNote() {
+    const el = document.getElementById('ai-ask-note')
+    if (!el) return
+    const paint = est => {
+      const node = document.getElementById('ai-ask-note')
+      if (!node || !est || est.low_tokens == null) return
+      node.textContent = `${aiTokenRange(est)}. Billed by Anthropic to your key.`
+    }
+    if (_aiEstimate) paint(_aiEstimate)
+    else aiEstimatePromise().then(paint)
+  }
+
+  // Read + clear the question. Cleared on read so a question asked about one
+  // run is never silently reused for the next one — a stale question is worse
+  // than none, because it steers the search without the human meaning it to.
+  function takeAiQuestion() {
+    const el = document.getElementById('ai-question')
+    const q = (el?.value || '').trim()
+    if (el) el.value = ''
+    return q || undefined
+  }
+
+  // Shared phrasing for a pre-run token range, so the Performer button tooltip
+  // and the recording-side expectation line cannot drift apart. Rounded to k
+  // for the same reason formatAiUsage rounds: this is a scale, not a quote.
+  function aiTokenRange(est) {
+    const k = n => `${Math.round(n / 1000)}k`
+    return `Typically ${k(est.low_tokens)}–${k(est.high_tokens)} tokens `
+         + `and up to ${est.max_searches} web searches`
+  }
+
+  // Usage badge — reads the usage block ai_assist.py::_usage_summary attaches
+  // to every result. TOKENS AND SEARCHES, never currency (Ryan, 2026-09-07;
+  // see the usage-reporting comment in ai_assist.py for the reasoning).
+  //
+  // Rounded on purpose. "74k tokens" reads as a scale; "73,229 tokens" reads
+  // as a number someone is expected to audit, which is exactly the job
+  // Anthropic's own console does better. Exact counts stay on hover for
+  // anyone who does want to reconcile a run against their bill.
+  //
+  // usage is null only when the response carried no usage object at all —
+  // "not measured", which is not the same as zero, so this renders nothing
+  // rather than claiming a free run.
+  //
+  // An old saved result may still carry `cost_cents` in its persisted blob
+  // (ai_research_json / dossier_json predate this change). Nothing reads it,
+  // and no migration cleans it up — a stale key in a blob costs nothing,
+  // whereas a migration over every AI result to delete one number is real
+  // risk for no gain.
+  function formatAiUsage(usage) {
     if (!usage) return ''
-    const c = usage.cost_cents
-    const label = c >= 100 ? `$${(c / 100).toFixed(2)}` : `${c.toFixed(c < 1 ? 3 : 2)}¢`
+    const total = usage.total_tokens
+      ?? ((usage.input_tokens || 0) + (usage.output_tokens || 0))
+    const rounded = total >= 1000 ? `${Math.round(total / 1000)}k` : String(total)
     const n = usage.web_search_requests || 0
-    const title = `${usage.input_tokens.toLocaleString()} in / ${usage.output_tokens.toLocaleString()} out tokens`
-      + (n ? ` + ${n} web search${n === 1 ? '' : 'es'}` : '')
-    return `<span class="ai-cost-badge" title="${esc(title)}">${label}</span>`
+    const label = `${rounded} tokens` + (n ? ` · ${n} search${n === 1 ? '' : 'es'}` : '')
+    const cached = usage.cache_read_input_tokens || 0
+    const title = `${(usage.input_tokens || 0).toLocaleString()} in / `
+      + `${(usage.output_tokens || 0).toLocaleString()} out tokens`
+      + (cached ? ` · ${cached.toLocaleString()} cached` : '')
+      + (n ? ` · ${n} web search${n === 1 ? '' : 'es'}` : '')
+    return `<span class="ai-usage-badge" title="${esc(title)}">${esc(label)}</span>`
   }
 
   function buildAiResultsHtml(r, opts = {}) {
@@ -5785,9 +6046,19 @@ const App = (() => {
     const rerunBtn = opts.showRerun
       ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run AI Assist again">Run again</button>` : ''
 
+    // The human's own question is answered FIRST, above the machine's routine
+    // findings. If someone asked something, that is what they opened this
+    // panel to read.
+    const answer = r.answer
+      ? `<div class="ai-res-section ai-res-answer">
+           <div class="ai-res-title">Answer</div>
+           <p class="ai-summary">${esc(formatAiThinking(r.answer))}</p>
+         </div>` : ''
+
     return `
+      ${answer}
       <div class="ai-res-section">
-        <div class="ai-res-title">Metadata Review ${formatAiCost(r.usage)} ${rerunBtn}</div>
+        <div class="ai-res-title">Metadata Review ${formatAiUsage(r.usage)} ${rerunBtn}</div>
         ${r.thinking ? `<p class="ai-summary">${esc(formatAiThinking(r.thinking))}</p>` : ''}
         ${propsHtml || '<p class="ai-res-empty">No field changes proposed.</p>'}
       </div>
@@ -5911,8 +6182,22 @@ const App = (() => {
     })
     document.getElementById('ai-apply-tracks')?.addEventListener('click', () =>
       applyRecTrackTitles(r.track_titles || [], rec, recordingId))
-    document.getElementById('btn-ai-rerun')?.addEventListener('click', () =>
-      startRecAiAssist(recordingId, rec, perf))
+    // Run again returns to the ASK BOX rather than firing straight off. Having
+    // just read a result is precisely when someone has a specific doubt worth
+    // typing, and a second blind pass is the thing that produced two different
+    // confident wrong dates in the first place.
+    document.getElementById('btn-ai-rerun')?.addEventListener('click', () => {
+      const pane = document.getElementById('ai-results')
+      if (!pane) return
+      pane.innerHTML = `<div class="ai-assist-cta">
+        ${aiAskBoxHtml('Run again — a question here tells it where to look.')}
+        <button class="btn btn-primary btn-sm iq-ai-btn" id="btn-ai-rerun-go">${icon('sparkles')} Research again</button>
+      </div>`
+      paintAiAskNote()
+      document.getElementById('ai-question')?.focus()
+      document.getElementById('btn-ai-rerun-go')?.addEventListener('click', () =>
+        startRecAiAssist(recordingId, rec, perf))
+    })
   }
 
   /** Recording detail — split panel: tracks + info file */
@@ -6392,7 +6677,7 @@ const App = (() => {
                  the other reason the button had to move out of it. -->
             <div class="slide-pane" id="sp-ai">
               <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                <div class="ai-assist-hint">Research the web to verify and fill this recording's metadata.</div>
+                ${aiAskBoxHtml("Research the web to verify and fill this recording's metadata.")}
               </div></div>
             </div>` : ''}
 
@@ -6989,6 +7274,7 @@ const App = (() => {
       // Scoped inside this block (like the header editors above) since applying
       // a proposal needs perf.id. Non-editors never get the pane in the DOM.
       document.getElementById('btn-ai-assist')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
+      paintAiAskNote()   // fills the token-range line once the estimate lands
       // Saved research from a prior run — render it immediately instead of the CTA.
       if (rec.ai_research) {
         renderRecAiResults(rec.ai_research, document.getElementById('ai-results'), recordingId, rec, perf)
@@ -11839,11 +12125,12 @@ const App = (() => {
     const body = ensureAiPane()
     if (!body) return
     switchIngestPane('isp-ai')
+    const question = takeAiQuestion()   // read before the spinner overwrites the pane
     if (btn) { btn.disabled = true; btn.textContent = '… researching' }
     body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web — this can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
     const t0 = Date.now()
     try {
-      const { job_id } = await API.ingest.aiAssist({ folder_path: ingest.folderPath, current: collectCurrentMeta() })
+      const { job_id } = await API.ingest.aiAssist({ folder_path: ingest.folderPath, current: collectCurrentMeta(), question })
       const result = await pollAiJob(job_id, t0)
       ingest.aiResult = result
       renderAiResults(result)
@@ -11854,6 +12141,8 @@ const App = (() => {
         body.innerHTML = `<p class="ai-res-note">No Anthropic API key set — add one in Settings.</p>`
       } else {
         body.innerHTML = `<p class="ai-res-note" style="color:var(--red)">AI Assist failed after ${secs}s: ${esc(e.message)}</p>`
+          + aiAskBoxHtml('Research the web to verify and fill this recording\'s metadata.')
+        paintAiAskNote()
       }
     } finally {
       if (btn) { btn.disabled = false; btn.innerHTML = icon('sparkles') + ' AI Assist' }
@@ -12445,7 +12734,7 @@ const App = (() => {
                    never advertises the feature. -->
               <div class="slide-pane" id="isp-ai">
                 <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                  <div class="ai-assist-hint">Research the web to verify and fill this recording's metadata.</div>
+                  ${aiAskBoxHtml("Research the web to verify and fill this recording's metadata.")}
                 </div></div>
               </div>
             </div>
@@ -13398,6 +13687,7 @@ const App = (() => {
     })
 
     document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
+    paintAiAskNote()   // fills the token-range line once the estimate lands
 
     // Details panel: horizontal tabs + the permanent rail, same gestures as
     // View Recording. Clicking the ACTIVE tab collapses the panel, which is the

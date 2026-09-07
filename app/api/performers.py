@@ -400,18 +400,18 @@ def update_performer(performer_id):
 @login_required
 def ai_estimate():
     """
-    Rough cost of one AI Assist pass, for the current user's chosen model.
+    Rough TOKEN cost of one AI Assist pass. No currency figure — see
+    ai_assist.py's usage-reporting comment for why that was removed.
 
-    A RANGE, not a figure: cost tracks how many web searches the model decides
+    A RANGE, not a figure: usage tracks how many web searches the model decides
     it needs, which isn't knowable up front. Quoting a single number would be a
-    promise we can't keep — see estimate_cost_cents().
+    promise we can't keep. No longer takes the model into account, because a
+    token count is a property of the work rather than of who is billed.
     """
-    from app.utils.ai_assist import estimate_cost_cents
-    model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
-    est = estimate_cost_cents(model)
-    if not est:
-        return jsonify({"model": model, "low_cents": None, "high_cents": None})
-    return jsonify({"model": model, "low_cents": est[0], "high_cents": est[1]})
+    from app.utils.ai_assist import estimate_tokens, MAX_SEARCHES
+    low, high = estimate_tokens()
+    return jsonify({"low_tokens": low, "high_tokens": high,
+                    "max_searches": MAX_SEARCHES})
 
 
 # ── MusicBrainz match resolution (2026-08-07) ────────────────────────────────
@@ -708,16 +708,50 @@ def delete_performer_image(image_id):
 _DOSSIER_JOBS = {}  # job_id -> {"status": running|done|error, "result"/"error"}
 
 
-def _run_dossier_job(job_id, performer_id, performer_name, current_bio, api_key, model, app):
+def _performer_context(p):
+    """
+    What the DB already knows about this act, handed to the model as ground
+    truth so it does not spend searches re-deriving it (2026-09-07).
+
+    MusicBrainz aliases matter more here than they look: same-name acts are the
+    main way this research goes wrong, and origin + active years + aliases is
+    usually what separates two of them.
+    """
+    extra = {}
+    if p.mb_extra_json:
+        try:
+            extra = json.loads(p.mb_extra_json) or {}
+        except (ValueError, TypeError):
+            extra = {}
+    return {
+        "aliases":           [a for a in (extra.get("aliases") or []) if a][:8],
+        "mb_type":           p.mb_type,
+        "mb_area":           p.mb_area,
+        "mb_begin":          p.mb_begin,
+        "mb_end":            p.mb_end,
+        "mb_disambiguation": p.mb_disambiguation,
+        "genre":             p.genre.name if p.genre else None,
+        "members":           [a.name for a in p.artists],
+    }
+
+
+def _run_dossier_job(job_id, performer_id, performer_name, current_bio, api_key, model, app,
+                     mode="bio", question=None, context=None):
     import traceback as _tb
     try:
         result = run_performer_research(
-            performer_name, current_bio, api_key, model)
+            performer_name, current_bio, api_key, model,
+            context=context, question=question, mode=mode)
         _DOSSIER_JOBS[job_id] = {"status": "done", "result": result}
         try:
             with app.app_context():
                 p = db.session.get(Performer, performer_id)
-                if p:
+                # Only the bio pass owns dossier_json. A lineup pass is reviewed
+                # and applied row by row into real Membership rows, so persisting
+                # it would leave a second, staler copy of roster data beside the
+                # authoritative one — exactly the duplication the Performer model
+                # keeps MusicBrainz scalars in columns to avoid.
+                if p and mode == "bio":
                     p.dossier_json = json.dumps(result)
                     db.session.commit()
         except Exception:
@@ -735,6 +769,9 @@ def start_dossier(performer_id):
     import threading
     import uuid
 
+    data = request.get_json(silent=True) or {}
+    mode = "lineup" if data.get("mode") == "lineup" else "bio"
+
     p = db.session.get(Performer, performer_id)
     if not p:
         return jsonify({"error": "Not found"}), 404
@@ -743,11 +780,13 @@ def start_dossier(performer_id):
         return jsonify({"error": "no_api_key"}), 428
     model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
 
+    context = _performer_context(p)
     job_id = uuid.uuid4().hex
     _DOSSIER_JOBS[job_id] = {"status": "running"}
     threading.Thread(
         target=_run_dossier_job,
         args=(job_id, performer_id, p.name, p.bio or "", api_key, model, current_app._get_current_object()),
+        kwargs={"mode": mode, "question": data.get("question"), "context": context},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id}), 202

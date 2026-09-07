@@ -284,9 +284,13 @@ const API = (() => {
       // "dossier" name: renaming a working endpoint to match a UI label buys
       // nothing and breaks anything already pointed at it. The user-facing
       // wording is AI Assist everywhere (Ryan, 2026-08-07).
-      // Pre-flight cost RANGE for one pass — see utils/ai_assist.py.
+      // Pre-flight TOKEN RANGE for one pass — see utils/ai_assist.py. Was a
+      // cost range in cents until 2026-09-07; no currency appears anywhere now.
       aiEstimate:     ()           => get('/api/performers/ai-estimate'),
-      startDossier:   (id)         => post(`/api/performers/${id}/dossier`),
+      // body: { mode?: 'bio' | 'lineup', question?: string }. Lineup research
+      // is a SEPARATE pass on the same endpoint — it neither writes the
+      // description nor persists a dossier blob (see api/performers.py).
+      startDossier:   (id, body)   => post(`/api/performers/${id}/dossier`, body || {}),
       dossierStatus:  (id, jobId)  => get(`/api/performers/${id}/dossier/${jobId}`),
 
       // MusicBrainz — structured facts, separate from AI Assist by design
@@ -479,7 +483,7 @@ const API = (() => {
       // already finished earlier in a queue are untouched.
       confirmCancel: (jobId) => post(`/api/ingest/confirm/${jobId}/cancel`, {}),
       aiAssist:          (payload) => post('/api/ingest/ai-assist', payload),
-      aiAssistRecording: (recId)   => post(`/api/ingest/ai-assist-recording/${recId}`),
+      aiAssistRecording: (recId, body) => post(`/api/ingest/ai-assist-recording/${recId}`, body || {}),
       aiAssistStatus:    (jobId)   => get(`/api/ingest/ai-assist/${jobId}`),
       saveInfoFile:   (payload) => post('/api/ingest/save-info-file', payload),
       checkExisting:  ({ artist_name, year, month, day }) => {

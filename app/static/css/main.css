@@ -3789,13 +3789,59 @@ input[type="range"].progress-bar {
 }
 .ai-res-subhead-note { text-transform: none; letter-spacing: 0; font-style: italic; }
 
-/* Actual per-run cost, read from resp.usage (ai_assist.py::_compute_cost).
-   Sits inline in the "Metadata Review" title — normal-case, non-bold, so it
-   reads as a small aside rather than competing with the header. */
-.ai-cost-badge {
+/* Per-run token + search count, read from resp.usage
+   (ai_assist.py::_usage_summary). Sits inline in the "Metadata Review" title —
+   normal-case, non-bold, so it reads as a small aside rather than competing
+   with the header. Renamed from .ai-cost-badge 2026-09-07 when currency was
+   removed; the class name said "cost" and no longer showed one. */
+.ai-usage-badge {
   text-transform: none; letter-spacing: 0; font-weight: 400;
   color: var(--t3); font-size: 10px; margin-left: 4px;
 }
+
+/* ── Performer page: lineup research ─────────────────────────────────────── */
+/* Sits under the roster it is about, not on the Description header where the
+   biography's AI Assist lives — they are two different jobs (2026-09-07). */
+.pp-lineup-ai { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
+.pp-lineup-results:empty { display: none; }
+.pp-lineup-rows { display: flex; flex-direction: column; gap: 2px; }
+.pp-lineup-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 5px 0; border-bottom: 1px solid var(--bd-0); font-size: 12px;
+}
+.pp-lineup-row:last-child { border-bottom: none; }
+.pp-lineup-name  { font-weight: 600; color: var(--t0); }
+.pp-lineup-inst  { color: var(--t2); font-style: italic; }
+.pp-lineup-dates { color: var(--t2); margin-left: auto; }
+/* A row we will not let you act on says so plainly rather than just missing a
+   button — an absent control reads as a rendering bug, a label reads as a rule. */
+.pp-lineup-nosrc { color: var(--t3); font-size: 10.5px; }
+.pp-lineup-note  { flex-basis: 100%; color: var(--t3); font-size: 10.5px; }
+
+/* The question box on the Performer page. Full width under the Description
+   header so it lines up with the description it feeds. */
+.pp-ai-ask { margin: 4px 0 8px; }
+.pp-ai-answer:empty { display: none; }
+
+/* ── Ask box — the pre-run question + the token expectation line ──────────── */
+/* One shared component across all three AI Assist surfaces (2026-09-07). The
+   question is optional by design, so the field is quiet: no label, no asterisk,
+   nothing that reads as a required step in front of the button. */
+.ai-ask { padding: 4px 0 2px; }
+.ai-ask-input {
+  width: 100%; margin-top: 8px; padding: 7px 10px;
+  background: var(--bg-1); color: var(--t0);
+  border: 1px solid var(--bd-0); border-radius: 4px;
+  font-family: inherit; font-size: 12px;
+}
+.ai-ask-input::placeholder { color: var(--t3); }
+.ai-ask-input:focus { outline: none; border-color: var(--accent); }
+/* Empty until the estimate resolves, and it may never resolve. No min-height:
+   a reserved empty strip in a panel that usually fills it reads as a bug. */
+.ai-ask-note { margin-top: 6px; font-size: 10.5px; color: var(--t3); }
+
+/* The human's own question, answered above the routine findings. */
+.ai-res-answer .ai-summary { color: var(--t0); }
 
 /* Neutral, theme-aware links (never blue) */
 .ai-link { color: var(--t2); text-decoration: underline; text-underline-offset: 2px; }

@@ -89,12 +89,14 @@ def health():
 _AI_JOBS = {}  # job_id -> {"status": running|done|error, "result"/"error", "t0"}
 
 
-def _run_ai_job(job_id, folder_path, current, api_key, model, *, recording_id=None, app=None):
+def _run_ai_job(job_id, folder_path, current, api_key, model, *, recording_id=None,
+                app=None, question=None, prior=None):
     import time as _time
     import traceback as _tb
     t0 = _time.time()
     try:
-        result = run_ai_assist(folder_path, current, api_key, model)
+        result = run_ai_assist(folder_path, current, api_key, model,
+                               question=question, prior=prior)
         _AI_JOBS[job_id] = {"status": "done", "result": result}
         print("[ai-assist] job %s ok in %.1fs" % (job_id[:8], _time.time() - t0), flush=True)
         # Persist to the recording, if this run was for an already-saved one.
@@ -305,7 +307,13 @@ def ai_assist():
     Kick off an AI research job (background thread) and return a job id
     immediately. Poll GET /api/ingest/ai-assist/<job_id> for the result.
 
-    Body: { folder_path, current: {...} }
+    Body: { folder_path, current: {...}, question?: "..." }
+
+    `question` is the archivist's optional pre-run question. It rides in this
+    existing body rather than getting an endpoint of its own — a question asked
+    BEFORE the run is just more context for the one call we were already
+    making, which is the whole reason it was chosen over a chat surface
+    (Ryan, 2026-09-07).
     """
     import threading
     import uuid
@@ -327,6 +335,7 @@ def ai_assist():
     threading.Thread(
         target=_run_ai_job,
         args=(job_id, folder_path, data.get("current") or {}, api_key, model),
+        kwargs={"question": data.get("question")},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id}), 202
@@ -342,6 +351,7 @@ def ai_assist_recording(recording_id):
     from app.models.recording import Recording
     from app.utils.format import format_partial_date
 
+    data = request.get_json(silent=True) or {}
     rec = db.session.get(Recording, recording_id)
     if not rec:
         return jsonify({"error": "Not found"}), 404
@@ -366,12 +376,23 @@ def ai_assist_recording(recording_id):
         return jsonify({"error": "no_api_key"}), 428
     model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
 
+    # A re-run gets the PREVIOUS run's findings back (see _prior_summary): the
+    # saved blob is right here, and without it a second pass re-searches
+    # everything the first one already found and is free to contradict it.
+    prior = None
+    if rec.ai_research_json:
+        try:
+            prior = json.loads(rec.ai_research_json)
+        except (ValueError, TypeError):
+            prior = None   # a corrupt blob is a reason to skip the recap, not to fail the run
+
     job_id = uuid.uuid4().hex
     _AI_JOBS[job_id] = {"status": "running"}
     threading.Thread(
         target=_run_ai_job,
         args=(job_id, rec.folder_path or "", current, api_key, model),
-        kwargs={"recording_id": recording_id, "app": current_app._get_current_object()},
+        kwargs={"recording_id": recording_id, "app": current_app._get_current_object(),
+                "question": data.get("question"), "prior": prior},
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id}), 202
