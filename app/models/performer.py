@@ -59,6 +59,25 @@ class Performer(db.Model):
     # after it silently overwrote a recording with a wrong date).
     dossier_json = db.Column(db.Text, nullable=True)
 
+    # Latest AI lineup-research pass (2026-09-07) — the researched roster with
+    # per-person stint dates, JSON-encoded, held for review.
+    #
+    # ITS OWN COLUMN, not folded into dossier_json: the two passes are separate
+    # actions on separate buttons with separate output shapes, and sharing one
+    # blob would mean each run silently destroyed the other's result.
+    #
+    # I argued against persisting this at all — a saved roster proposal sits
+    # beside the authoritative Membership rows and can drift from them. Ryan
+    # overruled it (2026-09-07) and was right: research the human paid tokens
+    # for, that vanishes on navigating away, is not a duplicate-data problem,
+    # it is a lost-work problem. The drift concern is real but belongs in the
+    # RENDER — the UI checks each row against the live roster and marks the
+    # ones already applied, rather than trusting a stored "applied" flag.
+    #
+    # Nothing here is authoritative. It is a proposal awaiting a human, exactly
+    # like dossier_json, and applying a row writes real Membership rows.
+    lineup_json = db.Column(db.Text, nullable=True)
+
     # Genre (2026-08-02) — a proper dimension, its own table, one FK per
     # Performer (never M2M — see the Genre design spec in Context Library).
     # Nullable: all existing performers start unassigned, and a non-null

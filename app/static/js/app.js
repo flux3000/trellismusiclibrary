@@ -5589,6 +5589,10 @@ const App = (() => {
     // Refinement spec), and the internet routinely disagrees with itself about
     // who was in a band in which year.
     let lineupRows = []
+    // The last saved pass, straight off the record. Rendering it on load is
+    // the whole point of persisting it: research the human paid tokens for
+    // should still be there when they come back to the page.
+    let lineupResult = performer.lineup || null
 
     function lineupDates(m) {
       const a = (m.start || '').trim(), b = (m.end || '').trim()
@@ -5602,6 +5606,25 @@ const App = (() => {
       const p = String(str || '').trim().split('-')
       const n = i => (p[i] && /^\d+$/.test(p[i]) ? parseInt(p[i], 10) : null)
       return [n(0), n(1), n(2)]
+    }
+
+    // Is this researched stint ALREADY on the roster?
+    //
+    // Derived from the live Membership rows every time it renders, never from
+    // a stored "applied" flag on the saved result. The saved blob is a
+    // proposal; the roster is the truth. A flag would be a second copy of the
+    // same fact, free to disagree with the first the moment someone edits a
+    // tenure by hand or removes a member — which is exactly the drift that
+    // made me argue against persisting this at all. Deriving it removes the
+    // objection instead of arguing with it.
+    function lineupRowApplied(m) {
+      const member = members.find(x => x.name.toLowerCase() === (m.name || '').toLowerCase())
+      if (!member) return false
+      const [sy, sm, sd] = splitPartialDate(m.start)
+      const [ey, em, ed] = splitPartialDate(m.end)
+      return (member.stints || []).some(st =>
+        st.start_year === sy && st.start_month === sm && st.start_day === sd &&
+        st.end_year === ey && st.end_month === em && st.end_day === ed)
     }
 
     function renderLineupResults(result) {
@@ -5623,7 +5646,9 @@ const App = (() => {
           <span class="ai-res-conf">${esc(m.confidence || '')}</span>
           ${m.url ? `<a class="ai-link" href="${esc(m.url)}" target="_blank" rel="noopener">source</a>`
                   : `<span class="pp-lineup-nosrc" title="No source given, so this cannot be added">no source</span>`}
-          ${m.url ? `<button class="btn btn-ghost btn-xs pp-lineup-add" data-idx="${i}">Add to roster</button>` : ''}
+          ${lineupRowApplied(m)
+              ? `<span class="pp-lineup-applied">On roster</span>`
+              : (m.url ? `<button class="btn btn-ghost btn-xs pp-lineup-add" data-idx="${i}">Add to roster</button>` : '')}
           ${m.note ? `<span class="pp-lineup-note">${esc(m.note)}</span>` : ''}
         </div>`).join('')
 
@@ -5678,8 +5703,10 @@ const App = (() => {
         await refreshRoster()
         renderArtists()
         renderStintEditor()
-        btn.textContent = 'Added'
-        btn.classList.add('applied')
+        // Repaint from the refreshed roster so every row's On roster / Add
+        // state is recomputed — adding one person can settle another row too,
+        // when the research listed the same stint twice under name variants.
+        renderLineupResults(lineupResult)
       } catch (e) {
         btn.disabled = false
         btn.textContent = 'Add to roster'
@@ -5707,6 +5734,7 @@ const App = (() => {
         clearInterval(tick)
         msg.className = 'pp-sec-msg is-ok'
         msg.textContent = 'Review each person below — nothing is added until you say so'
+        lineupResult = result
         renderLineupResults(result)
       } catch (e) {
         clearInterval(tick)
@@ -5717,6 +5745,17 @@ const App = (() => {
       }
     }
     document.getElementById('pp-lineup-run')?.addEventListener('click', runLineup)
+
+    // Paint the saved pass immediately on load. The button says "Research
+    // again" once there is one, so it is clear this is a previous result and
+    // not something that just ran.
+    if (lineupResult && (lineupResult.members || []).length) {
+      renderLineupResults(lineupResult)
+      const lb = document.getElementById('pp-lineup-run')
+      if (lb) lb.innerHTML = icon('sparkles') + ' Research lineup again'
+      const lm = document.getElementById('pp-lineup-msg')
+      if (lm) lm.textContent = 'Saved from an earlier run'
+    }
 
 
     // Token range on the button's tooltip. Fetched rather than hardcoded so a

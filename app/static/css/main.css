@@ -3816,6 +3816,9 @@ input[type="range"].progress-bar {
 /* A row we will not let you act on says so plainly rather than just missing a
    button — an absent control reads as a rendering bug, a label reads as a rule. */
 .pp-lineup-nosrc { color: var(--t3); font-size: 10.5px; }
+/* Derived from the live roster on every render, never a stored flag — see
+   lineupRowApplied(). Reads as a state, not a button that has been used up. */
+.pp-lineup-applied { color: var(--green); font-size: 10.5px; font-weight: 600; }
 .pp-lineup-note  { flex-basis: 100%; color: var(--t3); font-size: 10.5px; }
 
 /* The question box on the Performer page. Full width under the Description

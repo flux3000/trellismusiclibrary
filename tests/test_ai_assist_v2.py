@@ -21,6 +21,14 @@ from app.utils import ai_assist, performer_research
 from app.utils.ai_assist import MAX_SEARCHES, MAX_SEARCHES_WITH_QUESTION
 
 
+@pytest.fixture()
+def api(app):
+    """Same local fixture the other API test modules define — conftest has no
+    shared `api`, and importing one across test files is worse than four lines."""
+    app.config["LOGIN_DISABLED"] = True
+    return app.test_client()
+
+
 class _FakeBlock:
     type = "tool_use"
 
@@ -226,3 +234,78 @@ def test_the_existing_bio_is_only_sent_to_the_bio_pass(fake_anthropic):
     assert "An old draft bio" not in _user_text(fake_anthropic.last)
     performer_research.run_performer_research("Act", "An old draft bio.", "key", "m", mode="bio")
     assert "An old draft bio" in _user_text(fake_anthropic.last)
+
+
+# ── Lineup research is PERSISTED ────────────────────────────────────────────
+# The first build held the result in page state only, so running it and
+# navigating away threw away work that cost real tokens (Ryan, 2026-09-07).
+
+def test_migrate_add_performer_lineup_is_idempotent(tmp_path):
+    import sqlite3
+    from scripts import migrate_add_performer_lineup as mod
+
+    db_path = tmp_path / "legacy.db"
+    con = sqlite3.connect(str(db_path))
+    con.execute("CREATE TABLE performer (id INTEGER PRIMARY KEY, name TEXT)")
+    con.commit()
+    con.close()
+
+    original = mod.DB
+    try:
+        mod.DB = str(db_path)
+        mod.main()
+        mod.main()   # must not raise "duplicate column"
+    finally:
+        mod.DB = original
+
+    con = sqlite3.connect(str(db_path))
+    cols = [r[1] for r in con.execute("PRAGMA table_info(performer)")]
+    con.close()
+    assert "lineup_json" in cols
+
+
+def test_a_lineup_pass_is_saved_and_comes_back_on_the_performer(api, app, seeded_ids):
+    """The actual bug: run it, leave, come back, it is still there."""
+    import json as _json
+    from app.extensions import db as _db
+    from app.models.performer import Performer
+
+    pid = seeded_ids["performer_id"]
+    payload = {"thinking": "from the fan roster", "members": [
+        {"name": "Scott LaFaro", "start": "1959", "end": "1961",
+         "confidence": "high", "url": "https://example.org/roster"}]}
+
+    with app.app_context():
+        p = _db.session.get(Performer, pid)
+        p.lineup_json = _json.dumps(payload)
+        _db.session.commit()
+
+    got = api.get(f"/api/performers/{pid}").get_json()
+    assert got["lineup"]["members"][0]["name"] == "Scott LaFaro"
+    # The biography pass must be untouched — separate columns, separate runs.
+    assert got["dossier"] is None
+
+
+def test_a_performer_with_no_lineup_research_reports_none(api, seeded_ids):
+    # null, not {} — the page distinguishes "never run" from "ran, found
+    # nobody", and those deserve different words on screen.
+    got = api.get(f"/api/performers/{seeded_ids['performer_id']}").get_json()
+    assert got["lineup"] is None
+
+
+def test_the_two_passes_do_not_overwrite_each_other(api, app, seeded_ids):
+    import json as _json
+    from app.extensions import db as _db
+    from app.models.performer import Performer
+
+    pid = seeded_ids["performer_id"]
+    with app.app_context():
+        p = _db.session.get(Performer, pid)
+        p.dossier_json = _json.dumps({"biography": "A bio.", "thinking": "t"})
+        p.lineup_json  = _json.dumps({"members": [{"name": "X", "confidence": "low"}],
+                                      "thinking": "t"})
+        _db.session.commit()
+
+    got = api.get(f"/api/performers/{pid}").get_json()
+    assert got["dossier"]["biography"] == "A bio."
+    assert got["lineup"]["members"][0]["name"] == "X"

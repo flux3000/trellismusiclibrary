@@ -282,6 +282,12 @@ def get_performer(performer_id):
         "has_image": bool(p.images),
         "images":    [_image_payload(i) for i in p.images],
         "dossier":   json.loads(p.dossier_json) if p.dossier_json else None,
+        # The last lineup-research pass, so it survives navigating away
+        # (Ryan, 2026-09-07). Deliberately NOT added to app/api/share.py: a
+        # roster proposal awaiting review is the owner's working state, not
+        # catalog metadata a peer has any use for — and every field added to
+        # the peer surface is another way THE THREE LISTS drift apart.
+        "lineup":    json.loads(p.lineup_json) if p.lineup_json else None,
         # Genre (2026-08-02) — a proper dimension, one FK, nullable. null
         # until Ryan assigns one by hand (no AI suggestion for this field).
         # `color` (2026-08-07) drives the Browse cards' colour flair.
@@ -746,13 +752,14 @@ def _run_dossier_job(job_id, performer_id, performer_name, current_bio, api_key,
         try:
             with app.app_context():
                 p = db.session.get(Performer, performer_id)
-                # Only the bio pass owns dossier_json. A lineup pass is reviewed
-                # and applied row by row into real Membership rows, so persisting
-                # it would leave a second, staler copy of roster data beside the
-                # authoritative one — exactly the duplication the Performer model
-                # keeps MusicBrainz scalars in columns to avoid.
+                # Each mode owns its own column. Sharing one would mean a
+                # lineup run silently destroying the last biography research,
+                # and vice versa.
                 if p and mode == "bio":
                     p.dossier_json = json.dumps(result)
+                    db.session.commit()
+                elif p and mode == "lineup":
+                    p.lineup_json = json.dumps(result)
                     db.session.commit()
         except Exception:
             _tb.print_exc()   # best-effort — client already has the result via the job dict
