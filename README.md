@@ -9,15 +9,7 @@ Trellis is a music library manager for live recording collectors and aficionados
 Grab the latest build from [**Releases**](https://github.com/flux3000/trellismusiclibrary/releases)
 — no Python, no command line required.
 
-The app isn't signed yet, so macOS blocks it outright the first time, with
-no Open option in sight. Two ways past it, once, and only once:
-
-- **Terminal:** `xattr -dr com.apple.quarantine "/path/to/Trellis Music Library.app"`,
-  then open it normally.
-- **No Terminal:** try to open it, dismiss the blocked dialog, then go to
-  System Settings → Privacy & Security → scroll down to the blocked-app
-  notice → **Open Anyway**. Open the app again and this time there's a real
-  Open button.
+Drag it to Applications and open it.
 
 The rest of this README is for building from source.
 

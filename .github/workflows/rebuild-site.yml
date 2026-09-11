@@ -1,0 +1,35 @@
+# Publishing a release here rebuilds trellismusiclibrary.com.
+#
+# The website is static, and the version and download link on its landing page
+# are read from this repo's releases API at BUILD time. So a new release is
+# invisible on the site until the site rebuilds. This tells it to.
+#
+# One-time setup:
+#   1. Cloudflare dashboard, the Pages project, Settings, Builds & deployments,
+#      Deploy hooks, Add deploy hook. Point it at the production branch and
+#      copy the URL.
+#   2. Here: Settings, Secrets and variables, Actions, New repository secret,
+#      named SITE_DEPLOY_HOOK, pasted in.
+#
+# Until that secret exists this job succeeds and does nothing, so it will not
+# put a red mark on every release in the meantime.
+name: Rebuild trellismusiclibrary.com
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger the Cloudflare Pages deploy hook
+        env:
+          HOOK: ${{ secrets.SITE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "SITE_DEPLOY_HOOK is not set yet. Nothing to trigger."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK"
+          echo "Asked Cloudflare Pages to rebuild the site."
