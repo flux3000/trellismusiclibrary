@@ -6,10 +6,8 @@ Trellis is a music library manager for live recording collectors and aficionados
 
 ## Download
 
-Grab the latest build from [**Releases**](https://github.com/flux3000/trellismusiclibrary/releases)
-— no Python, no command line required.
-
-Drag it to Applications and open it.
+Grab the latest `.dmg` from [**Releases**](https://github.com/flux3000/trellismusiclibrary/releases),
+drag it to Applications, and open it.
 
 The rest of this README is for building from source.
 
@@ -17,7 +15,7 @@ The rest of this README is for building from source.
 
 - macOS 12+, with **Python 3.11+ installed as a framework build**.
 - **ffmpeg**, if you intend to share your library (peers stream MP3,
-  transcoded on first play — a listener doesn't need it).
+  transcoded on first play; a listener doesn't need it).
 - Somewhere to keep the audio. Trellis never moves or rewrites your files
   except when you explicitly ask it to.
 
@@ -60,8 +58,9 @@ Headless mode is configured by environment variables: `TRELLIS_PORT`,
 `TRELLIS_DB_PATH`, `SHARE_BASE_URL`, `SECRET_KEY`, `TRELLIS_COOKIE_NAME`.
 
 Sharing over the internet runs as a **second process**, in share-only mode
-(`SERVER_MODE=true`), exposed via an outbound Cloudflare Tunnel — no router
-ports opened, home address never published. See `run_headless.py --help`.
+(`SERVER_MODE=true`). It binds to `127.0.0.1`, so reaching it from another
+machine means putting a tunnel or a VPN in front of it yourself. Trellis has no
+opinion about which.
 
 ## Tests
 
@@ -77,17 +76,16 @@ No network, no audio files, no library mount required.
 ./tools/build_macos.sh          # → dist/Trellis Music Library.app
 ```
 
-Must run on macOS — PyInstaller doesn't cross-compile.
+Must run on macOS. PyInstaller doesn't cross-compile.
 
 ## How sharing works, briefly
 
-Every install is both a server and a client — identity is per-node, there's
-no global account. Peers authenticate with a bearer token into a blueprint
-with no editing endpoints at all, so a peer is structurally incapable of
-changing anything. Sharing is collection-level (your whole library is itself
-a collection); a peer sees full catalog pages, but every list of recordings
-on them is filtered to what they've been granted. Your own listening history
-and favorites never leave your machine.
+Every install is both a server and a client. Identity is per-node, and there's
+no global account. Peers authenticate with a bearer token into a blueprint with
+no editing endpoints at all, so a peer cannot change anything. A peer gets your
+whole library: they see full catalog pages, with every list of recordings
+filtered to what they can reach. Your favorites never travel. A library you join
+records what you stream, on its owner's machine.
 
 ## License
 
