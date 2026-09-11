@@ -99,4 +99,4 @@ and favorites never leave your machine.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Copyright (c) 2026 Ryan Baker. All rights reserved. See [LICENSE](LICENSE).
