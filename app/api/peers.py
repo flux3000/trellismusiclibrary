@@ -36,6 +36,7 @@ from app.models.recording import Recording
 from app.models.track import Track
 from app.utils.peer_auth import generate_invite_code, hash_secret
 from app.utils.node_settings import get_share_base_url, set_share_base_url, share_base_url_from_env
+from app.utils.authz import admin_required
 from app.utils.format import format_partial_date
 
 bp = Blueprint("peers", __name__)
@@ -55,16 +56,8 @@ def _iso(dt):
     return dt.isoformat() if dt else None
 
 
-def admin_required(f):
-    """login_required + role == admin. Peer management is the sharing control
-    surface — hold it to a higher bar than ordinary editing."""
-    @wraps(f)
-    @login_required
-    def wrapper(*args, **kwargs):
-        if getattr(current_user, "role", None) != "admin":
-            return jsonify({"error": "Admin only"}), 403
-        return f(*args, **kwargs)
-    return wrapper
+# admin_required now lives in app/utils/authz.py -- see that module for why.
+# Imported at the top of this file; this comment marks where it used to be.
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -370,7 +363,7 @@ def peer_activity(peer_id):
             "track_id":      r.track_id,
             "track_title":   track.title if track else None,
             "recording_id":  rec.id if rec else None,
-            "performer":     p.performer.name if (p and p.performer) else None,
+            "artist":     p.artist.name if (p and p.artist) else None,
             "date":          format_partial_date(p.start_year, p.start_month, p.start_day) if p else None,
         })
     return jsonify(out)

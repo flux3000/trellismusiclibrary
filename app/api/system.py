@@ -6,6 +6,8 @@ Right now that is one thing: is the library drive connected?
 Routes:
   GET  /api/system/library-status    polled by the Action Bar banner (~30s)
   POST /api/system/library-recheck   drop the cache and probe immediately
+  GET  /api/system/library-layout    is new material filed under an artist folder
+  PUT  /api/system/library-layout    change that
 
 Note what is deliberately NOT here: an endpoint that mounts the drive. Mount
 ownership belongs to the LaunchAgent (tools/mount_library.py), which runs
@@ -23,6 +25,8 @@ from config import is_installed_app
 from flask_login import login_required
 
 from app.utils import library_mount
+from app.utils import node_settings
+from app.utils.authz import admin_required
 
 bp = Blueprint("system", __name__)
 
@@ -139,3 +143,33 @@ def require_library(kind="json"):
             }), 503
         return wrapper
     return decorator
+
+
+# ── Library layout (install-level) ───────────────────────────────────────────
+#
+# Whether a new ingest lands in LIBRARY_ROOT/<Artist>/<folder> or flat at the
+# library root. Here rather than in Settings' per-user preferences because a
+# library has ONE shape: two users on one install answering differently is
+# precisely the hybrid tree this setting exists to prevent.
+#
+# It governs NEW material only. Recordings already in the library are never
+# relocated by changing it -- folder_path is what locates a recording, and
+# rename_recording_folder() renames the leaf under whatever parent it finds.
+
+@bp.route("/library-layout", methods=["GET"])
+@login_required
+def get_library_layout():
+    return jsonify({"file_under_artist_folder":
+                    node_settings.file_under_artist_folder()})
+
+
+@bp.route("/library-layout", methods=["PUT"])
+@admin_required
+def put_library_layout():
+    from flask import request
+    data = request.get_json(silent=True) or {}
+    value = data.get("file_under_artist_folder")
+    if not isinstance(value, bool):
+        return jsonify({"error": "file_under_artist_folder must be true or false"}), 400
+    node_settings.set_file_under_artist_folder(value)
+    return jsonify({"file_under_artist_folder": value})

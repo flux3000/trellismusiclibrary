@@ -92,7 +92,7 @@ def build_folder_name(
     Generate the canonical folder name for a recording.
 
     Args:
-        artist_name     : str  — performer display name
+        artist_name     : str  — artist display name
         start/end date  : nullable ints
         venue_name      : str | None
         city/state/country : str | None
@@ -118,14 +118,14 @@ def build_folder_name(
     return name
 
 
-def build_folder_name_from_recording(recording, performance, performer, venue):
+def build_folder_name_from_recording(recording, performance, artist, venue):
     """
     Convenience wrapper — builds folder name directly from ORM objects.
 
     Args:
         recording   : Recording model instance
         performance : Performance model instance
-        performer   : Performer model instance
+        artist   : Artist model instance
         venue       : Venue model instance | None
     """
     # Resolve location — performance overrides event, venue is canonical
@@ -139,7 +139,7 @@ def build_folder_name_from_recording(recording, performance, performer, venue):
         country = performance.country
 
     return build_folder_name(
-        artist_name     = performer.name,
+        artist_name     = artist.name,
         start_year      = performance.start_year,
         start_month     = performance.start_month,
         start_day       = performance.start_day,
@@ -288,8 +288,8 @@ def rename_recording_folder(recording, library_root):
     performance = recording.performance
     if not performance:
         return None
-    performer = performance.performer
-    if not performer:
+    artist = performance.artist
+    if not artist:
         return None
     venue = performance.venue
 
@@ -297,7 +297,7 @@ def rename_recording_folder(recording, library_root):
     if not old_rel:
         return None
     old_name = os.path.basename(old_rel)
-    new_name = build_folder_name_from_recording(recording, performance, performer, venue)
+    new_name = build_folder_name_from_recording(recording, performance, artist, venue)
     if new_name == old_name:
         return None  # already correct — the common case on every save
 

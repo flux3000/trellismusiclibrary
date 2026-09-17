@@ -101,9 +101,9 @@ def peer_can_access_track(peer, track):
 # Everything above answers "may this peer reach recording X?" — enough for
 # milestone 1, whose whole job was streaming what was granted.
 #
-# Milestone 2 gives peers real entity pages (performer, venue, artist, genre,
+# Milestone 2 gives peers real entity pages (artist, venue, musician, genre,
 # search, Browse). Those need the INVERSE question: "what is this peer's entire
-# world?" — because a performer is only visible by virtue of a visible
+# world?" — because an artist is only visible by virtue of a visible
 # recording pointing at it, and every count rendered on such a page has to be
 # computed over that world and nothing wider.
 #
@@ -175,13 +175,13 @@ def peer_visible_performance_ids(peer):
     return {pid for (pid,) in rows if pid is not None}
 
 
-def peer_visible_performer_ids(peer):
-    """Performers (acts) with at least one visible recording."""
+def peer_visible_artist_ids(peer):
+    """Artists (acts) with at least one visible recording."""
     from app.models.performance import Performance
     perf_ids = peer_visible_performance_ids(peer)
     if not perf_ids:
         return set()
-    rows = (db.session.query(Performance.performer_id)
+    rows = (db.session.query(Performance.artist_id)
             .filter(Performance.id.in_(perf_ids)).distinct().all())
     return {pid for (pid,) in rows if pid is not None}
 
@@ -202,48 +202,48 @@ def peer_visible_venue_ids(peer):
     return {vid for (vid,) in rows if vid is not None}
 
 
-def peer_visible_artist_ids(peer):
+def peer_visible_musician_ids(peer):
     """
-    Artists (people) reachable from a visible performer via membership.
+    Musicians (people) reachable from a visible artist via membership.
 
     Deliberately membership-based rather than per-show-personnel-resolved: a
     peer looking at an act should see its lineup, and narrowing that to only
-    the people who played the specific shared nights would make the artist
+    the people who played the specific shared nights would make the musician
     pages incoherent (a band with one visible member). Membership is catalog
     metadata about the act, not a holding.
     """
-    from app.models.artist import Membership
-    performer_ids = peer_visible_performer_ids(peer)
-    if not performer_ids:
+    from app.models.musician import Membership
+    artist_ids = peer_visible_artist_ids(peer)
+    if not artist_ids:
         return set()
-    rows = (db.session.query(Membership.artist_id)
-            .filter(Membership.performer_id.in_(performer_ids)).distinct().all())
+    rows = (db.session.query(Membership.musician_id)
+            .filter(Membership.artist_id.in_(artist_ids)).distinct().all())
     return {aid for (aid,) in rows if aid is not None}
 
 
 def peer_visible_genre_ids(peer):
-    """Genres carried by performers with at least one visible recording."""
-    from app.models.performer import Performer
-    performer_ids = peer_visible_performer_ids(peer)
-    if not performer_ids:
+    """Genres carried by artists with at least one visible recording."""
+    from app.models.artist import Artist
+    artist_ids = peer_visible_artist_ids(peer)
+    if not artist_ids:
         return set()
-    rows = (db.session.query(Performer.genre_id)
-            .filter(Performer.id.in_(performer_ids)).distinct().all())
+    rows = (db.session.query(Artist.genre_id)
+            .filter(Artist.id.in_(artist_ids)).distinct().all())
     return {gid for (gid,) in rows if gid is not None}
 
 
 # ── Entity access checks — all derived, none independent ──────────────────────
 
-def peer_can_access_performer(peer, performer_id):
-    return performer_id is not None and performer_id in peer_visible_performer_ids(peer)
+def peer_can_access_artist(peer, artist_id):
+    return artist_id is not None and artist_id in peer_visible_artist_ids(peer)
 
 
 def peer_can_access_venue(peer, venue_id):
     return venue_id is not None and venue_id in peer_visible_venue_ids(peer)
 
 
-def peer_can_access_artist(peer, artist_id):
-    return artist_id is not None and artist_id in peer_visible_artist_ids(peer)
+def peer_can_access_musician(peer, musician_id):
+    return musician_id is not None and musician_id in peer_visible_musician_ids(peer)
 
 
 def peer_can_access_genre(peer, genre_id):

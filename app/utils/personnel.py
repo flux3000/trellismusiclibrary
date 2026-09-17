@@ -13,7 +13,7 @@ import calendar
 from sqlalchemy import func
 from app.extensions import db
 from app.models.performance_personnel import PerformancePersonnel
-from app.utils.performers import resolve_or_create_artist
+from app.utils.artists import resolve_or_create_musician
 
 
 def _floor_date(y, m, d):
@@ -64,8 +64,8 @@ def _stint_covers(membership, performance):
 def _row_dict(row, source):
     return {
         "id":         row.id,          # PerformancePersonnel row id; None for inherited-only entries
-        "artist_id":  row.artist_id,
-        "name":       row.artist.name,
+        "musician_id":  row.musician_id,
+        "name":       row.musician.name,
         "instrument": row.instrument,
         "order":      row.order,
         "is_guest":   row.is_guest,
@@ -78,7 +78,7 @@ def resolve_performance_personnel(performance):
     """
     Resolve the ordered lineup for a Performance according to its
     personnel_mode. Returns a list of dicts:
-        {artist_id, name, instrument, order, is_guest, note, source}
+        {musician_id, name, instrument, order, is_guest, note, source}
     `source` is one of:
         'inherited' — from the act roster via a Membership stint covering
                       this date
@@ -103,33 +103,33 @@ def resolve_performance_personnel(performance):
     where the roster is just a pick-list of usual suspects, not a truth
     source — see design doc §3A "Refinement").
 
-    The return value is always deduped by artist_id (Ryan, 2026-07-23 bug
-    report — see _dedupe_by_artist below): the same person must never appear
+    The return value is always deduped by musician_id (Ryan, 2026-07-23 bug
+    report — see _dedupe_by_musician below): the same person must never appear
     twice, however the duplication arose.
     """
     if performance.personnel_mode == "explicit":
         rows = sorted(performance.personnel, key=lambda r: r.order)
-        return _dedupe_by_artist([_row_dict(r, "explicit") for r in rows])
+        return _dedupe_by_musician([_row_dict(r, "explicit") for r in rows])
 
-    # inherit: dedupe stints per artist (a person may have multiple stint
+    # inherit: dedupe stints per musician (a person may have multiple stint
     # rows, e.g. Mickey Hart) — include them once if ANY stint covers this
     # date, with an order taken from their earliest stint per the design
     # doc's display-dedupe rule.
-    stints_by_artist = {}
-    for m in performance.performer.memberships:
-        stints_by_artist.setdefault(m.artist_id, []).append(m)
+    stints_by_musician = {}
+    for m in performance.artist.memberships:
+        stints_by_musician.setdefault(m.musician_id, []).append(m)
 
     inherited = []
-    for artist_id, stints in stints_by_artist.items():
+    for musician_id, stints in stints_by_musician.items():
         covering = [m for m in stints if _stint_covers(m, performance)]
         if not covering:
             continue
         order = min(m.order for m in stints)
-        artist = stints[0].artist
+        musician = stints[0].musician
         inherited.append({
             "id":         None,
-            "artist_id":  artist_id,
-            "name":       artist.name,
+            "musician_id":  musician_id,
+            "name":       musician.name,
             "instrument": None,
             "order":      order,
             "is_guest":   False,
@@ -149,19 +149,19 @@ def resolve_performance_personnel(performance):
     added_rows = sorted(performance.personnel, key=lambda r: r.order)
     added = [_row_dict(r, "guest" if r.is_guest else "added") for r in added_rows]
 
-    return _dedupe_by_artist(inherited + added)
+    return _dedupe_by_musician(inherited + added)
 
 
-def _dedupe_by_artist(rows):
+def _dedupe_by_musician(rows):
     """
-    Collapse to one entry per artist_id, first occurrence wins.
+    Collapse to one entry per musician_id, first occurrence wins.
 
     Bug this fixes (Ryan, 2026-07-23 — JD Crowe & the New South, recording
     #239): a Performance's own performance_personnel row (added via the
     recording page's Members/Guests widget, source 'added'/'guest') persists
     independently of the act's Membership roster. If that SAME person is
     later added to the act's roster too — a completely reasonable, separate
-    action on the Performer page — resolve_performance_personnel would
+    action on the Artist page — resolve_performance_personnel would
     previously return them TWICE: once as the new 'inherited' roster entry,
     once as the now-redundant leftover 'added' row. The UI showed two
     identical pills, and removing either one silently failed — the
@@ -170,7 +170,7 @@ def _dedupe_by_artist(rows):
     set-membership check never saw the name as "dropped."
     Since `inherited` is always built before `added`/explicit rows are
     appended, first-occurrence-wins means a roster (inherited) entry always
-    takes priority over a redundant added/guest row for the same artist —
+    takes priority over a redundant added/guest row for the same musician —
     correct, because it makes removing that pill go through the normal
     "drop an inherited member from this one show" flow (case 5 in
     sync_performance_personnel), which also sweeps up the stale leftover
@@ -179,9 +179,9 @@ def _dedupe_by_artist(rows):
     seen = set()
     deduped = []
     for r in rows:
-        if r["artist_id"] in seen:
+        if r["musician_id"] in seen:
             continue
-        seen.add(r["artist_id"])
+        seen.add(r["musician_id"])
         deduped.append(r)
     return deduped
 
@@ -268,23 +268,23 @@ def sync_performance_personnel(performance, member_names=None, guest_names=None)
         order = 0
         for r in keep_members:
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=r["artist_id"], order=order,
+                performance_id=performance.id, musician_id=r["musician_id"], order=order,
                 instrument=r["instrument"], note=r["note"], is_guest=False))
             order += 1
         for n in added_members:
-            artist = resolve_or_create_artist(n)
+            musician = resolve_or_create_musician(n)
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=artist.id, order=order, is_guest=False))
+                performance_id=performance.id, musician_id=musician.id, order=order, is_guest=False))
             order += 1
         for r in keep_guests:
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=r["artist_id"], order=order,
+                performance_id=performance.id, musician_id=r["musician_id"], order=order,
                 instrument=r["instrument"], note=r["note"], is_guest=True))
             order += 1
         for n in added_guests:
-            artist = resolve_or_create_artist(n)
+            musician = resolve_or_create_musician(n)
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=artist.id, order=order, is_guest=True))
+                performance_id=performance.id, musician_id=musician.id, order=order, is_guest=True))
             order += 1
         db.session.flush()
         return
@@ -303,14 +303,14 @@ def sync_performance_personnel(performance, member_names=None, guest_names=None)
         base_order = (base_order + 1) if base_order is not None else 0
         i = 0
         for n in added_members:
-            artist = resolve_or_create_artist(n)
+            musician = resolve_or_create_musician(n)
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=artist.id, order=base_order + i, is_guest=False))
+                performance_id=performance.id, musician_id=musician.id, order=base_order + i, is_guest=False))
             i += 1
         for n in added_guests:
-            artist = resolve_or_create_artist(n)
+            musician = resolve_or_create_musician(n)
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=artist.id, order=base_order + i, is_guest=True))
+                performance_id=performance.id, musician_id=musician.id, order=base_order + i, is_guest=True))
             i += 1
 
     db.session.flush()
@@ -349,7 +349,7 @@ def set_performance_personnel_mode(performance, mode):
         db.session.flush()
         for i, r in enumerate(resolved):
             db.session.add(PerformancePersonnel(
-                performance_id=performance.id, artist_id=r["artist_id"], order=i,
+                performance_id=performance.id, musician_id=r["musician_id"], order=i,
                 instrument=r["instrument"], is_guest=r["is_guest"], note=r["note"]))
     else:
         db.session.query(PerformancePersonnel).filter_by(

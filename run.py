@@ -44,19 +44,47 @@ TRELLIS_SUBFOLDERS       = ("Library", "Download", "Backlog", "Workshop")
 
 
 def _read_trellis_root_marker():
-    """The Trellis folder chosen on a previous run, or None."""
+    """
+    What was chosen on a previous run, as a dict, or None.
+
+    Two shapes, because there are now two ways to answer the first-run
+    question (2026-09-17):
+
+      {"mode": "created",  "trellis_root": "..."}
+          Trellis laid the folder out itself: <root>/{Library, Download,
+          Backlog, Workshop}. The original and still the default.
+
+      {"mode": "imported", "library_root": "...",
+       "import_dir": ... | None, "backlog_dir": ... | None,
+       "workshop_dir": ... | None}
+          The user pointed Trellis at a library they already had. The three
+          working folders are OPTIONAL here (Ryan, 2026-09-17) -- a collector
+          may simply not have a Backlog, and inventing one inside their
+          collection is not ours to do.
+
+    A marker written before this existed has no "mode" and only
+    "trellis_root". That is the created shape, and it must keep resolving
+    exactly as it always has -- an existing install cannot be asked to
+    re-answer a question because a key appeared.
+    """
     try:
         data = json.loads(TRELLIS_ROOT_MARKER.read_text(encoding="utf-8"))
-        root = data.get("trellis_root")
-        return Path(root) if root else None
     except Exception:
         return None
+    if not isinstance(data, dict):
+        return None
+    if data.get("mode") == "imported":
+        return data if data.get("library_root") else None
+    return data if data.get("trellis_root") else None
 
 
 def _write_trellis_root_marker(root):
+    _write_marker({"mode": "created", "trellis_root": str(root)})
+
+
+def _write_marker(data):
     TRELLIS_ROOT_MARKER.parent.mkdir(parents=True, exist_ok=True)
-    TRELLIS_ROOT_MARKER.write_text(
-        json.dumps({"trellis_root": str(root)}), encoding="utf-8")
+    TRELLIS_ROOT_MARKER.write_text(json.dumps(data), encoding="utf-8")
 
 
 def _looks_reachable(path):
@@ -102,6 +130,60 @@ def _apply_trellis_root(root):
     app.config["IMPORT_ROOTS"] = [str(root), "/Volumes"]
 
 
+def _apply_imported_library(library_root, import_dir=None,
+                            backlog_dir=None, workshop_dir=None):
+    """
+    Point the app at a library the user ALREADY had (2026-09-17).
+
+    The difference from _apply_trellis_root is that nothing is derived and
+    nothing is created. LIBRARY_ROOT is the folder they picked, full stop --
+    not <picked>/Library, because their library IS that folder and a Library
+    subfolder inside it would be a second, empty one.
+
+    The three working folders are OPTIONAL and independent. A destination
+    that was not configured is LEFT OUT of TRIAGE_DIRS entirely rather than
+    pointed somewhere invented: both readers (api/quality.py::triage-move and
+    api/recordings.py::move-out) validate membership against this dict, so an
+    absent key is already a clean refusal rather than a move into a folder
+    that silently gets created on someone's disk.
+
+    IMPORT_ROOTS gets the library plus whichever working folders exist. It is
+    the allowlist every filesystem-reading endpoint checks before it will
+    browse, import, triage-move or stream -- forgetting it is what made "Add
+    Recordings" reject every folder under a freshly chosen root in 2026-08.
+    """
+    library_root = str(library_root)
+    app.config["LIBRARY_ROOT"] = library_root
+
+    triage = {}
+    if backlog_dir:
+        triage["backlog"] = str(backlog_dir)
+    if workshop_dir:
+        triage["workshop"] = str(workshop_dir)
+    app.config["TRIAGE_DIRS"] = triage
+
+    # No Download folder means "Add Recordings" simply opens at the library
+    # itself, which is where an adopting collector's material already is.
+    app.config["IMPORT_DIR"] = str(import_dir) if import_dir else library_root
+
+    roots = [library_root, "/Volumes"]
+    roots += [str(d) for d in (import_dir, backlog_dir, workshop_dir) if d]
+    app.config["IMPORT_ROOTS"] = roots
+
+
+def _apply_marker(data):
+    """Patch config from either marker shape. See _read_trellis_root_marker."""
+    if data.get("mode") == "imported":
+        _apply_imported_library(
+            data["library_root"],
+            import_dir   = data.get("import_dir"),
+            backlog_dir  = data.get("backlog_dir"),
+            workshop_dir = data.get("workshop_dir"),
+        )
+    else:
+        _apply_trellis_root(Path(data["trellis_root"]))
+
+
 def resolve_trellis_root_and_patch_config():
     """
     Decide where the library lives for THIS run and patch it into
@@ -118,7 +200,7 @@ def resolve_trellis_root_and_patch_config():
 
     marker = _read_trellis_root_marker()
     if marker is not None:
-        _apply_trellis_root(marker)
+        _apply_marker(marker)
         return True
 
     # Nothing chosen yet. If the old hardcoded default happens to be
@@ -135,8 +217,14 @@ def _setup_html():
     The one-time first-run screen. Inline, not a static file -- Flask isn't
     serving anything yet at this point, and this only ever runs once per
     machine. window.location.href navigates this same window over to the
-    real app once confirm_trellis_root() succeeds -- ordinary web navigation,
-    nothing PyWebView-specific needed for that part.
+    real app once setup succeeds -- ordinary web navigation, nothing
+    PyWebView-specific needed for that part.
+
+    Two answers since 2026-09-17: create a library, or use one you already
+    have. The second path is why the copy has to say what Trellis will and
+    will not do to someone's existing folders -- a collector handing over a
+    collection they spent years arranging is owed that before they click,
+    not after.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
     return f"""<!doctype html>
@@ -144,23 +232,31 @@ def _setup_html():
   :root {{ color-scheme: dark; }}
   * {{ box-sizing: border-box; }}
   body {{
-    margin: 0; height: 100vh; display: flex; align-items: center;
+    margin: 0; min-height: 100vh; display: flex; align-items: center;
     justify-content: center; background: #14161a; color: #e8e6e1;
     font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    padding: 40px 20px;
   }}
-  .card {{ max-width: 460px; padding: 40px; }}
+  .card {{ max-width: 520px; width: 100%; }}
   h1 {{ font-size: 21px; margin: 0 0 16px; }}
+  h2 {{ font-size: 15px; margin: 0 0 6px; }}
   p {{ font-size: 14px; line-height: 1.6; color: #b8b5ae; margin: 0 0 12px; }}
   .folders {{
     font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px;
     color: #d8d5ce; background: #1e2126; border-radius: 6px;
-    padding: 12px 16px; margin: 0 0 20px;
+    padding: 12px 16px; margin: 0 0 8px;
   }}
   button {{
     font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
     background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
   }}
+  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; }}
   button:disabled {{ opacity: .5; cursor: default; }}
+  .opt {{
+    border: 1px solid #3a3d43; border-radius: 8px; padding: 20px;
+    margin-bottom: 14px;
+  }}
+  .opt p:last-of-type {{ margin-bottom: 16px; }}
   .chosen {{ margin-top: 14px; font-size: 13px; color: #8fbf7f; word-break: break-all; }}
   .err {{ margin-top: 14px; font-size: 13px; color: #e0806a; }}
   label {{ display: block; font-size: 13px; color: #b8b5ae; margin: 4px 0 6px; }}
@@ -170,52 +266,140 @@ def _setup_html():
     color: #e8e6e1; font-family: inherit;
   }}
   input.field:focus {{ outline: none; border-color: #d98f4e; }}
+  .extras {{ display: none; margin-top: 16px; }}
+  .extras.on {{ display: block; }}
+  .extra-row {{
+    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
+    font-size: 13px; color: #b8b5ae;
+  }}
+  .extra-row span.path {{ color: #8fbf7f; word-break: break-all; }}
+  .extra-row button {{ padding: 5px 12px; font-size: 12px; }}
 </style></head>
 <body><div class="card">
   <h1>Welcome to Trellis</h1>
   <label for="username">What should we call you?</label>
   <input id="username" class="field" type="text" placeholder="e.g. jeff" autocomplete="off">
-  <p>Choose a location below. Trellis will create a
-     &ldquo;<strong>{TRELLIS_ROOT_FOLDER_NAME}</strong>&rdquo; folder there,
-     with four folders inside of it:</p>
-  <div class="folders">{", ".join(TRELLIS_SUBFOLDERS)}</div>
-  <p>You can change the folder later. For now, pick where it should start.</p>
-  <button id="choose">Choose Location&hellip;</button>
+
+  <div class="opt">
+    <h2>Use a library I already have</h2>
+    <p>Pick the folder your recordings are already in. Trellis reads them
+       where they sit. Nothing is copied or moved, and your folder structure
+       stays as you arranged it.</p>
+    <p>Two things Trellis will do: it may rename a recording's folder when
+       its details change, so a corrected date is reflected on disk, and any
+       recording you add from now on is filed as
+       <strong>Artist / Artist - Date - Venue - Location</strong>. You can
+       turn that second one off in Settings.</p>
+    <button id="import">Choose My Library Folder&hellip;</button>
+    <div class="extras" id="extras">
+      <p>Optional. If you keep folders for these, point Trellis at them.
+         Skip any you do not have.</p>
+      <div class="extra-row">Downloads: <span class="path" id="p-import">not set</span>
+        <button class="ghost" data-extra="import">Choose&hellip;</button></div>
+      <div class="extra-row">Backlog: <span class="path" id="p-backlog">not set</span>
+        <button class="ghost" data-extra="backlog">Choose&hellip;</button></div>
+      <div class="extra-row">Workshop: <span class="path" id="p-workshop">not set</span>
+        <button class="ghost" data-extra="workshop">Choose&hellip;</button></div>
+      <button id="import-done">Use This Library</button>
+    </div>
+  </div>
+
+  <div class="opt">
+    <h2>Start a new library</h2>
+    <p>Choose a location. Trellis creates a
+       &ldquo;<strong>{TRELLIS_ROOT_FOLDER_NAME}</strong>&rdquo; folder there,
+       with four folders inside of it:</p>
+    <div class="folders">{", ".join(TRELLIS_SUBFOLDERS)}</div>
+    <button id="choose">Choose Location&hellip;</button>
+  </div>
+
   <div id="status"></div>
 </div>
 <script>
-  const btn = document.getElementById('choose')
   const status = document.getElementById('status')
   const usernameInput = document.getElementById('username')
-  btn.addEventListener('click', async () => {{
-    const username = usernameInput.value.trim()
-    if (!username) {{
+  const extras = document.getElementById('extras')
+  const picked = {{ library: null, import: null, backlog: null, workshop: null }}
+
+  function name() {{
+    const v = usernameInput.value.trim()
+    if (!v) {{
       status.className = 'err'
       status.textContent = 'Tell us what to call you first.'
       usernameInput.focus()
-      return
     }}
-    btn.disabled = true
+    return v
+  }}
+
+  function fail(msg) {{
+    status.className = 'err'
+    status.textContent = msg
+  }}
+
+  async function finish(result) {{
+    if (result && result.ok) {{
+      status.className = 'chosen'
+      status.textContent = 'Ready: ' + result.root
+      window.location.href = {app_url!r}
+      return true
+    }}
+    fail((result && result.error) || 'Something went wrong. Try again.')
+    return false
+  }}
+
+  // ── Use an existing library ────────────────────────────────────────────
+  document.getElementById('import').addEventListener('click', async () => {{
+    if (!name()) return
+    const folder = await window.pywebview.api.pick_folder()
+    if (!folder) return
+    picked.library = folder
+    extras.classList.add('on')
+    status.className = 'chosen'
+    status.textContent = 'Library: ' + folder
+  }})
+
+  document.querySelectorAll('[data-extra]').forEach(btn => {{
+    btn.addEventListener('click', async () => {{
+      const which = btn.getAttribute('data-extra')
+      const folder = await window.pywebview.api.pick_folder()
+      if (!folder) return
+      picked[which] = folder
+      document.getElementById('p-' + which).textContent = folder
+    }})
+  }})
+
+  document.getElementById('import-done').addEventListener('click', async e => {{
+    const username = name()
+    if (!username || !picked.library) return
+    e.target.disabled = true
+    status.className = ''
+    status.textContent = 'Setting up\u2026'
+    try {{
+      const result = await window.pywebview.api.confirm_existing_library(
+        picked.library, username, picked.import, picked.backlog, picked.workshop)
+      if (!await finish(result)) e.target.disabled = false
+    }} catch (err) {{
+      fail(String(err))
+      e.target.disabled = false
+    }}
+  }})
+
+  // ── Create a new library ───────────────────────────────────────────────
+  document.getElementById('choose').addEventListener('click', async e => {{
+    const username = name()
+    if (!username) return
+    e.target.disabled = true
     status.className = ''
     status.textContent = ''
     try {{
       const parent = await window.pywebview.api.pick_folder()
-      if (!parent) {{ btn.disabled = false; return }}
+      if (!parent) {{ e.target.disabled = false; return }}
       status.textContent = 'Setting up your library\u2026'
       const result = await window.pywebview.api.confirm_trellis_root(parent, username)
-      if (result && result.ok) {{
-        status.className = 'chosen'
-        status.textContent = 'Created ' + result.root
-        window.location.href = {app_url!r}
-      }} else {{
-        status.className = 'err'
-        status.textContent = (result && result.error) || 'Something went wrong. Try again.'
-        btn.disabled = false
-      }}
-    }} catch (e) {{
-      status.className = 'err'
-      status.textContent = String(e)
-      btn.disabled = false
+      if (!await finish(result)) e.target.disabled = false
+    }} catch (err) {{
+      fail(String(err))
+      e.target.disabled = false
     }}
   }})
 </script></body></html>"""
@@ -428,6 +612,47 @@ class FluxAPI:
             self._create_owner_account(username)
         except Exception as e:
             return {"ok": False, "error": f"Folder created, but account setup failed: {e}"}
+
+        return {"ok": True, "root": str(root)}
+
+    def confirm_existing_library(self, library_path, username=None,
+                                 import_dir=None, backlog_dir=None,
+                                 workshop_dir=None):
+        """
+        First-run, the OTHER answer (2026-09-17): the user already has a
+        library and wants Trellis to use it where it sits.
+
+        Nothing is created and nothing is moved. The folder they picked
+        becomes LIBRARY_ROOT as-is. The three working folders are optional
+        and independent -- a collector may have a Download folder and no
+        Backlog, and Trellis does not invent either.
+
+        Refuses a folder it cannot list, because the alternative is an app
+        that opens onto an empty library and looks like a fresh install --
+        "new install" and "your library moved" looking identical is a trap
+        this codebase has already paid for once.
+        """
+        try:
+            root = Path(library_path)
+            if not root.is_dir() or not _looks_reachable(root):
+                return {"ok": False,
+                        "error": "That folder could not be opened. Pick the "
+                                 "folder your recordings are in."}
+            _write_marker({
+                "mode":         "imported",
+                "library_root": str(root),
+                "import_dir":   str(import_dir)   if import_dir   else None,
+                "backlog_dir":  str(backlog_dir)  if backlog_dir  else None,
+                "workshop_dir": str(workshop_dir) if workshop_dir else None,
+            })
+            _apply_imported_library(root, import_dir, backlog_dir, workshop_dir)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+        try:
+            self._create_owner_account(username)
+        except Exception as e:
+            return {"ok": False, "error": f"Library set, but account setup failed: {e}"}
 
         return {"ok": True, "root": str(root)}
 

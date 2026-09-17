@@ -17,7 +17,7 @@ import types
 
 import pytest
 
-from app.utils import ai_assist, performer_research
+from app.utils import ai_assist, artist_research
 from app.utils.ai_assist import MAX_SEARCHES, MAX_SEARCHES_WITH_QUESTION
 
 
@@ -77,8 +77,8 @@ def fake_anthropic(monkeypatch):
     )
     monkeypatch.setattr(ai_assist, "anthropic", fake, raising=False)
     monkeypatch.setattr(ai_assist, "_HAS_SDK", True)
-    monkeypatch.setattr(performer_research, "anthropic", fake, raising=False)
-    monkeypatch.setattr(performer_research, "_HAS_SDK", True)
+    monkeypatch.setattr(artist_research, "anthropic", fake, raising=False)
+    monkeypatch.setattr(artist_research, "_HAS_SDK", True)
     _FakeClient.last = {}
     return _FakeClient
 
@@ -185,15 +185,15 @@ def test_lineage_can_be_proposed():
     assert "lineage" in ai_assist._PROPOSAL_FIELDS
 
 
-# ── Performer research: grounding, modes ────────────────────────────────────
+# ── Artist research: grounding, modes ────────────────────────────────────
 
 def test_context_block_is_empty_when_nothing_is_known():
-    assert performer_research._context_block({}) == ""
-    assert performer_research._context_block(None) == ""
+    assert artist_research._context_block({}) == ""
+    assert artist_research._context_block(None) == ""
 
 
 def test_context_block_carries_the_db_facts():
-    block = performer_research._context_block({
+    block = artist_research._context_block({
         "aliases": ["The Dead"], "mb_area": "Palo Alto", "mb_begin": "1965",
         "genre": "Rock", "members": ["Jerry Garcia", "Phil Lesh"],
     })
@@ -204,11 +204,11 @@ def test_context_block_carries_the_db_facts():
 
 
 def test_bio_mode_and_lineup_mode_send_different_tools(fake_anthropic):
-    performer_research.run_performer_research("Act", "", "key", "m", mode="bio")
+    artist_research.run_artist_research("Act", "", "key", "m", mode="bio")
     bio_tools = {t.get("name") for t in fake_anthropic.last["tools"]}
     assert "submit_dossier" in bio_tools
 
-    performer_research.run_performer_research("Act", "", "key", "m", mode="lineup")
+    artist_research.run_artist_research("Act", "", "key", "m", mode="lineup")
     lineup_call = fake_anthropic.last
     assert "submit_lineup" in {t.get("name") for t in lineup_call["tools"]}
     assert "LINEUP" in lineup_call["system"][-1]["text"]
@@ -216,7 +216,7 @@ def test_bio_mode_and_lineup_mode_send_different_tools(fake_anthropic):
 
 
 def test_lineup_mode_returns_members(fake_anthropic):
-    got = performer_research.run_performer_research("Act", "", "key", "m", mode="lineup")
+    got = artist_research.run_artist_research("Act", "", "key", "m", mode="lineup")
     assert got["mode"] == "lineup"
     assert got["members"] == [{"name": "X", "confidence": "low"}]
     assert got["usage"]["total_tokens"] == 1100
@@ -225,14 +225,14 @@ def test_lineup_mode_returns_members(fake_anthropic):
 
 def test_an_unknown_mode_is_refused(fake_anthropic):
     with pytest.raises(ai_assist.AiAssistError):
-        performer_research.run_performer_research("Act", "", "key", "m", mode="astrology")
+        artist_research.run_artist_research("Act", "", "key", "m", mode="astrology")
 
 
 def test_the_existing_bio_is_only_sent_to_the_bio_pass(fake_anthropic):
     # Lineup research has no use for the prose, and sending it is pure tokens.
-    performer_research.run_performer_research("Act", "An old draft bio.", "key", "m", mode="lineup")
+    artist_research.run_artist_research("Act", "An old draft bio.", "key", "m", mode="lineup")
     assert "An old draft bio" not in _user_text(fake_anthropic.last)
-    performer_research.run_performer_research("Act", "An old draft bio.", "key", "m", mode="bio")
+    artist_research.run_artist_research("Act", "An old draft bio.", "key", "m", mode="bio")
     assert "An old draft bio" in _user_text(fake_anthropic.last)
 
 
@@ -241,6 +241,8 @@ def test_the_existing_bio_is_only_sent_to_the_bio_pass(fake_anthropic):
 # navigating away threw away work that cost real tokens (Ryan, 2026-09-07).
 
 def test_migrate_add_performer_lineup_is_idempotent(tmp_path):
+    # Exercises a one-off migration against the schema of its day, so it keeps
+    # that day's names (not renamed 2026-09-16).
     import sqlite3
     from scripts import migrate_add_performer_lineup as mod
 
@@ -264,48 +266,48 @@ def test_migrate_add_performer_lineup_is_idempotent(tmp_path):
     assert "lineup_json" in cols
 
 
-def test_a_lineup_pass_is_saved_and_comes_back_on_the_performer(api, app, seeded_ids):
+def test_a_lineup_pass_is_saved_and_comes_back_on_the_artist(api, app, seeded_ids):
     """The actual bug: run it, leave, come back, it is still there."""
     import json as _json
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    pid = seeded_ids["performer_id"]
+    pid = seeded_ids["artist_id"]
     payload = {"thinking": "from the fan roster", "members": [
         {"name": "Scott LaFaro", "start": "1959", "end": "1961",
          "confidence": "high", "url": "https://example.org/roster"}]}
 
     with app.app_context():
-        p = _db.session.get(Performer, pid)
+        p = _db.session.get(Artist, pid)
         p.lineup_json = _json.dumps(payload)
         _db.session.commit()
 
-    got = api.get(f"/api/performers/{pid}").get_json()
+    got = api.get(f"/api/artists/{pid}").get_json()
     assert got["lineup"]["members"][0]["name"] == "Scott LaFaro"
     # The biography pass must be untouched — separate columns, separate runs.
     assert got["dossier"] is None
 
 
-def test_a_performer_with_no_lineup_research_reports_none(api, seeded_ids):
+def test_a_artist_with_no_lineup_research_reports_none(api, seeded_ids):
     # null, not {} — the page distinguishes "never run" from "ran, found
     # nobody", and those deserve different words on screen.
-    got = api.get(f"/api/performers/{seeded_ids['performer_id']}").get_json()
+    got = api.get(f"/api/artists/{seeded_ids['artist_id']}").get_json()
     assert got["lineup"] is None
 
 
 def test_the_two_passes_do_not_overwrite_each_other(api, app, seeded_ids):
     import json as _json
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    pid = seeded_ids["performer_id"]
+    pid = seeded_ids["artist_id"]
     with app.app_context():
-        p = _db.session.get(Performer, pid)
+        p = _db.session.get(Artist, pid)
         p.dossier_json = _json.dumps({"biography": "A bio.", "thinking": "t"})
         p.lineup_json  = _json.dumps({"members": [{"name": "X", "confidence": "low"}],
                                       "thinking": "t"})
         _db.session.commit()
 
-    got = api.get(f"/api/performers/{pid}").get_json()
+    got = api.get(f"/api/artists/{pid}").get_json()
     assert got["dossier"]["biography"] == "A bio."
     assert got["lineup"]["members"][0]["name"] == "X"

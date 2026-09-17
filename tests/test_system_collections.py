@@ -31,7 +31,7 @@ from app.extensions import db as _db
 from app.models.collection import Collection, CollectionRecording, SYSTEM_FULL_LIBRARY
 from app.models.peer import Peer, CollectionGrant, PeerToken
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.recording import Recording
 from app.models.user import User
 from app.utils.peer_access import (
@@ -44,11 +44,11 @@ from app.utils.peer_auth import generate_token, hash_secret
 # ── World building ────────────────────────────────────────────────────────────
 
 def _recording(label, published=True, favorite=False):
-    performer = Performer(name=f"{label} Band")
-    _db.session.add(performer)
+    artist = Artist(name=f"{label} Band")
+    _db.session.add(artist)
     _db.session.flush()
 
-    perf = Performance(performer_id=performer.id, start_year=1975,
+    perf = Performance(artist_id=artist.id, start_year=1975,
                        start_month=6, start_day=1)
     _db.session.add(perf)
     _db.session.flush()
@@ -346,7 +346,7 @@ def test_owner_favorites_do_not_reach_a_peer(app):
         "/api/share/recordings/recent?card=1",
         "/api/share/recordings/recent",
         f"/api/share/collections/{curated.id}",
-        "/api/share/performers/all-recordings",
+        "/api/share/artists/all-recordings",
     ]:
         res = c.get(path, headers=h)
         assert res.status_code == 200, f"{path} returned {res.status_code}"

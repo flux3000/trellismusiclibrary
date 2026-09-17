@@ -2,7 +2,7 @@
 utils/serialize.py — Shared model → dict serialisers for API responses.
 
 Single source of truth for the recording "summary" shape used by the catalog
-(artists), performance detail, and library views, so the fields never diverge
+(musicians), performance detail, and library views, so the fields never diverge
 between endpoints.
 """
 
@@ -46,7 +46,7 @@ def recording_summary(rec):
 def recording_row(rec, waveform=False, card=False):
     """
     Self-contained recording row for flat catalog/collection displays — includes
-    the performer, date, and venue so a single row fully describes the show.
+    the artist, date, and venue so a single row fully describes the show.
 
     `waveform` (default False, opt-in) adds a downsampled card waveform strip.
     Left off by default: this same serializer backs the flat List views
@@ -56,9 +56,9 @@ def recording_row(rec, waveform=False, card=False):
     kept because the capability is real and tested.
 
     `card` (default False, opt-in) adds the Browse cards' visual fields:
-    `genre`, `genre_color`, and `image_id` for the performer's primary photo.
+    `genre`, `genre_color`, and `image_id` for the artist's primary photo.
     Same reasoning as `waveform` and the same design-spec rule: each field walks
-    Recording → Performance → Performer → (Genre | PerformerImage), so on the
+    Recording → Performance → Artist → (Genre | ArtistImage), so on the
     544-row flat List that is three extra joins per row to benefit a 3-card and
     a 12-card module. Callers passing card=True MUST eager-load those
     relationships or they buy an N+1 — see api/recordings.py.
@@ -68,8 +68,8 @@ def recording_row(rec, waveform=False, card=False):
     v = p.venue if p else None
     row = {
         "id":              rec.id,
-        "performer":       p.performer.name if (p and p.performer) else None,
-        "performer_id":    p.performer_id if p else None,
+        "artist":       p.artist.name if (p and p.artist) else None,
+        "artist_id":    p.artist_id if p else None,
         "date":            format_partial_date(p.start_year, p.start_month, p.start_day) if p else None,
         "start_year":      p.start_year  if p else None,
         "start_month":     p.start_month if p else None,
@@ -105,31 +105,31 @@ def recording_row(rec, waveform=False, card=False):
     if waveform:
         row["waveform"] = _card_waveform(rec)
     if card:
-        performer = p.performer if (p and p.performer) else None
-        g = performer.genre if performer else None
+        artist = p.artist if (p and p.artist) else None
+        g = artist.genre if artist else None
         row["genre"]       = g.name  if g else None
         # May be None even when a genre exists — colour is nullable and NULL is
         # a supported state (the frontend renders neutral grey). Never
         # substitute a default here; the fallback belongs in one place.
         row["genre_color"] = g.color if g else None
-        row["image_id"]    = _primary_image_id(performer)
+        row["image_id"]    = _primary_image_id(artist)
     return row
 
 
-def _primary_image_id(performer):
+def _primary_image_id(artist):
     """
-    Id of the performer's primary image, for the card's circular thumbnail.
+    Id of the artist's primary image, for the card's circular thumbnail.
 
     Reads through the `images` relationship (ordered primary-first) rather than
     querying, so an eager-loading caller pays nothing extra. Falls back to the
     first image when none is flagged primary — deleting the primary must not
-    leave a performer with photos but no face on the card. Mirrors
-    performer_image.primary_for(); both exist because one serves loaded objects
+    leave an artist with photos but no face on the card. Mirrors
+    artist_image.primary_for(); both exist because one serves loaded objects
     and the other a bare id.
     """
-    if performer is None:
+    if artist is None:
         return None
-    imgs = performer.images
+    imgs = artist.images
     return imgs[0].id if imgs else None
 
 

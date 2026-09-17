@@ -9,8 +9,8 @@ behaviours (2026-09-01).
    source folder — so the tests below check the disk is untouched as much as
    they check the parse.
 
-2. GENRE ON THE PERFORMER. The ingest form can now set an act's genre. Genre
-   lives on Performer, not Recording, and this is the only place outside
+2. GENRE ON THE ARTIST. The ingest form can now set an act's genre. Genre
+   lives on Artist, not Recording, and this is the only place outside
    api/genres.py that can create one, so the guards matter more than the happy
    path: an id beats a name, a name matches case-insensitively before creating,
    and a payload that says NOTHING about genre must not clear an existing one.
@@ -23,7 +23,7 @@ import os
 import pytest
 
 from app.models.genre import Genre
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.utils.ingest import parse_info_file, build_scan_payload
 
 
@@ -172,7 +172,7 @@ def test_blank_override_on_an_empty_folder_adds_no_candidate(app, tmp_path):
     assert scan["text_file_candidates"] == []
 
 
-# ── Genre on the Performer, through /api/ingest/confirm ─────────────────────
+# ── Genre on the Artist, through /api/ingest/confirm ─────────────────────
 
 @pytest.fixture()
 def api(app):
@@ -181,36 +181,36 @@ def api(app):
 
 
 # The confirm endpoint runs a background job that copies real files, so these
-# exercise `_apply_performer_genre` directly. That is the honest boundary: the
+# exercise `_apply_artist_genre` directly. That is the honest boundary: the
 # function is the whole of the genre decision, and driving it through a
 # file-copying job would test the copier, not the rule.
 
 
 def test_genre_id_links_an_existing_genre(app):
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
     g = Genre(name="Bluegrass", color="#7a8b99")
-    p = Performer(name="Hot Rize")
+    p = Artist(name="Hot Rize")
     _db.session.add_all([g, p])
     _db.session.commit()
 
-    _apply_performer_genre(p, {"genre_id": g.id})
+    _apply_artist_genre(p, {"genre_id": g.id})
     _db.session.commit()
     assert p.genre_id == g.id
 
 
 def test_genre_name_matches_case_insensitively_before_creating(app):
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
     g = Genre(name="Bluegrass")
-    p = Performer(name="Hot Rize")
+    p = Artist(name="Hot Rize")
     _db.session.add_all([g, p])
     _db.session.commit()
     before = _db.session.query(Genre).count()
 
-    _apply_performer_genre(p, {"genre_name": "bluegrass"})
+    _apply_artist_genre(p, {"genre_name": "bluegrass"})
     _db.session.commit()
 
     assert p.genre_id == g.id
@@ -219,13 +219,13 @@ def test_genre_name_matches_case_insensitively_before_creating(app):
 
 def test_genre_name_creates_when_genuinely_new(app):
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
-    p = Performer(name="The Meters")
+    p = Artist(name="The Meters")
     _db.session.add(p)
     _db.session.commit()
 
-    _apply_performer_genre(p, {"genre_name": "New Orleans Funk"})
+    _apply_artist_genre(p, {"genre_name": "New Orleans Funk"})
     _db.session.commit()
 
     assert p.genre is not None
@@ -234,14 +234,14 @@ def test_genre_name_creates_when_genuinely_new(app):
 
 def test_genre_id_wins_over_genre_name(app):
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
     g = Genre(name="Bluegrass")
-    p = Performer(name="Hot Rize")
+    p = Artist(name="Hot Rize")
     _db.session.add_all([g, p])
     _db.session.commit()
 
-    _apply_performer_genre(p, {"genre_id": g.id, "genre_name": "Something Else"})
+    _apply_artist_genre(p, {"genre_id": g.id, "genre_name": "Something Else"})
     _db.session.commit()
 
     assert p.genre_id == g.id
@@ -256,17 +256,17 @@ def test_silence_never_clears_an_existing_genre(app):
     members/guests payload documents.
     """
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
     g = Genre(name="Bluegrass")
-    p = Performer(name="Hot Rize")
+    p = Artist(name="Hot Rize")
     _db.session.add_all([g, p])
     _db.session.commit()
     p.genre_id = g.id
     _db.session.commit()
 
-    _apply_performer_genre(p, {})                       # no keys at all
-    _apply_performer_genre(p, {"genre_id": None, "genre_name": ""})
+    _apply_artist_genre(p, {})                       # no keys at all
+    _apply_artist_genre(p, {"genre_id": None, "genre_name": ""})
     _db.session.commit()
 
     assert p.genre_id == g.id
@@ -275,12 +275,12 @@ def test_silence_never_clears_an_existing_genre(app):
 def test_unknown_genre_id_is_ignored_rather_than_fatal(app):
     """A stale id must not 500 an ingest that is otherwise fine."""
     from app.extensions import db as _db
-    from app.api.ingest import _apply_performer_genre
+    from app.api.ingest import _apply_artist_genre
 
-    p = Performer(name="The Meters")
+    p = Artist(name="The Meters")
     _db.session.add(p)
     _db.session.commit()
 
-    _apply_performer_genre(p, {"genre_id": 999999})
+    _apply_artist_genre(p, {"genre_id": 999999})
     _db.session.commit()
     assert p.genre_id is None

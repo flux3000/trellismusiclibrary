@@ -22,7 +22,7 @@ by peer. It was rejected for two reasons:
 
 WHAT IS STORED, AND WHAT IS NOT
 -------------------------------
-Only the PAIR (which library, which recording id). No performer, no date, no
+Only the PAIR (which library, which recording id). No artist, no date, no
 venue — nothing about the recording itself.
 
 That keeps faith with "live proxy, zero persistence": the rule forbids caching

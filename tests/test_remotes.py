@@ -198,13 +198,13 @@ def test_proxy_rewrites_share_urls_to_local_proxy_urls(app, keychain, monkeypatc
     _patch_open(monkeypatch, lambda req: _FakeResponse(json.dumps({
         "id": 5,
         "tracks": [{"id": 9, "stream_url": "/api/share/stream/9"}],
-        "images": [{"url": "/api/share/performers/images/3"}],
+        "images": [{"url": "/api/share/artists/images/3"}],
         "unrelated": "/api/recordings/1",
     })))
 
     body = c.get(f"/api/remotes/{node_id}/recordings/5").get_json()
     assert body["tracks"][0]["stream_url"] == f"/api/remotes/{node_id}/stream/9"
-    assert body["images"][0]["url"] == f"/api/remotes/{node_id}/performers/images/3"
+    assert body["images"][0]["url"] == f"/api/remotes/{node_id}/artists/images/3"
     # Only /api/share/ prefixes are touched.
     assert body["unrelated"] == "/api/recordings/1"
 

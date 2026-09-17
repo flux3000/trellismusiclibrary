@@ -536,7 +536,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
    list lives here in one block rather than as font-family declarations
    scattered through the file, because that is what stops it spreading; a
    display face used broadly just makes an interface shout.
-   (.rec-card-performer declares it in its own rule, beside the card's other
+   (.rec-card-artist declares it in its own rule, beside the card's other
    type, since the whole card is defined there.)                            */
 .app-wordmark,
 .login-logo .logo-text,
@@ -616,7 +616,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* `.sidebar-nav` stopped being the scrolling element itself 2026-08-23 — it's
    now just a non-scrolling flex column holding two children: `.nav-scroll`
    (My Library / Collections / Favorites, scrollable) and `.nav-dims-foot`
-   (Venues/Performers/Artists/Genres, pinned). Splitting it this way is what
+   (Venues/Artists/Musicians/Genres, pinned). Splitting it this way is what
    lets someone favorite a hundred shows without burying the reference
    dimensions off the bottom of the sidebar (Ryan, 2026-08-23) — before this,
    the whole column scrolled together and `.nav-dims-foot` merely refused to
@@ -641,7 +641,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .nav-scroll::-webkit-scrollbar-track { background: transparent; }
 .nav-scroll::-webkit-scrollbar-thumb { background: var(--bd-2); border-radius: 2px; }
 
-/* Pins the reference dimensions (Venues, Performers, Artists, Genres) to the
+/* Pins the reference dimensions (Venues, Artists, Musicians, Genres) to the
    foot of the sidebar, just above the user bar (Ryan, 2026-08-08) — outside
    `.nav-scroll` now, so no amount of scrolling in the shelf above ever moves
    it. They are indexes for re-finding something you know exists — useful,
@@ -650,7 +650,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   border-top: 1px solid var(--bd-0);
   padding: 6px 8px 4px;
   flex-shrink: 0;
-  /* Expanding Venues (or Performers, or Genres) drops hundreds of rows INTO
+  /* Expanding Venues (or Artists, or Genres) drops hundreds of rows INTO
      this pinned footer. It had no overflow and no height cap, and its parent
      .sidebar-nav is overflow:hidden — so every row past the fold was clipped
      and simply unreachable (Ryan, 2026-08-23: "scrollbar is non functional").
@@ -952,20 +952,20 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   color: var(--t1);
 }
 
-/* ── Entity pages (Performer / Venue / Artist / Genre / Collection) ───────────
-   .performer-head and .pp-name-row were removed 2026-08-07 when every one of
+/* ── Entity pages (Artist / Venue / Musician / Genre / Collection) ───────────
+   .artist-head and .pp-name-row were removed 2026-08-07 when every one of
    these pages moved onto the shared hero + tabs shell (entityShellHtml). The
-   `pp-` prefix now means ENTITY page, not performer page. */
-/* ── Performer page: hero + tabs (rebuilt 2026-08-07) ─────────────────────────
+   `pp-` prefix now means ENTITY page, not artist page. */
+/* ── Artist page: hero + tabs (rebuilt 2026-08-07) ─────────────────────────
    Replaced a single stacked column that put members, genre, the recordings
    table, resources and AI research on one scroll. Everything is now behind
    four tabs with a hero header carrying the page's identity — the page has to
    read as a music page to a general listener, not as a form.               */
-/* Page gutter. The old layout got this from .performer-head's 28px padding,
+/* Page gutter. The old layout got this from .artist-head's 28px padding,
    which went away with the rebuild — hence the flush-left first pass. Applied
    on the wrapper so hero, tabs and panes share one gutter and can never drift
    apart. */
-.performer-page { padding: 22px 28px 32px; }
+.artist-page { padding: 22px 28px 32px; }
 
 .pp-hero { display: flex; align-items: flex-start; gap: 20px; padding: 0 0 18px; }
 .pp-hero-main { flex: 1; min-width: 0; }
@@ -982,7 +982,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   border: 3px solid var(--ring, var(--bd-1)); background: var(--bg-3);
   display: block; object-fit: cover;
 }
-/* Initials, not a silhouette icon: with photos on ~1 of 164 performers the
+/* Initials, not a silhouette icon: with photos on ~1 of 164 artists the
    no-photo state IS this page's normal appearance, and it should look
    intentional rather than like a failed image load. */
 .pp-portrait-blank {
@@ -991,19 +991,19 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 }
 
 /* .pp-name is shared with the person/venue/collection pages at 22px; the
-   performer hero wants more presence without changing those. */
+   artist hero wants more presence without changing those. */
 .pp-hero .pp-name { font-size: 26px; font-weight: 600; letter-spacing: -.01em; }
 
-/* Genre hero "portrait" — the colour that tints every card of its performers.
+/* Genre hero "portrait" — the colour that tints every card of its artists.
    A genre has no likeness, but it does have this, and showing it here doubles
    as a live preview of what the picker set. */
 /* Venue portraits and gallery tiles are SQUARE (Ryan, 2026-08-07) — rounded
-   rather than circular, so a venue never reads as a performer. */
+   rather than circular, so a venue never reads as an artist. */
 .venue-page .pp-portrait-img,
 .venue-page .pp-portrait-blank { border-radius: var(--r-md); }
 .venue-page .pp-ph { border-radius: var(--r-md); }
 
-/* Create forms — one look for New venue / performer / artist. Deliberately
+/* Create forms — one look for New venue / artist / musician. Deliberately
    narrow: these ask for a name and little else, because everything is editable
    in place on the page the form creates. */
 .create-form { max-width: 420px; }
@@ -1185,7 +1185,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* Editable MusicBrainz search term (Ryan, 2026-08-08) — a billing variant
    like "Aaron Parks Trio" is a real act name but often not what MusicBrainz
    indexed it under, so the term sent to the API needs to be adjustable
-   without renaming the Performer. Sits under the status line/prompt in every
+   without renaming the Artist. Sits under the status line/prompt in every
    unresolved state (never-looked-up, ambiguous, no-results, candidate list). */
 .pp-mb-searchrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .pp-mb-searchrow-sm { margin: 0 0 10px; }
@@ -1312,7 +1312,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* Photo-source tiles sit IN the gallery grid beside the drop zone — uploading,
    importing from Commons and searching the web are all ways of getting a photo
    in, so they read as one row of doors rather than one tool plus footnotes
-   underneath. `.pp-fetch-tile` imports (Performer only — it needs the
+   underneath. `.pp-fetch-tile` imports (Artist only — it needs the
    MusicBrainz → Wikidata bridge); `.pp-link-tile` just opens a search in a new
    tab and is a plain <a> wearing the same face, which every photographed
    dimension gets (2026-09-01). */
@@ -1327,7 +1327,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .pp-fetch-msg { font-size: 11px; color: var(--t2); margin-top: 12px; min-height: 14px; }
 .pp-fetch-msg.is-ok  { color: var(--green); }
 .pp-fetch-msg.is-err { color: var(--red); }
-/* The single-slot .pp-image-* styles were removed 2026-08-07 when the Performer
+/* The single-slot .pp-image-* styles were removed 2026-08-07 when the Artist
    page gained a Photos tab: the gallery (.pp-gal / .pp-ph) and the hero
    portrait (.pp-portrait-*) above replace them entirely, and nothing in the
    JS referenced them any more. */
@@ -1348,13 +1348,13 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 }
 .pp-desc.pp-empty { color: var(--t3); font-style: italic; }
 
-.pp-artists-block { margin-top: 16px; }
-.pp-artists-label {
+.pp-musicians-block { margin-top: 16px; }
+.pp-musicians-label {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--t2); margin-bottom: 7px;
 }
-.pp-artists-label-note { text-transform: none; letter-spacing: 0; font-style: italic; font-weight: 400; }
-/* .pp-artists reuses .mg-row (see the Members/Guests two-row rules) for the
+.pp-musicians-label-note { text-transform: none; letter-spacing: 0; font-style: italic; font-weight: 400; }
+/* .pp-musicians reuses .mg-row (see the Members/Guests two-row rules) for the
    bordered-box pill container look, shared visually with the recording page
    and Add Recording form. */
 
@@ -1379,7 +1379,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .pp-stint-del:hover { color: var(--red); }
 .pp-stint-add-btn { margin-top: 8px; }
 
-/* Performer reference resources (external DBs / discographies) */
+/* Artist reference resources (external DBs / discographies) */
 .pp-resources { display: flex; flex-direction: column; gap: 3px; }
 .pp-resource-row { display: flex; align-items: baseline; gap: 10px; font-size: 12px; }
 .pp-resource-link { color: var(--accent); text-decoration: none; }
@@ -1389,7 +1389,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .pp-resource-x:hover { color: var(--red); }
 
 /* Recording count, now between the head and the recordings table rather than
-   inside .performer-head (2026-07-22 — was "N recordings · N performances"
+   inside .artist-head (2026-07-22 — was "N recordings · N performances"
    inside the head block; now just "N recordings", moved down). */
 #pp-rec-count { font-size: 12px; color: var(--t2); margin: 16px 28px 8px; }
 
@@ -1409,7 +1409,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 }
 .vn-val { display: inline-block; min-width: 70px; font-size: 13px; color: var(--t0); }
 
-/* Grouped appearances on the Artist page — one block per performer */
+/* Grouped appearances on the Musician page — one block per artist */
 .pp-group { margin-top: 6px; }
 .pp-group-head {
   font-size: 13px; font-weight: 600; color: var(--t1);
@@ -1496,7 +1496,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   letter-spacing: -0.02em;
 }
 
-/* Venue + performer sub-label stacked in one grid cell */
+/* Venue + artist sub-label stacked in one grid cell */
 .rec-venue-wrap {
   display: flex;
   flex-direction: column;
@@ -1510,8 +1510,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   min-width: 0;
 }
 
-/* Non-canonical performer name, e.g. "Bill Evans Trio" under "Bill Evans" */
-.rec-performer {
+/* Non-canonical artist name, e.g. "Bill Evans Trio" under "Bill Evans" */
+.rec-artist {
   font-size: 11px;
   color: var(--t2);
   min-width: 0;
@@ -1648,7 +1648,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   display: block;
 }
 /* Initials disc — the DEFAULT, not a fallback: most acts have no photo. Same
-   treatment as the cards and the Performer hero so an act looks the same
+   treatment as the cards and the Artist hero so an act looks the same
    everywhere it appears. */
 .rec-header-photo--initials {
   display: flex; align-items: center; justify-content: center;
@@ -1792,7 +1792,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 /* Back inside the text column 2026-08-22 (Ryan): as a full-width row it began
-   under the performer avatar, out of line with every other line of text in the
+   under the artist avatar, out of line with every other line of text in the
    header. It keeps the width it gained — the column is the whole header now
    that the right-hand meta block is gone — but starts where the name, date and
    personnel start. The old 480px cap is still gone. */
@@ -1842,7 +1842,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-date-line .pp-editable:hover { background: var(--bg-1); }
 .rec-dot { color: var(--t3); margin: 0 5px; }
 .rec-f-loc { color: var(--t2); }
-/* "Go to its own page" link (2026-07-23) — next to the Performer name and
+/* "Go to its own page" link (2026-07-23) — next to the Artist name and
    the Venue name on the recording page. Same treatment for both, shown
    whether or not the viewer can edit (it's navigation, not editing). */
 .rec-nav-link {
@@ -1854,9 +1854,9 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   background: var(--bg-2); border: 1px solid var(--accent); color: var(--t0);
   border-radius: var(--r-sm); padding: 1px 4px; font-size: 12px; margin-right: 3px;
 }
-.rec-artists-row { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.rec-musicians-row { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
 /* Unused as of 2026-08-22 — the inline instrument/note editor was cut from V1
-   and a name click now opens the Artist page. Kept because the data, the
+   and a name click now opens the Musician page. Kept because the data, the
    resolver and the endpoint all survive; only the render function went. */
 .rec-personnel-detail { flex-basis: 100%; margin-top: 4px; }
 .rec-personnel-detail-inner {
@@ -2729,7 +2729,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 /* ── Genre picker + pill (2026-08-02) ─────────────────────────────────────────
-   The Performer page's Genre field reuses .artist-picker-wrap/.artist-dropdown/
+   The Artist page's Genre field reuses .artist-picker-wrap/.artist-dropdown/
    .artist-result (same dropdown chrome as the Members picker) — only the pill
    below and the empty-state hint are new. */
 
@@ -2789,12 +2789,12 @@ input[type="number"]::-webkit-outer-spin-button {
 .genre-assign-picker-wrap input { width: 100%; box-sizing: border-box; font-size: 12px; }
 .genre-assign-status { font-size: 11px; color: var(--accent-lit); white-space: nowrap; }
 
-/* ── Genre page (#/genre/<id>) — grouped by performer ────────────────────────
-   A genre's recordings are reached through its performers (one extra hop the
+/* ── Genre page (#/genre/<id>) — grouped by artist ────────────────────────
+   A genre's recordings are reached through its artists (one extra hop the
    Venue page doesn't need, since Performance links straight to Venue). */
 
-.genre-performer-section { margin-top: 20px; }
-.genre-performer-head {
+.genre-artist-section { margin-top: 20px; }
+.genre-artist-head {
   display: flex;
   align-items: baseline;
   gap: 10px;
@@ -2802,18 +2802,18 @@ input[type="number"]::-webkit-outer-spin-button {
   border-bottom: 1px solid var(--bd-1);
   margin-bottom: 2px;
 }
-.genre-performer-name {
+.genre-artist-name {
   font-size: 14px;
   font-weight: 500;
   color: var(--t0);
   text-decoration: none;
 }
-.genre-performer-name:hover { color: var(--accent-lit); }
-.genre-performer-count { font-size: 11px; color: var(--t2); }
+.genre-artist-name:hover { color: var(--accent-lit); }
+.genre-artist-count { font-size: 11px; color: var(--t2); }
 
-/* ── Artists index — performer linking ───────────────────────────────────────── */
+/* ── Musicians index — artist linking ───────────────────────────────────────── */
 
-.ad-performer-row {
+.ad-artist-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2822,7 +2822,7 @@ input[type="number"]::-webkit-outer-spin-button {
   font-size: 12px;
 }
 
-.ad-performer-name { flex: 1; color: var(--t0); }
+.ad-artist-name { flex: 1; color: var(--t0); }
 
 .ad-unlink-btn {
   background: none;
@@ -2836,7 +2836,7 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 .ad-unlink-btn:hover { color: var(--red); background: rgba(224,85,85,0.1); }
 
-.ad-add-performer-row {
+.ad-add-artist-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3799,7 +3799,7 @@ input[type="range"].progress-bar {
   color: var(--t3); font-size: 10px; margin-left: 4px;
 }
 
-/* ── Performer page: lineup research ─────────────────────────────────────── */
+/* ── Artist page: lineup research ─────────────────────────────────────── */
 /* Sits under the roster it is about, not on the Description header where the
    biography's AI Assist lives — they are two different jobs (2026-09-07). */
 .pp-lineup-ai { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; }
@@ -3821,7 +3821,7 @@ input[type="range"].progress-bar {
 .pp-lineup-applied { color: var(--green); font-size: 10.5px; font-weight: 600; }
 .pp-lineup-note  { flex-basis: 100%; color: var(--t3); font-size: 10.5px; }
 
-/* The question box on the Performer page. Full width under the Description
+/* The question box on the Artist page. Full width under the Description
    header so it lines up with the description it feeds. */
 .pp-ai-ask { margin: 4px 0 8px; }
 .pp-ai-answer:empty { display: none; }
@@ -3882,8 +3882,8 @@ input[type="range"].progress-bar {
 
 /* Members/Guests two-row personnel widget (2026-07-22) — shared markup+CSS
    between the Add Recording form (createMembersWidget, draft state) and the
-   View Recording page (renderRecArtists, live API calls) so both look
-   identical, per Ryan's ask. Replaces the old single Artists pill row +
+   View Recording page (renderRecMusicians, live API calls) so both look
+   identical, per Ryan's ask. Replaces the old single Musicians pill row +
    descriptive subtext + Inherit/Explicit mode selector. */
 .mg-row {
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -3979,8 +3979,8 @@ input[type="range"].progress-bar {
 .member-chip-x { color: var(--t2); cursor: pointer; font-size: 14px; line-height: 1; }
 .member-chip-x:hover { color: var(--red); }
 /* An <a> since 2026-08-22 on the Recording view (it links to the person's
-   Artist page), still a <span> on the ingest Review form where there is no
-   artist row to point at yet — so inherit rather than assume link colours. */
+   Musician page), still a <span> on the ingest Review form where there is no
+   musician row to point at yet — so inherit rather than assume link colours. */
 .member-chip-name { cursor: pointer; color: inherit; text-decoration: none; }
 .member-chip-name:hover { text-decoration: underline; }
 a.member-chip-name:hover { color: var(--accent); }
@@ -4218,7 +4218,7 @@ a.member-chip-name:hover { color: var(--accent); }
   object-fit: cover; background: var(--bg-3);
 }
 /* Initials fallback — same idiom as heroPortraitHtml()'s, shrunk down: with
-   photos on a small minority of performers, no-photo is the normal case here
+   photos on a small minority of artists, no-photo is the normal case here
    too and should look intentional rather than like a missing image. */
 .nav-fav-avatar--blank {
   display: flex; align-items: center; justify-content: center;
@@ -4262,8 +4262,8 @@ a.member-chip-name:hover { color: var(--accent); }
 /* Collections is the ONE .nav-top row that is a section header rather than a
    destination — it was deliberately given My Library's treatment on
    2026-08-23 ("no longer a generic sub dimension"), and the approved mock
-   shows it as COLLECTIONS in caps beside MY LIBRARY while Venues/Performers/
-   Artists/Genres are sentence-case links. Dropping caps from every .nav-top
+   shows it as COLLECTIONS in caps beside MY LIBRARY while Venues/Artists/
+   Musicians/Genres are sentence-case links. Dropping caps from every .nav-top
    would have taken this with it, so it opts back in by its data-dim rather
    than by needing a new class. */
 /* The shelf headers: MY LIBRARY, COLLECTIONS, FAVORITES. One rule, so they
@@ -4392,7 +4392,7 @@ a.member-chip-name:hover { color: var(--accent); }
      straight back. Same value, now from the token. */
   font-size: var(--nav-item-fs); color: var(--t0);
   text-transform: none; letter-spacing: 0;
-  /* Venue and performer names run long. Without this a single wide row makes
+  /* Venue and artist names run long. Without this a single wide row makes
      the whole sidebar scroll sideways, which is worse than an ellipsis. */
   min-width: 0; overflow: hidden;
 }
@@ -4436,11 +4436,11 @@ a.member-chip-name:hover { color: var(--accent); }
   border-bottom: 1px solid var(--bd-0);
   font-size: 12px;
 }
-.rec-row--flat.with-performer {
+.rec-row--flat.with-artist {
   grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
 .rec-row--flat:hover { background: var(--bg-1); }
-.rec-performer-cell { color: var(--t0); font-weight: 450; }
+.rec-artist-cell { color: var(--t0); font-weight: 450; }
 .rec-date-added { text-align: right; color: var(--t3); font-variant-numeric: tabular-nums; }
 
 /* Header row paired with .rec-row--flat — same grid, mostly blank; "Added" sorts. */
@@ -4452,7 +4452,7 @@ a.member-chip-name:hover { color: var(--accent); }
   padding: 0 20px 4px;
   font-size: 10px;
 }
-.rec-table-head.with-performer {
+.rec-table-head.with-artist {
   grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
 .rec-th-added {
@@ -5168,7 +5168,7 @@ a.member-chip-name:hover { color: var(--accent); }
   overflow-y: auto;
   /* 14px at the top, not 8 (2026-08-28): the "Inferred from" strip used to
      stand between the topbar's hairline and the first field label, and without
-     it the Performer label sat almost on the rule. */
+     it the Artist label sat almost on the rule. */
   padding: 14px 20px 12px;
 }
 
@@ -5208,9 +5208,9 @@ a.member-chip-name:hover { color: var(--accent); }
   grid-template-columns: 96px 84px minmax(0, 1fr);
   gap: 10px;
 }
-/* Act row: Performer and Genre on one line (Ryan, 2026-09-01). Genre belongs
+/* Act row: Artist and Genre on one line (Ryan, 2026-09-01). Genre belongs
    beside the act because it is a property OF the act — it is written to the
-   Performer row on Confirm, not to the recording. Performer takes twice the
+   Artist row on Confirm, not to the recording. Artist takes twice the
    width: it is the longest value on the form and the one most often typed,
    where a genre is a short pick from a controlled list. */
 .ingest-row-act {
@@ -5218,7 +5218,7 @@ a.member-chip-name:hover { color: var(--accent); }
   gap: 10px;
 }
 
-/* Genre picker — same dropdown chrome as the Performer and Venue pickers
+/* Genre picker — same dropdown chrome as the Artist and Venue pickers
    (.artist-dropdown / .artist-result), so all three autocompletes behave and
    look identical. */
 .genre-picker-wrap { position: relative; width: 100%; }
@@ -5298,7 +5298,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .meta-readout-value--yellow { color: var(--amber); }
 .meta-readout-value--red    { color: var(--red); }
 /* Not part of the chip above — the shared "AI Assist"-shaped button, still
-   used by the performer dossier and the AI Assist retry button. It lost its
+   used by the artist dossier and the AI Assist retry button. It lost its
    third user when Add Recording's quality bar was removed (2026-08-28). */
 .iq-ai-btn {
   flex-shrink: 0; white-space: nowrap; margin-left: auto;
@@ -5416,7 +5416,7 @@ a.member-chip-name:hover { color: var(--accent); }
   position: relative;
 }
 /* The input inside never stretched (2026-08-28). .venue-picker-wrap and
-   .event-picker-wrap have always set this; this one did not, so Performer —
+   .event-picker-wrap have always set this; this one did not, so Artist —
    the widest, most important field on the form — rendered at an <input>'s
    default ~20-character width while its row was 1200px wide. Scoped with the
    child combinator so the Members/Guests widget, which reuses this class for
@@ -6428,7 +6428,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-file .nm { color: var(--t1); }
 .lq-dir .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Performer-implied-by-folder-name badge (2026-08-22). Uses the shared
+/* Artist-implied-by-folder-name badge (2026-08-22). Uses the shared
    .badge base (see the Source badges section) rather than one-off styling —
    "new" gets the same accent treatment as everything else worth noticing;
    "existing" stays deliberately quiet since it's the unremarkable case. */
@@ -6645,7 +6645,7 @@ a.member-chip-name:hover { color: var(--accent); }
   margin-left: auto;
 }
 .lq-applyall-x:hover { color: var(--t0); text-decoration: underline; }
-/* Performer / Venue / City / State / Country / Event / Source / Lineage —
+/* Artist / Venue / City / State / Country / Event / Source / Lineage —
    eight fields where there used to be one (Ryan, 2026-08-31), laid out like
    the Add Recording form's own rows rather than invented fresh. Notes spans
    the full width underneath — the one field long enough to want its own line. */
@@ -7375,8 +7375,8 @@ a.member-chip-name:hover { color: var(--accent); }
    this treats the show's own metadata as the artwork, gig-poster style.
    Centred, ruled, uppercase act.
 
-   `--genre-fg` is set inline per card by recCardHtml() from the performer's
-   GENRE colour (falling back to neutral --t2 for the 70 of 164 performers with
+   `--genre-fg` is set inline per card by recCardHtml() from the artist's
+   GENRE colour (falling back to neutral --t2 for the 70 of 164 artists with
    no genre). Genre rather than source: source is a technical attribute and
    makes a poor identity; genre groups the library the way a listener browses.
 
@@ -7404,8 +7404,8 @@ a.member-chip-name:hover { color: var(--accent); }
   background: var(--genre-fg, var(--t2));
 }
 
-/* Square performer photo (2026-08-27, was circular). Only 1 of 164
-   performers has one today, so the card is designed to look finished
+/* Square artist photo (2026-08-27, was circular). Only 1 of 164
+   artists has one today, so the card is designed to look finished
    WITHOUT it — the element is simply absent, never a placeholder silhouette. */
 .rec-card-photo {
   width: 52px; height: 52px; border-radius: var(--r-md); object-fit: cover;
@@ -7429,7 +7429,7 @@ a.member-chip-name:hover { color: var(--accent); }
   height: 1px; background: var(--genre-fg, var(--bd-1)); opacity: .45; margin: 9px 0;
 }
 
-.rec-card-performer {
+.rec-card-artist {
   /* The display face's main job in the app: the act name as poster billing.
      No text-transform — the name renders exactly as the database holds it
      (Ryan, 2026-08-23). The old -.005em tracking existed to compensate for
@@ -7511,7 +7511,7 @@ a.member-chip-name:hover { color: var(--accent); }
   display: block;
 }
 /* Reserves the avatar's width when there's no photo so the columns of a
-   12-row list stay aligned — with photos on ~1 performer, a collapsing
+   12-row list stay aligned — with photos on ~1 artist, a collapsing
    column would make every row start at a different x. */
 /* Initials disc — the DEFAULT avatar, not a fallback (2026-08-07). Most acts
    have no photo, so this is what a card normally looks like; it uses the same
@@ -7530,7 +7530,7 @@ a.member-chip-name:hover { color: var(--accent); }
   letter-spacing: .05em; font-variant-numeric: tabular-nums;
 }
 .rec-rowcard-main { min-width: 0; }
-.rec-rowcard-performer { font-size: 13.5px; font-weight: 600; color: var(--t0); }
+.rec-rowcard-artist { font-size: 13.5px; font-weight: 600; color: var(--t0); }
 .rec-rowcard-venue { font-size: 11.5px; color: var(--t2); font-style: italic; margin-top: 2px; }
 
 .rec-rowcard-meta {
@@ -7548,13 +7548,13 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 
 /* Below ~900px the meta and ingest-date columns are the first things worth
-   losing — performer, date and venue are the identifying fields. */
+   losing — artist, date and venue are the identifying fields. */
 @media (max-width: 900px) {
   .rec-rowcard { grid-template-columns: 4px auto 100px minmax(0, 1fr) auto; }
   .rec-rowcard-meta { display: none; }
 }
 
-/* ── Performer / Collection tiles ─────────────────────────────────────────── */
+/* ── Artist / Collection tiles ─────────────────────────────────────────── */
 .perf-tile, .col-tile {
   display: block; text-decoration: none; color: inherit;
   background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-md);
@@ -7579,7 +7579,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .otd-row:hover { background: var(--bg-1); }
 .otd-year      { font-size: 11.5px; color: var(--t3); width: 40px; flex-shrink: 0; }
-.otd-performer { font-size: 13px; color: var(--t0); flex: 0 1 auto; min-width: 0; max-width: 40%; }
+.otd-artist { font-size: 13px; color: var(--t0); flex: 0 1 auto; min-width: 0; max-width: 40%; }
 .otd-venue     { font-size: 12px; color: var(--t2); flex: 1; min-width: 0; }
 
 /* ── View Recording · Listening Quality pane ──────────────────────────────────
@@ -8058,7 +8058,7 @@ body.drive-offline .track-row:hover { background: transparent; }
 /* Matched on src rather than a class: perfPhotoHtml() takes its class from
    the caller, so cards, hero portraits and the gallery all carry different
    ones. The endpoint is the thing they genuinely have in common. */
-body.drive-offline img[src*="/api/performers/images/"],
+body.drive-offline img[src*="/api/artists/images/"],
 body.drive-offline img[src*="/api/venues/images/"] {
   opacity: 0.45;
   filter: grayscale(1);
@@ -8079,7 +8079,7 @@ body.drive-offline img[src*="/api/venues/images/"] {
    names:
 
      1200px  the Recording view's two-column header stops fitting — the meta
-             block squeezes the performer name into a column too narrow to
+             block squeezes the artist name into a column too narrow to
              read. Header stacks; the side-by-side split survives elsewhere.
 
       900px  the Track List and the Side Panel can no longer share a row
@@ -8172,7 +8172,7 @@ body.drive-offline img[src*="/api/venues/images/"] {
    Three JS choke points do the real work: makeInlineEditable() binds nothing
    and strips its own affordance, entityShellHtml() drops the editable title and
    the hero actions, and createPhotoGallery() renders pictures only. What is
-   left over is the handful of bespoke editors on the Performer page — the
+   left over is the handful of bespoke editors on the Artist page — the
    roster rows, tenure stints, reference resources, the genre chip and the AI
    dossier button — each with its own hand-rolled click handler.
 
@@ -8209,7 +8209,7 @@ html.playback-mode #pp-dossier-run,
 html.playback-mode .pp-sec-msg { display: none !important; }
 
 /* .rec-pill-name is deliberately NOT in this list — as of 2026-08-22 it is a
-   link to the person's Artist page, and navigation is not editing. It must keep
+   link to the person's Musician page, and navigation is not editing. It must keep
    working in Playback. */
 
 /* Content that stays readable but stops advertising — and stops accepting — a
@@ -8548,7 +8548,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 
    2026-08-24 (Ryan): art squared up (was a 76px strip) — tall enough to show
    traditional album cover art once that's supported, not just a cropped
-   headshot. Performer/venue/date now sit in .top-overlay, a gradient scrim
+   headshot. Artist/venue/date now sit in .top-overlay, a gradient scrim
    over the bottom of the art, rather than a separate text panel below it —
    the image is the whole tile now.
 
@@ -8703,13 +8703,13 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    (Ryan). Source and grade are their own reserved cells now; an ungraded row
    renders an empty one and nothing moves.
 
-   The performer column is also CAPPED rather than proportional. At 1.1fr it
+   The artist column is also CAPPED rather than proportional. At 1.1fr it
    took a SHARE OF THE WINDOW — about 480px at 1400px wide — so a short name
    like "Phish" left a hand's width of dead space before the venue, and the
    wider the monitor the worse it got. That is the horizontal eye travel Ryan
    asked to remove (2026-09-02).
 
-   200px, measured against the real library: performer names run 20 characters
+   200px, measured against the real library: artist names run 20 characters
    at the median and 26 at the 75th percentile, so this fits three quarters of
    them whole and ellipsises the four-name jazz summits that no sane column
    width would have held anyway. A grid column is one width for every row by
@@ -8721,7 +8721,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
     3px                    /* genre spine   */
     26px                   /* photo         */
     104px                  /* date          */
-    minmax(110px, 200px)   /* performer     */
+    minmax(110px, 200px)   /* artist     */
     minmax(0, 1fr)         /* venue + place */
     46px                   /* source        */
     26px;                  /* grade         */
@@ -8739,7 +8739,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   background: var(--bg-4); border: 1.5px solid var(--genre-fg, var(--bd-1));
 }
 /* The photo variant. Same box as the initials square so the two cases are
-   interchangeable in the grid — `object-fit: cover` because a performer
+   interchangeable in the grid — `object-fit: cover` because an artist
    photo is any aspect ratio and a squashed face is worse than a cropped one. */
 .brow-av--img { object-fit: cover; padding: 0; }
 .brow-date { font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
@@ -8888,9 +8888,9 @@ select.set-input { max-width: 480px; }
 }
 
 /* ══ Dimension index pages (2026-09-01) ═════════════════════════════════════
-   One layout for Venues, Performers, Artists, Events and Genres. Replaces the
+   One layout for Venues, Artists, Musicians, Events and Genres. Replaces the
    split list/detail admin screen (Venues, Genres) and the bare text list
-   (Performers) — see renderDimIndexPage in app.js for why all three went.
+   (Artists) — see renderDimIndexPage in app.js for why all three went.
 
    The page furniture above this is the entity SHELL, the same one each
    dimension's own record page uses, so an index and a record look like two
@@ -8940,7 +8940,7 @@ select.set-input { max-width: 480px; }
   border-radius: var(--r-md);
   transition: border-color .12s, background .12s;
 }
-/* The accent is the genre colour where there is one (Performers, Genres) and
+/* The accent is the genre colour where there is one (Artists, Genres) and
    a neutral border elsewhere — genre colour is the most complete visual signal
    this library owns, so it is what a tile lights up with. */
 .dim-tile:hover { border-color: var(--dim-fg, var(--bd-2)); background: var(--bg-4); }
@@ -8963,7 +8963,7 @@ select.set-input { max-width: 480px; }
    distinction the Venue record page has drawn since 2026-08-07 via its
    `venue-page` class. A genre has no likeness at all, so its tile's face IS
    the colour, which doubles as a live preview of what tints every card its
-   performers appear on. */
+   artists appear on. */
 .dim-grid--round  .dim-tile-art { border-radius: 50%; }
 .dim-grid--square .dim-tile-art { border-radius: var(--r-sm); }
 .dim-grid--swatch .dim-tile-art { border-radius: var(--r-sm); flex-basis: 26px; height: 26px; }
@@ -9026,7 +9026,7 @@ select.set-input { max-width: 480px; }
 /* Native swatch + hex box, two views of one value. The hex box is not
    redundant: <input type="color"> cannot express "no colour", and NULL is a
    real state here — an uncoloured genre renders the same neutral grey as a
-   performer with no genre at all. */
+   artist with no genre at all. */
 .cf-color { display: flex; align-items: center; gap: 8px; }
 .cf-color input[type="color"] {
   flex: 0 0 34px; height: 30px; padding: 2px; cursor: pointer;

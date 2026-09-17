@@ -1,7 +1,7 @@
 """
 models/performance.py — Performance model.
 
-A Performance is a unique live event: a specific performer on a specific
+A Performance is a unique live event: a specific artist on a specific
 night at a specific place. Multiple recordings (different tapes, sources)
 can exist for the same performance.
 
@@ -20,7 +20,7 @@ class Performance(db.Model):
     __tablename__ = "performance"
 
     id           = db.Column(db.Integer, primary_key=True)
-    performer_id = db.Column(db.Integer, db.ForeignKey("performer.id"), nullable=False)
+    artist_id = db.Column(db.Integer, db.ForeignKey("artist.id"), nullable=False)
     venue_id     = db.Column(db.Integer, db.ForeignKey("venue.id"),  nullable=True)
     event_id  = db.Column(db.Integer, db.ForeignKey("event.id"),  nullable=True)
 
@@ -34,7 +34,7 @@ class Performance(db.Model):
     # date, plus any performance_personnel rows layered on as guests/edits.
     # 'explicit': lineup = performance_personnel rows ONLY; act roster ignored
     # entirely (rotating billings where the act roster is just a pick-list,
-    # e.g. Acoustic All-Stars). Defaults from performer.default_personnel_mode
+    # e.g. Acoustic All-Stars). Defaults from artist.default_personnel_mode
     # at creation. See app/utils/personnel.py::resolve_performance_personnel.
     personnel_mode = db.Column(db.String(16), nullable=False, default="inherit",
                                server_default="inherit")
@@ -58,7 +58,7 @@ class Performance(db.Model):
                            onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
-    performer  = db.relationship("Performer",  back_populates="performances")
+    artist  = db.relationship("Artist",  back_populates="performances")
     venue      = db.relationship("Venue",      back_populates="performances")
     event      = db.relationship("Event",      back_populates="performances")
     recordings = db.relationship("Recording",  back_populates="performance",
@@ -70,4 +70,4 @@ class Performance(db.Model):
     def __repr__(self):
         date = f"{self.start_year}-{self.start_month:02d}-{self.start_day:02d}" \
                if all([self.start_year, self.start_month, self.start_day]) else "unknown date"
-        return f"<Performance {self.performer_id} @ {date}>"
+        return f"<Performance {self.artist_id} @ {date}>"

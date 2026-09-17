@@ -1,7 +1,7 @@
 """
-app/utils/entity_images.py — image behaviour shared by Performer and Venue.
+app/utils/entity_images.py — image behaviour shared by Artist and Venue.
 
-Ryan's call (2026-08-07): PARALLEL TABLES, shared LOGIC. `performer_image` and
+Ryan's call (2026-08-07): PARALLEL TABLES, shared LOGIC. `artist_image` and
 `venue_image` are separate tables so each keeps a real foreign key — this
 project turned FK enforcement on deliberately in July, and a polymorphic
 (entity_type, entity_id) pair cannot be enforced by SQLite at all. What is NOT
@@ -80,7 +80,7 @@ def image_payload(img, url_prefix):
 
 
 # ── Endpoint bodies ─────────────────────────────────────────────────────────
-# Written once and parameterised, so Performer and Venue photo management can
+# Written once and parameterised, so Artist and Venue photo management can
 # never drift apart in behaviour — only in which table they write to.
 
 def handle_upload(parent, model, images_dir, url_prefix):
@@ -186,7 +186,7 @@ def handle_delete(img, images_dir):
 #
 # The endpoint BODIES have been shared since 2026-08-07; the five route
 # DECLARATIONS around them were still copy-pasted per blueprint. With four
-# photographed entities (Performer, Venue, Artist, Event) that is four places
+# photographed entities (Artist, Venue, Musician, Event) that is four places
 # to forget `require_library`, four URL shapes to get subtly different, and
 # four chances for a `has_image` to mean something slightly else.
 #
@@ -203,7 +203,7 @@ def handle_delete(img, images_dir):
 # addressed by PARENT, everything else by IMAGE ID. A parent now has several
 # images, so "the venue's image" no longer identifies one.
 #
-# api/performers.py deliberately does NOT use this. It carries two extra routes
+# api/artists.py deliberately does NOT use this. It carries two extra routes
 # (the Wikimedia Commons fetch and a PUT for caption/credit) whose bodies are
 # not shared, and its wrappers are already thin. Rewriting a working, tested
 # surface to save five decorators is the wrong trade; if a fifth photographed
@@ -215,8 +215,8 @@ def register_image_routes(bp, *, parent_model, image_model, url_prefix,
     """
     Mount the five standard photo routes on `bp`.
 
-    parent_model    the owning model (Venue, Artist, Event)
-    image_model     its image table (VenueImage, ArtistImage, EventImage)
+    parent_model    the owning model (Venue, Musician, Event)
+    image_model     its image table (VenueImage, MusicianImage, EventImage)
     url_prefix      public prefix for image URLs, e.g. '/api/venues/images'
     images_dir_for  fn(parent) -> pathlib.Path of that parent's _images dir
     login_required / require_library
@@ -227,7 +227,7 @@ def register_image_routes(bp, *, parent_model, image_model, url_prefix,
     Endpoint names are namespaced by the blueprint, so two blueprints
     registering these cannot collide.
     """
-    kind = parent_model.__tablename__          # 'venue', 'artist', 'event'
+    kind = parent_model.__tablename__          # 'venue', 'musician', 'event'
 
     def _parent_or_404(parent_id):
         return db.session.get(parent_model, parent_id)
@@ -287,9 +287,9 @@ def entity_images_dir(library_root, bucket, name, sanitize):
     """
     LIBRARY_ROOT/<bucket>/<sanitized name>/_images.
 
-    `bucket` is '_venues' / '_artists' / '_events' — an underscore-prefixed
+    `bucket` is '_venues' / '_musicians' / '_events' — an underscore-prefixed
     namespace so an entity and an ACT sharing a name ("Fillmore", "Bill Evans")
-    cannot write into one folder. Performers deliberately have no bucket: their
+    cannot write into one folder. Artists deliberately have no bucket: their
     photos have lived beside their recording folders since 2026-07-22 and
     moving them would orphan every existing file.
     """

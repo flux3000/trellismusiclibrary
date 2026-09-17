@@ -1,9 +1,9 @@
 """
 app/utils/musicbrainz.py — MusicBrainz artist lookup.
 
-Fetches the structured facts that make a Performer page read like a music site
+Fetches the structured facts that make an Artist page read like a music site
 rather than a file listing: type (Group/Person), origin, active years, a
-disambiguation phrase, and external links. Runs once when a Performer is
+disambiguation phrase, and external links. Runs once when an Artist is
 created (Ryan, 2026-08-07).
 
 WHY THIS IS NOT "AI Assist"
@@ -29,7 +29,7 @@ with an explicit per-person Add; nothing here touches the DB.
 OFFLINE IS A SUPPORTED STATE. Flux runs in a PyWebView shell on a single Mac
 and is expected to work with no network. Every function here fails soft —
 returns None or an empty result, never raises into a caller — so a lookup
-failure can never block an ingest or a manual Performer create.
+failure can never block an ingest or a manual Artist create.
 """
 
 import json
@@ -51,7 +51,7 @@ _BASE = "https://musicbrainz.org/ws/2"
 # on the wire — see that file for why it used to be wrong.
 
 # Their published rate limit is 1 request/second on the free endpoint. We make
-# at most a couple of calls per Performer creation, so a simple process-wide
+# at most a couple of calls per Artist creation, so a simple process-wide
 # spacer is sufficient — no queue, no backoff ladder.
 _MIN_INTERVAL = 1.1
 _last_call = [0.0]
@@ -69,7 +69,7 @@ _MARGIN = 12
 
 
 # Circuit breaker. Offline, every call burns the full _TIMEOUT — and a bulk
-# import creating 40 new Performers would then spend eight minutes of an ingest
+# import creating 40 new Artists would then spend eight minutes of an ingest
 # job waiting on DNS that is never going to answer. After this many consecutive
 # failures the module stops trying for the life of the process; any success
 # resets it. Deliberately process-scoped and not persisted: restarting the app
@@ -92,7 +92,7 @@ def enabled():
     """
     Whether lookups may run at all.
 
-    Off under TESTING unconditionally: `resolve_or_create_performer()` is
+    Off under TESTING unconditionally: `resolve_or_create_artist()` is
     exercised throughout the test suite, and a unit test must never depend on
     a network round-trip to musicbrainz.org. Also honours a
     MUSICBRAINZ_ENABLED config flag so it can be switched off entirely.
@@ -177,7 +177,7 @@ def _summarise(artist):
 
 def search_artist(name, limit=6):
     """
-    Candidate matches for a performer name, best first.
+    Candidate matches for an artist name, best first.
 
     Returns a list of summary dicts (possibly empty). Used both by the
     automatic pass and by the manual "resolve this match" picker, so the two
@@ -295,9 +295,9 @@ def lookup_details(mbid):
     return out
 
 
-def apply_to_performer(performer, summary, links=None, status="matched"):
+def apply_to_artist(artist, summary, links=None, status="matched"):
     """
-    Copy a resolved MusicBrainz summary onto a Performer.
+    Copy a resolved MusicBrainz summary onto an Artist.
 
     `status` records HOW the link happened and must stay honest:
         'matched' — the confidence gate picked it with no human involved
@@ -312,13 +312,13 @@ def apply_to_performer(performer, summary, links=None, status="matched"):
     human's curation.
     """
     from datetime import datetime, timezone
-    performer.mbid              = summary.get("mbid")
-    performer.mb_type           = summary.get("type")
-    performer.mb_area           = summary.get("area")
-    performer.mb_begin          = summary.get("begin")
-    performer.mb_end            = summary.get("end")
-    performer.mb_disambiguation = summary.get("disambiguation")
-    performer.mb_links_json     = json.dumps(links or summary.get("links") or {})
+    artist.mbid              = summary.get("mbid")
+    artist.mb_type           = summary.get("type")
+    artist.mb_area           = summary.get("area")
+    artist.mb_begin          = summary.get("begin")
+    artist.mb_end            = summary.get("end")
+    artist.mb_disambiguation = summary.get("disambiguation")
+    artist.mb_links_json     = json.dumps(links or summary.get("links") or {})
     # Trimmed 2026-08-07 to what the page actually shows. Aliases, community
     # tags and gender were fetched, stored and displayed for one afternoon;
     # Ryan cut the display, so fetching them was pure cost. `related` is kept
@@ -330,23 +330,23 @@ def apply_to_performer(performer, summary, links=None, status="matched"):
     # `links` stay STORED but are no longer displayed (Ryan, 2026-08-07): their
     # job is telling future ingest/enrichment jobs where to look for information
     # about this act, not giving the user a list to read.
-    performer.mb_extra_json     = json.dumps({
+    artist.mb_extra_json     = json.dumps({
         "name":    summary.get("name"),
         "related": summary.get("related") or [],
     })
-    performer.mb_status         = status
-    performer.mb_checked_at     = datetime.now(timezone.utc)
-    return performer
+    artist.mb_status         = status
+    artist.mb_checked_at     = datetime.now(timezone.utc)
+    return artist
 
 
-def try_match_performer(performer):
+def try_match_artist(artist):
     """
     The automatic pass: search, gate, and record the outcome.
 
     Always sets `mb_status` so the UI can tell "never looked" (None) from
     "looked and found nothing" ('none') from "needs you to choose"
     ('ambiguous'). That distinction is the whole reason the column exists —
-    without it the performer page can't know whether to offer a Match button.
+    without it the artist page can't know whether to offer a Match button.
 
     Returns the status string, or None when lookups are disabled or the
     breaker has tripped — leaving `mb_status` NULL so the row is retried on a
@@ -356,17 +356,17 @@ def try_match_performer(performer):
     if not enabled() or tripped():
         return None
     try:
-        candidates = search_artist(performer.name)
+        candidates = search_artist(artist.name)
         status, best = classify(candidates)
         if status == "matched":
             details = lookup_details(best["mbid"]) or best
-            apply_to_performer(performer, details, details.get("links"))
+            apply_to_artist(artist, details, details.get("links"))
             return "matched"
-        performer.mb_status     = status
-        performer.mb_checked_at = datetime.now(timezone.utc)
+        artist.mb_status     = status
+        artist.mb_checked_at = datetime.now(timezone.utc)
         return status
     except Exception as e:                                   # noqa: BLE001
         # Belt and braces — _get already swallows network errors, but this runs
         # inside ingest and must not be able to fail it under any circumstance.
-        log.warning("musicbrainz match failed for %r: %s", performer.name, e)
+        log.warning("musicbrainz match failed for %r: %s", artist.name, e)
         return "none"

@@ -11,7 +11,7 @@ pure sidesteps that trap for the part where the bugs actually live.
 ────────────────────────────────────────────────────────────────────────────
 THE RULE  (Ryan, 2026-08-18, re-confirmed at build kickoff)
 
-    "We search only the artist, performer, date, venue, or any combination
+    "We search only the musician, artist, date, venue, or any combination
      of the above."
 
 Four dimensions. Track titles are NOT searchable, and neither is provenance
@@ -230,7 +230,7 @@ def parse_query(q, today_year=None):
 
     Multi-term is AND by design (Ryan): typing more must NARROW rather than
     break, so "hot rize 1983" means the act AND the year. There is no
-    field-prefix grammar ("performer:"), no quoting and no negation — the
+    field-prefix grammar ("artist:"), no quoting and no negation — the
     invited cohort will never use it, and every one of those is a way for a
     query to silently mean something the user didn't intend.
 
@@ -325,7 +325,7 @@ def score_row(query, candidate_keys, ymd=None):
 
 # ── Index construction ─────────────────────────────────────────────────────
 
-def build_index(performers, artists, venues, recordings):
+def build_index(artists, musicians, venues, recordings):
     """
     Precompute match keys for every searchable row.
 
@@ -333,24 +333,24 @@ def build_index(performers, artists, venues, recordings):
     column-level queries, never ORM objects, so no relationship is lazily
     walked per row. Expected shapes:
 
-      performer  {id, name, sort_name}
-      artist     {id, name, sort_name, performer_ids: [int]}
+      artist  {id, name, sort_name}
+      musician     {id, name, sort_name, artist_ids: [int]}
       venue      {id, name, city, state, country}
-      recording  {id, performance_id, performer_id, performer_name,
-                  performer_sort_name, artist_names: [str], venue_name,
+      recording  {id, performance_id, artist_id, artist_name,
+                  artist_sort_name, musician_names: [str], venue_name,
                   city, state, country, year, month, day, source,
                   listening_quality}
 
     Normalisation happens once here rather than once per query term, which is
     what keeps the measured cost at ~15ms for the whole corpus.
     """
-    idx = {"performers": [], "artists": [], "venues": [], "recordings": []}
+    idx = {"artists": [], "musicians": [], "venues": [], "recordings": []}
 
-    for p in performers:
-        idx["performers"].append({**p, "_keys": keys(p.get("name"), p.get("sort_name"))})
+    for p in artists:
+        idx["artists"].append({**p, "_keys": keys(p.get("name"), p.get("sort_name"))})
 
-    for a in artists:
-        idx["artists"].append({**a, "_keys": keys(a.get("name"), a.get("sort_name"))})
+    for a in musicians:
+        idx["musicians"].append({**a, "_keys": keys(a.get("name"), a.get("sort_name"))})
 
     for v in venues:
         idx["venues"].append({
@@ -360,9 +360,9 @@ def build_index(performers, artists, venues, recordings):
 
     for r in recordings:
         # A recording's searchable text is the union of its three text
-        # dimensions: the act, its members (artist reaches shows through
+        # dimensions: the act, its members (musician reaches shows through
         # membership, NOT performance_personnel — Ryan, 2026-08-18, matching
-        # the precedent already set for peer artist visibility), and the
+        # the precedent already set for peer musician visibility), and the
         # venue including its geography.
         #
         # Geography comes from the VENUE, not the performance. Measured
@@ -373,8 +373,8 @@ def build_index(performers, artists, venues, recordings):
         idx["recordings"].append({
             **r,
             "_keys": keys(
-                r.get("performer_name"), r.get("performer_sort_name"),
-                *(r.get("artist_names") or []),
+                r.get("artist_name"), r.get("artist_sort_name"),
+                *(r.get("musician_names") or []),
                 r.get("venue_name"), r.get("city"), r.get("state"), r.get("country"),
             ),
         })
@@ -385,16 +385,16 @@ def build_index(performers, artists, venues, recordings):
 # ── The search itself ──────────────────────────────────────────────────────
 
 GROUP_LABELS = {
-    "performers": "Performers",
+    "artists": "Artists",
     "recordings": "Recordings",
     "venues":     "Venues",
-    "artists":    "Artists",
+    "musicians":    "Musicians",
 }
 
 # Fixed group order rather than reordering by best match. A dropdown whose
 # groups reshuffle between keystrokes is impossible to aim at — the user
 # starts moving toward a row that has already moved.
-GROUP_ORDER = ("performers", "recordings", "venues", "artists")
+GROUP_ORDER = ("artists", "recordings", "venues", "musicians")
 
 
 def _sort_key_entity(entry):
@@ -428,7 +428,7 @@ def run_search(index, q, today_year=None):
     unsliced — paging and payload shaping belong to the API layer, so the
     dropdown and the results page can slice the same result differently.
 
-    Entity groups (Performers, Venues, Artists) are matched on TEXT terms only; a
+    Entity groups (Artists, Venues, Musicians) are matched on TEXT terms only; a
     date term does not exclude them, it simply isn't something an act can
     satisfy. So "hot rize 1983" still offers the act itself alongside that
     year's shows, which is what a user reaching for a band wants. The
@@ -447,7 +447,7 @@ def run_search(index, q, today_year=None):
     # Entities — text terms only.
     if query.text_terms:
         entity_query = Query(query.raw, query.text_terms, [])
-        for key in ("performers", "venues", "artists"):
+        for key in ("artists", "venues", "musicians"):
             hits = []
             for row in index.get(key, []):
                 s = score_row(entity_query, row["_keys"])

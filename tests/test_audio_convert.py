@@ -14,7 +14,7 @@ import pytest
 
 from app.extensions import db as _db
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.recording import Recording
 from app.models.track import Track
 from app.models.user import User
@@ -138,16 +138,16 @@ def test_convert_requires_login(app):
 # ═════════════════════════════════════════════════════════════════════════════
 # Top Shelf: the ordered sequence behind the record bin
 # ═════════════════════════════════════════════════════════════════════════════
-def _make_top(db, performer_name, n):
-    p = Performer(name=performer_name)
+def _make_top(db, artist_name, n):
+    p = Artist(name=artist_name)
     db.session.add(p); db.session.flush()
     out = []
     for i in range(n):
-        perf = Performance(performer_id=p.id, start_year=1990 + i,
+        perf = Performance(artist_id=p.id, start_year=1990 + i,
                            start_month=1, start_day=1)
         db.session.add(perf); db.session.flush()
         rec = Recording(performance_id=perf.id, source="SBD", quality="A",
-                        folder_path=f"{performer_name}/{i}")
+                        folder_path=f"{artist_name}/{i}")
         db.session.add(rec); db.session.flush()
         db.session.add(Track(recording_id=rec.id, track_number=1, title="One",
                              duration=100, file_path="01.flac"))
@@ -205,7 +205,7 @@ def test_offset_zero_is_still_the_old_single_draw(app, client, db):
     assert len(set(ids) & set(made)) <= 1
 
 
-def test_a_performer_does_not_come_round_until_the_others_have(app, client, db):
+def test_a_artist_does_not_come_round_until_the_others_have(app, client, db):
     """
     The bin is rounds, not a shuffled list: with two acts of two shows each,
     the first two flips must be different acts.
@@ -221,5 +221,5 @@ def test_a_performer_does_not_come_round_until_the_others_have(app, client, db):
         first_two.append(got[0]["id"])
 
     assert (first_two[0] in a) != (first_two[1] in a), \
-        "both of the first two flips came from the same performer"
+        "both of the first two flips came from the same artist"
     assert len(set(first_two) & (a | b)) == 2

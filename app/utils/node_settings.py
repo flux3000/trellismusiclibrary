@@ -16,6 +16,14 @@ from app.models.node_setting import NodeSetting
 
 SHARE_BASE_URL_KEY = "share_base_url"
 
+# Whether new ingests are filed under an <Artist>/ directory (2026-09-17).
+# An INSTALL-level setting, not a per-user preference: a library has one
+# shape, and two users on one install disagreeing would produce exactly the
+# hybrid tree this setting exists to prevent. Defaults ON, which is what
+# every library Trellis laid out itself already looks like -- an existing
+# install must not change shape because a new key appeared.
+FILE_UNDER_ARTIST_KEY = "file_under_artist_folder"
+
 
 def get_share_base_url():
     """Env var wins when set; otherwise whatever was saved from Settings."""
@@ -44,3 +52,34 @@ def set_share_base_url(url):
         db.session.add(NodeSetting(key=SHARE_BASE_URL_KEY, value=url))
     db.session.commit()
     return url
+
+
+# ── Library layout ───────────────────────────────────────────────────────────
+
+def file_under_artist_folder():
+    """
+    True when a new ingest should land in LIBRARY_ROOT/<Artist>/<folder>.
+
+    False files it flat at the library root. That is for the collector who
+    pointed Trellis at a library they built themselves, where the artist is
+    already in the folder name and every show sits at one level -- see
+    move_to_library(). Adopted recordings are unaffected either way: they keep
+    whatever path they were found at, and rename_recording_folder() renames
+    the leaf under its existing parent rather than relocating anything.
+    """
+    row = db.session.get(NodeSetting, FILE_UNDER_ARTIST_KEY)
+    return True if row is None else row.value == "true"
+
+
+def set_file_under_artist_folder(enabled):
+    """Persist the layout choice. Stored as the literal string "true"/"false"
+    because NodeSetting.value is a string column and a bare bool would arrive
+    back as the truthy "False"."""
+    value = "true" if enabled else "false"
+    row = db.session.get(NodeSetting, FILE_UNDER_ARTIST_KEY)
+    if row:
+        row.value = value
+    else:
+        db.session.add(NodeSetting(key=FILE_UNDER_ARTIST_KEY, value=value))
+    db.session.commit()
+    return enabled

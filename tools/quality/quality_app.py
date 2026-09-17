@@ -77,7 +77,7 @@ def find_recordings(root):
     """
     A "recording" is any directory containing audio, at any depth.
 
-    Handles both shapes found in real libraries: a performer folder holding
+    Handles both shapes found in real libraries: a artist folder holding
     many show folders, and a single show folder pointed at directly. Disc
     subdirectories (CD1/, CD2/) are folded into their parent rather than
     treated as separate recordings.
@@ -102,7 +102,7 @@ def find_recordings(root):
             folded.add(d)
 
     # Drop any folder that is an ancestor of another candidate, unless it holds
-    # audio itself — prevents a performer folder being scored as one recording.
+    # audio itself — prevents a artist folder being scored as one recording.
     out = []
     for d in sorted(folded):
         has_own = any(f.lower().endswith(AUDIO_EXT) for f in os.listdir(d)) \

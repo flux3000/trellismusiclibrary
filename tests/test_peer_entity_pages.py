@@ -18,12 +18,12 @@ like working software.
 import pytest
 
 from app.extensions import db as _db
-from app.models.artist import Artist, Membership
+from app.models.musician import Musician, Membership
 from app.models.collection import Collection, CollectionRecording
 from app.models.genre import Genre
 from app.models.peer import Peer, CollectionGrant, PeerToken
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.recording import Recording
 from app.models.venue import Venue
 from app.utils.peer_auth import generate_token, hash_secret
@@ -38,21 +38,21 @@ def _half(label, genre_name, venue=None):
     _db.session.add(genre)
     _db.session.flush()
 
-    performer = Performer(name=f"{label} Band", genre_id=genre.id)
-    _db.session.add(performer)
-    _db.session.flush()
-
-    artist = Artist(name=f"{label} Player")
+    artist = Artist(name=f"{label} Band", genre_id=genre.id)
     _db.session.add(artist)
     _db.session.flush()
-    _db.session.add(Membership(performer_id=performer.id, artist_id=artist.id, order=0))
+
+    musician = Musician(name=f"{label} Player")
+    _db.session.add(musician)
+    _db.session.flush()
+    _db.session.add(Membership(artist_id=artist.id, musician_id=musician.id, order=0))
 
     if venue is None:
         venue = Venue(name=f"{label} Hall", city=label, country="US")
         _db.session.add(venue)
         _db.session.flush()
 
-    perf = Performance(performer_id=performer.id, venue_id=venue.id,
+    perf = Performance(artist_id=artist.id, venue_id=venue.id,
                        start_year=1975, start_month=6, start_day=1)
     _db.session.add(perf)
     _db.session.flush()
@@ -62,7 +62,7 @@ def _half(label, genre_name, venue=None):
     _db.session.add(rec)
     _db.session.commit()
 
-    return {"genre": genre.id, "performer": performer.id, "artist": artist.id,
+    return {"genre": genre.id, "artist": artist.id, "musician": musician.id,
             "venue": venue.id, "performance": perf.id, "recording": rec.id,
             "venue_obj": venue}
 
@@ -97,11 +97,11 @@ def _auth(world):
     return {"Authorization": f"Bearer {world['token']}"}
 
 
-# ── Performer ─────────────────────────────────────────────────────────────────
+# ── Artist ─────────────────────────────────────────────────────────────────
 
-def test_granted_performer_page_is_full_catalog_metadata(app, world):
+def test_granted_artist_page_is_full_catalog_metadata(app, world):
     c = app.test_client()
-    r = c.get(f"/api/share/performers/{world['shared']['performer']}", headers=_auth(world))
+    r = c.get(f"/api/share/artists/{world['shared']['artist']}", headers=_auth(world))
     assert r.status_code == 200
     body = r.get_json()
     assert body["name"] == "Shared Band"
@@ -110,24 +110,24 @@ def test_granted_performer_page_is_full_catalog_metadata(app, world):
         assert key in body
 
 
-def test_ungranted_performer_page_is_403(app, world):
+def test_ungranted_artist_page_is_403(app, world):
     c = app.test_client()
-    r = c.get(f"/api/share/performers/{world['secret']['performer']}", headers=_auth(world))
+    r = c.get(f"/api/share/artists/{world['secret']['artist']}", headers=_auth(world))
     assert r.status_code == 403
 
 
-def test_performer_image_urls_point_at_the_share_route(app, world):
-    """A peer cannot reach /api/performers/images/<id>. If the payload hands
+def test_artist_image_urls_point_at_the_share_route(app, world):
+    """A peer cannot reach /api/artists/images/<id>. If the payload hands
     them that URL, every photo on the page is a broken image."""
     c = app.test_client()
-    r = c.get(f"/api/share/performers/{world['shared']['performer']}", headers=_auth(world))
+    r = c.get(f"/api/share/artists/{world['shared']['artist']}", headers=_auth(world))
     for img in r.get_json()["images"]:
-        assert img["url"].startswith("/api/share/performers/images/")
+        assert img["url"].startswith("/api/share/artists/images/")
 
 
-def test_performer_recordings_exclude_ungranted(app, world):
+def test_artist_recordings_exclude_ungranted(app, world):
     c = app.test_client()
-    r = c.get(f"/api/share/performers/{world['shared']['performer']}/recordings",
+    r = c.get(f"/api/share/artists/{world['shared']['artist']}/recordings",
               headers=_auth(world))
     assert r.status_code == 200
     rec_ids = {rec["id"] for perf in r.get_json() for rec in perf["recordings"]}
@@ -160,30 +160,30 @@ def test_venue_with_nothing_visible_is_403(app, world):
     assert r.status_code == 403
 
 
-# ── Artist ────────────────────────────────────────────────────────────────────
+# ── Musician ────────────────────────────────────────────────────────────────────
 
-def test_artist_page_lists_only_visible_acts(app, world):
+def test_musician_page_lists_only_visible_acts(app, world):
     """One person, member of both a shared and a secret act. The secret act
     must not appear — naming it would leak an act by the back door."""
-    shared_performer = _db.session.get(Performer, world["shared"]["performer"])
-    secret_performer = _db.session.get(Performer, world["secret"]["performer"])
-    person = Artist(name="Session Player")
+    shared_artist = _db.session.get(Artist, world["shared"]["artist"])
+    secret_artist = _db.session.get(Artist, world["secret"]["artist"])
+    person = Musician(name="Session Player")
     _db.session.add(person)
     _db.session.flush()
-    _db.session.add(Membership(performer_id=shared_performer.id, artist_id=person.id, order=0))
-    _db.session.add(Membership(performer_id=secret_performer.id, artist_id=person.id, order=1))
+    _db.session.add(Membership(artist_id=shared_artist.id, musician_id=person.id, order=0))
+    _db.session.add(Membership(artist_id=secret_artist.id, musician_id=person.id, order=1))
     _db.session.commit()
 
     c = app.test_client()
-    r = c.get(f"/api/share/artists/{person.id}", headers=_auth(world))
+    r = c.get(f"/api/share/musicians/{person.id}", headers=_auth(world))
     assert r.status_code == 200
-    names = {p["name"] for p in r.get_json()["performers"]}
+    names = {p["name"] for p in r.get_json()["artists"]}
     assert names == {"Shared Band"}
 
 
-def test_ungranted_artist_is_403(app, world):
+def test_ungranted_musician_is_403(app, world):
     c = app.test_client()
-    r = c.get(f"/api/share/artists/{world['secret']['artist']}", headers=_auth(world))
+    r = c.get(f"/api/share/musicians/{world['secret']['musician']}", headers=_auth(world))
     assert r.status_code == 403
 
 
@@ -208,9 +208,9 @@ def test_genre_detail_is_reachable_and_scoped(app, world):
     assert r.status_code == 200
     body = r.get_json()
     assert body["name"] == "Jazz"
-    assert body["performer_count"] == 1
+    assert body["artist_count"] == 1
     assert body["recording_count"] == 1
-    names = {p["name"] for p in body["performers"]}
+    names = {p["name"] for p in body["artists"]}
     assert names == {"Shared Band"}
 
 
@@ -239,18 +239,18 @@ def test_genre_counts_are_scoped(app, world):
     c = app.test_client()
     r = c.get("/api/share/genres/", headers=_auth(world))
     jazz = next(g for g in r.get_json() if g["name"] == "Jazz")
-    assert jazz["performer_count"] == 1
+    assert jazz["artist_count"] == 1
     assert jazz["recording_count"] == 1
 
 
 # ── The door itself ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("path", [
-    "/api/share/performers/1",
-    "/api/share/performers/1/recordings",
-    "/api/share/performers/images/1",
-    "/api/share/venues/1",
     "/api/share/artists/1",
+    "/api/share/artists/1/recordings",
+    "/api/share/artists/images/1",
+    "/api/share/venues/1",
+    "/api/share/musicians/1",
     "/api/share/genres/",
 ])
 def test_every_entity_endpoint_requires_a_token(app, world, path):
@@ -261,13 +261,13 @@ def test_every_entity_endpoint_requires_a_token(app, world, path):
 
 
 def test_recording_detail_carries_nav_ids(app, world):
-    """Without performer_id and venue_id the entity pages are unreachable —
-    the frontend builds #/performer/<id> and #/venue/<id> from these."""
+    """Without artist_id and venue_id the entity pages are unreachable —
+    the frontend builds #/artist/<id> and #/venue/<id> from these."""
     c = app.test_client()
     r = c.get(f"/api/share/recordings/{world['shared']['recording']}", headers=_auth(world))
     assert r.status_code == 200
     body = r.get_json()
-    assert body["performer_id"] == world["shared"]["performer"]
+    assert body["artist_id"] == world["shared"]["artist"]
     assert body["venue_id"] == world["shared"]["venue"]
 
 

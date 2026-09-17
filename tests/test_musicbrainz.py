@@ -105,7 +105,7 @@ def test_summarise_tolerates_missing_optional_blocks():
     assert s["begin"] is None and s["disambiguation"] is None
 
 
-# ── apply_to_performer ──────────────────────────────────────────────────────
+# ── apply_to_artist ──────────────────────────────────────────────────────
 
 def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     """MusicBrainz may fill its own columns and nothing else.
@@ -115,14 +115,14 @@ def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     auto-apply that was removed in July.
     """
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    p = _db.session.get(Performer, seeded_ids["performer_id"])
+    p = _db.session.get(Artist, seeded_ids["artist_id"])
     p.bio = "Hand-written bio"
     original_name = p.name
     _db.session.commit()
 
-    mb.apply_to_performer(p, mb._summarise(_ARTIST), {"wikipedia": "http://x"})
+    mb.apply_to_artist(p, mb._summarise(_ARTIST), {"wikipedia": "http://x"})
     _db.session.commit()
 
     assert p.name == original_name
@@ -137,8 +137,8 @@ def test_apply_never_touches_human_curated_fields(app, seeded_ids):
 
 def test_lookups_disabled_under_testing(app):
     """The suite must never make a network call. `enabled()` is False under
-    TESTING, which is what keeps resolve_or_create_performer() offline in every
-    other test file that happens to create a Performer."""
+    TESTING, which is what keeps resolve_or_create_artist() offline in every
+    other test file that happens to create a Artist."""
     with app.app_context():
         assert mb.enabled() is False
 
@@ -147,11 +147,11 @@ def test_try_match_is_noop_when_disabled(app, seeded_ids):
     """Returns None and leaves mb_status NULL — 'never looked up', so the row
     is retried later rather than being recorded as a real 'no match'."""
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    p = _db.session.get(Performer, seeded_ids["performer_id"])
+    p = _db.session.get(Artist, seeded_ids["artist_id"])
     p.mb_status = None
-    assert mb.try_match_performer(p) is None
+    assert mb.try_match_artist(p) is None
     assert p.mb_status is None
 
 

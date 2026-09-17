@@ -1,11 +1,11 @@
 """
 api/performances.py — Performance endpoints.
 
-A Performance belongs to one Performer (the act). `members` (back-compat key)
+A Performance belongs to one Artist (the act). `members` (back-compat key)
 and `personnel` are the RESOLVED show-level lineup — act roster with stint
 bounds applied, plus guests, or an explicit per-show list — never the raw,
 unfiltered act roster. See app/utils/personnel.py::resolve_performance_personnel.
-The act roster itself is only ever edited via PUT /api/performers/<id>.
+The act roster itself is only ever edited via PUT /api/artists/<id>.
 """
 
 from flask import Blueprint, current_app, jsonify, request
@@ -13,17 +13,17 @@ from flask_login import login_required
 
 from app.extensions import db
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.performance_personnel import PerformancePersonnel
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_summary
-from app.utils.performers import resolve_or_create_performer
+from app.utils.artists import resolve_or_create_artist
 from app.utils.personnel import (
     resolve_performance_personnel, sync_performance_personnel,
     set_performance_personnel_mode,
 )
 from app.utils.pruning import (
-    prune_performer_if_orphaned, prune_venue_if_orphaned, prune_event_if_orphaned,
+    prune_artist_if_orphaned, prune_venue_if_orphaned, prune_event_if_orphaned,
 )
 from app.utils.folder_naming import rename_recording_folder
 
@@ -33,12 +33,12 @@ bp = Blueprint("performances", __name__)
 @bp.route("/")
 @login_required
 def list_performances():
-    performer_id = request.args.get("performer_id", type=int)
+    artist_id = request.args.get("artist_id", type=int)
     year         = request.args.get("year",         type=int)
 
     q = db.session.query(Performance)
-    if performer_id:
-        q = q.filter(Performance.performer_id == performer_id)
+    if artist_id:
+        q = q.filter(Performance.artist_id == artist_id)
     if year:
         q = q.filter(Performance.start_year == year)
 
@@ -46,7 +46,7 @@ def list_performances():
     return jsonify([
         {
             "id":        p.id,
-            "performer": p.performer.name,
+            "artist": p.artist.name,
             "date":      format_partial_date(p.start_year, p.start_month, p.start_day),
             "venue":     p.venue.name if p.venue else None,
             "city":      p.venue.city  if p.venue else p.city,
@@ -65,23 +65,23 @@ def get_performance(performance_id):
 
     v = p.venue
     resolved = resolve_performance_personnel(p)
-    # Performer photo + genre colour ride along on the performance detail so the
+    # Artist photo + genre colour ride along on the performance detail so the
     # Record Header can draw its avatar circle without a second round trip. Same
     # id the card serializer sends (serialize._primary_image_id), so the header,
-    # the cards and the Performer page hero can never show different faces.
+    # the cards and the Artist page hero can never show different faces.
     from app.utils.serialize import _primary_image_id
-    _perf_genre = getattr(p.performer, "genre", None)
+    _perf_genre = getattr(p.artist, "genre", None)
     return jsonify({
         "id":           p.id,
-        "performer_id": p.performer_id,
-        "performer":    p.performer.name,
-        "performer_image_id":   _primary_image_id(p.performer),
-        "performer_genre_color": _perf_genre.color if _perf_genre else None,
+        "artist_id": p.artist_id,
+        "artist":    p.artist.name,
+        "artist_image_id":   _primary_image_id(p.artist),
+        "artist_genre_color": _perf_genre.color if _perf_genre else None,
         # Back-compat shape (id/name pairs) for the existing recording-page
-        # Artists pill row — now the RESOLVED show lineup (act roster with
+        # Musicians pill row — now the RESOLVED show lineup (act roster with
         # stint bounds applied, plus guests, or the explicit list), not the
         # raw act roster. Existing UI needs zero changes to pick this up.
-        "members":         [{"id": r["artist_id"], "name": r["name"]} for r in resolved],
+        "members":         [{"id": r["musician_id"], "name": r["name"]} for r in resolved],
         # Full detail incl. instrument/is_guest/note/source/row-id, for the
         # Phase 2 show-personnel UI.
         "personnel":       resolved,
@@ -110,13 +110,13 @@ def get_performance(performance_id):
 @login_required
 def create_performance():
     data = request.get_json()
-    if not data.get("performer_id"):
-        return jsonify({"error": "performer_id is required"}), 400
-    performer = db.session.get(Performer, data["performer_id"])
-    if not performer:
-        return jsonify({"error": "performer not found"}), 404
+    if not data.get("artist_id"):
+        return jsonify({"error": "artist_id is required"}), 400
+    artist = db.session.get(Artist, data["artist_id"])
+    if not artist:
+        return jsonify({"error": "artist not found"}), 404
     p = Performance(
-        performer_id = data["performer_id"],
+        artist_id = data["artist_id"],
         venue_id     = data.get("venue_id"),
         event_id     = data.get("event_id"),
         title        = data.get("title"),
@@ -132,7 +132,7 @@ def create_performance():
         country      = data.get("country"),
         notes        = data.get("notes"),
         # New performances start in the act's default resolution mode.
-        personnel_mode = performer.default_personnel_mode,
+        personnel_mode = artist.default_personnel_mode,
     )
     db.session.add(p)
     db.session.commit()
@@ -147,18 +147,18 @@ def update_performance(performance_id):
         return jsonify({"error": "Not found"}), 404
     data = request.get_json()
 
-    # Reassign the Performer when a new name is supplied and differs from the
-    # current one. Scoped to this performance; the old performer is pruned if it
+    # Reassign the Artist when a new name is supplied and differs from the
+    # current one. Scoped to this performance; the old artist is pruned if it
     # is left with no performances.
     reassigned = None
-    new_name = (data.get("performer_name") or "").strip()
-    if new_name and new_name.lower() != p.performer.name.lower():
-        old_performer_id = p.performer_id
-        performer = resolve_or_create_performer(new_name)
-        p.performer_id = performer.id
+    new_name = (data.get("artist_name") or "").strip()
+    if new_name and new_name.lower() != p.artist.name.lower():
+        old_artist_id = p.artist_id
+        artist = resolve_or_create_artist(new_name)
+        p.artist_id = artist.id
         db.session.flush()
-        prune_performer_if_orphaned(old_performer_id)
-        reassigned = performer.name
+        prune_artist_if_orphaned(old_artist_id)
+        reassigned = artist.name
 
     # Manual inherit/explicit toggle — applied BEFORE the members diff below,
     # so a same-request combo of {personnel_mode, members} lands on the new
@@ -170,8 +170,8 @@ def update_performance(performance_id):
         set_performance_personnel_mode(p, data["personnel_mode"])
 
     # SHOW-level personnel — who played THIS performance. Distinct from the
-    # act roster (which is edited only via PUT /api/performers/<id> on the
-    # Performer page). This used to call set_performer_members(p.performer,
+    # act roster (which is edited only via PUT /api/artists/<id> on the
+    # Artist page). This used to call set_artist_members(p.artist,
     # ...), silently rewriting the act's GLOBAL roster from a single show's
     # pill-row edit — that was the actual bug the Per-Show Personnel design
     # doc set out to fix. Now it only ever touches performance_personnel rows
@@ -188,7 +188,7 @@ def update_performance(performance_id):
     # Capture the outgoing venue/event before the generic field loop
     # overwrites them, so a repoint that leaves either with zero
     # performances prunes the now-empty row -- same trip-wire as the
-    # Performer reassignment above via prune_performer_if_orphaned.
+    # Artist reassignment above via prune_artist_if_orphaned.
     old_venue_id = p.venue_id
     old_event_id = p.event_id
 
@@ -206,7 +206,7 @@ def update_performance(performance_id):
         prune_event_if_orphaned(old_event_id)
 
     # Folder name follows the metadata (decided 2026-07-25, built 2026-08-09)
-    # — date, venue, location and a performer reassignment all feed
+    # — date, venue, location and an artist reassignment all feed
     # build_folder_name(), and a Performance can hold several Recordings
     # (SBD + AUD of the same show), each with its own folder to keep in sync.
     # Non-fatal per-recording: one folder rename failing (e.g. its directory

@@ -39,7 +39,7 @@ from flask_login import login_required
 from sqlalchemy import func
 
 from app.extensions import db
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.utils import quality_store as qs
 from app.utils.ingest import resolve_shows_in_dir
 
@@ -392,7 +392,7 @@ def _proposed_track_titles(scan, tags, info):
 
 def _tag_date_parts(concert_date):
     """
-    Split a FLAC CONCERTDATE-style tag ("YYYY-MM-DD", "YYYY-MM", or "YYYY")
+    Split a FLAC DATE-style tag ("YYYY-MM-DD", "YYYY-MM", or "YYYY")
     into (year, month, day) ints, any of which may be None.
 
     Mirrors the ingest wizard's own tags.concert_date.split('-') in app.js
@@ -607,7 +607,7 @@ def _attach_concerns(results):
     Must run AFTER _attach_interpretation / _attach_metadata / _attach_
     fingerprints: it reads all three rather than recomputing anything.
     """
-    from app.api.ingest import resolve_similar_performer_ids
+    from app.api.ingest import resolve_similar_artist_ids
     from app.models.performance import Performance
     from app.utils.format import format_partial_date
 
@@ -672,14 +672,14 @@ def _attach_concerns(results):
             concerns.append({"level": "warn", "kind": "technical",
                              "text": f"{issue.get('issue')} — {issue.get('detail')}"})
 
-        # Possible duplicate. Needs performer + year; without both there is
+        # Possible duplicate. Needs artist + year; without both there is
         # nothing meaningful to match on and we say nothing rather than guess.
         if x.get("artist") and x.get("year"):
             try:
-                pids = resolve_similar_performer_ids(x["artist"])
+                pids = resolve_similar_artist_ids(x["artist"])
                 if pids:
                     q = db.session.query(Performance).filter(
-                        Performance.performer_id.in_(pids),
+                        Performance.artist_id.in_(pids),
                         Performance.start_year == int(x["year"]))
                     if x.get("month"):
                         q = q.filter(Performance.start_month == int(x["month"]))
@@ -689,7 +689,7 @@ def _attach_concerns(results):
                     if hits:
                         p = hits[0]
                         where = format_partial_date(p.start_year, p.start_month, p.start_day)
-                        act   = p.performer.name if p.performer else "this act"
+                        act   = p.artist.name if p.artist else "this act"
                         more  = f" (+{len(hits) - 1} more)" if len(hits) > 1 else ""
                         concerns.append({
                             "level": "warn", "kind": "duplicate",
@@ -1072,15 +1072,15 @@ def browse():
             files.append({"name": name, "ext": ext, "size_bytes": size_bytes})
 
     # Bulk Import's standing convention is one folder per act
-    # (ImportDir/Performer Name/Show Folder/ — see _cleanup_empty_parent's
+    # (ImportDir/Artist Name/Show Folder/ — see _cleanup_empty_parent's
     # docstring in utils/ingest.py). Tag every row with whether ITS name
-    # already matches a Performer, so the common top-level listing shows
+    # already matches an Artist, so the common top-level listing shows
     # which acts are already in the library at a glance. Meaningless at
-    # deeper levels (a date-named show folder is never a Performer), but
+    # deeper levels (a date-named show folder is never an Artist), but
     # harmless — it just always reads "new" there.
-    pstatus = _performer_status_map([d["name"] for d in dirs])
+    pstatus = _artist_status_map([d["name"] for d in dirs])
     for d in dirs:
-        d["performer_status"] = pstatus[d["name"]]
+        d["artist_status"] = pstatus[d["name"]]
 
     # "Up" stops at the navigation root. Outside it entirely (a folder picked
     # in the native dialog), the parent is offered normally — the user is
@@ -1110,13 +1110,13 @@ def browse():
     })
 
 
-def _performer_status_map(names):
+def _artist_status_map(names):
     """
     {folder_name: "existing"|"new"} — same match rule as
-    resolve_or_create_performer() and the duplicate-name guard in
-    api/performers.py (case-insensitive on Performer.name), so "does this
-    performer already exist" means the same thing everywhere in the app.
-    Deliberately NOT resolve_or_create_performer itself: that function
+    resolve_or_create_artist() and the duplicate-name guard in
+    api/artists.py (case-insensitive on Artist.name), so "does this
+    artist already exist" means the same thing everywhere in the app.
+    Deliberately NOT resolve_or_create_artist itself: that function
     creates on a miss and can fire a synchronous MusicBrainz lookup — fine
     inside the ingest background job it was written for, a landmine if
     called from a read-only endpoint that runs on every folder browse.
@@ -1132,8 +1132,8 @@ def _performer_status_map(names):
     normed = {n: unicodedata.normalize("NFC", n).lower() for n in names}
     existing_lower = {
         row[0].lower() for row in
-        db.session.query(Performer.name)
-                   .filter(func.lower(Performer.name).in_(set(normed.values())))
+        db.session.query(Artist.name)
+                   .filter(func.lower(Artist.name).in_(set(normed.values())))
                    .all()
     }
     return {n: ("existing" if lo in existing_lower else "new")

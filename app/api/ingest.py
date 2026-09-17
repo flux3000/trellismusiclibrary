@@ -4,7 +4,7 @@ api/ingest.py — Full ingest confirmation endpoint.
 POST /api/ingest/confirm
 
 Handles the full "resolve or create" chain from a single payload:
-  CanonicalArtist → Artist → Venue (optional) → Performance → Recording + Tracks
+  Artist → Venue (optional) → Performance → Recording + Tracks
 
 This avoids the frontend needing to pre-resolve IDs. The user just
 provides names and dates; this endpoint does the lookup/create work.
@@ -24,9 +24,9 @@ from sqlalchemy import func
 _AUDIO_EXTS = {'.flac', '.mp3', '.wav', '.aiff', '.aif', '.m4a', '.ogg', '.ape', '.wv'}
 
 from app.extensions import db
-from app.models.performer import Performer
-from app.models.artist import Artist, Membership
-from app.utils.performers import resolve_or_create_performer
+from app.models.artist import Artist
+from app.models.musician import Musician, Membership
+from app.utils.artists import resolve_or_create_artist
 from app.utils.personnel import sync_performance_personnel
 from app.utils.venues import is_placeholder_venue_name
 from app.models.venue import Venue
@@ -42,6 +42,7 @@ from app.utils.ingest import (move_to_library, compute_audio_rename_map,
 from app.utils.folder_naming import build_folder_name
 from app.utils.ai_assist import run_ai_assist, AiAssistError
 from app.utils.prefs import get_api_key, get_pref
+from app.utils import node_settings
 from app.utils.health import compute_health
 from app.utils.checksums import (
     parse_checksum_file, match_entries_to_tracks, verify_track_checksum,
@@ -124,7 +125,7 @@ def _run_ai_job(job_id, folder_path, current, api_key, model, *, recording_id=No
 # the threshold parse_info_file() already uses for fuzzy artist/venue matching
 # — deliberately the same number, so the ingest form and the duplicate check
 # never disagree about whether two names are "the same".
-_PERFORMER_SIMILARITY = 0.85
+_ARTIST_SIMILARITY = 0.85
 
 # Words that decorate an act name without changing who it is. "Aoife O'Donovan"
 # and "Aoife O'Donovan Band" are one act to a collector and two rows in the DB,
@@ -140,14 +141,14 @@ def _act_key(name):
     return " ".join(core or words)
 
 
-def resolve_similar_performer_ids(artist_name):
+def resolve_similar_artist_ids(artist_name):
     """
-    Every Performer that plausibly IS the act named `artist_name`.
+    Every Artist that plausibly IS the act named `artist_name`.
 
     Three widening passes, because a duplicate that goes unnoticed costs an
     accidental re-ingest and a duplicate flagged wrongly costs one glance:
 
-      1. exact, case-insensitive — what resolve_or_create_performer() does, so
+      1. exact, case-insensitive — what resolve_or_create_artist() does, so
          this can never disagree with what Confirm would actually resolve to
       2. same normalised core after stripping act-noise words, so
          "Aoife O'Donovan" finds "Aoife O'Donovan Band"
@@ -155,8 +156,8 @@ def resolve_similar_performer_ids(artist_name):
          drift ("Bela Fleck" / "Béla Fleck")
 
     Then the ARTIST (person) side: if a person of that name exists, every
-    Performer they are a member of counts too — Ryan asked for "performer or
-    artist, or a similar variant of either", and the 07-11 remodel makes those
+    Artist they are a member of counts too — Ryan asked for "artist or
+    musician, or a similar variant of either", and the 07-11 remodel makes those
     genuinely different tables.
     """
     from difflib import SequenceMatcher
@@ -167,7 +168,7 @@ def resolve_similar_performer_ids(artist_name):
 
     ids  = set()
     key  = _act_key(name)
-    rows = db.session.query(Performer.id, Performer.name).all()
+    rows = db.session.query(Artist.id, Artist.name).all()
 
     for pid, pname in rows:
         if pname and pname.lower() == name.lower():
@@ -176,13 +177,13 @@ def resolve_similar_performer_ids(artist_name):
         pkey = _act_key(pname)
         if not pkey or not key:
             continue
-        if pkey == key or SequenceMatcher(None, pkey, key).ratio() >= _PERFORMER_SIMILARITY:
+        if pkey == key or SequenceMatcher(None, pkey, key).ratio() >= _ARTIST_SIMILARITY:
             ids.add(pid)
 
-    person = db.session.query(Artist).filter(
-        func.lower(Artist.name) == name.lower()).first()
+    person = db.session.query(Musician).filter(
+        func.lower(Musician.name) == name.lower()).first()
     if person:
-        ids.update(m.performer_id for m in person.memberships)
+        ids.update(m.artist_id for m in person.memberships)
 
     return sorted(ids)
 
@@ -193,13 +194,13 @@ def check_existing():
     """
     GET /api/ingest/check-existing?artist_name=...&year=...&month=...&day=...
     Read-only lookup (no creation) — the Add Recording form calls this once
-    performer + date are known, to WARN (not block) when the library already
-    has a performance for that performer/date. Multiple recordings per
+    artist + date are known, to WARN (not block) when the library already
+    has a performance for that artist/date. Multiple recordings per
     performance are legitimate (SBD + AUD of the same show), so this never
     prevents Confirm — it just surfaces what's already there so an archivist
     doesn't accidentally re-ingest a tape they already have. Ryan, 2026-07-14.
 
-    Matches on performer name the same way resolve_or_create_performer does
+    Matches on artist name the same way resolve_or_create_artist does
     (case-insensitive exact match) so this never disagrees with what Confirm
     would actually resolve to. Month/day narrow the match; year is required —
     without it there's nothing meaningful to match on.
@@ -211,14 +212,14 @@ def check_existing():
     month = request.args.get("month", type=int)
     day   = request.args.get("day",   type=int)
     if not artist_name or not year:
-        return jsonify({"performer_found": False, "performances": []})
+        return jsonify({"artist_found": False, "performances": []})
 
-    performer_ids = resolve_similar_performer_ids(artist_name)
-    if not performer_ids:
-        return jsonify({"performer_found": False, "performances": []})
+    artist_ids = resolve_similar_artist_ids(artist_name)
+    if not artist_ids:
+        return jsonify({"artist_found": False, "performances": []})
 
     q = db.session.query(Performance).filter(
-        Performance.performer_id.in_(performer_ids),
+        Performance.artist_id.in_(artist_ids),
         Performance.start_year == year,
     )
     if month:
@@ -238,7 +239,7 @@ def check_existing():
             # Which act it actually matched, so a fuzzy/variant hit is never
             # mistaken for an exact one ("Aoife O'Donovan Band" vs "Aoife
             # O'Donovan" are different rows and the user must see which).
-            "performer": p.performer.name if p.performer else None,
+            "artist": p.artist.name if p.artist else None,
             "recordings": [
                 {
                     "id":          r.id,
@@ -250,7 +251,7 @@ def check_existing():
                 for r in p.recordings
             ],
         })
-    return jsonify({"performer_found": True, "performances": performances})
+    return jsonify({"artist_found": True, "performances": performances})
 
 
 @bp.route("/save-info-file", methods=["POST"])
@@ -358,7 +359,7 @@ def ai_assist_recording(recording_id):
     p = rec.performance
     v = p.venue if p else None
     current = {
-        "artist":  (p.performer.name if (p and p.performer) else ""),
+        "artist":  (p.artist.name if (p and p.artist) else ""),
         "date":    format_partial_date(p.start_year, p.start_month, p.start_day) if p else "",
         "venue":   (v.name if v else ""),
         "city":    (v.city if v else (p.city if p else "")),
@@ -596,14 +597,14 @@ def _run_ingest_job(job_id, app, data, user_id):
         job["status"] = "error"
 
 
-def _apply_performer_genre(performer, data):
+def _apply_artist_genre(artist, data):
     """
     Set the act's genre from an ingest payload. Does not commit.
 
     Genre lives on the ACT, not the recording — an act's genre is the same on
     every night it played, which is why there is no genre column on Recording
     and should not be. So the Add Recording form's Genre field writes through
-    to the Performer row, and this is where that happens.
+    to the Artist row, and this is where that happens.
 
     ⚠ This is the only place outside api/genres.py that can CREATE a Genre, and
     it exists because Ryan asked for it (2026-09-01). The Genre design spec's
@@ -628,7 +629,7 @@ def _apply_performer_genre(performer, data):
         never visit the review form and send neither key; treating that
         omission as "clear it" would strip the genre off every act they touch.
         Exactly the None-vs-[] trap the members/guests payload documents below,
-        and the reason there is no `else: performer.genre_id = None` here.
+        and the reason there is no `else: artist.genre_id = None` here.
     """
     genre_id_in   = data.get("genre_id")
     genre_name_in = (data.get("genre_name") or "").strip()
@@ -644,8 +645,8 @@ def _apply_performer_genre(performer, data):
             db.session.add(genre)
             db.session.flush()
 
-    if genre and performer.genre_id != genre.id:
-        performer.genre_id = genre.id
+    if genre and artist.genre_id != genre.id:
+        artist.genre_id = genre.id
 
 
 @bp.route("/confirm", methods=["POST"])
@@ -866,21 +867,21 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     end_month   = data.get("end_month")
     end_day     = data.get("end_day")
 
-    # ── 1. Find or create Performer (the act) ─────────────────────────────────
+    # ── 1. Find or create Artist (the act) ─────────────────────────────────
     # `members`/`guests` are the Add Recording form's two personnel rows — see
     # app/utils/personnel.py::sync_performance_personnel for what they mean at
     # the PERFORMANCE level. Historically this block also used member_names to
-    # seed/overwrite the act's ROSTER via set_performer_members, unconditionally,
-    # for an existing Performer too — that's the same act-roster-corruption bug
+    # seed/overwrite the act's ROSTER via set_artist_members, unconditionally,
+    # for an existing Artist too — that's the same act-roster-corruption bug
     # Phase 1 already fixed for the recording page's PUT endpoint, just never
     # ported to ingest (flagged as an open gap in the design doc's ripple list,
-    # item 5). resolve_or_create_performer(name, member_names) already has the
+    # item 5). resolve_or_create_artist(name, member_names) already has the
     # correct behavior baked in — it only seeds member_names as the roster when
-    # the Performer is BRAND NEW, and leaves an existing act's roster alone —
+    # the Artist is BRAND NEW, and leaves an existing act's roster alone —
     # so passing member_names straight through here fixes it with no new code.
     # Two different needs for the same payload key, so two variables:
-    #  - member_names/guest_names (never None) for resolve_or_create_performer,
-    #    which just wants "what to seed a BRAND NEW performer's roster with,
+    #  - member_names/guest_names (never None) for resolve_or_create_artist,
+    #    which just wants "what to seed a BRAND NEW artist's roster with,
     #    if anything."
     #  - member_names_sync/guest_names_sync (RAW, preserves None) for
     #    sync_performance_personnel below, which treats None as "leave this
@@ -892,7 +893,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     #    inherited roster member had just been removed, which trips its
     #    case-5 safeguard: flip to 'explicit' and snapshot nothing, since
     #    nothing was in the list to keep. Net effect: the recording's
-    #    Members row came out blank even though the performer's own roster
+    #    Members row came out blank even though the artist's own roster
     #    was intact (Ryan, 2026-07-23 bug report — Bela Fleck & Tony
     #    Trischka). Only the manual Add Recording/Batch Review form pre-fills
     #    and always sends both keys (even an intentionally-emptied one), so
@@ -901,10 +902,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     guest_names_sync  = data.get("guests")
     member_names = member_names_sync or []
     guest_names  = guest_names_sync  or []
-    performer = resolve_or_create_performer(artist_name, member_names)
+    artist = resolve_or_create_artist(artist_name, member_names)
 
-    # ── 2. Genre, on the PERFORMER (2026-09-01) ───────────────────────────────
-    _apply_performer_genre(performer, data)
+    # ── 2. Genre, on the ARTIST (2026-09-01) ───────────────────────────────
+    _apply_artist_genre(artist, data)
 
     # ── 3. Find or create Venue (optional) ────────────────────────────────────
     # Placeholder names ("Unknown Venue", "TBD", ...) are never linked as a
@@ -958,7 +959,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
 
     # ── 4. Find or create Performance ─────────────────────────────────────────
     perf_q = db.session.query(Performance).filter(
-        Performance.performer_id == performer.id,
+        Performance.artist_id == artist.id,
         Performance.start_year  == start_year,
         Performance.start_month == start_month,
         Performance.start_day   == start_day,
@@ -969,7 +970,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     performance = perf_q.first()
     if not performance:
         performance = Performance(
-            performer_id = performer.id,
+            artist_id = artist.id,
             venue_id     = venue.id  if venue  else None,
             event_id     = event.id  if event  else None,
             start_year   = start_year,
@@ -985,7 +986,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             # New performances start in the act's default resolution mode
             # (e.g. "Acoustic All-Stars" set to 'explicit' means every future
             # ingest starts explicit, not inherit) — see personnel.py.
-            personnel_mode = performer.default_personnel_mode,
+            personnel_mode = artist.default_personnel_mode,
         )
         db.session.add(performance)
         db.session.flush()
@@ -1028,6 +1029,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         ).first()
         behavior = pref.value if pref else "move"
     library_root = str(current_app.config["LIBRARY_ROOT"])
+    # Library LAYOUT is an install-level setting, read here rather than inside
+    # move_to_library(), which has no app context (2026-09-17). Off means the
+    # show lands flat at the library root -- for a collector who pointed
+    # Trellis at a library they built themselves.
+    under_artist = node_settings.file_under_artist_folder()
 
     tracks_in = data.get("tracks", [])
     # Audio is always flattened + renamed into the library folder's root on
@@ -1054,6 +1060,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             progress_cb      = progress_cb,
             audio_rename_map = audio_rename_map,
             cancel_cb        = cancel_cb,
+            under_artist_folder = under_artist,
         )
     except IngestCancelled:
         # A cancel is not a failure. move_to_library has already undone its own
@@ -1255,7 +1262,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
 
     return {
         "recording_id":        rec.id,
-        "performer_id":        performer.id,
+        "artist_id":        artist.id,
         "folder_name":         folder_name,
         "event_id":            event.id if event else None,
         "checksum_mismatches": checksum_mismatches,
@@ -1429,7 +1436,7 @@ def batch_scan():
     # Known artist/venue records — same lookups the interactive Add Recording
     # scan uses, so Paula's per-item confidence scoring here (added 2026-07-15,
     # Ryan: "let's get her pulled into that experience") matches exactly.
-    known_performers = [p.name for p in db.session.query(Performer.name).all()]
+    known_artists = [p.name for p in db.session.query(Artist.name).all()]
     known_venues = [
         {"name": v.name, "city": v.city, "state": v.state, "country": v.country}
         for v in db.session.query(Venue).all()
@@ -1493,7 +1500,7 @@ def batch_scan():
         paula_result = None
         if scan:
             try:
-                paula_result = compute_paula_score(scan, known_performers, known_venues)
+                paula_result = compute_paula_score(scan, known_artists, known_venues)
             except Exception:
                 paula_result = None
 
@@ -1502,12 +1509,12 @@ def batch_scan():
         artist = (from_tags.get("artist") or from_info.get("artist") or "").strip()
         artist_in_db = bool(
             artist and any(
-                artist.lower() == p.lower() for p in known_performers
+                artist.lower() == p.lower() for p in known_artists
             )
         )
         artist_fuzzy = bool(from_info.get("artist_match"))
 
-        # Date — prefer CONCERTDATE tag, then individual fields from info file
+        # Date — prefer the tag date (DATE, or retired CONCERTDATE), then individual fields from info file
         concert_date_tag = from_tags.get("concert_date") or ""
         year = month = day = None
         if concert_date_tag:
@@ -1553,7 +1560,7 @@ def batch_scan():
             })
 
         # Venue / location — build_scan_payload already parses the tag's
-        # CONCERTLOCATION into city/state/country via the shared parser.
+        # LOCATION into city/state/country via the shared parser.
         venue   = (from_tags.get("venue")   or from_info.get("venue")   or "").strip() or None
         city    = (from_tags.get("city")    or from_info.get("city")    or "").strip() or None
         state   = (from_tags.get("state")   or from_info.get("state")   or "").strip() or None

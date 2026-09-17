@@ -1,5 +1,5 @@
 """
-app/utils/commons.py — freely-licensed performer photos via Wikidata → Commons.
+app/utils/commons.py — freely-licensed artist photos via Wikidata → Commons.
 
 MusicBrainz hosts no artist images. What it does give us is a WIKIDATA link
 (captured in `mb_links_json`), and Wikidata's property P18 points at a file on
@@ -20,7 +20,7 @@ API rather than from article HTML is precisely what keeps the result clean. We
 never touch Wikipedia's own file namespace.
 
 Attribution is captured, not assumed: CC BY and CC BY-SA both require credit,
-so the licence string and author land in `PerformerImage.credit` at fetch time.
+so the licence string and author land in `ArtistImage.credit` at fetch time.
 A photo whose licence we cannot read is REJECTED rather than stored with a
 guess — an unattributable image is worse than no image.
 
@@ -278,9 +278,9 @@ def download(url, max_bytes=_MAX_BYTES):
         return None, None
 
 
-def find_photo_for_performer(performer, exclude=None):
+def find_photo_for_artist(artist, exclude=None):
     """
-    Whole chain for one Performer: links → QID → images → Commons → bytes.
+    Whole chain for one Artist: links → QID → images → Commons → bytes.
 
     `exclude` is a set of Commons filenames already imported for this act, so
     clicking "Find a free photo" a second time returns a DIFFERENT photo rather
@@ -293,7 +293,7 @@ def find_photo_for_performer(performer, exclude=None):
     click legitimately comes back empty for almost everything.
     """
     try:
-        links = json.loads(performer.mb_links_json) if performer.mb_links_json else {}
+        links = json.loads(artist.mb_links_json) if artist.mb_links_json else {}
     except (TypeError, ValueError):
         links = {}
 

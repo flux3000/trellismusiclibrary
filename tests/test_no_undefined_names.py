@@ -13,7 +13,7 @@ exist, because that is a runtime question. So this compiles cleanly and then
 
 That happened twice in one session on 2026-08-24: once a patch script aborted
 mid-run leaving a function referencing an undefined local, and once
-`peer_visible_venue_ids` / `peer_visible_artist_ids` were used in api/share.py
+`peer_visible_venue_ids` / `peer_visible_musician_ids` were used in api/share.py
 without ever being imported. Both compiled. Both were NameErrors on the first
 peer request. This is the Python counterpart of "node --check is not enough".
 

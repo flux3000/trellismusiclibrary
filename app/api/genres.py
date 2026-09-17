@@ -2,14 +2,14 @@
 api/genres.py — Genre endpoints.
 
 Genre is a proper dimension (see the Genre design spec in Context Library,
-2026-08-02): its own table, one FK from Performer, guarded delete — matching
-how Venue, Collection and Artist deletes already behave. Nothing here ever
+2026-08-02): its own table, one FK from Artist, guarded delete — matching
+how Venue, Collection and Musician deletes already behave. Nothing here ever
 creates a genre implicitly; every picker in the frontend selects from this
 list only.
 
 Routes:
   GET    /api/genres/         — list genres (q= for search)
-  GET    /api/genres/<id>     — genre detail: its performers + their recordings
+  GET    /api/genres/<id>     — genre detail: its artists + their recordings
   POST   /api/genres/         — create genre
   PUT    /api/genres/<id>     — update genre
   DELETE /api/genres/<id>     — delete genre (409 while referenced)
@@ -21,7 +21,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.models.genre import Genre
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.serialize import recording_summary
@@ -38,17 +38,17 @@ def list_genres():
         query = query.filter(Genre.name.ilike(f"%{q}%"))
     genres = query.order_by(Genre.name).all()
 
-    performer_counts = dict(
-        db.session.query(Performer.genre_id, func.count(Performer.id))
-        .filter(Performer.genre_id.isnot(None))
-        .group_by(Performer.genre_id).all()
+    artist_counts = dict(
+        db.session.query(Artist.genre_id, func.count(Artist.id))
+        .filter(Artist.genre_id.isnot(None))
+        .group_by(Artist.genre_id).all()
     )
     recording_counts = dict(
-        db.session.query(Performer.genre_id, func.count(Recording.id))
-        .join(Performance, Performance.performer_id == Performer.id)
+        db.session.query(Artist.genre_id, func.count(Recording.id))
+        .join(Performance, Performance.artist_id == Artist.id)
         .join(Recording, Recording.performance_id == Performance.id)
-        .filter(Performer.genre_id.isnot(None))
-        .group_by(Performer.genre_id).all()
+        .filter(Artist.genre_id.isnot(None))
+        .group_by(Artist.genre_id).all()
     )
     return jsonify([
         {
@@ -56,7 +56,7 @@ def list_genres():
             "name":            g.name,
             "description":     g.description,
             "color":           g.color,
-            "performer_count": performer_counts.get(g.id, 0),
+            "artist_count": artist_counts.get(g.id, 0),
             "recording_count": recording_counts.get(g.id, 0),
         }
         for g in genres
@@ -93,18 +93,18 @@ def get_genre(genre_id):
     if not g:
         return jsonify({"error": "Not found"}), 404
 
-    performers = (
-        db.session.query(Performer)
-        .filter(Performer.genre_id == genre_id)
-        .order_by(func.coalesce(Performer.sort_name, Performer.name))
+    artists = (
+        db.session.query(Artist)
+        .filter(Artist.genre_id == genre_id)
+        .order_by(func.coalesce(Artist.sort_name, Artist.name))
         .all()
     )
     perf_rows = []
     total_recordings = 0
-    for p in performers:
+    for p in artists:
         performances = (
             db.session.query(Performance)
-            .filter(Performance.performer_id == p.id)
+            .filter(Performance.artist_id == p.id)
             .order_by(
                 Performance.start_year.desc().nullsfirst(),
                 Performance.start_month.desc().nullsfirst(),
@@ -112,15 +112,15 @@ def get_genre(genre_id):
             ).all()
         )
         # Flatten to one row per Recording, decorated with the performance's
-        # date/venue — same shape the Performer page's flat recording table
-        # expects (see get_performer_recordings / all_recordings).
+        # date/venue — same shape the Artist page's flat recording table
+        # expects (see get_artist_recordings / all_recordings).
         recordings = []
         for perf in performances:
             v = perf.venue
             for r in perf.recordings:
                 row = recording_summary(r)
                 row.update({
-                    "performer":   p.name,
+                    "artist":   p.name,
                     "start_year":  perf.start_year,
                     "start_month": perf.start_month,
                     "start_day":   perf.start_day,
@@ -143,9 +143,9 @@ def get_genre(genre_id):
         "name":            g.name,
         "description":     g.description,
         "color":           g.color,
-        "performer_count": len(perf_rows),
+        "artist_count": len(perf_rows),
         "recording_count": total_recordings,
-        "performers":      perf_rows,
+        "artists":      perf_rows,
     })
 
 
@@ -198,13 +198,13 @@ def update_genre(genre_id):
 @bp.route("/<int:genre_id>", methods=["DELETE"])
 @login_required
 def delete_genre(genre_id):
-    """Delete a genre. Refuses while performers still reference it."""
+    """Delete a genre. Refuses while artists still reference it."""
     g = db.session.get(Genre, genre_id)
     if not g:
         return jsonify({"error": "Not found"}), 404
-    n = db.session.query(Performer).filter_by(genre_id=genre_id).count()
+    n = db.session.query(Artist).filter_by(genre_id=genre_id).count()
     if n:
-        return jsonify({"error": f"Genre has {n} performer(s) — reassign or "
+        return jsonify({"error": f"Genre has {n} artist(s) — reassign or "
                                  "clear those first."}), 409
     db.session.delete(g)
     db.session.commit()

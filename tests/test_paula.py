@@ -2,7 +2,7 @@
 tests/test_paula.py — pure-function unit tests for app/utils/paula.py.
 
 Paula is the free, non-AI completeness/confidence scorer (2026-07-16 design
-conversation with Ryan). No DB or app context needed — known_performers/
+conversation with Ryan). No DB or app context needed — known_artists/
 known_venues are passed in directly, same pattern as parse_info_file's own
 (currently unused-in-production) fuzzy matching.
 """
@@ -103,9 +103,9 @@ def test_date_nothing_present():
 
 # ── Full weighted score — locks in the worked examples Ryan reviewed ───────
 
-def test_full_score_well_tagged_new_performer_known_venue():
+def test_full_score_well_tagged_new_artist_known_venue():
     """Reproduces the worked example Ryan approved: well-tagged show, brand
-    new (unmatched) performer, venue already in the DB. Should land ~75,
+    new (unmatched) artist, venue already in the DB. Should land ~75,
     not the old miscalibrated 58."""
     tags = {
         "artist": "Brand New Act", "concert_date": "1994-06-15",
@@ -114,9 +114,9 @@ def test_full_score_well_tagged_new_performer_known_venue():
     }
     scan = _scan(tags=tags, info={})
     known_venues = [{"name": "The Fillmore", "city": "San Francisco", "state": "CA", "country": "US"}]
-    result = compute_paula_score(scan, known_performers=[], known_venues=known_venues)
+    result = compute_paula_score(scan, known_artists=[], known_venues=known_venues)
     assert 73 <= result["score"] <= 77
-    assert result["attributes"]["performer"]["subscore"] == 0.70
+    assert result["attributes"]["artist"]["subscore"] == 0.70
     assert result["attributes"]["venue_name"]["subscore"] == 0.90   # 0.70 + 0.20 match
 
 
@@ -135,9 +135,9 @@ def test_full_score_best_case_domestic_caps_below_100():
         "venue": "Sprague Hall", "city": "New Haven", "state": "CT", "country": None,
     }
     scan = _scan(tags=tags, info=info)
-    known_performers = ["Bill Evans Trio"]
+    known_artists = ["Bill Evans Trio"]
     known_venues = [{"name": "Sprague Hall", "city": "New Haven", "state": "CT", "country": "US"}]
-    result = compute_paula_score(scan, known_performers, known_venues)
+    result = compute_paula_score(scan, known_artists, known_venues)
     assert result["attributes"]["country"]["subscore"] == 0.0
     assert 90 <= result["score"] < 100
 

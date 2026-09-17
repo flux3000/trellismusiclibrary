@@ -31,6 +31,15 @@ def _snapshot(uid):
         # never hardcodes a filesystem path. Read-only: update_preferences
         # ignores it.
         "import_dir":           current_app.config.get("IMPORT_DIR", ""),
+        # Which triage destinations this install actually HAS (2026-09-17).
+        # Server-owned like import_dir. A library Trellis laid out itself has
+        # both; a library the user imported may have neither, one, or both,
+        # because those folders are optional and not ours to invent (Ryan).
+        # The frontend hardcoded Backlog and Workshop in three places, so
+        # without this an install that has no Backlog still offered the
+        # button and the move 400'd on click -- a failure reported as a
+        # different failure, which this codebase has a rule about.
+        "triage_destinations":  sorted(current_app.config.get("TRIAGE_DIRS", {})),
     }
 
 

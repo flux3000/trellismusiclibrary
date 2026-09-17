@@ -1,7 +1,7 @@
 """
 models/venue_image.py — multiple images per Venue, one designated primary.
 
-A parallel table to `performer_image` rather than a shared polymorphic one
+A parallel table to `artist_image` rather than a shared polymorphic one
 (Ryan, 2026-08-07). The duplication is SCHEMA ONLY: every behaviour —
 one-primary maintenance, promotion on delete, upload/serve/delete — lives once
 in `app/utils/entity_images.py` and is parameterised by `__parent_fk__`.
@@ -12,7 +12,7 @@ entity_id) pair at all — so a polymorphic table would trade a guarantee the
 database gives us for the convenience of one fewer CREATE TABLE.
 
 Files live at LIBRARY_ROOT/_venues/<sanitized venue name>/_images/<filename>.
-The `_venues` prefix keeps them out of the performer namespace: a venue and an
+The `_venues` prefix keeps them out of the artist namespace: a venue and an
 act can share a name ("Fillmore"), and two entities writing to one folder is a
 collision waiting to happen.
 """
@@ -24,7 +24,7 @@ from app.extensions import db
 class VenueImage(db.Model):
     __tablename__ = "venue_image"
 
-    # The one thing that differs from PerformerImage, and the hook every shared
+    # The one thing that differs from ArtistImage, and the hook every shared
     # helper in utils/entity_images.py keys off.
     __parent_fk__ = "venue_id"
 

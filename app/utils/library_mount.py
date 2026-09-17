@@ -2,7 +2,7 @@
 utils/library_mount.py — is the library drive actually there?
 
 LIBRARY_ROOT lives on an SMB share (/Volumes/music). When macOS drops that
-mount the database is still perfectly fine — every Recording, Track, Performer
+mount the database is still perfectly fine — every Recording, Track, Artist
 and Venue row is local SQLite — but every byte of audio and every image is
 suddenly gone. Without this module the app finds that out one broken <img> at
 a time.

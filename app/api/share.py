@@ -20,11 +20,11 @@ Routes (url_prefix /api/share):
 
 Entity pages (milestone 2, 2026-08-08) — paths mirror the LOCAL API so the
 consumer's frontend can reuse its existing render functions:
-  GET  /performers/<id>              catalog metadata (bio, dossier, genre…)
-  GET  /performers/<id>/recordings   holdings — filtered to the visible set
-  GET  /performers/images/<image_id> performer photo, checked via its owner
+  GET  /artists/<id>              catalog metadata (bio, dossier, genre…)
+  GET  /artists/<id>/recordings   holdings — filtered to the visible set
+  GET  /artists/images/<image_id> artist photo, checked via its owner
   GET  /venues/<id>                  venue + its visible shows, visible counts
-  GET  /artists/<id>                 person, visible acts + guest appearances
+  GET  /musicians/<id>                 person, visible acts + guest appearances
   GET  /genres/                      genres present in the visible set
   GET  /genres/<id>                  one genre, its visible acts and shows
 
@@ -53,9 +53,9 @@ from app.utils.peer_auth import (
 from app.utils.peer_access import (
     peer_granted_collection_ids, peer_can_access_recording, peer_can_access_track,
     peer_visible_recording_ids, peer_visible_performance_ids,
-    peer_visible_performer_ids, peer_visible_venue_ids, peer_visible_artist_ids,
-    peer_can_access_performer, peer_can_access_venue,
-    peer_can_access_artist,
+    peer_visible_artist_ids, peer_visible_venue_ids, peer_visible_musician_ids,
+    peer_can_access_artist, peer_can_access_venue,
+    peer_can_access_musician,
 )
 from app.utils.serialize import recording_row, recording_summary
 from app.utils.rate_limit import rate_limited
@@ -177,7 +177,7 @@ def me():
 #
 # It is catalog metadata about a PERSON, not about their holdings, so it reveals
 # nothing about what they own — the same reasoning that lets a peer see a full
-# performer page.
+# artist page.
 
 @bp.route("/me/image", strict_slashes=False)
 @peer_required
@@ -299,9 +299,9 @@ def recording_detail(recording_id):
     return jsonify({
         "id":               rec.id,
         # The recording page's NEXT call: it fetches /performances/<id> for
-        # performer, date, venue and personnel. Omitting this (2026-08-08) left
+        # artist, date, venue and personnel. Omitting this (2026-08-08) left
         # the page with nothing to look up, so it rendered its local empty
-        # state — "Set performer / Add date / Add venue" — as though the record
+        # state — "Set artist / Add date / Add venue" — as though the record
         # were unfilled rather than the fetch never having happened.
         "performance_id":   rec.performance_id,
         "title":            rec.title,
@@ -309,14 +309,14 @@ def recording_detail(recording_id):
         # favourites of their own yet, so this is False — see _peer_row.
         "is_favorite":      False,
         # Show identity (self-contained, so the peer client needs no other call)
-        "performer":        p.performer.name if (p and p.performer) else None,
+        "artist":        p.artist.name if (p and p.artist) else None,
         # Nav ids (2026-08-08). Milestone 1 sent names only, which was right
         # when a peer had nowhere to navigate TO. With entity pages, the
-        # frontend builds #/performer/<id> and #/venue/<id> from exactly these
+        # frontend builds #/artist/<id> and #/venue/<id> from exactly these
         # two fields — without them the pages exist but are unreachable.
         # Not a leak: both endpoints are access-checked, so an id for something
         # ungranted buys a 403 and nothing else.
-        "performer_id":     p.performer_id if p else None,
+        "artist_id":     p.artist_id if p else None,
         "date":             format_partial_date(p.start_year, p.start_month, p.start_day) if p else None,
         "venue":            v.name    if v else None,
         "venue_id":         v.id      if v else None,
@@ -400,7 +400,7 @@ def stream(track_id):
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Ryan's requirement: a peer should get a HOLISTIC experience — learn about the
-# performer, see the venue, see who played that night — not a bare list of
+# artist, see the venue, see who played that night — not a bare list of
 # streamable files. So these mirror the LOCAL endpoints' paths and payload
 # shapes exactly, which is what lets the consumer's frontend reuse its existing
 # render functions instead of growing a parallel set of peer-only pages.
@@ -419,7 +419,7 @@ def stream(track_id):
 # right; the subtle one is a count computed over the whole library, which
 # publishes the size of a collection that was never shared.
 
-_SHARE_IMG_URL = "/api/share/performers/images"
+_SHARE_IMG_URL = "/api/share/artists/images"
 
 
 def _peer_row(rec, card=False):
@@ -481,23 +481,23 @@ def _visible_recordings(peer, recordings):
     return [r for r in recordings if r.id in visible]
 
 
-# ── GET /api/share/performers/<id> ────────────────────────────────────────────
+# ── GET /api/share/artists/<id> ────────────────────────────────────────────
 # Pure catalog metadata. Note there is NOTHING to filter here: the local
 # endpoint carries no holdings at all — holdings live in the separate
 # /recordings sub-route below. The only change from the local payload is the
-# image URL prefix, because a peer cannot reach /api/performers/images/<id>.
+# image URL prefix, because a peer cannot reach /api/artists/images/<id>.
 
-@bp.route("/performers/<int:performer_id>", strict_slashes=False)
+@bp.route("/artists/<int:artist_id>", strict_slashes=False)
 @peer_required
-def performer_detail(performer_id):
-    from app.models.performer import Performer
+def artist_detail(artist_id):
+    from app.models.artist import Artist
     from app.utils import entity_images as ei
-    from app.api.performers import _serialize_roster
+    from app.api.artists import _serialize_roster
 
     peer = current_peer()
-    if not peer_can_access_performer(peer, performer_id):
+    if not peer_can_access_artist(peer, artist_id):
         abort(403)
-    p = db.session.get(Performer, performer_id)
+    p = db.session.get(Artist, artist_id)
     if p is None:
         abort(404)
 
@@ -529,24 +529,24 @@ def performer_detail(performer_id):
     })
 
 
-# ── GET /api/share/performers/<id>/recordings ─────────────────────────────────
+# ── GET /api/share/artists/<id>/recordings ─────────────────────────────────
 # Holdings. Filtered twice over: performances the peer can't see are dropped
 # entirely, and a visible performance's recordings are themselves filtered —
 # two tapers of one night can land in different collections.
 
-@bp.route("/performers/<int:performer_id>/recordings", strict_slashes=False)
+@bp.route("/artists/<int:artist_id>/recordings", strict_slashes=False)
 @peer_required
-def performer_recordings(performer_id):
+def artist_recordings(artist_id):
     from app.models.performance import Performance
 
     peer = current_peer()
-    if not peer_can_access_performer(peer, performer_id):
+    if not peer_can_access_artist(peer, artist_id):
         abort(403)
 
     visible_perf_ids = peer_visible_performance_ids(peer)
     performances = (
         db.session.query(Performance)
-        .filter(Performance.performer_id == performer_id,
+        .filter(Performance.artist_id == artist_id,
                 Performance.id.in_(visible_perf_ids))
         .order_by(
             Performance.start_year.desc().nullsfirst(),
@@ -563,7 +563,7 @@ def performer_recordings(performer_id):
             continue
         out.append({
             "performance_id": perf.id,
-            "performer_name": perf.performer.name if perf.performer else None,
+            "artist_name": perf.artist.name if perf.artist else None,
             "title":          perf.title,
             "stage":          perf.stage,
             "start_year":     perf.start_year,
@@ -581,25 +581,25 @@ def performer_recordings(performer_id):
     return jsonify(out)
 
 
-# ── GET /api/share/performers/images/<image_id> ───────────────────────────────
-# The photo route. Access is checked against the image's OWNING performer, not
+# ── GET /api/share/artists/images/<image_id> ───────────────────────────────
+# The photo route. Access is checked against the image's OWNING artist, not
 # the image id — otherwise a peer could walk image ids and pull the face of
 # every act in a library they were never granted.
 
-@bp.route("/performers/images/<int:image_id>", strict_slashes=False)
+@bp.route("/artists/images/<int:image_id>", strict_slashes=False)
 @peer_required
-def performer_image(image_id):
-    from app.models.performer_image import PerformerImage
+def artist_image(image_id):
+    from app.models.artist_image import ArtistImage
     from app.utils import entity_images as ei
-    from app.api.performers import _performer_images_dir
+    from app.api.artists import _artist_images_dir
 
     peer = current_peer()
-    img = db.session.get(PerformerImage, image_id)
+    img = db.session.get(ArtistImage, image_id)
     if not img:
         abort(404)
-    if not peer_can_access_performer(peer, img.performer_id):
+    if not peer_can_access_artist(peer, img.artist_id):
         abort(403)
-    return ei.handle_serve(img, _performer_images_dir(img.performer))
+    return ei.handle_serve(img, _artist_images_dir(img.artist))
 
 
 # ── GET /api/share/venues/<id> ────────────────────────────────────────────────
@@ -647,37 +647,37 @@ def venue_detail(venue_id):
     })
 
 
-# ── GET /api/share/artists/<id> ───────────────────────────────────────────────
-# The people. `performers` is narrowed to acts the peer can see — an artist
+# ── GET /api/share/musicians/<id> ───────────────────────────────────────────────
+# The people. `artists` is narrowed to acts the peer can see — a musician
 # page listing bands whose shows aren't shared would name acts by the back
 # door. Guest appearances are filtered to visible performances.
 
-@bp.route("/artists/<int:artist_id>", strict_slashes=False)
+@bp.route("/musicians/<int:musician_id>", strict_slashes=False)
 @peer_required
-def artist_detail(artist_id):
-    from app.models.artist import Artist
+def musician_detail(musician_id):
+    from app.models.musician import Musician
     from app.models.performance_personnel import PerformancePersonnel
 
     peer = current_peer()
-    if not peer_can_access_artist(peer, artist_id):
+    if not peer_can_access_musician(peer, musician_id):
         abort(403)
-    a = db.session.get(Artist, artist_id)
+    a = db.session.get(Musician, musician_id)
     if a is None:
         abort(404)
 
-    visible_performer_ids = peer_visible_performer_ids(peer)
-    performers = [m.performer for m in a.memberships
-                  if m.performer is not None and m.performer.id in visible_performer_ids]
-    performers.sort(key=lambda p: (p.sort_name or p.name).lower())
-    member_performer_ids = {p.id for p in performers}
+    visible_artist_ids = peer_visible_artist_ids(peer)
+    artists = [m.artist for m in a.memberships
+                  if m.artist is not None and m.artist.id in visible_artist_ids]
+    artists.sort(key=lambda p: (p.sort_name or p.name).lower())
+    member_artist_ids = {p.id for p in artists}
 
     visible_perf_ids = peer_visible_performance_ids(peer)
     guest_appearances = []
-    for pp in db.session.query(PerformancePersonnel).filter_by(artist_id=artist_id).all():
+    for pp in db.session.query(PerformancePersonnel).filter_by(musician_id=musician_id).all():
         perf = pp.performance
         if not perf or perf.id not in visible_perf_ids:
             continue
-        if perf.performer_id in member_performer_ids:
+        if perf.artist_id in member_artist_ids:
             continue
         recs = _visible_recordings(peer, perf.recordings)
         if not recs:
@@ -685,8 +685,8 @@ def artist_detail(artist_id):
         v = perf.venue
         guest_appearances.append({
             "performance_id": perf.id,
-            "performer_id":   perf.performer_id,
-            "performer_name": perf.performer.name if perf.performer else None,
+            "artist_id":   perf.artist_id,
+            "artist_name": perf.artist.name if perf.artist else None,
             "date":       format_partial_date(perf.start_year, perf.start_month, perf.start_day),
             "start_year": perf.start_year, "start_month": perf.start_month,
             "start_day":  perf.start_day,
@@ -707,13 +707,13 @@ def artist_detail(artist_id):
         "name":      a.name,
         "sort_name": a.sort_name,
         "bio":       a.bio,
-        "performers":        [{"id": p.id, "name": p.name} for p in performers],
+        "artists":        [{"id": p.id, "name": p.name} for p in artists],
         "guest_appearances": guest_appearances,
     })
 
 
 # ── GET /api/share/genres/ ────────────────────────────────────────────────────
-# Local list_genres computes performer_count and recording_count with a GROUP BY
+# Local list_genres computes artist_count and recording_count with a GROUP BY
 # over the whole library. Reproduced here in Python over the visible set only,
 # which is cheap at this scale and impossible to accidentally leave unfiltered.
 # Genres with nothing visible are omitted entirely rather than shown as zero —
@@ -724,31 +724,31 @@ def artist_detail(artist_id):
 def list_genres():
     from app.models.genre import Genre
     from app.models.performance import Performance
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
     peer = current_peer()
     visible_recs = peer_visible_recording_ids(peer)
     if not visible_recs:
         return jsonify([])
 
-    rows = (db.session.query(Performer.genre_id, Performer.id, Recording.id)
-            .join(Performance, Performance.performer_id == Performer.id)
+    rows = (db.session.query(Artist.genre_id, Artist.id, Recording.id)
+            .join(Performance, Performance.artist_id == Artist.id)
             .join(Recording, Recording.performance_id == Performance.id)
             .filter(Recording.id.in_(visible_recs),
-                    Performer.genre_id.isnot(None))
+                    Artist.genre_id.isnot(None))
             .all())
 
-    performers_by_genre = {}
+    artists_by_genre = {}
     recordings_by_genre = {}
-    for genre_id, performer_id, recording_id in rows:
-        performers_by_genre.setdefault(genre_id, set()).add(performer_id)
+    for genre_id, artist_id, recording_id in rows:
+        artists_by_genre.setdefault(genre_id, set()).add(artist_id)
         recordings_by_genre.setdefault(genre_id, set()).add(recording_id)
 
-    if not performers_by_genre:
+    if not artists_by_genre:
         return jsonify([])
 
     genres = (db.session.query(Genre)
-              .filter(Genre.id.in_(performers_by_genre.keys()))
+              .filter(Genre.id.in_(artists_by_genre.keys()))
               .order_by(Genre.name).all())
     return jsonify([
         {
@@ -756,7 +756,7 @@ def list_genres():
             "name":            g.name,
             "description":     g.description,
             "color":           g.color,
-            "performer_count": len(performers_by_genre.get(g.id, ())),
+            "artist_count": len(artists_by_genre.get(g.id, ())),
             "recording_count": len(recordings_by_genre.get(g.id, ())),
         }
         for g in genres
@@ -764,7 +764,7 @@ def list_genres():
 
 
 # ── GET /api/share/genres/<id> ────────────────────────────────────────────────
-# Mirrors local get_genre. Performers are narrowed to those with something
+# Mirrors local get_genre. Artists are narrowed to those with something
 # visible, their recording lists to the visible set, and BOTH counts are
 # recomputed from the filtered rows rather than carried over from the genre's
 # true totals. A genre whose every recording is ungranted 404s rather than
@@ -775,7 +775,7 @@ def list_genres():
 def genre_detail(genre_id):
     from app.models.genre import Genre
     from app.models.performance import Performance
-    from app.models.performer import Performer
+    from app.models.artist import Artist
     from sqlalchemy import func
 
     peer = current_peer()
@@ -783,27 +783,27 @@ def genre_detail(genre_id):
     if g_row is None:
         abort(404)
 
-    visible_performer_ids = peer_visible_performer_ids(peer)
+    visible_artist_ids = peer_visible_artist_ids(peer)
     visible_perf_ids = peer_visible_performance_ids(peer)
-    if not visible_performer_ids:
+    if not visible_artist_ids:
         abort(403)
 
-    performers = (
-        db.session.query(Performer)
-        .filter(Performer.genre_id == genre_id,
-                Performer.id.in_(visible_performer_ids))
-        .order_by(func.coalesce(Performer.sort_name, Performer.name))
+    artists = (
+        db.session.query(Artist)
+        .filter(Artist.genre_id == genre_id,
+                Artist.id.in_(visible_artist_ids))
+        .order_by(func.coalesce(Artist.sort_name, Artist.name))
         .all()
     )
-    if not performers:
+    if not artists:
         abort(403)
 
     perf_rows = []
     total_recordings = 0
-    for p in performers:
+    for p in artists:
         performances = (
             db.session.query(Performance)
-            .filter(Performance.performer_id == p.id,
+            .filter(Performance.artist_id == p.id,
                     Performance.id.in_(visible_perf_ids))
             .order_by(
                 Performance.start_year.desc().nullsfirst(),
@@ -817,7 +817,7 @@ def genre_detail(genre_id):
             for r in _visible_recordings(peer, perf.recordings):
                 row = _peer_summary(r)
                 row.update({
-                    "performer":   p.name,
+                    "artist":   p.name,
                     "start_year":  perf.start_year,
                     "start_month": perf.start_month,
                     "start_day":   perf.start_day,
@@ -842,19 +842,19 @@ def genre_detail(genre_id):
         "name":            g_row.name,
         "description":     g_row.description,
         "color":           g_row.color,
-        "performer_count": len(perf_rows),
+        "artist_count": len(perf_rows),
         "recording_count": total_recordings,
-        "performers":      perf_rows,
+        "artists":      perf_rows,
     })
 
 
 # ── GET /api/share/performances/<id> ──────────────────────────────────────────
 # The recording page's second call. app.js fetches the RECORDING for tracks and
-# metadata, then the PERFORMANCE for who/when/where — performer, date, venue and
+# metadata, then the PERFORMANCE for who/when/where — artist, date, venue and
 # resolved personnel live here, not on the recording.
 #
 # Missing it (2026-08-08) is why a peer's View Recording page rendered "Set
-# performer / Add date / Add venue": the page had a recording with no
+# artist / Add date / Add venue": the page had a recording with no
 # performance to describe it, so it fell back to its empty-state prompts and
 # looked like an unfilled local record rather than a failed remote fetch.
 
@@ -875,9 +875,9 @@ def performance_detail(performance_id):
     resolved = resolve_performance_personnel(p)
     return jsonify({
         "id":             p.id,
-        "performer_id":   p.performer_id,
-        "performer":      p.performer.name if p.performer else None,
-        "members":        [{"id": r["artist_id"], "name": r["name"]} for r in resolved],
+        "artist_id":   p.artist_id,
+        "artist":      p.artist.name if p.artist else None,
+        "members":        [{"id": r["musician_id"], "name": r["name"]} for r in resolved],
         "personnel":      resolved,
         "personnel_mode": p.personnel_mode,
         "title":        p.title,
@@ -912,7 +912,7 @@ def performance_detail(performance_id):
 # mirror the local paths one for one and the page assembles itself.
 #
 # The Recommended algorithm is NOT reimplemented here. Its diversity rules
-# (distinct performer as a hard rule, distinct genre as a soft preference,
+# (distinct artist as a hard rule, distinct genre as a soft preference,
 # unplayed weighting, date-stable seeding) are subtle enough that a second copy
 # would drift within a month. The helpers are imported and fed a filtered pool
 # instead — the same compromise made for _serialize_roster, and for the same
@@ -947,7 +947,7 @@ def recommended_recordings():
     import random
     from datetime import date as _date
     from app.api.recordings import (
-        _card_eager, _recommended_pool_query, _genre_by_performer, _select_diverse,
+        _card_eager, _recommended_pool_query, _genre_by_artist, _select_diverse,
     )
 
     peer = current_peer()
@@ -969,16 +969,16 @@ def recommended_recordings():
 
     # No play-history weighting: play_log records the OWNER's listening, which
     # is none of the peer's business and no guide to what they have heard.
-    perf_by_rec = {r.id: (r.performance.performer_id if r.performance else None)
+    perf_by_rec = {r.id: (r.performance.artist_id if r.performance else None)
                    for r in pool}
-    genre_by_performer = _genre_by_performer(
+    genre_by_artist = _genre_by_artist(
         {pid for pid in perf_by_rec.values() if pid is not None})
 
     rnd = random.Random(f"{_date.today().isoformat()}:{reroll}")
     ordered = list(pool)
     rnd.shuffle(ordered)
 
-    picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_performer)
+    picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_artist)
     return jsonify([_peer_row(r, card=True) for r in picks])
 
 
@@ -1087,26 +1087,26 @@ def list_venues():
     ])
 
 
-@bp.route("/artists/", strict_slashes=False)
+@bp.route("/musicians/", strict_slashes=False)
 @peer_required
-def list_artists():
-    """People reachable through a visible act. Mirrors local list_artists.
+def list_musicians():
+    """People reachable through a visible act. Mirrors local list_musicians.
 
-    Membership-derived, like every other artist surface here: a band's lineup
+    Membership-derived, like every other musician surface here: a band's lineup
     is catalog metadata about the act, and narrowing it to whoever played the
     visible nights gives incoherent pages.
     """
     from sqlalchemy import func as _func
-    from app.models.artist import Artist
+    from app.models.musician import Musician
 
     peer = current_peer()
-    artist_ids = peer_visible_artist_ids(peer)
-    if not artist_ids:
+    musician_ids = peer_visible_musician_ids(peer)
+    if not musician_ids:
         return jsonify([])
 
-    rows = (db.session.query(Artist)
-            .filter(Artist.id.in_(artist_ids))
-            .order_by(_func.coalesce(Artist.sort_name, Artist.name)).all())
+    rows = (db.session.query(Musician)
+            .filter(Musician.id.in_(musician_ids))
+            .order_by(_func.coalesce(Musician.sort_name, Musician.name)).all())
     return jsonify([
         {"id": a.id, "name": a.name, "sort_name": a.sort_name} for a in rows
     ])
@@ -1143,22 +1143,22 @@ def search():
         return jsonify({"query": q, "text_terms": [], "date_terms": [],
                         "total": 0, "groups": []})
 
-    visible_performers = peer_visible_performer_ids(peer)
     visible_artists = peer_visible_artist_ids(peer)
+    visible_musicians = peer_visible_musician_ids(peer)
     visible_venues = peer_visible_venue_ids(peer)
 
     raw = local_search.build_search_index()
     recordings = [r for r in raw["recordings"] if r["id"] in visible_recs]
-    performers = [p for p in raw["performers"] if p["id"] in visible_performers]
+    artists = [p for p in raw["artists"] if p["id"] in visible_artists]
     venues = [v for v in raw["venues"] if v["id"] in visible_venues]
-    artists = [
-        # The act list on an artist row is narrowed too, or a person visible
+    musicians = [
+        # The act list on a musician row is narrowed too, or a person visible
         # through one band advertises every other band they were ever in.
-        {**a, "performer_ids": [pid for pid in a.get("performer_ids", [])
-                                if pid in visible_performers]}
-        for a in raw["artists"] if a["id"] in visible_artists
+        {**a, "artist_ids": [pid for pid in a.get("artist_ids", [])
+                                if pid in visible_artists]}
+        for a in raw["musicians"] if a["id"] in visible_musicians
     ]
-    index = se.build_index(performers, artists, venues, recordings)
+    index = se.build_index(artists, musicians, venues, recordings)
 
     result = se.run_search(index, q)
     counts = local_search._derived_counts(index)
@@ -1196,14 +1196,14 @@ def search():
     })
 
 
-@bp.route("/performers/all-recordings", strict_slashes=False)
+@bp.route("/artists/all-recordings", strict_slashes=False)
 @peer_required
 def all_recordings():
     """
-    The Library/Browse payload: every visible performer with their visible
+    The Library/Browse payload: every visible artist with their visible
     performances and recordings, in one request.
 
-    MIRRORS `GET /api/performers/all-recordings` (api/performers.py) key for
+    MIRRORS `GET /api/artists/all-recordings` (api/artists.py) key for
     key, deliberately. The frontend's `renderLibraryView()` consumes this shape
     and `contextualise()` rewrites the URL transparently, so any divergence
     here shows up as a broken Library page on the peer side only — which is
@@ -1215,34 +1215,34 @@ def all_recordings():
     Every list AND every count is computed over the visible set. A peer must
     not learn that an act they can see three shows by actually has forty-one:
     `performance_count` and `recording_count` below are lengths of the FILTERED
-    lists, never of the performer's real holdings.
+    lists, never of the artist's real holdings.
     """
     from sqlalchemy import func as _func
     from app.models.performance import Performance
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
     peer = current_peer()
-    visible_performers = peer_visible_performer_ids(peer)
-    if not visible_performers:
+    visible_artists = peer_visible_artist_ids(peer)
+    if not visible_artists:
         return jsonify([])
 
     visible_perfs = peer_visible_performance_ids(peer)
     visible_recs = peer_visible_recording_ids(peer)
 
-    performers = (
-        db.session.query(Performer)
-        .filter(Performer.id.in_(visible_performers))
-        # coalesce(sort_name, name): sort_name is NULL for every performer in
+    artists = (
+        db.session.query(Artist)
+        .filter(Artist.id.in_(visible_artists))
+        # coalesce(sort_name, name): sort_name is NULL for every artist in
         # this database, and ordering on it alone ties every row.
-        .order_by(_func.coalesce(Performer.sort_name, Performer.name))
+        .order_by(_func.coalesce(Artist.sort_name, Artist.name))
         .all()
     )
 
     result = []
-    for pf in performers:
+    for pf in artists:
         performances = (
             db.session.query(Performance)
-            .filter(Performance.performer_id == pf.id,
+            .filter(Performance.artist_id == pf.id,
                     Performance.id.in_(visible_perfs))
             .order_by(
                 Performance.start_year.asc().nullslast(),
@@ -1264,7 +1264,7 @@ def all_recordings():
             v = p.venue
             perf_list.append({
                 "performance_id": p.id,
-                "performer_name": p.performer.name,
+                "artist_name": p.artist.name,
                 "title":          p.title,
                 "start_year":     p.start_year,
                 "start_month":    p.start_month,
@@ -1282,8 +1282,8 @@ def all_recordings():
         # needed for Browse's genre filter and the colour spine on every row.
         g = pf.genre
         result.append({
-            "performer_id":      pf.id,
-            "performer_name":    pf.name,
+            "artist_id":      pf.id,
+            "artist_name":    pf.name,
             "genre":             g.name  if g else None,
             "genre_color":       g.color if g else None,
             "performance_count": len(perf_list),
@@ -1294,20 +1294,20 @@ def all_recordings():
     return jsonify(result)
 
 
-@bp.route("/performers/", strict_slashes=False)
+@bp.route("/artists/", strict_slashes=False)
 @peer_required
-def list_performers():
+def list_artists():
     """
     Acts with something visible, and counts over the visible set only.
 
     Note this is a list endpoint, which the entity-page design deliberately
     avoided — a peer must not be able to enumerate a library. It is safe here
-    for the same reason the artist page is: it can only ever contain acts the
+    for the same reason the musician page is: it can only ever contain acts the
     peer already reached through a granted recording. The dangerous version
     would be an unfiltered index, and this is not that.
     """
     from app.models.performance import Performance
-    from app.models.performer import Performer
+    from app.models.artist import Artist
     from sqlalchemy import func
 
     peer = current_peer()
@@ -1315,12 +1315,12 @@ def list_performers():
     if not visible:
         return jsonify([])
 
-    rows = (db.session.query(Performer, func.count(Recording.id).label("rc"))
-            .join(Performance, Performance.performer_id == Performer.id)
+    rows = (db.session.query(Artist, func.count(Recording.id).label("rc"))
+            .join(Performance, Performance.artist_id == Artist.id)
             .join(Recording, Recording.performance_id == Performance.id)
             .filter(Recording.id.in_(visible))
-            .group_by(Performer.id)
-            .order_by(func.coalesce(Performer.sort_name, Performer.name))
+            .group_by(Artist.id)
+            .order_by(func.coalesce(Artist.sort_name, Artist.name))
             .all())
     return jsonify([
         {
@@ -1328,7 +1328,7 @@ def list_performers():
             "name":            p.name,
             "sort_name":       p.sort_name,
             "recording_count": rc,
-            "members":         [a.name for a in p.artists],
+            "members":         [a.name for a in p.musicians],
             "genre_id":        p.genre_id,
             "genre_name":      p.genre.name if p.genre else None,
         }

@@ -55,8 +55,8 @@ bp = Blueprint("remotes", __name__)
 # result looked like "no matches"); missing from share.py it 404s and renders
 # as an empty page. tests/test_peer_surface_parity.py asserts all three.
 _ALLOWED_PREFIXES = {
-    "me", "collections", "recordings", "performances", "performers",
-    "venues", "artists", "genres", "stream", "search",
+    "me", "collections", "recordings", "performances", "artists",
+    "venues", "musicians", "genres", "stream", "search",
 }
 
 # Header names worth carrying in each direction. Everything else is dropped —
@@ -302,7 +302,7 @@ def _rewrite_share_urls(obj, node_id):
     Rewrite every '/api/share/...' string in a payload to '/api/remotes/<id>/...'.
 
     The remote hands out paths on ITS box — stream_url is '/api/share/stream/12',
-    image urls are '/api/share/performers/images/4'. Handed to the frontend
+    image urls are '/api/share/artists/images/4'. Handed to the frontend
     unchanged, those resolve against localhost and 404, because localhost has no
     token-authenticated share door of its own.
 
@@ -379,7 +379,7 @@ def proxy(node_id, subpath):
     ctype = resp.headers.get("Content-Type", "")
 
     # JSON: read it whole so share URLs can be rewritten before it reaches the
-    # frontend. These payloads are small — a collection listing, a performer.
+    # frontend. These payloads are small — a collection listing, an artist.
     if "application/json" in ctype:
         try:
             payload = _json.loads(resp.read())

@@ -114,6 +114,31 @@ RESOLVE_AUDIO_EXTS = {".flac", ".mp3", ".wav", ".aiff", ".aif",
 UNSUPPORTED_AUDIO_EXTENSIONS = RESOLVE_AUDIO_EXTS - AUDIO_EXTENSIONS
 
 
+# Directory-name prefixes that are never a show and never part of one.
+#
+# Two families, both of which surfaced as red "no audio here" rows on every
+# scan before 2026-09-17:
+#
+#   - Trellis's own namespaces under LIBRARY_ROOT: _musicians/, _venues/,
+#     _events/, and the per-artist _images/ folder (app/api/artists.py).
+#     Pointing the library at a collector's existing folder (rather than one
+#     Trellis created) puts these in the same directory as their shows, so a
+#     rescan offered one bogus row per photographed artist.
+#   - Housekeeping: _originals/ from an SHN/WAV -> FLAC conversion, and
+#     anything dot-prefixed (.git, Finder and sync-client metadata).
+#
+# Matching on the PREFIX rather than a name list is deliberate: the leading
+# underscore is already the convention every Trellis-owned directory under
+# LIBRARY_ROOT follows, so a bucket added later is covered here without
+# anyone remembering that this list exists.
+_EXCLUDED_DIR_PREFIXES = ("_", ".")
+
+
+def _is_excluded_dir(name):
+    """True when a directory name is one show resolution must never enter."""
+    return name.startswith(_EXCLUDED_DIR_PREFIXES)
+
+
 def _root_audio_count(path):
     """Count audio files directly in `path` (non-recursive)."""
     try:
@@ -127,11 +152,17 @@ def _root_audio_count(path):
 
 
 def _audio_subdirs(path):
-    """Immediate subdirs of `path` that contain audio at any depth."""
+    """
+    Immediate subdirs of `path` that contain audio at any depth.
+
+    Excluded directories (see _is_excluded_dir) are skipped outright, so an
+    `_originals/` folder left by an SHN/WAV -> FLAC conversion can never be
+    mistaken for a disc subdir or for a grouping child of its own show.
+    """
     result = []
     try:
         for sub in os.scandir(path):
-            if not sub.is_dir():
+            if not sub.is_dir() or _is_excluded_dir(sub.name):
                 continue
             for _, _, files in os.walk(sub.path):
                 if any(os.path.splitext(f)[1].lower() in RESOLVE_AUDIO_EXTS
@@ -143,7 +174,7 @@ def _audio_subdirs(path):
     return result
 
 
-def resolve_shows(path):
+def resolve_shows(path, include_empty=True):
     """
     Recursively resolve a directory to its actual show-level paths.
 
@@ -158,15 +189,18 @@ def resolve_shows(path):
       - Has >= 2 audio-containing subdirs → grouping folder, expand each.
       - Has exactly 1 audio-containing subdir → could be a transparent wrapper
         ('flac/') OR another nesting level; recurse to find out.
-      - Has no audio at all → return as-is (the scanner grades it red).
+      - Has no audio at all → return as-is when `include_empty`, so a
+        folder the USER named is reported (the scanner grades it red)
+        rather than vanishing. A directory being WALKED during a scan
+        passes include_empty=False instead — see resolve_shows_in_dir.
     """
     if _root_audio_count(path) > 0:
         return [path]
     subs = _audio_subdirs(path)
     if not subs:
-        return [path]
+        return [path] if include_empty else []
     if len(subs) == 1:
-        return resolve_shows(subs[0].path)
+        return resolve_shows(subs[0].path, include_empty)
 
     # A multi-disc show is ONE show, not a grouping folder. When 2+ of the
     # audio-bearing subdirs are named for a disc/set, the parent is the show
@@ -185,22 +219,50 @@ def resolve_shows(path):
 
     result = []
     for sub in sorted(subs, key=lambda e: e.name.lower()):
-        result.extend(resolve_shows(sub.path))
+        result.extend(resolve_shows(sub.path, include_empty))
     return result
 
 
-def resolve_shows_in_dir(source_dir):
+def resolve_shows_in_dir(source_dir, skipped=None):
     """
     Every show folder under one scanned directory.
 
     The top-level loop both `batch_scan` and the quality analyser run: each
     immediate subdirectory is resolved to its real show paths, handling
     arbitrary nesting (artist -> year -> show).
+
+    Two kinds of directory are dropped rather than returned (2026-09-17, for
+    libraries Trellis did not lay out itself):
+
+      - Excluded names (see _is_excluded_dir) — Trellis's own _musicians/,
+        _venues/ and _events/ buckets, and dot-prefixed metadata.
+      - Anything with no audio anywhere beneath it. This is the one that
+        matters in a flat library: an artist's photos live at
+        LIBRARY_ROOT/<Artist>/_images, so `<Artist>/` is a plain directory
+        whose only child is excluded, and it would otherwise come back as a
+        show that grades red — one bogus row per photographed artist, on
+        every rescan. It also covers stray `Art/` and notes folders.
+
+    The distinction from resolve_shows() itself is the whole point: a folder
+    the USER named and pointed at must still report "no audio here", because
+    silently returning nothing for an explicit target is the kind of failure
+    that reads as the app being broken. A folder merely encountered while
+    walking has not been asked about and is simply not a show.
+
+    `skipped`, when given a list, collects the audio-less paths that were
+    dropped, so an adoption summary can say where the folders went instead
+    of leaving a collector to wonder why 100 folders produced 40 shows.
+    Excluded names are NOT collected — those are Trellis's own furniture,
+    not the collector's missing material.
     """
     show_paths = []
     for entry in sorted(os.scandir(source_dir), key=lambda e: e.name.lower()):
-        if entry.is_dir():
-            show_paths.extend(resolve_shows(entry.path))
+        if not entry.is_dir() or _is_excluded_dir(entry.name):
+            continue
+        resolved = resolve_shows(entry.path, include_empty=False)
+        if not resolved and skipped is not None:
+            skipped.append(entry.path)
+        show_paths.extend(resolved)
     return show_paths
 
 
@@ -607,20 +669,81 @@ def fingerprint_type_for_file(path, filename_lower=None):
 
 # ── FLAC tag reading ───────────────────────────────────────────────────────────
 
-# Map FLAC tag keys → our field names
-_TAG_MAP = {
-    "ARTIST":          "artist",
-    "ALBUM":           "album",
-    "DATE":            "year",
-    "CONCERTDATE":     "concert_date",
-    "CONCERTVENUE":    "venue",
-    "CONCERTLOCATION": "location",
-    "RECORDINGSOURCE": "source",
-    "LINEAGE":         "lineage",
-    "TITLE":           "title",
-    "TRACKNUMBER":     "track_number",
-    "TRACKTOTAL":      "track_total",
+# FLAC tag keys → our container field names. The current key comes first; the
+# retired keys follow because every file tagged before 2026-09-16 carries them
+# and other collectors use some of them. First non-empty value wins.
+_CONTAINER_TAG_KEYS = {
+    "artist":   ("ARTIST", "ALBUMARTIST"),
+    "album":    ("ALBUM",),
+    "venue":    ("VENUE", "CONCERTVENUE"),
+    "location": ("LOCATION", "CONCERTLOCATION"),
+    "source":   ("SOURCE", "RECORDINGSOURCE"),
+    "lineage":  ("LINEAGE",),
 }
+# DATE held only the year until 2026-09-16 and CONCERTDATE the full date; now
+# DATE holds the full date. Both are read and the more precise value wins.
+_DATE_TAG_KEYS = ("DATE", "CONCERTDATE")
+
+_ISO_PARTIAL_RE  = re.compile(r"^\s*(\d{4})(?:[-./](\d{1,2})(?:[-./](\d{1,2}))?)?\s*$")
+_DATED_VENUE_RE  = re.compile(r"^\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2})\s+-\s+(.+)$")
+
+
+def _loose_tag_date(value):
+    """
+    Normalise a date tag to "YYYY", "YYYY-MM" or "YYYY-MM-DD", or None.
+    Seen in the wild: "1977-05-08", "2015.02.27", "2026", "August 19, 2012".
+    """
+    if not value:
+        return None
+    m = _ISO_PARTIAL_RE.match(str(value))
+    if m:
+        y, mo, d = (int(g) if g else None for g in m.groups())
+        if mo and not 1 <= mo <= 12:
+            return None
+        if d and not 1 <= d <= 31:
+            return None
+        return format_partial_date(y, mo, d)
+    parsed = _parse_date(str(value))
+    return format_partial_date(parsed[0], parsed[1], parsed[2]) if parsed else None
+
+
+def _first_tag(tags, keys):
+    for k in keys:
+        v = tags.get(k)
+        if v and str(v[0]).strip():
+            return str(v[0]).strip()
+    return None
+
+
+def _container_from_tags(tags):
+    """Container fields from one file's Vorbis comments (see _CONTAINER_TAG_KEYS)."""
+    out = {}
+    for field, keys in _CONTAINER_TAG_KEYS.items():
+        v = _first_tag(tags, keys)
+        if v:
+            out[field] = v
+
+    dates = [d for d in (_loose_tag_date(_first_tag(tags, (k,))) for k in _DATE_TAG_KEYS) if d]
+    if dates:
+        best = max(dates, key=len)             # "1977-05-08" beats "1977"
+        out["concert_date"] = best
+        out["year"] = best[:4]
+
+    # A VENUE carrying "2015.02.27 - Ryman Auditorium - Nashville, TN" (seen in
+    # the wild): the date and place fill fields the file left empty.
+    venue = out.get("venue")
+    m = _DATED_VENUE_RE.match(venue) if venue else None
+    if m:
+        parts = [x.strip() for x in m.group(2).split(" - ") if x.strip()]
+        if parts:
+            out["venue"] = parts[0]
+            if len(parts) > 1 and not out.get("location"):
+                out["location"] = " - ".join(parts[1:])
+        if not out.get("concert_date"):
+            d = _loose_tag_date(m.group(1))
+            if d:
+                out["concert_date"], out["year"] = d, d[:4]
+    return out
 
 
 def read_flac_tags(audio_files):
@@ -629,7 +752,7 @@ def read_flac_tags(audio_files):
 
     Returns:
       {
-        "container": { artist, album, concert_date, venue, location, source, lineage },
+        "container": { artist, album, year, concert_date, venue, location, source, lineage },
         "tracks":    [ { index, filename, title, track_number, duration } ]
       }
     Container fields are read from the first successfully tagged file.
@@ -645,9 +768,7 @@ def read_flac_tags(audio_files):
 
             # Capture container-level tags from first file that has them
             if not container:
-                for tag_key, field in _TAG_MAP.items():
-                    if tag_key in tags and field not in ("title", "track_number", "track_total"):
-                        container[field] = tags[tag_key][0]
+                container = _container_from_tags(tags)
 
             # Full raw Vorbis comments (lowercased keys, single values unwrapped)
             # so the UI can show the same JSON as the recording view's File Tags.
@@ -690,7 +811,8 @@ def build_recording_tags(recording):
     and the debug endpoint (which compares it against on-disk tags).
 
     Returns (container_tags: dict, track_total: str). Only non-empty values are
-    included in container_tags.
+    included in container_tags. PERFORMER is a list (one Vorbis comment per
+    musician); every other value is a string.
     """
     perf   = recording.performance
     venue  = perf.venue if perf else None
@@ -712,20 +834,34 @@ def build_recording_tags(recording):
     # ── Source string ─────────────────────────────────────────────────────────
     source_str = recording.source
 
-    # ── Artist / album labels ─────────────────────────────────────────────────
-    artist_name = perf.performer.name if (perf and perf.performer) else None
-    album_parts = [p for p in [artist_name, concert_date, venue_name] if p]
+    # ── Artist, genre, lineup ─────────────────────────────────────────────────
+    artist      = perf.artist if perf else None
+    artist_name = artist.name if artist else None
+    genre_name  = artist.genre.name if (artist and artist.genre) else None
+    # The lineup belongs to the PERFORMANCE (two recordings of one night share
+    # it): roster inheritance, overrides, guests and dedupe are all resolved
+    # there. Bare names, no instrument, in resolved order.
+    performers = []
+    if perf:
+        from app.utils.personnel import resolve_performance_personnel
+        performers = [p["name"] for p in resolve_performance_personnel(perf) if p.get("name")]
+
+    # ALBUM is "date - venue": the act is already in ARTIST, and date first
+    # makes players sort shows chronologically.
+    album_parts = [p for p in [concert_date, venue_name] if p]
     album_str   = " - ".join(album_parts) if album_parts else None
 
     container_tags = {}
-    if artist_name:       container_tags["ARTIST"]          = artist_name
-    if album_str:         container_tags["ALBUM"]           = album_str
-    if perf and perf.start_year: container_tags["DATE"]     = str(perf.start_year)
-    if concert_date:      container_tags["CONCERTDATE"]     = concert_date
-    if venue_name:        container_tags["CONCERTVENUE"]    = venue_name
-    if location_parts:    container_tags["CONCERTLOCATION"] = ", ".join(location_parts)
-    if source_str:        container_tags["RECORDINGSOURCE"] = source_str
-    if recording.lineage: container_tags["LINEAGE"]         = recording.lineage
+    if artist_name:       container_tags["ARTIST"]      = artist_name
+    if artist_name:       container_tags["ALBUMARTIST"] = artist_name
+    if album_str:         container_tags["ALBUM"]       = album_str
+    if concert_date:      container_tags["DATE"]        = concert_date
+    if venue_name:        container_tags["VENUE"]       = venue_name
+    if location_parts:    container_tags["LOCATION"]    = ", ".join(location_parts)
+    if source_str:        container_tags["SOURCE"]      = source_str
+    if recording.lineage: container_tags["LINEAGE"]     = recording.lineage
+    if genre_name:        container_tags["GENRE"]       = genre_name
+    if performers:        container_tags["PERFORMER"]   = performers   # multi-valued
 
     return container_tags, str(len(tracks))
 
@@ -764,7 +900,9 @@ def write_flac_tags(recording, library_root):
 
     Builds container-level tags via build_recording_tags(), then per-track
     TITLE/TRACKNUMBER/TRACKTOTAL for each Track. Existing Vorbis comments are
-    replaced entirely (clean write).
+    replaced entirely (clean write, Ryan 2026-09-16). A track's note becomes
+    COMMENT. Anything we do not write,
+    DISCNUMBER and DISCTOTAL included, is removed.
 
     Args:
         recording:    Recording ORM object with relationships loaded
@@ -797,6 +935,8 @@ def write_flac_tags(recording, library_root):
             audio["TRACKTOTAL"]  = track_total
             if track.songwriter:
                 audio["COMPOSER"] = track.songwriter
+            if track.notes and track.notes.strip():
+                audio["COMMENT"] = track.notes.strip()
 
             audio.save()
             n_written += 1
@@ -1133,6 +1273,86 @@ def detect_source_from_name(folder_name):
         return None
     hits = _SOURCE_IN_FOLDER.findall(folder_name)
     return hits[-1].upper() if hits else None
+
+
+# ── Equipment named in a folder name (2026-09-17) ────────────────────────────
+#
+# Tapers put their rig in the folder name as routinely as they put the source
+# in it: "gd1977-05-08.aud.schoeps.nak700.t01". detect_source_from_name()
+# already harvests the SBD/AUD/MTX/FM half; this harvests the gear, which is
+# lineage information and nowhere else in the metadata when the folder has no
+# info file — the exact case a collector adopting an existing library is in.
+#
+# Two tiers, because the false-positive problem here is not theoretical. A
+# folder name is short and adversarial: it is made of act names, venue names,
+# city names and taper surnames, and a wrong lineage written unattended across
+# a few thousand folders is worse than no lineage at all.
+#
+#   Tier 1, whole words: makers whose names are not English words and not
+#   plausible surnames in this position. Delimiter-bounded.
+#
+#   Tier 2, prefix + model number, GLUED: short tokens that are only equipment
+#   when a number is stuck to them. "at" is a preposition, "ca" is California,
+#   "sp" is anything at all. "at853" is a microphone. The digit run is capped
+#   at four so a glued US ZIP ("ca94704") cannot read as a model.
+#
+# Deliberately NOT included: single-letter prefixes. "d7" and "m10" and "v3"
+# are real decks, but "d1"/"d2" is the disc-number convention _parse_set_dir
+# already owns (d01t01), and a lineage that swallows disc markers would be
+# both wrong and confusing. Missing a deck is cheap; inventing one is not.
+_GEAR_WORDS = (
+    "schoeps", "neumann", "sennheiser", "nakamichi", "nak", "oktava",
+    "earthworks", "josephson", "milab", "naiant", "busman", "mbho",
+    "gefell", "beyerdynamic", "audio-technica", "lunatec", "nagra",
+    "tascam", "marantz", "apogee", "edirol", "sony", "dat",
+)
+
+_GEAR_PREFIXES = ("akg", "at", "km", "cmc", "mk", "dpa", "ca", "sp",
+                  "ua", "sbm", "pcm", "dr", "jb")
+
+# A model number, when one is glued on: "nak700", "mbho603a", "akg451", "mk4".
+# Four digits maximum so a glued US ZIP cannot read as a model.
+_GEAR_MODEL = r"\d{1,4}[a-z]?"
+
+_DELIM = r"(?:^|[(\[._\-\s>])"
+_ENDIM = r"(?=$|[)\]._\-\s>])"
+
+# Words take the model number OPTIONALLY (schoeps, nak700); prefixes REQUIRE
+# it, which is the whole reason they are a separate tier -- see the note above.
+_GEAR_IN_FOLDER = re.compile(
+    _DELIM + "(" +
+    "|".join(re.escape(w) + "(?:" + _GEAR_MODEL + ")?"
+             for w in sorted(_GEAR_WORDS, key=len, reverse=True)) +
+    "|" +
+    "|".join(re.escape(p) + _GEAR_MODEL for p in _GEAR_PREFIXES) +
+    ")" + _ENDIM,
+    re.IGNORECASE,
+)
+
+
+def detect_gear_from_name(folder_name):
+    """
+    Equipment tokens named in a folder name, in the order they appear.
+
+    Returns the matched text VERBATIM (original spelling and case), deduped
+    case-insensitively. "gd77-05-08.aud.schoeps.nak700" -> ["schoeps", "nak700"].
+
+    Returns a list rather than a lineage string on purpose. A lineage is a
+    CHAIN — "Schoeps CMC6/MK4 > Lunatec V3 > SD722 > FLAC" asserts an order
+    and a completeness. A folder name states neither: it names some gear. Any
+    caller joining these with ">" would be fabricating a signal chain out of a
+    word list, which is the uncorroborated-value failure this codebase already
+    has rules about. Join with ", " and let a human make it a chain.
+    """
+    if not folder_name:
+        return []
+    out, seen = [], set()
+    for hit in _GEAR_IN_FOLDER.findall(folder_name):
+        key = hit.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(hit)
+    return out
 
 
 def detect_source(text):
@@ -1607,7 +1827,7 @@ def build_scan_payload(folder_path, info_override=None):
     from_tags = read_flac_tags(files["audio_files"])
     log_step(job, "read FLAC tags", f"{len(files['audio_files'])} file(s)")
 
-    # Parse CONCERTLOCATION tag into city/state/country using the same
+    # Parse the LOCATION tag into city/state/country using the same
     # geonamescache-backed parser as the info file (best-effort, graceful fallback)
     tag_city = tag_state = tag_country = None
     tag_location = from_tags["container"].get("location") or ""
@@ -1786,6 +2006,23 @@ def build_scan_payload(folder_path, info_override=None):
             resp["suggestions"]["from_info_file"]["source"] = from_folder
             resp["source_from_folder_name"] = True
 
+    # Lineage, same last-resort rule and the same reason (2026-09-17). A taper
+    # who writes "gd1977-05-08.aud.schoeps.nak700" has named their rig, and for
+    # a folder with no info file that is the ONLY place the rig is recorded —
+    # which is exactly the folder a collector adopting an existing library is
+    # looking at.
+    #
+    # Joined with ", " and never ">": the folder named some gear, it did not
+    # state a signal chain. Writing "schoeps > nak700" would assert an order
+    # and a completeness nothing here observed, and a reviewer reading it back
+    # would have no way to tell the invented arrow from a taper's own.
+    if not resp["suggestions"]["from_tags"].get("lineage") \
+            and not resp["suggestions"]["from_info_file"].get("lineage"):
+        gear = detect_gear_from_name(resp["folder_name"])
+        if gear:
+            resp["suggestions"]["from_info_file"]["lineage"] = ", ".join(gear)
+            resp["lineage_from_folder_name"] = True
+
     resp["health"] = compute_health(resp)
     log_step(job, "done", f"health {resp['health']['score']} ({resp['health']['band']})")
     return resp
@@ -1831,9 +2068,9 @@ class IngestCancelled(Exception):
 
 def move_to_library(source_folder, library_root, artist_name, folder_name,
                     behavior="copy", progress_cb=None, audio_rename_map=None,
-                    cancel_cb=None):
+                    cancel_cb=None, under_artist_folder=True):
     """
-    Move or copy a source folder into the library under the artist directory.
+    Move or copy a source folder into the library.
 
     Audio files are always flattened into the destination folder's ROOT and
     renamed per `audio_rename_map` (original rel_path → new flat filename),
@@ -1860,6 +2097,19 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
                               re-read the actual name from the returned path rather
                               than assume this argument is what landed on disk.
         behavior           : "copy" | "move"
+        under_artist_folder: bool — whether to file the show under an
+                              <artist_name>/ directory (the default, and what
+                              Trellis-created libraries look like) or flat at
+                              the library root. A collector who pointed Trellis
+                              at their OWN library may keep every show in one
+                              flat level with the artist in the folder name;
+                              filing new material under an artist directory
+                              there leaves them with a permanently hybrid tree.
+                              An INSTALL-level setting, not a per-user one —
+                              a library has one shape, so it is read from
+                              node_setting and passed in by the caller rather
+                              than looked up here (this function has no app
+                              context and its tests call it directly).
         progress_cb         : callable(copied_bytes, total_bytes) | None — progress
         audio_rename_map   : {rel_path_or_basename: new_filename}, from
                               compute_audio_rename_map(). An audio file with
@@ -1878,7 +2128,11 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     Returns:
         str — new folder path relative to library_root
     """
-    dest_dir = Path(library_root) / _sanitize_path(artist_name)
+    # The artist directory is a CONVENTION, not a law (2026-09-17). When it is
+    # off, the show lands directly at the library root and dedupe happens
+    # against every folder there instead of that one artist's shelf.
+    dest_dir = (Path(library_root) / _sanitize_path(artist_name)
+                if under_artist_folder else Path(library_root))
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     # Guard against silently merging into an already-existing folder of the
@@ -1937,8 +2191,8 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         # empty-of-anything-useful) directory tree that's left behind.
         shutil.rmtree(str(src), ignore_errors=True)
         # The recording folder itself is gone — now check whether ITS parent
-        # (typically the "Performer Name" staging folder in a Bulk Import
-        # layout, e.g. Import/Performer Name/Show Folder/) is left empty too,
+        # (typically the "Artist Name" staging folder in a Bulk Import
+        # layout, e.g. Import/Artist Name/Show Folder/) is left empty too,
         # and remove it if so (Ryan, 2026-07-23 — applies to every
         # move-behavior ingest, not just Bulk Import; see
         # _cleanup_empty_parent's own docstring for the safety guards).
@@ -1967,7 +2221,7 @@ def _is_junk_name(name):
 
 # Standard macOS/user directories that must never be auto-deleted even if
 # they happen to be empty — this cleanup is meant for disposable Bulk Import
-# staging folders (e.g. "Performer Name"), not general-purpose folders a
+# staging folders (e.g. "Artist Name"), not general-purpose folders a
 # user might legitimately empty out for unrelated reasons.
 _PROTECTED_DIR_NAMES = {
     "Desktop", "Downloads", "Documents", "Music", "Movies",
@@ -1980,7 +2234,7 @@ _PROTECTED_DIR_NAMES = {
     # that must never vanish; this name-only safety exclusion doesn't couple
     # the app to it functionally, so it doesn't reopen that decision).
     # Explicit ask (Ryan, 2026-08-23): these must never be removed even if
-    # briefly empty between imports — unlike a "Performer Name" staging
+    # briefly empty between imports — unlike a "Artist Name" staging
     # folder, they are permanent structure, not disposable. NOTE: "Download"
     # (singular) is Flux's own folder and distinct from macOS's "Downloads"
     # above; both are listed, neither substitutes for the other.
@@ -1994,7 +2248,7 @@ def _cleanup_empty_parent(folder):
     folder itself — already gone by the time this runs, see the rmtree
     above), remove ITS parent too if that parent is now empty. One level
     only — never walks further up the tree (Ryan's ask was specifically
-    "the Performer Name source directory," singular, not an arbitrary climb
+    "the Artist Name source directory," singular, not an arbitrary climb
     toward the filesystem root).
 
     Best-effort and silent: this is a courtesy cleanup, not something that

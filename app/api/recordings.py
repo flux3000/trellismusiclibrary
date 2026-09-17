@@ -29,7 +29,7 @@ from app.models.collection import CollectionRecording
 from app.models.recording_event import RecordingEvent
 from app.models.track import Track
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.play_log import PlayLog
 from app.models.venue import Venue
 from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recording_tags)
@@ -59,19 +59,19 @@ def _card_eager(query):
     """
     Eager-load everything `recording_row(card=True)` walks.
 
-    Without this each card row lazy-loads Performance → Performer → Genre and
-    → PerformerImage separately, which is an N+1 the moment a module shows more
+    Without this each card row lazy-loads Performance → Artist → Genre and
+    → ArtistImage separately, which is an N+1 the moment a module shows more
     than a couple of cards. Defined once so every card-bearing endpoint loads
     the same set — the serializer's docstring names this as the caller's
     responsibility, and three copies of it would eventually disagree.
     """
     return query.options(
         selectinload(Recording.performance)
-        .selectinload(Performance.performer)
-        .selectinload(Performer.images),
+        .selectinload(Performance.artist)
+        .selectinload(Artist.images),
         selectinload(Recording.performance)
-        .selectinload(Performance.performer)
-        .selectinload(Performer.genre),
+        .selectinload(Performance.artist)
+        .selectinload(Artist.genre),
     )
 
 
@@ -105,7 +105,7 @@ def recent_recordings():
 # ── GET /api/recordings/recommended ───────────────────────────────────────────
 # Browse view's "Recommended" module (Library Browse View design spec,
 # 2026-08-02). Randomly-selected high-quality (A/A+ only — not A-) recordings,
-# weighted toward ones absent from play_log, diverse by Performer (hard rule)
+# weighted toward ones absent from play_log, diverse by Artist (hard rule)
 # and Genre (soft preference, degrades silently while genre_id is
 # NULL/absent). Seeded by date so picks are stable within a day; the client's
 # "Show me three more" control advances `reroll` to get a fresh draw.
@@ -121,21 +121,21 @@ def _recommended_pool_query():
     )
 
 
-def _genre_by_performer(performer_ids):
+def _genre_by_artist(artist_ids):
     """
-    Best-effort {performer_id: genre_id} map for the diversity preference.
+    Best-effort {artist_id: genre_id} map for the diversity preference.
     Returns {} (no genre preference applied) if the query fails for any
-    reason — in particular, `performer.genre_id` may not exist yet on the
+    reason — in particular, `artist.genre_id` may not exist yet on the
     live DB (the genre migration had not been run as of this feature's
     build). Diversity-by-genre is a soft preference, never load-bearing, so
     failing this open (no genre data) rather than raising is the right call.
     """
-    if not performer_ids:
+    if not artist_ids:
         return {}
     try:
         return dict(
-            db.session.query(Performer.id, Performer.genre_id)
-            .filter(Performer.id.in_(performer_ids))
+            db.session.query(Artist.id, Artist.genre_id)
+            .filter(Artist.id.in_(artist_ids))
             .all()
         )
     except Exception:
@@ -143,33 +143,33 @@ def _genre_by_performer(performer_ids):
         return {}
 
 
-def _select_diverse(candidates, limit, perf_by_rec, genre_by_performer):
+def _select_diverse(candidates, limit, perf_by_rec, genre_by_artist):
     """
     Greedily pick up to `limit` recordings from `candidates` (already ordered
-    by preference — unplayed first). Never two picks share a Performer — a
+    by preference — unplayed first). Never two picks share an Artist — a
     hard rule, no exception: if the pool doesn't have `limit` distinct
-    Performers to offer, the draw comes back short rather than repeating one.
+    Artists to offer, the draw comes back short rather than repeating one.
     Prefers distinct Genres too, but relaxes that if the pool can't support
     it (soft preference, degrades silently while genre_id is NULL/absent).
     """
     picks = []
-    used_performers = set()
+    used_artists = set()
     used_genres = set()
-    deferred = []   # distinct-performer, but genre already used this draw
+    deferred = []   # distinct-artist, but genre already used this draw
 
     for r in candidates:
         if len(picks) >= limit:
             break
         pid = perf_by_rec.get(r.id)
-        if pid is not None and pid in used_performers:
+        if pid is not None and pid in used_artists:
             continue
-        gid = genre_by_performer.get(pid) if pid is not None else None
+        gid = genre_by_artist.get(pid) if pid is not None else None
         if gid is not None and gid in used_genres:
             deferred.append((r, pid, gid))
             continue
         picks.append(r)
         if pid is not None:
-            used_performers.add(pid)
+            used_artists.add(pid)
         if gid is not None:
             used_genres.add(gid)
 
@@ -177,19 +177,19 @@ def _select_diverse(candidates, limit, perf_by_rec, genre_by_performer):
         for r, pid, gid in deferred:
             if len(picks) >= limit:
                 break
-            if pid is not None and pid in used_performers:
+            if pid is not None and pid in used_artists:
                 continue
             picks.append(r)
             if pid is not None:
-                used_performers.add(pid)
+                used_artists.add(pid)
 
     return picks[:limit]
 
 
-def _diverse_sequence(candidates, perf_by_rec, genre_by_performer):
+def _diverse_sequence(candidates, perf_by_rec, genre_by_artist):
     """
-    The WHOLE pool, ordered so no Performer comes round again until every
-    other Performer has had a turn.
+    The WHOLE pool, ordered so no Artist comes round again until every
+    other Artist has had a turn.
 
     This is what makes the Top Shelf a record bin (Ryan, 2026-09-02) rather
     than a single draw of six: the strip is now flipped through one tile at a
@@ -202,13 +202,13 @@ def _diverse_sequence(candidates, perf_by_rec, genre_by_performer):
     byte-for-byte the old six-tile draw** and the existing behaviour (and its
     tests) are a prefix of the new sequence rather than a special case of it.
     Rounds after the first relax nothing: each is again at most one recording
-    per Performer.
+    per Artist.
     """
     seq = []
     remaining = list(candidates)
     while remaining:
         round_picks = _select_diverse(remaining, len(remaining),
-                                      perf_by_rec, genre_by_performer)
+                                      perf_by_rec, genre_by_artist)
         if not round_picks:
             break                      # nothing pickable; stop rather than spin
         seq.extend(round_picks)
@@ -248,8 +248,8 @@ def recommended_recordings():
         .all()
     }
 
-    perf_by_rec = {r.id: (r.performance.performer_id if r.performance else None) for r in pool}
-    genre_by_performer = _genre_by_performer(
+    perf_by_rec = {r.id: (r.performance.artist_id if r.performance else None) for r in pool}
+    genre_by_artist = _genre_by_artist(
         {pid for pid in perf_by_rec.values() if pid is not None}
     )
 
@@ -265,12 +265,12 @@ def recommended_recordings():
 
     if offset:
         picks = _diverse_sequence(ordered, perf_by_rec,
-                                  genre_by_performer)[offset:offset + limit]
+                                  genre_by_artist)[offset:offset + limit]
     else:
         # The common case — the first paint — still runs the single-round
         # picker. Building the whole sequence to take the first six of it
         # would be the same answer for more work on every Browse load.
-        picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_performer)
+        picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_artist)
     # No waveform as of 2026-08-07: the Browse card is a handbill rendered from
     # metadata, so shipping downsampled peaks here was pure payload. The
     # serializer's opt-in param is untouched and still tested.
@@ -438,7 +438,7 @@ def favorite_recordings():
     is inherently capped, this is "the shelf I keep coming back to" and wants
     to be complete.
 
-    Ordered by performer then date — a Favorites list is browsed by looking for
+    Ordered by artist then date — a Favorites list is browsed by looking for
     a name, not by when the star happened to be clicked. `is_favorite` carries
     no timestamp anyway, which is deliberate: it is a one-click reaction, not an
     event log (see Recording.is_favorite).
@@ -447,7 +447,7 @@ def favorite_recordings():
     already unusable and would want its own page.
 
     card=True unconditionally, added 2026-08-23 — the sidebar row now shows a
-    small performer thumbnail beside the show's full title, which needs
+    small artist thumbnail beside the show's full title, which needs
     `image_id`. Eager-loaded via `_card_eager` for the same N+1 reason every
     other card=True caller uses it (see that function's docstring); a
     favorites list can realistically run to the same size as /recent's card
@@ -456,17 +456,17 @@ def favorite_recordings():
     limit = request.args.get("limit", 200, type=int) or 200
     limit = max(1, min(limit, 500))
     # coalesce(sort_name, name), not sort_name: the column is NULL for every one
-    # of the 179 performers in the library (checked 2026-08-22 —
+    # of the 179 artists in the library (checked 2026-08-22 —
     # scripts/backfill_sort_names.py has never been run against it). Ordering on
     # it alone would tie every row and fall back to whatever order SQLite felt
     # like. This expression is the right one regardless of whether that backfill
     # ever happens.
-    sort_key = db.func.coalesce(Performer.sort_name, Performer.name)
+    sort_key = db.func.coalesce(Artist.sort_name, Artist.name)
     recs = _card_eager(
         Recording.query
         .filter(Recording.is_favorite.is_(True))
         .join(Performance, Recording.performance_id == Performance.id)
-        .outerjoin(Performer, Performance.performer_id == Performer.id)
+        .outerjoin(Artist, Performance.artist_id == Artist.id)
         .order_by(sort_key.asc(),
                   Performance.start_year.asc(),
                   Performance.start_month.asc(),
@@ -489,7 +489,7 @@ def scan_recording():
 
     Also runs Paula (app.utils.paula.compute_paula_score) — the free,
     non-AI completeness/confidence scorer, 2026-07-16. Paula needs real DB
-    data to fuzzy-match tag/txt-inferred Performer and Venue names, which is
+    data to fuzzy-match tag/txt-inferred Artist and Venue names, which is
     why she runs here (DB access) rather than inside build_scan_payload
     (kept DB-free/pure, same as compute_health()). Scoped to the interactive
     Add Recording flow only for now — batch-scan is untouched.
@@ -525,14 +525,14 @@ def scan_recording():
     if resp is None:
         return jsonify({"error": "No audio files found in folder"}), 422
 
-    known_performers = [p.name for p in Performer.query.all()]
+    known_artists = [p.name for p in Artist.query.all()]
     known_venues = [
         {"name": v.name, "city": v.city, "state": v.state, "country": v.country}
         for v in Venue.query.all()
     ]
-    log_step(job, "queried known performers/venues",
-             f"{len(known_performers)} performers, {len(known_venues)} venues")
-    resp["paula"] = compute_paula_score(resp, known_performers, known_venues)
+    log_step(job, "queried known artists/venues",
+             f"{len(known_artists)} artists, {len(known_venues)} venues")
+    resp["paula"] = compute_paula_score(resp, known_artists, known_venues)
     log_step(job, "response ready", "Paula scoring done")
 
     return jsonify(resp)
@@ -633,7 +633,7 @@ def _delete_tracks_of_recording(recording_id):
 def delete_recording(recording_id):
     """
     Delete a recording and all its child records (tracks, events, fingerprints).
-    Then prune any performance/performer/canonical-artist left empty by the
+    Then prune any performance/artist/canonical-artist left empty by the
     delete.
 
     `?delete_files=1` ALSO removes the recording's folder from disk (Ryan,

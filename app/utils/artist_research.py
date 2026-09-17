@@ -1,11 +1,11 @@
 """
-app/utils/performer_research.py — AI Dossier research for the Performer page.
+app/utils/artist_research.py — AI Dossier research for the Artist page.
 
-run_performer_research() sends an act's name (+ any existing bio draft) to
+run_artist_research() sends an act's name (+ any existing bio draft) to
 Anthropic (BYOK key, same model preference as ingest-side AI Assist), lets it
 research with the web-search tool, and returns a drafted biography plus
 suggested external resource links (collector sites, discography databases,
-etc.) for human review. Nothing is written to the Performer record —
+etc.) for human review. Nothing is written to the Artist record —
 the caller (frontend) reviews and applies: the bio is copy-paste into `bio`,
 each resource link is an individual "Add" action into the Resources list.
 
@@ -217,7 +217,7 @@ def _context_block(context):
 
 
 # Citation markup the web-search tool leaves in generated prose. It surfaced as
-# literal "<cite index=...>" text in the biography on the Performer page
+# literal "<cite index=...>" text in the biography on the Artist page
 # (2026-08-07). Stripped SERVER-SIDE so what we store is already clean —
 # scrubbing at render time would leave the mess in `dossier_json` forever and
 # require every future consumer to re-implement the same cleanup.
@@ -255,7 +255,7 @@ def _extract_result(resp, tool_name):
             "biography": "", "resources": [], "members": [], "sources": []}
 
 
-def run_performer_research(performer_name, current_bio, api_key, model,
+def run_artist_research(artist_name, current_bio, api_key, model,
                            *, context=None, question=None, mode="bio"):
     """
     Run a research pass over an act. Two modes, one call path:
@@ -276,7 +276,7 @@ def run_performer_research(performer_name, current_bio, api_key, model,
         raise AiAssistError("Unknown research mode %r" % mode)
     system, submit_tool, tool_name = _MODES[mode]
 
-    text = "Act name: %s\n" % performer_name
+    text = "Act name: %s\n" % artist_name
     ctx = _context_block(context)
     if ctx:
         text += "\n" + ctx
@@ -293,7 +293,7 @@ def run_performer_research(performer_name, current_bio, api_key, model,
     max_uses = MAX_SEARCHES_WITH_QUESTION if question else MAX_SEARCHES
 
     _log("start act=%r mode=%s model=%s q=%s max_uses=%d"
-         % (performer_name, mode, model, bool(question), max_uses))
+         % (artist_name, mode, model, bool(question), max_uses))
 
     client = anthropic.Anthropic(api_key=api_key, timeout=300.0)
     t0 = time.time()

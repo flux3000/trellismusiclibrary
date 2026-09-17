@@ -70,10 +70,10 @@ def _venue(name="Ryman Auditorium", city="Nashville", state="TN", country=None):
     return SimpleNamespace(name=name, city=city, state=state, country=country)
 
 
-def _performance(performer, venue, start_year=1964, start_month=None, start_day=None,
+def _performance(artist, venue, start_year=1964, start_month=None, start_day=None,
                   end_year=None, end_month=None, end_day=None):
     return SimpleNamespace(
-        performer=performer, venue=venue,
+        artist=artist, venue=venue,
         start_year=start_year, start_month=start_month, start_day=start_day,
         end_year=end_year, end_month=end_month, end_day=end_day,
         city=None, state=None, country=None,
@@ -96,9 +96,9 @@ def test_rename_dedupes_against_a_different_recordings_folder(tmp_path):
     stale = artist_dir / "Various Artists - 1964 - Ryman Auditorium - Unknown Location"
     stale.mkdir()
 
-    performer = SimpleNamespace(name="Various Artists")
+    artist = SimpleNamespace(name="Various Artists")
     venue = _venue()
-    performance = _performance(performer, venue)
+    performance = _performance(artist, venue)
     rec = _recording(
         "Various Artists/Various Artists - 1964 - Ryman Auditorium - Unknown Location",
         performance)
@@ -121,9 +121,9 @@ def test_rename_no_op_when_name_already_matches_metadata(tmp_path):
     correct = artist_dir / "Various Artists - 1964 - Ryman Auditorium - Nashville, TN"
     correct.mkdir()
 
-    performer = SimpleNamespace(name="Various Artists")
+    artist = SimpleNamespace(name="Various Artists")
     venue = _venue()
-    performance = _performance(performer, venue)
+    performance = _performance(artist, venue)
     rec = _recording(
         "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN",
         performance)

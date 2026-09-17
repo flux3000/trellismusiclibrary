@@ -2,12 +2,12 @@
 tests/test_peer_visible_set.py — the visible set (peer sharing milestone 2).
 
 Milestone 1 proved a peer can only STREAM what was granted. Milestone 2 gives
-peers real entity pages — performer, venue, artist, genre, search, Browse — and
+peers real entity pages — artist, venue, musician, genre, search, Browse — and
 those are built on the inverse question: what is this peer's entire world?
 
 The leak these tests exist to prevent is NOT the obvious one. Recording lists
 are easy to get right and everyone remembers to filter them. The dangerous leak
-is derived: a performer, venue, artist or genre made visible by a recording the
+is derived: a artist, venue, musician or genre made visible by a recording the
 peer was never granted, and any count computed over the full library.
 
 So the shape of this file is: build a library with TWO disjoint halves, grant
@@ -20,12 +20,12 @@ conftest._seed(), so no existing test's expectations shift.
 import pytest
 
 from app.extensions import db as _db
-from app.models.artist import Artist, Membership
+from app.models.musician import Musician, Membership
 from app.models.collection import Collection, CollectionRecording
 from app.models.genre import Genre
 from app.models.peer import Peer, CollectionGrant
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.recording import Recording
 from app.models.venue import Venue
 
@@ -33,13 +33,13 @@ from app.utils.peer_access import (
     peer_can_access_recording_id,
     peer_visible_recording_ids,
     peer_visible_performance_ids,
-    peer_visible_performer_ids,
-    peer_visible_venue_ids,
     peer_visible_artist_ids,
+    peer_visible_venue_ids,
+    peer_visible_musician_ids,
     peer_visible_genre_ids,
-    peer_can_access_performer,
-    peer_can_access_venue,
     peer_can_access_artist,
+    peer_can_access_venue,
+    peer_can_access_musician,
     peer_can_access_genre,
 )
 
@@ -47,26 +47,26 @@ from app.utils.peer_access import (
 # ── World building ────────────────────────────────────────────────────────────
 
 def _build_half(label, genre_name):
-    """A complete, self-contained slice: genre → performer → member artist →
+    """A complete, self-contained slice: genre → artist → member musician →
     venue → performance → recording. Returns the ids as a dict."""
     genre = Genre(name=genre_name)
     _db.session.add(genre)
     _db.session.flush()
 
-    performer = Performer(name=f"{label} Band", genre_id=genre.id)
-    _db.session.add(performer)
-    _db.session.flush()
-
-    artist = Artist(name=f"{label} Player")
+    artist = Artist(name=f"{label} Band", genre_id=genre.id)
     _db.session.add(artist)
     _db.session.flush()
-    _db.session.add(Membership(performer_id=performer.id, artist_id=artist.id, order=0))
+
+    musician = Musician(name=f"{label} Player")
+    _db.session.add(musician)
+    _db.session.flush()
+    _db.session.add(Membership(artist_id=artist.id, musician_id=musician.id, order=0))
 
     venue = Venue(name=f"{label} Hall", city=label, country="US")
     _db.session.add(venue)
     _db.session.flush()
 
-    perf = Performance(performer_id=performer.id, venue_id=venue.id,
+    perf = Performance(artist_id=artist.id, venue_id=venue.id,
                        start_year=1975, start_month=6, start_day=1)
     _db.session.add(perf)
     _db.session.flush()
@@ -77,7 +77,7 @@ def _build_half(label, genre_name):
     _db.session.flush()
     _db.session.commit()
 
-    return {"genre": genre.id, "performer": performer.id, "artist": artist.id,
+    return {"genre": genre.id, "artist": artist.id, "musician": musician.id,
             "venue": venue.id, "performance": perf.id, "recording": rec.id}
 
 
@@ -119,9 +119,9 @@ def two_halves(app):
 def test_no_grants_means_empty_world(app):
     peer = _peer_granted([], name="Ungranted")
     assert peer_visible_recording_ids(peer) == set()
-    assert peer_visible_performer_ids(peer) == set()
-    assert peer_visible_venue_ids(peer) == set()
     assert peer_visible_artist_ids(peer) == set()
+    assert peer_visible_venue_ids(peer) == set()
+    assert peer_visible_musician_ids(peer) == set()
     assert peer_visible_genre_ids(peer) == set()
 
 
@@ -138,12 +138,12 @@ def test_visible_recordings_are_exactly_the_granted_collection(two_halves):
 
 # ── Derived dimensions — the real leak surface ────────────────────────────────
 
-def test_ungranted_performer_is_invisible(two_halves):
+def test_ungranted_artist_is_invisible(two_halves):
     peer = two_halves["peer"]
-    visible = peer_visible_performer_ids(peer)
-    assert two_halves["shared"]["performer"] in visible
-    assert two_halves["secret"]["performer"] not in visible
-    assert not peer_can_access_performer(peer, two_halves["secret"]["performer"])
+    visible = peer_visible_artist_ids(peer)
+    assert two_halves["shared"]["artist"] in visible
+    assert two_halves["secret"]["artist"] not in visible
+    assert not peer_can_access_artist(peer, two_halves["secret"]["artist"])
 
 
 def test_ungranted_venue_is_invisible(two_halves):
@@ -154,12 +154,12 @@ def test_ungranted_venue_is_invisible(two_halves):
     assert not peer_can_access_venue(peer, two_halves["secret"]["venue"])
 
 
-def test_ungranted_artist_is_invisible(two_halves):
+def test_ungranted_musician_is_invisible(two_halves):
     peer = two_halves["peer"]
-    visible = peer_visible_artist_ids(peer)
-    assert two_halves["shared"]["artist"] in visible
-    assert two_halves["secret"]["artist"] not in visible
-    assert not peer_can_access_artist(peer, two_halves["secret"]["artist"])
+    visible = peer_visible_musician_ids(peer)
+    assert two_halves["shared"]["musician"] in visible
+    assert two_halves["secret"]["musician"] not in visible
+    assert not peer_can_access_musician(peer, two_halves["secret"]["musician"])
 
 
 def test_ungranted_genre_is_invisible(two_halves):
@@ -210,7 +210,7 @@ def test_revoking_the_grant_empties_the_world(two_halves):
     _db.session.commit()
 
     assert peer_visible_recording_ids(peer) == set()
-    assert peer_visible_performer_ids(peer) == set()
+    assert peer_visible_artist_ids(peer) == set()
 
 
 def test_recording_in_both_granted_and_ungranted_collection_is_visible(two_halves):

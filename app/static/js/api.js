@@ -11,10 +11,10 @@ const API = (() => {
   // `null` = my own library. A number = the id of a joined remote_node, and
   // every eligible request is rewritten to travel through the local proxy:
   //
-  //     /api/performers/12  →  /api/remotes/3/performers/12
+  //     /api/artists/12  →  /api/remotes/3/artists/12
   //
-  // Rewriting HERE, in one function, is what lets the existing Performer,
-  // Venue, Artist and Genre pages render a remote library with no changes of
+  // Rewriting HERE, in one function, is what lets the existing Artist,
+  // Venue, Musician and Genre pages render a remote library with no changes of
   // their own. The alternative — a parallel set of peer-only pages — was
   // rejected in the Peer UX design session precisely because it would fall out
   // of step with the local pages within a month.
@@ -28,8 +28,8 @@ const API = (() => {
   // node about my preferences is meaningless, and asking it about my peers
   // would be a bug worth catching loudly rather than proxying politely.
   const REMOTE_CAPABLE = new Set([
-    'collections', 'recordings', 'performances', 'performers', 'venues',
-    'artists', 'genres', 'stream', 'search',
+    'collections', 'recordings', 'performances', 'artists', 'venues',
+    'musicians', 'genres', 'stream', 'search',
   ])
 
   function contextualise(path) {
@@ -109,13 +109,13 @@ const API = (() => {
 
   // ── Entity photos, one shape for every photographed dimension ─────────────
   //
-  // Performer, Venue, Artist and Event all expose the identical five routes
+  // Artist, Venue, Musician and Event all expose the identical five routes
   // (app/utils/entity_images.py generates them server-side), so the client
   // half is generated too — otherwise the fourth copy-paste of the FormData
   // upload is where someone forgets `credentials: 'same-origin'` and photos
   // 401 on one dimension only.
   //
-  // `contextual` is opt-in and currently TRUE only for performers: an <img src>
+  // `contextual` is opt-in and currently TRUE only for artists: an <img src>
   // never passes through request(), so without it a photo URL resolves against
   // localhost while viewing a remote library. It stays off for the other three
   // because api/share.py exposes no proxy route for their images — turning it
@@ -184,6 +184,13 @@ const API = (() => {
       libraryRecheck: () => post('/api/system/library-recheck'),
       // Which version am I running, and where is my data? Read by Settings.
       about:          () => get('/api/system/about'),
+      // Library LAYOUT: whether new material is filed under an <Artist>/
+      // folder. Install-level, not a per-user preference -- a library has one
+      // shape. Governs new ingests only; nothing already filed is relocated.
+      libraryLayout:       () => get('/api/system/library-layout'),
+      setLibraryLayout:    (fileUnderArtistFolder) =>
+        put('/api/system/library-layout',
+            { file_under_artist_folder: fileUnderArtistFolder }),
     },
 
     // ── Auth ────────────────────────────────────────────────────────────────
@@ -213,21 +220,21 @@ const API = (() => {
     },
 
 
-    // ── Artists (people) ──────────────────────────────────────────────────────
-    artists: {
-      search: (q)        => get(`/api/artists/search?q=${encodeURIComponent(q)}`),
-      list:   ()         => get('/api/artists/'),
-      get:    (id)       => get(`/api/artists/${id}`),
-      create: (data)     => post('/api/artists/', data),
-      update: (id, data) => put(`/api/artists/${id}`, data),
-      remove: (id)       => request('DELETE', `/api/artists/${id}`),
-      addPerformer:    (id, data)   => post(`/api/artists/${id}/performers`, data),
-      removePerformer: (id, perfId) => request('DELETE', `/api/artists/${id}/performers/${perfId}`),
+    // ── Musicians (people) ──────────────────────────────────────────────────────
+    musicians: {
+      search: (q)        => get(`/api/musicians/search?q=${encodeURIComponent(q)}`),
+      list:   ()         => get('/api/musicians/'),
+      get:    (id)       => get(`/api/musicians/${id}`),
+      create: (data)     => post('/api/musicians/', data),
+      update: (id, data) => put(`/api/musicians/${id}`, data),
+      remove: (id)       => request('DELETE', `/api/musicians/${id}`),
+      addArtist:    (id, data)   => post(`/api/musicians/${id}/artists`, data),
+      removeArtist: (id, perfId) => request('DELETE', `/api/musicians/${id}/artists/${perfId}`),
 
       // Photos (2026-09-01). A person is the one entity here that most
-      // obviously has a likeness; the 2026-08-07 "performer-level only" call
+      // obviously has a likeness; the 2026-08-07 "artist-level only" call
       // was about CARD surfaces and still stands there.
-      ...entityImageApi('artists'),
+      ...entityImageApi('musicians'),
     },
 
     // ── Collections ───────────────────────────────────────────────────────────
@@ -241,19 +248,19 @@ const API = (() => {
       removeRecording: (id, recId)      => request('DELETE', `/api/collections/${id}/recordings/${recId}`),
     },
 
-    // ── Performers (acts) ─────────────────────────────────────────────────────
-    performers: {
-      search:        (q)         => get(`/api/performers/search?q=${encodeURIComponent(q)}`),
-      list:          ()          => get('/api/performers/'),
-      allRecordings: ()          => get('/api/performers/all-recordings'),
-      get:           (id)        => get(`/api/performers/${id}`),
-      recordings:    (id)        => get(`/api/performers/${id}/recordings`),
-      create:        (data)      => post('/api/performers/', data),
-      update:        (id, data)  => put(`/api/performers/${id}`, data),
-      remove:        (id)        => request('DELETE', `/api/performers/${id}`),
-      addStint:      (id, artistId, data) => post(`/api/performers/${id}/members/${artistId}/stints`, data),
-      updateStint:   (stintId, data)      => put(`/api/performers/stints/${stintId}`, data),
-      removeStint:   (stintId)            => request('DELETE', `/api/performers/stints/${stintId}`),
+    // ── Artists (acts) ─────────────────────────────────────────────────────
+    artists: {
+      search:        (q)         => get(`/api/artists/search?q=${encodeURIComponent(q)}`),
+      list:          ()          => get('/api/artists/'),
+      allRecordings: ()          => get('/api/artists/all-recordings'),
+      get:           (id)        => get(`/api/artists/${id}`),
+      recordings:    (id)        => get(`/api/artists/${id}/recordings`),
+      create:        (data)      => post('/api/artists/', data),
+      update:        (id, data)  => put(`/api/artists/${id}`, data),
+      remove:        (id)        => request('DELETE', `/api/artists/${id}`),
+      addStint:      (id, musicianId, data) => post(`/api/artists/${id}/members/${musicianId}/stints`, data),
+      updateStint:   (stintId, data)      => put(`/api/artists/stints/${stintId}`, data),
+      removeStint:   (stintId)            => request('DELETE', `/api/artists/stints/${stintId}`),
 
       // Profile pictures (2026-07-22; MULTI-IMAGE 2026-08-07) — a raw upload,
       // not JSON, so it bypasses request()'s JSON.stringify/Content-Type:
@@ -263,21 +270,21 @@ const API = (() => {
       // (same-origin session cookie covers the @login_required check, same as
       // the waveform/spectrogram images already do).
       //
-      // Images are addressed BY IMAGE ID, not by performer: a performer now has
-      // several and "the performer's image" no longer identifies one.
+      // Images are addressed BY IMAGE ID, not by artist: an artist now has
+      // several and "the artist's image" no longer identifies one.
       // Contextualised: an <img src> never passes through request(), so it
       // would otherwise resolve against localhost while viewing a remote
       // library and 404 on every photo.
-      ...entityImageApi('performers', { contextual: true }),
-      // Wikidata → Wikimedia Commons photo lookup. Performer-only: the bridge
+      ...entityImageApi('artists', { contextual: true }),
+      // Wikidata → Wikimedia Commons photo lookup. Artist-only: the bridge
       // runs through this act's MusicBrainz match, and no other dimension has
       // one. Returns {found:false} when the act simply has no freely-licensed
       // photo — an ordinary outcome, not an error, so it resolves rather than
       // throwing.
-      fetchImage:      (id)            => post(`/api/performers/${id}/images/fetch`),
-      // Caption/credit edit. Also performer-only — a fetched CC photo carries
+      fetchImage:      (id)            => post(`/api/artists/${id}/images/fetch`),
+      // Caption/credit edit. Also artist-only — a fetched CC photo carries
       // an attribution requirement, and only fetched photos exist here.
-      updateImage:     (imageId, data) => put(`/api/performers/images/${imageId}`, data),
+      updateImage:     (imageId, data) => put(`/api/artists/images/${imageId}`, data),
 
       // AI Assist — AI-drafted bio + suggested resource links, background job
       // (same shape as API.ingest.aiAssist*). The ROUTES keep the older
@@ -286,22 +293,22 @@ const API = (() => {
       // wording is AI Assist everywhere (Ryan, 2026-08-07).
       // Pre-flight TOKEN RANGE for one pass — see utils/ai_assist.py. Was a
       // cost range in cents until 2026-09-07; no currency appears anywhere now.
-      aiEstimate:     ()           => get('/api/performers/ai-estimate'),
+      aiEstimate:     ()           => get('/api/artists/ai-estimate'),
       // body: { mode?: 'bio' | 'lineup', question?: string }. Lineup research
       // is a SEPARATE pass on the same endpoint — it neither writes the
-      // description nor persists a dossier blob (see api/performers.py).
-      startDossier:   (id, body)   => post(`/api/performers/${id}/dossier`, body || {}),
-      dossierStatus:  (id, jobId)  => get(`/api/performers/${id}/dossier/${jobId}`),
+      // description nor persists a dossier blob (see api/artists.py).
+      startDossier:   (id, body)   => post(`/api/artists/${id}/dossier`, body || {}),
+      dossierStatus:  (id, jobId)  => get(`/api/artists/${id}/dossier/${jobId}`),
 
       // MusicBrainz — structured facts, separate from AI Assist by design
       // (curated database, no hallucination surface; see utils/musicbrainz.py).
-      // Looks up AND links if the match is unambiguous — see api/performers.py.
+      // Looks up AND links if the match is unambiguous — see api/artists.py.
       // Returns {status:'matched'} or {status, candidates:[...]} to choose from.
-      mbLookup:     (id, q)    => post(`/api/performers/${id}/musicbrainz/lookup`, q ? { q } : {}),
+      mbLookup:     (id, q)    => post(`/api/artists/${id}/musicbrainz/lookup`, q ? { q } : {}),
       mbCandidates: (id, q) =>
-        get(`/api/performers/${id}/musicbrainz/candidates${q ? '?q=' + encodeURIComponent(q) : ''}`),
-      mbResolve:    (id, mbid) => post(`/api/performers/${id}/musicbrainz`, { mbid }),
-      mbMembers:    (id)       => get(`/api/performers/${id}/musicbrainz/members`),
+        get(`/api/artists/${id}/musicbrainz/candidates${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      mbResolve:    (id, mbid) => post(`/api/artists/${id}/musicbrainz`, { mbid }),
+      mbMembers:    (id)       => get(`/api/artists/${id}/musicbrainz/members`),
     },
 
     // ── Peers (inbound sharing — who I share TO) ─────────────────────────────
@@ -331,7 +338,7 @@ const API = (() => {
       create: (data)     => post('/api/performances/', data),
       update: (id, data) => put(`/api/performances/${id}`, data),
       // Per-show instrument / note. NO CALLER as of 2026-08-22 — the inline
-      // editor was cut from V1 (Ryan) and a name click now opens the Artist
+      // editor was cut from V1 (Ryan) and a name click now opens the Musician
       // page. Kept deliberately: the column, the resolver and the endpoint all
       // still carry this, and the UI is the only piece that went.
       updatePersonnelRow: (perfId, personnelId, data) =>
@@ -345,7 +352,7 @@ const API = (() => {
       // table request is unchanged (see app/utils/serialize.py):
       //   `waveform` — downsampled peak strip. Nothing requests it since the
       //                card became a handbill; kept because it's real and tested.
-      //   `card`     — genre colour + performer primary image, for Browse's
+      //   `card`     — genre colour + artist primary image, for Browse's
       //                Recently Added row cards.
       recent:     (limit, opts) => {
         const o = opts || {}
@@ -420,7 +427,7 @@ const API = (() => {
       update: (id, data) => put(`/api/venues/${id}`, data),
       remove: (id)       => request('DELETE', `/api/venues/${id}`),
 
-      // Photos (2026-08-07) — same shapes and semantics as performers, sharing
+      // Photos (2026-08-07) — same shapes and semantics as artists, sharing
       // one server-side implementation (app/utils/entity_images.py) and now one
       // client-side one too, so the gallery component works against any
       // namespace unchanged.

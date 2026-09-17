@@ -18,7 +18,7 @@ from app.utils import commons
 @pytest.fixture()
 def api(app):
     """Test client with auth disabled. Defined per-file, matching the existing
-    convention in test_db_logic.py / test_performer_media.py."""
+    convention in test_db_logic.py / test_artist_media.py."""
     app.config["LOGIN_DISABLED"] = True
     return app.test_client()
 
@@ -173,9 +173,9 @@ def test_image_filenames_empty_for_missing_qid():
 def test_find_photo_skips_already_imported(monkeypatch, app, seeded_ids):
     """A second click must return a DIFFERENT photo, not the same one again."""
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    p = _db.session.get(Performer, seeded_ids["performer_id"])
+    p = _db.session.get(Artist, seeded_ids["artist_id"])
     p.mb_links_json = json.dumps({"Wikidata": "https://www.wikidata.org/wiki/Q1"})
 
     monkeypatch.setattr(commons, "image_filenames_for_qid",
@@ -185,14 +185,14 @@ def test_find_photo_skips_already_imported(monkeypatch, app, seeded_ids):
                                    "licence": "CC BY", "descurl": "http://d"})
     monkeypatch.setattr(commons, "download", lambda url: (b"bytes", ".jpg"))
 
-    first = commons.find_photo_for_performer(p)
+    first = commons.find_photo_for_artist(p)
     assert first["source_ref"] == "First.jpg"
 
-    second = commons.find_photo_for_performer(p, exclude={"First.jpg"})
+    second = commons.find_photo_for_artist(p, exclude={"First.jpg"})
     assert second["source_ref"] == "Second.jpg"
 
     # Nothing left — the ordinary outcome once an act's free images run out.
-    assert commons.find_photo_for_performer(
+    assert commons.find_photo_for_artist(
         p, exclude={"First.jpg", "Second.jpg"}) is None
 
 
@@ -202,25 +202,25 @@ def test_find_photo_returns_none_without_wikidata_link(app, seeded_ids):
     """No MusicBrainz match means no Wikidata link means nothing to follow —
     the ordinary case for most of a long-tail library."""
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    p = _db.session.get(Performer, seeded_ids["performer_id"])
+    p = _db.session.get(Artist, seeded_ids["artist_id"])
     p.mb_links_json = json.dumps({"Discogs": "https://discogs.com/artist/1"})
-    assert commons.find_photo_for_performer(p) is None
+    assert commons.find_photo_for_artist(p) is None
 
 
 def test_find_photo_tolerates_malformed_links_json(app, seeded_ids):
     from app.extensions import db as _db
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
-    p = _db.session.get(Performer, seeded_ids["performer_id"])
+    p = _db.session.get(Artist, seeded_ids["artist_id"])
     p.mb_links_json = "{not valid json"
-    assert commons.find_photo_for_performer(p) is None
+    assert commons.find_photo_for_artist(p) is None
 
 
 def test_fetch_endpoint_requires_musicbrainz_match(api, seeded_ids):
     """The Wikidata link comes from MusicBrainz, so an unmatched act has
     nothing to follow — a clear 400 explaining the prerequisite, not a 500."""
-    r = api.post(f"/api/performers/{seeded_ids['performer_id']}/images/fetch")
+    r = api.post(f"/api/artists/{seeded_ids['artist_id']}/images/fetch")
     assert r.status_code == 400
     assert "MusicBrainz" in r.get_json()["error"]

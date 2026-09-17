@@ -1,7 +1,7 @@
 """
 tests/test_ingest_utils.py — move_to_library()'s Move-behavior cleanup
 (2026-07-23): once a recording folder is moved into the library, its
-immediate parent (the "Performer Name" staging folder in a typical Bulk
+immediate parent (the "Artist Name" staging folder in a typical Bulk
 Import layout) should be removed too if left empty — but only ONE level up,
 only ever for behavior="move" (never "copy"), and never anything that isn't
 unambiguously a disposable staging folder. Pure filesystem logic, no DB/app
@@ -21,67 +21,67 @@ def _make_show(parent, show_name="1994-07-30 Show", filename="track.flac"):
 
 
 def test_move_deletes_empty_parent_staging_folder(tmp_path):
-    """The common Bulk Import case: Import/Performer Name/Show Folder/ — once
-    the Show Folder is moved (its only content), the now-empty "Performer
+    """The common Bulk Import case: Import/Artist Name/Show Folder/ — once
+    the Show Folder is moved (its only content), the now-empty "Artist
     Name" folder should go too. Its own parent (Import) is left alone —
     cleanup is ONE level only, not a climb toward the root."""
     import_dir = tmp_path / "Import"
-    performer_dir = import_dir / "Performer Name"
-    show = _make_show(performer_dir)
+    artist_dir = import_dir / "Artist Name"
+    show = _make_show(artist_dir)
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Performer Name", "1994-07-30 Show",
+    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
                      behavior="move")
 
     assert not show.exists()
-    assert not performer_dir.exists()
+    assert not artist_dir.exists()
     assert import_dir.exists()   # one level only — not also removed
 
 
 def test_move_keeps_nonempty_parent(tmp_path):
-    """A sibling show folder still under "Performer Name" means it's not
+    """A sibling show folder still under "Artist Name" means it's not
     empty — must survive."""
-    performer_dir = tmp_path / "Performer Name"
-    show1 = _make_show(performer_dir, "Show 1")
-    _make_show(performer_dir, "Show 2")
+    artist_dir = tmp_path / "Artist Name"
+    show1 = _make_show(artist_dir, "Show 1")
+    _make_show(artist_dir, "Show 2")
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show1), str(lib), "Performer Name", "Show 1", behavior="move")
+    move_to_library(str(show1), str(lib), "Artist Name", "Show 1", behavior="move")
 
     assert not show1.exists()
-    assert performer_dir.exists()
-    assert (performer_dir / "Show 2").exists()
+    assert artist_dir.exists()
+    assert (artist_dir / "Show 2").exists()
 
 
 def test_move_ignores_ds_store_when_checking_empty(tmp_path):
     """A folder Finder has visited almost always has a stray .DS_Store —
     that alone shouldn't block cleanup, and the junk file itself should be
     removed along with the folder."""
-    performer_dir = tmp_path / "Performer Name"
-    show = _make_show(performer_dir)
-    (performer_dir / ".DS_Store").write_bytes(b"junk")
+    artist_dir = tmp_path / "Artist Name"
+    show = _make_show(artist_dir)
+    (artist_dir / ".DS_Store").write_bytes(b"junk")
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Performer Name", "1994-07-30 Show",
+    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
                      behavior="move")
 
-    assert not performer_dir.exists()
+    assert not artist_dir.exists()
 
 
 def test_copy_never_touches_source(tmp_path):
     """behavior="copy" must never remove the source show folder OR its
     parent, regardless of emptiness — copy's whole contract is "source stays
     untouched."""
-    performer_dir = tmp_path / "Performer Name"
-    show = _make_show(performer_dir)
+    artist_dir = tmp_path / "Artist Name"
+    show = _make_show(artist_dir)
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Performer Name", "1994-07-30 Show",
+    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
                      behavior="copy")
 
     assert show.exists()
     assert (show / "track.flac").exists()
-    assert performer_dir.exists()
+    assert artist_dir.exists()
 
 
 def test_move_never_deletes_protected_dir_name(tmp_path):
@@ -338,10 +338,10 @@ def test_move_does_not_dedupe_a_genuinely_new_folder_name(tmp_path):
     lib = tmp_path / "lib"; lib.mkdir()
     show = _make_show(tmp_path / "Import", "1994-07-30 Show")
 
-    new_rel = move_to_library(str(show), str(lib), "Performer Name",
+    new_rel = move_to_library(str(show), str(lib), "Artist Name",
                               "1994-07-30 Show", behavior="move")
 
-    assert new_rel == "Performer Name/1994-07-30 Show"
+    assert new_rel == "Artist Name/1994-07-30 Show"
 
 
 def test_move_dedupes_a_third_collision_past_the_second(tmp_path):
@@ -357,3 +357,172 @@ def test_move_dedupes_a_third_collision_past_the_second(tmp_path):
                               behavior="move")
 
     assert new_rel == "Various Artists/Show (3)"
+
+
+# ── Show resolution in a library Trellis did not lay out (2026-09-17) ────────
+#
+# A collector who points Trellis at their OWN folder gets two kinds of
+# directory mixed in with their shows: Trellis's underscore-prefixed buckets
+# (_musicians/, _venues/, _events/) and, in a flat library, a plain
+# <Artist>/ folder whose only content is the _images/ directory that
+# app/api/artists.py writes artist photos into. Before this, every one of
+# those came back from resolve_shows_in_dir() as a show with no audio and
+# graded red — one bogus review row per photographed artist, on every
+# rescan, in a library with 72 of them.
+
+def _flat_library(tmp_path):
+    """A collector's flat library: shows and Trellis furniture side by side."""
+    def mk(rel, files=()):
+        d = tmp_path / rel
+        d.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            (d / f).write_bytes(b"x")
+        return d
+
+    mk("Grateful Dead 1977-05-08 Barton Hall", ["01.flac", "02.flac"])
+    mk("Bill Evans 1968-11-02 Ronnie Scotts.sbd", ["t01.flac"])
+    mk("Grateful Dead/_images", ["photo.jpg"])          # artist photos
+    mk("_venues/Barton Hall/_images", ["v.jpg"])        # bucket
+    mk("_musicians/Jerry Garcia/_images", ["m.jpg"])    # bucket
+    mk(".sync_metadata", ["junk.txt"])                  # dot-prefixed
+    mk("Notes", ["readme.txt"])                         # collector's own
+    return mk
+
+
+def test_resolve_skips_buckets_photo_dirs_and_audioless_folders(tmp_path):
+    from app.utils.ingest import resolve_shows_in_dir
+
+    _flat_library(tmp_path)
+    skipped = []
+    got = sorted(Path(p).relative_to(tmp_path).as_posix()
+                 for p in resolve_shows_in_dir(str(tmp_path), skipped=skipped))
+
+    assert got == ["Bill Evans 1968-11-02 Ronnie Scotts.sbd",
+                   "Grateful Dead 1977-05-08 Barton Hall"]
+
+    # Audio-less folders are REPORTABLE, so an adoption summary can say where
+    # they went. Trellis's own buckets are not — they are furniture, not the
+    # collector's missing material.
+    assert sorted(Path(p).relative_to(tmp_path).as_posix() for p in skipped) \
+        == ["Grateful Dead", "Notes"]
+
+
+def test_resolve_still_reports_a_folder_the_user_named(tmp_path):
+    """The contract resolve_shows() keeps and resolve_shows_in_dir() drops.
+
+    Returning nothing for a folder the user explicitly pointed at reads as
+    the app being broken; the scanner has to be able to grade it red and say
+    "no audio here". A folder merely encountered while walking was never
+    asked about and is simply not a show.
+    """
+    from app.utils.ingest import resolve_shows
+
+    empty = tmp_path / "Empty Folder"
+    empty.mkdir()
+
+    assert resolve_shows(str(empty)) == [str(empty)]
+    assert resolve_shows(str(empty), include_empty=False) == []
+
+
+def test_originals_folder_does_not_split_or_shadow_its_show(tmp_path):
+    """_originals/ holds the pre-conversion WAV/SHN files after an SHN->FLAC
+    triage conversion. It must never read as a disc subdir or a second show."""
+    from app.utils.ingest import resolve_shows
+
+    show = tmp_path / "Miles 1970-03-07"
+    (show / "_originals").mkdir(parents=True)
+    (show / "01.flac").write_bytes(b"x")
+    (show / "_originals" / "01.shn").write_bytes(b"x")
+
+    assert resolve_shows(str(show)) == [str(show)]
+
+
+def test_multi_disc_and_deep_nesting_survive_the_exclusions(tmp_path):
+    """Negative control: the new rules must not eat anything that was working.
+
+    A CD1/CD2 show is still ONE show, and artist -> year -> show nesting still
+    resolves to the show. A checker that only ever removes things is easy to
+    get wrong in the direction of removing too much.
+    """
+    from app.utils.ingest import resolve_shows_in_dir
+
+    for disc in ("CD1", "CD2"):
+        d = tmp_path / "Phish 1997-11-17" / disc
+        d.mkdir(parents=True)
+        (d / "01.flac").write_bytes(b"x")
+    deep = tmp_path / "Allman Bros" / "1971" / "Fillmore East"
+    deep.mkdir(parents=True)
+    (deep / "01.flac").write_bytes(b"x")
+
+    got = sorted(Path(p).relative_to(tmp_path).as_posix()
+                 for p in resolve_shows_in_dir(str(tmp_path)))
+    assert got == ["Allman Bros/1971/Fillmore East", "Phish 1997-11-17"]
+
+
+def test_excluded_dir_predicate_has_a_negative_control(tmp_path):
+    """A predicate that never fires, or fires on everything, is worse than none."""
+    from app.utils.ingest import _is_excluded_dir
+
+    for ordinary in ("Grateful Dead", "CD1", "Art", "audio", "Notes", "1971"):
+        assert not _is_excluded_dir(ordinary), ordinary
+    for furniture in ("_images", "_venues", "_musicians", "_events",
+                      "_originals", ".git", ".DS_Store"):
+        assert _is_excluded_dir(furniture), furniture
+
+
+# ── Library layout: the artist folder is a convention, not a law (2026-09-17) ─
+#
+# A collector who pointed Trellis at a library they built themselves may keep
+# every show at one flat level with the artist in the folder name. Filing new
+# material under an <Artist>/ directory there leaves them with a permanently
+# hybrid tree, so move_to_library() takes the layout as a parameter. It is read
+# from node_setting by the caller, because this function has no app context.
+
+def test_new_recordings_file_under_an_artist_folder_by_default(tmp_path):
+    """The default must not change: every library Trellis laid out itself
+    already looks like this, and a new keyword argument appearing is not a
+    reason for an existing install to change shape."""
+    lib = tmp_path / "Library"
+    lib.mkdir()
+    show = _make_show(tmp_path / "Import", "Show")
+
+    rel = move_to_library(str(show), str(lib), "Grateful Dead",
+                          "Grateful Dead - 1977-05-08", behavior="copy")
+
+    assert rel == "Grateful Dead/Grateful Dead - 1977-05-08"
+    assert (lib / rel / "track.flac").is_file()
+
+
+def test_layout_off_files_flat_at_the_library_root(tmp_path):
+    lib = tmp_path / "Library"
+    lib.mkdir()
+    show = _make_show(tmp_path / "Import", "Show")
+
+    rel = move_to_library(str(show), str(lib), "Grateful Dead",
+                          "Grateful Dead - 1977-05-08", behavior="copy",
+                          under_artist_folder=False)
+
+    assert rel == "Grateful Dead - 1977-05-08"
+    assert "/" not in rel, "flat layout must produce a single path segment"
+    assert (lib / rel / "track.flac").is_file()
+    assert not (lib / "Grateful Dead").exists()
+
+
+def test_flat_layout_dedupes_against_the_root(tmp_path):
+    """Two shows with the same canonical name collide at the ROOT when flat,
+    not on one artist's shelf — so the same "(2)" convention has to apply
+    there. This is the SBD-vs-AUD case, real in Ryan's library."""
+    lib = tmp_path / "Library"
+    lib.mkdir()
+    name = "Grateful Dead - 1977-05-08"
+
+    first = move_to_library(str(_make_show(tmp_path / "A", "S")), str(lib),
+                            "Grateful Dead", name, behavior="copy",
+                            under_artist_folder=False)
+    second = move_to_library(str(_make_show(tmp_path / "B", "S")), str(lib),
+                             "Grateful Dead", name, behavior="copy",
+                             under_artist_folder=False)
+
+    assert first == name
+    assert second == f"{name} (2)"
+    assert (lib / second / "track.flac").is_file()

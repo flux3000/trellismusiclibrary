@@ -71,7 +71,7 @@ def list_favorites(node_id):
     """Displayable rows, resolved from the remote in ONE batched call.
 
     Nothing about the recording is stored locally (see
-    models/remote_favorite.py), so this is where bare ids become performer,
+    models/remote_favorite.py), so this is where bare ids become artist,
     date and venue. If the library is unreachable the error travels — a
     favourites list that silently renders empty when someone's node is offline
     is the empty-vs-broken confusion this project keeps relearning.

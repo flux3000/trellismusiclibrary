@@ -1,9 +1,9 @@
 """
 tests/test_venue_media.py — Venue photos (2026-08-07).
 
-Venue images are a PARALLEL table to performer_image with SHARED behaviour
+Venue images are a PARALLEL table to artist_image with SHARED behaviour
 (app/utils/entity_images.py). These tests exist to prove the sharing actually
-holds: every assertion here has a twin in test_performer_media.py, and if the
+holds: every assertion here has a twin in test_artist_media.py, and if the
 two ever diverge it means the shared helpers stopped being shared.
 """
 
@@ -46,7 +46,7 @@ def test_upload_list_serve_delete(api, app, venue, tmp_path):
     assert img["origin"] == "upload"
     assert img["url"] == f"/api/venues/images/{img['id']}"
 
-    # Files land under _venues/, NOT alongside performer photos — a venue and
+    # Files land under _venues/, NOT alongside artist photos — a venue and
     # an act can share a name ("Fillmore") and must not collide.
     images_dir = tmp_path / "_venues" / "The Fillmore" / "_images"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
@@ -127,13 +127,13 @@ def test_deleting_venue_cascades_to_images(api, app, venue, tmp_path):
 def test_shared_helpers_work_on_both_models():
     """set_primary()/primary_for() are model-agnostic via __parent_fk__ — the
     single hook that lets one implementation serve both tables."""
-    from app.models.performer_image import PerformerImage
+    from app.models.artist_image import ArtistImage
     from app.models.venue_image import VenueImage
 
-    assert PerformerImage.__parent_fk__ == "performer_id"
+    assert ArtistImage.__parent_fk__ == "artist_id"
     assert VenueImage.__parent_fk__ == "venue_id"
     # Same column surface, so the shared endpoint bodies can't be surprised.
     shared = {"filename", "ext", "is_primary", "sort_order", "origin",
               "caption", "credit", "source_ref", "created_at"}
-    for model in (PerformerImage, VenueImage):
+    for model in (ArtistImage, VenueImage):
         assert shared <= set(model.__table__.columns.keys()), model

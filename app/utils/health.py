@@ -8,7 +8,7 @@ Model — a transparent completeness ratio:
 
     score = 100 × (populated fields) / (total fields)
 
-    Core fields (8):  Performer · Date · Venue · City · State · Country ·
+    Core fields (8):  Artist · Date · Venue · City · State · Country ·
                       Source · Lineage
     Track fields (N): one per audio file — the track's *real* title.
 
@@ -125,7 +125,7 @@ def compute_health(scan):
         else:
             factors.append(_f("Identity", -1, "No %s" % name.lower(), True))
 
-    core("Performer", _present(tags.get("artist") or info.get("artist")))
+    core("Artist", _present(tags.get("artist") or info.get("artist")))
 
     total += 1
     prec = _date_precision(tags, info)

@@ -52,7 +52,7 @@ def get_collection(collection_id):
     if not c:
         return jsonify({"error": "Not found"}), 404
     # card=True: the collection page renders handbill cards (Ryan, 2026-08-07),
-    # which need the performer's genre colour and primary photo. Collections
+    # which need the artist's genre colour and primary photo. Collections
     # are small — a few dozen rows — so the extra joins are cheap here in a way
     # they would not be on the 544-row flat List.
     #
@@ -62,7 +62,7 @@ def get_collection(collection_id):
     # than render it as a collection page; this endpoint stays honest rather
     # than lying about its contents, but it is not a page to link casually.
     rows = [recording_row(r, card=True) for r in c.recordings]
-    rows.sort(key=lambda r: ((r["performer"] or "").lower(),
+    rows.sort(key=lambda r: ((r["artist"] or "").lower(),
                              r["start_year"] or 0, r["start_month"] or 0, r["start_day"] or 0))
     return jsonify({"id": c.id, "name": c.name, "description": c.description,
                     "is_system": c.is_system, "system_key": c.system_key,

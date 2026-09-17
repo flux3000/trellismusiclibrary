@@ -20,7 +20,7 @@ import pytest
 
 from app.extensions import db as _db
 from app.models.user import User
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.venue import Venue
 from app.models.performance import Performance
 from app.models.recording import Recording
@@ -60,13 +60,13 @@ def ryman(app, tmp_path):
     """
     app.config["LIBRARY_ROOT"] = str(tmp_path)
 
-    performer = Performer(name="Various Artists")
-    _db.session.add(performer)
+    artist = Artist(name="Various Artists")
+    _db.session.add(artist)
     venue = Venue(name="Ryman Auditorium", city="Nashville", state="TN", country="US")
     _db.session.add(venue)
     _db.session.flush()
 
-    perf = Performance(performer_id=performer.id, venue_id=venue.id, start_year=1964)
+    perf = Performance(artist_id=artist.id, venue_id=venue.id, start_year=1964)
     _db.session.add(perf)
     _db.session.flush()
 
@@ -172,12 +172,12 @@ def two_tracks(app, tmp_path):
     title — the shape a retitle can collapse."""
     app.config["LIBRARY_ROOT"] = str(tmp_path)
 
-    performer = Performer(name="Various Artists")
-    _db.session.add(performer)
+    artist = Artist(name="Various Artists")
+    _db.session.add(artist)
     venue = Venue(name="Ryman Auditorium", city="Nashville", state="TN", country="US")
     _db.session.add(venue)
     _db.session.flush()
-    perf = Performance(performer_id=performer.id, venue_id=venue.id, start_year=1964)
+    perf = Performance(artist_id=artist.id, venue_id=venue.id, start_year=1964)
     _db.session.add(perf)
     _db.session.flush()
 

@@ -3,7 +3,7 @@ scripts/wipe_all_peers.py
 
 Permanently deletes every peer, invite, device token, collection grant and
 access-log row -- a clean slate for the sharing feature. Does NOT touch your
-library (recordings/tracks/performers/etc), your own account, or Collections
+library (recordings/tracks/artists/etc), your own account, or Collections
 themselves; only the peer-sharing tables.
 
 Goes through the ORM and deletes Peer rows only -- CollectionGrant, PeerInvite,

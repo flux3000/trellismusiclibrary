@@ -65,9 +65,8 @@ def load_known_names_from_db():
         conn = sqlite3.connect(db_path)
         cur  = conn.cursor()
 
-        # Try both old schema (performer) and new schema (artist) gracefully
         artists = []
-        for table in ("performer", "artist"):
+        for table in ("artist",):
             try:
                 cur.execute(f"SELECT name FROM {table}")
                 artists = [r[0] for r in cur.fetchall()]

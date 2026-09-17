@@ -93,7 +93,7 @@ _INFO_FILE_CHAR_CAP = 20_000
 # A token count cannot go stale, because it is a measurement rather than a
 # claim about someone else's price list.
 
-# Measured from real Performer-page runs (2026-08-07): a 5-search pass billed
+# Measured from real Artist-page runs (2026-08-07): a 5-search pass billed
 # 74,737 input / 1,492 output tokens. INPUT DOMINATES, for the reason given
 # above, so usage tracks the search count almost linearly and the search count
 # is the only variable worth modelling. ~15k input tokens per search is the

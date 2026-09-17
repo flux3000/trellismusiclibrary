@@ -76,8 +76,8 @@ def debug_live():
 def debug_info():
     _require_admin()
 
-    from app.models.performer import Performer
     from app.models.artist import Artist
+    from app.models.musician import Musician
     from app.models.track import Track
 
     return jsonify({
@@ -86,8 +86,8 @@ def debug_info():
         "db_path":     str(current_app.config.get("SQLALCHEMY_DATABASE_URI", "")),
         "user":        {"id": current_user.id, "username": current_user.username},
         "counts": {
-            "performers": db.session.query(Performer).count(),
-            "artists":    db.session.query(Artist).count(),
+            "artists": db.session.query(Artist).count(),
+            "musicians":    db.session.query(Musician).count(),
             "recordings": db.session.query(Recording).count(),
             "tracks":     db.session.query(Track).count(),
         },

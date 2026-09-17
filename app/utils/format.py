@@ -3,7 +3,7 @@ utils/format.py — Shared formatting helpers for API responses.
 
 Single source of truth for turning the DB's split year/month/day columns into
 a display string. Used by every endpoint that serialises a performance date
-(artists, performances, venues, events, debug) so the format never drifts.
+(musicians, performances, venues, events, debug) so the format never drifts.
 
 Note: folder_naming.py has its own date formatter that emits a filesystem
 placeholder ("Unknown Date") instead of None — that's intentional and separate,

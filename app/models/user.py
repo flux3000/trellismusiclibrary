@@ -33,8 +33,8 @@ class User(UserMixin, db.Model):
 
     # Extension only ('.jpg'). The file is Config.AVATAR_DIR/user_<id><ext> —
     # one picture per person, so this is a column rather than the row-per-image
-    # table performers use. NB performer.image_ext is vestigial for exactly the
-    # opposite reason: performers grew galleries. A face does not.
+    # table artists use. NB artist.image_ext is vestigial for exactly the
+    # opposite reason: artists grew galleries. A face does not.
     avatar_ext    = db.Column(db.String(8), nullable=True)
     password_hash = db.Column(db.String(255), nullable=False)
 
@@ -68,18 +68,18 @@ class User(UserMixin, db.Model):
 
 class UserArtistPermission(db.Model):
     """
-    Grants an archivist edit access to a specific Performer (act).
+    Grants an archivist edit access to a specific Artist (act).
     Only evaluated when user.all_artists is False.
     """
     __tablename__ = "user_artist_permission"
 
     id           = db.Column(db.Integer, primary_key=True)
     user_id      = db.Column(db.Integer, db.ForeignKey("user.id"),      nullable=False)
-    performer_id = db.Column(db.Integer, db.ForeignKey("performer.id"), nullable=False)
+    artist_id = db.Column(db.Integer, db.ForeignKey("artist.id"), nullable=False)
 
     # Relationships
     user      = db.relationship("User", back_populates="artist_permissions")
-    performer = db.relationship("Performer")
+    artist = db.relationship("Artist")
 
     def __repr__(self):
-        return f"<UserArtistPermission user={self.user_id} performer={self.performer_id}>"
+        return f"<UserArtistPermission user={self.user_id} artist={self.artist_id}>"

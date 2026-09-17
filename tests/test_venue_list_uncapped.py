@@ -4,7 +4,7 @@ not just the first 200 alphabetically.
 
 Ryan reported 2026-08-30: the Venues list in the sidebar's bottom-left nav
 "stops midway through the alphabet at L". list_venues() (app/api/venues.py)
-carried a `.limit(200)` that list_performers/list_artists/list_genres —
+carried a `.limit(200)` that list_artists/list_musicians/list_genres —
 the sidebar's three sibling dimension endpoints — never had; ordered by
 `Venue.name`, a 200-row cut lands exactly where a library with more than 200
 venues would appear to run out partway through the alphabet, with nothing on

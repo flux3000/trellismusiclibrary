@@ -43,7 +43,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
     This bit me on the first run (2026-08-08). The local API sets
     `login_manager.login_view` but no `unauthorized_handler`, so an
-    unauthenticated call to /api/performers/1 answers 302 → the login page.
+    unauthenticated call to /api/artists/1 answers 302 → the login page.
     urllib follows that on GET, lands on the SPA shell, and reports 200 with
     HTML — which reads exactly like "the peer token got into the admin API."
 
@@ -126,7 +126,7 @@ def probe(base, token):
     print(f"\n{_ok(status)} /collections/{col_id}  →  {len(recs)} recordings")
     for r in recs[:5]:
         card = "card fields ✓" if "genre_color" in r else "card fields MISSING"
-        print(f"    · [{r['id']}] {r.get('date')} — {r.get('performer')} "
+        print(f"    · [{r['id']}] {r.get('date')} — {r.get('artist')} "
               f"@ {r.get('venue')}   ({card})")
     if len(recs) > 5:
         print(f"    … and {len(recs) - 5} more")
@@ -135,20 +135,20 @@ def probe(base, token):
 
     # ── Every act and venue in the granted collection ─────────────────────────
     # Walk them ALL, not just the first. A collection of six Béla recordings
-    # spans six DIFFERENT Performer rows (Béla Fleck, Bela Fleck & Jerry
+    # spans six DIFFERENT Artist rows (Béla Fleck, Bela Fleck & Jerry
     # Douglas, Acoustic All-Stars…), because a billed act is its own entity.
-    # Probing only the first one makes it look as though a single performer is
+    # Probing only the first one makes it look as though a single artist is
     # reachable, which is how this section came to exist.
-    print("\n── Every performer in the granted collection ──")
-    performer_ids = sorted({r["performer_id"] for r in recs if r.get("performer_id")})
-    for pid in performer_ids:
-        pstatus, pbody = _call(base, f"/api/share/performers/{pid}", token)
-        rstatus, rbody = _call(base, f"/api/share/performers/{pid}/recordings", token)
+    print("\n── Every artist in the granted collection ──")
+    artist_ids = sorted({r["artist_id"] for r in recs if r.get("artist_id")})
+    for pid in artist_ids:
+        pstatus, pbody = _call(base, f"/api/share/artists/{pid}", token)
+        rstatus, rbody = _call(base, f"/api/share/artists/{pid}/recordings", token)
         shown = sum(len(p.get("recordings", [])) for p in rbody) if rstatus == 200 else 0
         name = pbody.get("name") if pstatus == 200 else pbody
         print(f"  {_ok(pstatus)} [{pid:>4}] {str(name)[:44]:<44} "
               f"{shown} recording(s) visible")
-    print(f"  → {len(performer_ids)} distinct acts, all reachable if every row is ✓")
+    print(f"  → {len(artist_ids)} distinct acts, all reachable if every row is ✓")
 
     print("\n── Every venue in the granted collection ──")
     venue_names = {}
@@ -167,20 +167,20 @@ def probe(base, token):
 
     rec_id = recs[0]["id"]
     status, rec = _call(base, f"/api/share/recordings/{rec_id}", token)
-    print(f"\n{_ok(status)} /recordings/{rec_id}  →  {rec.get('performer')}, "
+    print(f"\n{_ok(status)} /recordings/{rec_id}  →  {rec.get('artist')}, "
           f"{len(rec.get('tracks', []))} tracks")
-    print(f"    nav ids: performer_id={rec.get('performer_id')} "
+    print(f"    nav ids: artist_id={rec.get('artist_id')} "
           f"venue_id={rec.get('venue_id')}")
-    if rec.get("performer_id") is None:
-        print("    ⚠ no performer_id — the performer page is unreachable")
+    if rec.get("artist_id") is None:
+        print("    ⚠ no artist_id — the artist page is unreachable")
 
-    performer_id = rec.get("performer_id")
+    artist_id = rec.get("artist_id")
     venue_id = rec.get("venue_id")
 
-    if performer_id:
-        status, perf = _call(base, f"/api/share/performers/{performer_id}", token)
-        print(f"\n── One performer in detail ──")
-        print(f"{_ok(status)} /performers/{performer_id}  →  {perf.get('name')}")
+    if artist_id:
+        status, perf = _call(base, f"/api/share/artists/{artist_id}", token)
+        print(f"\n── One artist in detail ──")
+        print(f"{_ok(status)} /artists/{artist_id}  →  {perf.get('name')}")
         print(f"    bio:      {'yes' if perf.get('bio') else 'none'}")
         print(f"    dossier:  {'yes' if perf.get('dossier') else 'none'}")
         print(f"    genre:    {(perf.get('genre') or {}).get('name') or 'none'}")
@@ -190,16 +190,16 @@ def probe(base, token):
             istatus, ibody = _call(base, img["url"], token)
             print(f"    {_ok(istatus)} photo fetch {img['url']} → {ibody}")
 
-        status, prs = _call(base, f"/api/share/performers/{performer_id}/recordings", token)
+        status, prs = _call(base, f"/api/share/artists/{artist_id}/recordings", token)
         shown = sum(len(p.get("recordings", [])) for p in prs)
-        print(f"\n{_ok(status)} /performers/{performer_id}/recordings  →  "
+        print(f"\n{_ok(status)} /artists/{artist_id}/recordings  →  "
               f"{len(prs)} performances, {shown} recordings VISIBLE")
 
         for m in perf.get("members", [])[:1]:
-            status, art = _call(base, f"/api/share/artists/{m['id']}", token)
-            print(f"\n{_ok(status)} /artists/{m['id']}  →  {art.get('name') if status==200 else art}")
+            status, art = _call(base, f"/api/share/musicians/{m['id']}", token)
+            print(f"\n{_ok(status)} /musicians/{m['id']}  →  {art.get('name') if status==200 else art}")
             if status == 200:
-                print(f"    acts visible: {[p['name'] for p in art.get('performers', [])]}")
+                print(f"    acts visible: {[p['name'] for p in art.get('artists', [])]}")
 
     if venue_id:
         status, ven = _call(base, f"/api/share/venues/{venue_id}", token)
@@ -212,7 +212,7 @@ def probe(base, token):
     status, genres = _call(base, "/api/share/genres/", token)
     print(f"\n{_ok(status)} /genres/  →  {len(genres)} genres in the visible set")
     for g in genres[:8]:
-        print(f"    · {g['name']}: {g['performer_count']} performers, "
+        print(f"    · {g['name']}: {g['artist_count']} artists, "
               f"{g['recording_count']} recordings")
 
     # ── Negative space ────────────────────────────────────────────────────────
@@ -231,7 +231,7 @@ def probe(base, token):
     checks = [
         ("no token at all",            "/api/share/collections",      None),
         ("a garbage token",            "/api/share/collections",      "xxx"),
-        ("the local admin API",        "/api/performers/1",           token),
+        ("the local admin API",        "/api/artists/1",           token),
         ("the raw-FLAC stream route",  "/api/stream/1",               token),
         ("peer administration",        "/api/peers/",                 token),
     ]
@@ -243,7 +243,7 @@ def probe(base, token):
 
     print()
     print("  Writes (a peer token must have no route to any of these):")
-    for method, path in [("PUT", "/api/performers/1"), ("DELETE", "/api/recordings/1"),
+    for method, path in [("PUT", "/api/artists/1"), ("DELETE", "/api/recordings/1"),
                          ("POST", "/api/collections/")]:
         status, _ = _call(base, path, token, method=method)
         verdict = "✓" if status in REFUSED + (404, 405) else f"✗ GOT {status}"

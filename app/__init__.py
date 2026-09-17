@@ -125,8 +125,8 @@ def create_app(config_class=Config):
 
     # ── Register blueprints ────────────────────────────────────
     from app.api.auth         import bp as auth_bp
-    from app.api.artists      import bp as artists_bp
-    from app.api.performers    import bp as performers_bp
+    from app.api.musicians      import bp as musicians_bp
+    from app.api.artists    import bp as artists_bp
     from app.api.collections   import bp as collections_bp
     from app.api.performances import bp as performances_bp
     from app.api.recordings   import bp as recordings_bp
@@ -147,8 +147,8 @@ def create_app(config_class=Config):
     from app.api.system       import bp as system_bp
 
     app.register_blueprint(auth_bp,         url_prefix="/api/auth")
-    app.register_blueprint(artists_bp,      url_prefix="/api/artists")
-    app.register_blueprint(performers_bp,   url_prefix="/api/performers")
+    app.register_blueprint(musicians_bp,      url_prefix="/api/musicians")
+    app.register_blueprint(artists_bp,   url_prefix="/api/artists")
     app.register_blueprint(collections_bp,  url_prefix="/api/collections")
     app.register_blueprint(performances_bp, url_prefix="/api/performances")
     app.register_blueprint(recordings_bp,   url_prefix="/api/recordings")

@@ -2,7 +2,7 @@
 tests/test_db_logic.py — serializer, tag builder, and cascade-prune behavior
 against the seeded temp DB.
 
-(2026-07-11 remodel: Performer = act; Artist = person; Membership = M2M.)
+(2026-07-11 remodel: Artist = act; Musician = person; Membership = M2M.)
 """
 
 import json as _json
@@ -11,15 +11,15 @@ import pytest
 from app.extensions import db as _db
 from app.models.recording import Recording
 from app.models.performance import Performance
-from app.models.performer import Performer
-from app.models.artist import Artist, Membership
+from app.models.artist import Artist
+from app.models.musician import Musician, Membership
 from app.models.venue import Venue
 from app.models.track import Track
 from app.models.track_analysis import TrackAnalysis
 from app.models.play_log import PlayLog
 from app.utils.serialize import recording_summary, recording_row
 from app.utils.ingest import build_recording_tags, scan_folder, compute_audio_rename_map
-from app.utils.pruning import prune_after_recording_delete, prune_performer_if_orphaned
+from app.utils.pruning import prune_after_recording_delete, prune_artist_if_orphaned
 
 
 @pytest.fixture()
@@ -57,9 +57,9 @@ def test_build_recording_tags(app, seeded_ids):
     rec = _db.session.get(Recording, seeded_ids["recording_id"])
     tags, total = build_recording_tags(rec)
     assert tags["ARTIST"] == "Bill Evans"
-    assert tags["CONCERTDATE"] == "1980-02-22"
-    assert tags["CONCERTVENUE"] == "Sprague Memorial Hall"
-    assert tags["CONCERTLOCATION"] == "New Haven, CT, US"
+    assert tags["DATE"] == "1980-02-22"
+    assert tags["VENUE"] == "Sprague Memorial Hall"
+    assert tags["LOCATION"] == "New Haven, CT, US"
     assert total == "2"
 
 
@@ -109,8 +109,8 @@ def test_recording_ai_research_serialization(api, seeded_ids):
 def test_prune_after_delete_removes_full_chain(app, db, seeded_ids):
     rec_id       = seeded_ids["recording_id"]
     perf_id      = seeded_ids["performance_id"]
-    performer_id = seeded_ids["performer_id"]
-    artist_id    = seeded_ids["artist_id"]      # the sole member (person)
+    artist_id = seeded_ids["artist_id"]
+    musician_id    = seeded_ids["musician_id"]      # the sole member (person)
     track_ids = [t.id for t in Track.query.filter_by(recording_id=rec_id).all()]
 
     # Simulate delete_recording's child cleanup, then prune.
@@ -125,27 +125,27 @@ def test_prune_after_delete_removes_full_chain(app, db, seeded_ids):
     pruned = prune_after_recording_delete(perf_id)
     db.session.commit()
 
-    assert pruned == {"performances": [perf_id], "performers": [performer_id],
-                      "artists": [artist_id]}
+    assert pruned == {"performances": [perf_id], "artists": [artist_id],
+                      "musicians": [musician_id]}
     assert _db.session.get(Performance, perf_id) is None
-    assert _db.session.get(Performer, performer_id) is None
-    assert _db.session.get(Artist, artist_id) is None      # orphaned person removed
+    assert _db.session.get(Artist, artist_id) is None
+    assert _db.session.get(Musician, musician_id) is None      # orphaned person removed
     assert TrackAnalysis.query.count() == 0
     assert PlayLog.query.count() == 0
 
 
 def test_prune_keeps_person_who_is_in_another_act(app, db, seeded_ids):
-    performer_id = seeded_ids["performer_id"]
-    artist_id    = seeded_ids["artist_id"]
+    artist_id = seeded_ids["artist_id"]
+    musician_id    = seeded_ids["musician_id"]
     rec_id       = seeded_ids["recording_id"]
 
-    # Put the same person in a second performer, so they survive the prune.
-    other = Performer(name="Bill Evans Trio")
+    # Put the same person in a second artist, so they survive the prune.
+    other = Artist(name="Bill Evans Trio")
     db.session.add(other); db.session.flush()
-    db.session.add(Membership(performer_id=other.id, artist_id=artist_id, order=0))
+    db.session.add(Membership(artist_id=other.id, musician_id=musician_id, order=0))
     db.session.flush()
 
-    # Orphan the original performer (remove its performance) and prune it.
+    # Orphan the original artist (remove its performance) and prune it.
     # Must clear the seeded Recording/Track chain first (as delete_recording's
     # real cleanup does) — with FK enforcement on, bulk-deleting Performance
     # while a Recording still references it violates the FK.
@@ -156,25 +156,25 @@ def test_prune_keeps_person_who_is_in_another_act(app, db, seeded_ids):
         synchronize_session=False)
     db.session.query(Track).filter(Track.id.in_(track_ids)).delete(synchronize_session=False)
     db.session.query(Recording).filter_by(id=rec_id).delete(synchronize_session=False)
-    db.session.query(Performance).filter_by(performer_id=performer_id).delete(
+    db.session.query(Performance).filter_by(artist_id=artist_id).delete(
         synchronize_session=False)
     db.session.flush()
-    result = prune_performer_if_orphaned(performer_id)
+    result = prune_artist_if_orphaned(artist_id)
     db.session.commit()
 
-    assert result["performers"] == [performer_id]
-    assert result["artists"] == []                          # person kept
-    assert _db.session.get(Artist, artist_id) is not None
-    assert _db.session.get(Performer, other.id) is not None
+    assert result["artists"] == [artist_id]
+    assert result["musicians"] == []                          # person kept
+    assert _db.session.get(Musician, musician_id) is not None
+    assert _db.session.get(Artist, other.id) is not None
 
 
 # ── CRUD endpoint guards (delete refuses while referenced) ─────────────────────
 
-def test_delete_performer_refuses_with_recordings(api, seeded_ids):
-    r = api.delete(f"/api/performers/{seeded_ids['performer_id']}")
+def test_delete_artist_refuses_with_recordings(api, seeded_ids):
+    r = api.delete(f"/api/artists/{seeded_ids['artist_id']}")
     assert r.status_code == 409
     assert "performance" in r.get_json()["error"]
-    assert _db.session.get(Performer, seeded_ids["performer_id"]) is not None
+    assert _db.session.get(Artist, seeded_ids["artist_id"]) is not None
 
 
 def test_delete_venue_refuses_with_performances(api, seeded_ids):
@@ -184,21 +184,21 @@ def test_delete_venue_refuses_with_performances(api, seeded_ids):
     assert _db.session.get(Venue, perf.venue_id) is not None
 
 
-def test_delete_artist_refuses_while_member(api, seeded_ids):
-    r = api.delete(f"/api/artists/{seeded_ids['artist_id']}")
+def test_delete_musician_refuses_while_member(api, seeded_ids):
+    r = api.delete(f"/api/musicians/{seeded_ids['musician_id']}")
     assert r.status_code == 409
     assert "member" in r.get_json()["error"]
 
 
-def test_artist_edit_and_delete_when_orphan(api):
-    created = api.post("/api/artists/", json={"name": "Sandip Burman"}).get_json()
+def test_musician_edit_and_delete_when_orphan(api):
+    created = api.post("/api/musicians/", json={"name": "Sandip Burman"}).get_json()
     aid = created["id"]
     # Edit
-    assert api.put(f"/api/artists/{aid}", json={"sort_name": "Burman, Sandip"}).status_code == 200
-    assert _db.session.get(Artist, aid).sort_name == "Burman, Sandip"
+    assert api.put(f"/api/musicians/{aid}", json={"sort_name": "Burman, Sandip"}).status_code == 200
+    assert _db.session.get(Musician, aid).sort_name == "Burman, Sandip"
     # Delete (no memberships) succeeds
-    assert api.delete(f"/api/artists/{aid}").status_code == 200
-    assert _db.session.get(Artist, aid) is None
+    assert api.delete(f"/api/musicians/{aid}").status_code == 200
+    assert _db.session.get(Musician, aid) is None
 
 
 def test_do_confirm_copies_files_and_reports_progress(app, db, tmp_path):
@@ -237,25 +237,25 @@ def test_do_confirm_copies_files_and_reports_progress(app, db, tmp_path):
 
 def test_do_confirm_does_not_corrupt_existing_roster(app, db, tmp_path):
     """Regression test for the ingest-time act-roster-corruption bug
-    (2026-07-22 fix): confirming a recording for an EXISTING Performer with
+    (2026-07-22 fix): confirming a recording for an EXISTING Artist with
     'members' set to (a subset of) its already-resolved lineup must NOT call
-    set_performer_members and rewrite the act roster — that was the same
+    set_artist_members and rewrite the act roster — that was the same
     Phase-1 bug, just never ported to the ingest confirm path. Membership
     stint history must survive untouched, and a 'guests' name must attach as
     performance-level personnel only, never touching the roster."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
-    from app.utils.performers import resolve_or_create_performer, add_membership_stint
+    from app.utils.artists import resolve_or_create_artist, add_membership_stint
     from app.utils.personnel import resolve_performance_personnel
 
     uid = db.session.query(User).first().id
     lib = tmp_path / "lib"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
 
-    # An existing act with a DATED stint — exactly what set_performer_members'
+    # An existing act with a DATED stint — exactly what set_artist_members'
     # wholesale-rewrite behavior used to be able to destroy.
-    performer = resolve_or_create_performer("Existing Act With History")
-    stint = add_membership_stint(performer, "Roster Person",
+    artist = resolve_or_create_artist("Existing Act With History")
+    stint = add_membership_stint(artist, "Roster Person",
                                   start_year=1970, end_year=1975)
     _db.session.commit()
 
@@ -274,7 +274,7 @@ def test_do_confirm_does_not_corrupt_existing_roster(app, db, tmp_path):
     assert result["recording_id"]
 
     # Roster untouched: still exactly one stint, same dates, not duplicated.
-    roster = _db.session.query(Membership).filter_by(performer_id=performer.id).all()
+    roster = _db.session.query(Membership).filter_by(artist_id=artist.id).all()
     assert len(roster) == 1
     assert roster[0].id == stint.id
     assert (roster[0].start_year, roster[0].end_year) == (1970, 1975)
@@ -288,10 +288,10 @@ def test_do_confirm_does_not_corrupt_existing_roster(app, db, tmp_path):
     }
 
 
-def test_do_confirm_seeds_roster_for_brand_new_performer(app, db, tmp_path):
-    """The other half of the same fix: a BRAND NEW Performer's first-show
+def test_do_confirm_seeds_roster_for_brand_new_artist(app, db, tmp_path):
+    """The other half of the same fix: a BRAND NEW Artist's first-show
     'members' still seeds its initial roster (unchanged behavior) — only
-    an EXISTING Performer's roster is protected from being overwritten."""
+    an EXISTING Artist's roster is protected from being overwritten."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
@@ -312,9 +312,9 @@ def test_do_confirm_seeds_roster_for_brand_new_performer(app, db, tmp_path):
     result = _do_confirm(data, uid, None)
     assert result["recording_id"]
 
-    performer = _db.session.query(Performer).filter_by(name="Brand New Duo").first()
-    roster_names = {m.artist.name for m in
-                    _db.session.query(Membership).filter_by(performer_id=performer.id).all()}
+    artist = _db.session.query(Artist).filter_by(name="Brand New Duo").first()
+    roster_names = {m.musician.name for m in
+                    _db.session.query(Membership).filter_by(artist_id=artist.id).all()}
     assert roster_names == {"Person A", "Person B"}
 
 
@@ -327,7 +327,7 @@ def test_do_confirm_omitted_members_key_does_not_wipe_inherited_roster(app, db, 
     every member," tripping the case-5 safeguard: flip to personnel_mode=
     'explicit' and snapshot the (empty) surviving lineup. Net effect: an
     existing act's Members row on View Recording came out blank even though
-    the performer's own roster was fully intact (Ryan's report — "Bela Fleck
+    the artist's own roster was fully intact (Ryan's report — "Bela Fleck
     & Tony Trischka" ingested via Bulk Import's Auto-Ingest button).
     The fix preserves the None/[] distinction through to
     sync_performance_personnel, so an omitted key means "leave the resolved
@@ -335,16 +335,16 @@ def test_do_confirm_omitted_members_key_does_not_wipe_inherited_roster(app, db, 
     performance, since the resolved lineup IS the roster already."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
-    from app.utils.performers import resolve_or_create_performer, add_membership_stint
+    from app.utils.artists import resolve_or_create_artist, add_membership_stint
     from app.utils.personnel import resolve_performance_personnel
 
     uid = db.session.query(User).first().id
     lib = tmp_path / "lib"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
 
-    performer = resolve_or_create_performer("Auto Ingest Duo")
-    add_membership_stint(performer, "Fleck-Like Person")
-    add_membership_stint(performer, "Trischka-Like Person")
+    artist = resolve_or_create_artist("Auto Ingest Duo")
+    add_membership_stint(artist, "Fleck-Like Person")
+    add_membership_stint(artist, "Trischka-Like Person")
     _db.session.commit()
 
     src = tmp_path / "src_show_auto"; src.mkdir()
@@ -427,17 +427,17 @@ def test_do_confirm_without_ai_result_leaves_ai_research_json_null(app, db, tmp_
     assert rec.ai_research_json is None
 
 
-def test_check_existing_no_performer_match(api):
+def test_check_existing_no_artist_match(api):
     """Artist name that doesn't exist yet — nothing to warn about."""
     resp = api.get("/api/ingest/check-existing?artist_name=Nobody+At+All&year=1999")
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["performer_found"] is False
+    assert body["artist_found"] is False
     assert body["performances"] == []
 
 
-def test_check_existing_finds_recording_for_performer_and_date(app, db, api, tmp_path):
-    """The core case: a recording already exists for this performer+date —
+def test_check_existing_finds_recording_for_artist_and_date(app, db, api, tmp_path):
+    """The core case: a recording already exists for this artist+date —
     Add Recording's duplicate-warning check should surface it (non-blocking,
     per Ryan's 2026-07-14 call — this only warns, never blocks Confirm)."""
     from app.api.ingest import _do_confirm
@@ -464,7 +464,7 @@ def test_check_existing_finds_recording_for_performer_and_date(app, db, api, tmp
     )
     assert resp.status_code == 200
     body = resp.get_json()
-    assert body["performer_found"] is True
+    assert body["artist_found"] is True
     assert len(body["performances"]) == 1
     recs = body["performances"][0]["recordings"]
     assert len(recs) == 1
@@ -472,7 +472,7 @@ def test_check_existing_finds_recording_for_performer_and_date(app, db, api, tmp
     assert recs[0]["quality"] == "A"
     assert recs[0]["track_count"] == 1
 
-    # A different day for the same performer/year should NOT match — the
+    # A different day for the same artist/year should NOT match — the
     # whole point is to narrow to the same show, not just the same act/year.
     resp2 = api.get(
         "/api/ingest/check-existing"
@@ -484,17 +484,17 @@ def test_check_existing_finds_recording_for_performer_and_date(app, db, api, tmp
 def test_check_existing_excludes_performance_with_no_recordings(db, api):
     """A bare Performance row with zero Recordings isn't a duplicate risk —
     nothing to accidentally re-ingest yet."""
-    from app.utils.performers import resolve_or_create_performer
+    from app.utils.artists import resolve_or_create_artist
     from app.models.performance import Performance
 
-    performer = resolve_or_create_performer("Empty Performance Act")
-    perf = Performance(performer_id=performer.id, start_year=2001, start_month=5, start_day=5)
+    artist = resolve_or_create_artist("Empty Performance Act")
+    perf = Performance(artist_id=artist.id, start_year=2001, start_month=5, start_day=5)
     _db.session.add(perf)
     _db.session.commit()
 
     resp = api.get("/api/ingest/check-existing?artist_name=Empty+Performance+Act&year=2001")
     body = resp.get_json()
-    assert body["performer_found"] is True
+    assert body["artist_found"] is True
     assert body["performances"] == []
 
 
@@ -651,10 +651,10 @@ def test_save_info_file_rejects_path_traversal(api, tmp_path):
     assert not outside.exists()
 
 
-def test_performer_and_venue_delete_when_empty(api):
-    pid = api.post("/api/performers/", json={"name": "Temp Act"}).get_json()["id"]
-    assert api.delete(f"/api/performers/{pid}").status_code == 200
-    assert _db.session.get(Performer, pid) is None
+def test_artist_and_venue_delete_when_empty(api):
+    pid = api.post("/api/artists/", json={"name": "Temp Act"}).get_json()["id"]
+    assert api.delete(f"/api/artists/{pid}").status_code == 200
+    assert _db.session.get(Artist, pid) is None
 
     vid = api.post("/api/venues/", json={"name": "Temp Hall"}).get_json()["id"]
     assert api.delete(f"/api/venues/{vid}").status_code == 200
@@ -1006,11 +1006,11 @@ def test_do_confirm_flattens_and_renames_multi_disc_with_checksums(app, db, tmp_
     assert tracks[2].expected_checksum == md5_3
 
 
-# ── Duplicate detection across performer/artist variants (2026-08-02) ─────────
+# ── Duplicate detection across artist/musician variants (2026-08-02) ─────────
 # The triage card now warns when the library already holds this act on this
 # date. Exact-name matching alone would miss the variant that actually bites:
 # "Aoife O'Donovan" and "Aoife O'Donovan Band" are one act to a collector and
-# two Performer rows in the DB.
+# two Artist rows in the DB.
 
 def test_act_key_strips_decoration_but_keeps_identity():
     from app.api.ingest import _act_key
@@ -1029,52 +1029,52 @@ def test_act_key_never_returns_empty_for_an_all_noise_name():
     assert _act_key("The Band") == "the band"
 
 
-def test_resolve_similar_performer_ids_finds_variants(app):
+def test_resolve_similar_artist_ids_finds_variants(app):
     from app.extensions import db as _db
-    from app.models.performer import Performer
-    from app.api.ingest import resolve_similar_performer_ids
+    from app.models.artist import Artist
+    from app.api.ingest import resolve_similar_artist_ids
 
     with app.app_context():
-        exact   = Performer(name="Aoife O'Donovan")
-        variant = Performer(name="Aoife O'Donovan Band")
-        typo    = Performer(name="Aoife ODonovan")
-        other   = Performer(name="Punch Brothers")
+        exact   = Artist(name="Aoife O'Donovan")
+        variant = Artist(name="Aoife O'Donovan Band")
+        typo    = Artist(name="Aoife ODonovan")
+        other   = Artist(name="Punch Brothers")
         _db.session.add_all([exact, variant, typo, other])
         _db.session.commit()
 
-        ids = set(resolve_similar_performer_ids("Aoife O'Donovan"))
+        ids = set(resolve_similar_artist_ids("Aoife O'Donovan"))
         assert {exact.id, variant.id, typo.id} <= ids
         assert other.id not in ids
 
 
-def test_resolve_similar_performer_ids_reaches_through_a_person(app):
-    """Ryan asked for 'performer OR artist'. Since the 07-11 remodel those are
+def test_resolve_similar_artist_ids_reaches_through_a_person(app):
+    """Ryan asked for 'artist OR musician'. Since the 07-11 remodel those are
     different tables, so a person's name has to find the acts they play in."""
     from app.extensions import db as _db
-    from app.models.performer import Performer
-    from app.models.artist import Artist, Membership
-    from app.api.ingest import resolve_similar_performer_ids
+    from app.models.artist import Artist
+    from app.models.musician import Musician, Membership
+    from app.api.ingest import resolve_similar_artist_ids
 
     with app.app_context():
-        act    = Performer(name="Old And In The Way")
-        person = Artist(name="Jerry Garcia")
+        act    = Artist(name="Old And In The Way")
+        person = Musician(name="Jerry Garcia")
         _db.session.add_all([act, person])
         _db.session.flush()
-        _db.session.add(Membership(performer_id=act.id, artist_id=person.id))
+        _db.session.add(Membership(artist_id=act.id, musician_id=person.id))
         _db.session.commit()
 
-        assert act.id in resolve_similar_performer_ids("Jerry Garcia")
+        assert act.id in resolve_similar_artist_ids("Jerry Garcia")
 
 
-def test_resolve_similar_performer_ids_is_empty_for_a_blank_name():
-    from app.api.ingest import resolve_similar_performer_ids
-    assert resolve_similar_performer_ids("") == []
-    assert resolve_similar_performer_ids(None) == []
+def test_resolve_similar_artist_ids_is_empty_for_a_blank_name():
+    from app.api.ingest import resolve_similar_artist_ids
+    assert resolve_similar_artist_ids("") == []
+    assert resolve_similar_artist_ids(None) == []
 
 
 # ── Genre (2026-08-02) ───────────────────────────────────────────────────────
-# Genre is a proper dimension: its own table, one nullable FK from Performer,
-# guarded delete matching Venue/Collection/Artist. See the Genre design spec
+# Genre is a proper dimension: its own table, one nullable FK from Artist,
+# guarded delete matching Venue/Collection/Musician. See the Genre design spec
 # in Context Library. Nothing may create a genre implicitly — every picker
 # selects from the existing table only.
 
@@ -1098,7 +1098,7 @@ def test_genre_color_roundtrip_validation_and_clearing(api):
     """Colour is `#rrggbb` only, normalised to lowercase, and CLEARABLE.
 
     Clearing matters as much as setting: NULL is a first-class state that
-    renders the same neutral grey as a performer with no genre at all, so it
+    renders the same neutral grey as a artist with no genre at all, so it
     must not be a validation failure. Shorthand and named colours are refused
     at the door so every consumer gets one canonical form.
     """
@@ -1125,14 +1125,14 @@ def test_recording_row_card_fields_opt_in(app, seeded_ids):
 
     Absence, not null, is the assertion for the default case — this serializer
     also backs the 544-row flat List, and each card field walks Recording →
-    Performance → Performer → (Genre | PerformerImage). Shipping them
+    Performance → Artist → (Genre | ArtistImage). Shipping them
     unconditionally would tax List to benefit two small Browse modules.
     """
     from app.extensions import db as _db
     from app.utils.serialize import recording_row
     from app.models.recording import Recording
     from app.models.genre import Genre
-    from app.models.performer_image import PerformerImage
+    from app.models.artist_image import ArtistImage
 
     rec = _db.session.get(Recording, seeded_ids["recording_id"])
 
@@ -1145,9 +1145,9 @@ def test_recording_row_card_fields_opt_in(app, seeded_ids):
     assert card["genre_color"] is None    # never substitutes a default
     assert card["image_id"] is None
 
-    performer = rec.performance.performer
-    performer.genre = Genre(name="Trip Hop", color="#445566")
-    _db.session.add(PerformerImage(performer_id=performer.id,
+    artist = rec.performance.artist
+    artist.genre = Genre(name="Trip Hop", color="#445566")
+    _db.session.add(ArtistImage(artist_id=artist.id,
                                    filename="img_x.jpg", ext=".jpg",
                                    is_primary=True))
     _db.session.commit()
@@ -1159,7 +1159,7 @@ def test_recording_row_card_fields_opt_in(app, seeded_ids):
 
 
 def test_recording_row_card_image_falls_back_when_no_primary_flagged(app, seeded_ids):
-    """A performer with images but none flagged primary still gets a face.
+    """A artist with images but none flagged primary still gets a face.
 
     Deleting the primary must never leave a card blank while photos exist, so
     the serializer falls back to the first image rather than requiring the flag.
@@ -1167,11 +1167,11 @@ def test_recording_row_card_image_falls_back_when_no_primary_flagged(app, seeded
     from app.extensions import db as _db
     from app.utils.serialize import recording_row
     from app.models.recording import Recording
-    from app.models.performer_image import PerformerImage
+    from app.models.artist_image import ArtistImage
 
     rec = _db.session.get(Recording, seeded_ids["recording_id"])
-    pid = rec.performance.performer_id
-    _db.session.add(PerformerImage(performer_id=pid, filename="img_y.png",
+    pid = rec.performance.artist_id
+    _db.session.add(ArtistImage(artist_id=pid, filename="img_y.png",
                                    ext=".png", is_primary=False))
     _db.session.commit()
 
@@ -1179,20 +1179,20 @@ def test_recording_row_card_image_falls_back_when_no_primary_flagged(app, seeded
 
 
 def test_genre_delete_guarded_while_referenced(api, seeded_ids):
-    from app.models.performer import Performer
+    from app.models.artist import Artist
 
     g = api.post("/api/genres/", json={"name": "Test Guard Genre"}).get_json()
-    pid = seeded_ids["performer_id"]
-    upd = api.put(f"/api/performers/{pid}", json={"genre_id": g["id"]})
+    pid = seeded_ids["artist_id"]
+    upd = api.put(f"/api/artists/{pid}", json={"genre_id": g["id"]})
     assert upd.status_code == 200
 
     refused = api.delete(f"/api/genres/{g['id']}")
     assert refused.status_code == 409
     assert "1" in refused.get_json()["error"]
-    assert _db.session.get(Performer, pid).genre_id == g["id"]   # untouched
+    assert _db.session.get(Artist, pid).genre_id == g["id"]   # untouched
 
     # Clear the assignment, then delete succeeds.
-    api.put(f"/api/performers/{pid}", json={"genre_id": None})
+    api.put(f"/api/artists/{pid}", json={"genre_id": None})
     ok = api.delete(f"/api/genres/{g['id']}")
     assert ok.status_code == 200
 
@@ -1202,22 +1202,22 @@ def test_genre_delete_when_unreferenced(api):
     assert api.delete(f"/api/genres/{g['id']}").status_code == 200
 
 
-def test_performer_genre_nullable_and_defaults_null(api, seeded_ids):
-    """A performer with no genre assignment (the seeded default) serializes
+def test_artist_genre_nullable_and_defaults_null(api, seeded_ids):
+    """A artist with no genre assignment (the seeded default) serializes
     genre: null, never errors — the FK is nullable by design (plenty of acts
     resist a single label)."""
-    resp = api.get(f"/api/performers/{seeded_ids['performer_id']}")
+    resp = api.get(f"/api/artists/{seeded_ids['artist_id']}")
     assert resp.status_code == 200
     assert resp.get_json()["genre"] is None
 
 
-def test_performer_put_accepts_and_clears_genre_id(api, seeded_ids):
-    pid = seeded_ids["performer_id"]
+def test_artist_put_accepts_and_clears_genre_id(api, seeded_ids):
+    pid = seeded_ids["artist_id"]
     g = api.post("/api/genres/", json={"name": "Newgrass Test"}).get_json()
 
-    r = api.put(f"/api/performers/{pid}", json={"genre_id": g["id"]})
+    r = api.put(f"/api/artists/{pid}", json={"genre_id": g["id"]})
     assert r.status_code == 200
-    fetched = api.get(f"/api/performers/{pid}").get_json()
+    fetched = api.get(f"/api/artists/{pid}").get_json()
     # Field-wise rather than whole-dict equality: the genre payload gained
     # `color` on 2026-08-07 and will gain more. This test is about the FK
     # assignment round-tripping, so it should not fail every time an unrelated
@@ -1227,14 +1227,14 @@ def test_performer_put_accepts_and_clears_genre_id(api, seeded_ids):
     assert fetched["genre"]["color"] is None   # no colour set on create
 
     # Clearing back to null is a legitimate, supported edit.
-    r2 = api.put(f"/api/performers/{pid}", json={"genre_id": None})
+    r2 = api.put(f"/api/artists/{pid}", json={"genre_id": None})
     assert r2.status_code == 200
-    assert api.get(f"/api/performers/{pid}").get_json()["genre"] is None
+    assert api.get(f"/api/artists/{pid}").get_json()["genre"] is None
 
 
-def test_performer_put_rejects_unknown_genre_id(api, seeded_ids):
-    pid = seeded_ids["performer_id"]
-    r = api.put(f"/api/performers/{pid}", json={"genre_id": 999999})
+def test_artist_put_rejects_unknown_genre_id(api, seeded_ids):
+    pid = seeded_ids["artist_id"]
+    r = api.put(f"/api/artists/{pid}", json={"genre_id": 999999})
     assert r.status_code == 400
 
 
@@ -1308,9 +1308,9 @@ def test_recording_row_waveform_none_when_no_track_analysed(app, tmp_path):
     """A recording with no TrackAnalysis rows at all (the ~3% un-analysed
     share) must not error — waveform comes back None, and the frontend
     degrades to a flat strip rather than leaving a hole."""
-    performer = Performer(name="No Analysis Act")
-    _db.session.add(performer); _db.session.flush()
-    perf = Performance(performer_id=performer.id, start_year=2020, start_month=1, start_day=1)
+    artist = Artist(name="No Analysis Act")
+    _db.session.add(artist); _db.session.flush()
+    perf = Performance(artist_id=artist.id, start_year=2020, start_month=1, start_day=1)
     _db.session.add(perf); _db.session.flush()
     rec = Recording(performance_id=perf.id, source="AUD", folder_path="x/no-analysis")
     _db.session.add(rec); _db.session.flush()
@@ -1330,10 +1330,10 @@ def test_on_this_day_matches_month_and_day_regardless_of_year(api, db):
     today = datetime.now(timezone.utc).date()
     other_month = (today.month % 12) + 1   # guaranteed different from today.month
 
-    performer = Performer(name="On This Day Act")
-    db.session.add(performer); db.session.flush()
+    artist = Artist(name="On This Day Act")
+    db.session.add(artist); db.session.flush()
 
-    perf_match = Performance(performer_id=performer.id, start_year=1975,
+    perf_match = Performance(artist_id=artist.id, start_year=1975,
                              start_month=today.month, start_day=today.day)
     db.session.add(perf_match); db.session.flush()
     rec_match = Recording(performance_id=perf_match.id, source="AUD", folder_path="x/match")
@@ -1341,7 +1341,7 @@ def test_on_this_day_matches_month_and_day_regardless_of_year(api, db):
     db.session.add(Track(recording_id=rec_match.id, track_number=1, title="One",
                          duration=100, file_path="01.flac"))
 
-    perf_miss = Performance(performer_id=performer.id, start_year=1980,
+    perf_miss = Performance(artist_id=artist.id, start_year=1980,
                             start_month=other_month, start_day=today.day)
     db.session.add(perf_miss); db.session.flush()
     rec_miss = Recording(performance_id=perf_miss.id, source="AUD", folder_path="x/miss")
@@ -1372,11 +1372,11 @@ def test_on_this_day_empty_when_nothing_matches(api, seeded_ids):
 def test_recommended_pool_is_a_and_a_plus_only_not_a_minus(api, db):
     """'High quality' means quality IN ('A','A+') — A- is deliberately
     excluded (Ryan, 2026-08-02)."""
-    performer = Performer(name="Recommended Pool Act")
-    db.session.add(performer); db.session.flush()
+    artist = Artist(name="Recommended Pool Act")
+    db.session.add(artist); db.session.flush()
 
     def _make(quality, suffix):
-        perf = Performance(performer_id=performer.id, start_year=2000, start_month=1, start_day=1)
+        perf = Performance(artist_id=artist.id, start_year=2000, start_month=1, start_day=1)
         db.session.add(perf); db.session.flush()
         rec = Recording(performance_id=perf.id, source="SBD", quality=quality,
                         folder_path=f"x/{suffix}")
@@ -1396,15 +1396,15 @@ def test_recommended_pool_is_a_and_a_plus_only_not_a_minus(api, db):
     assert a_minus.id not in ids
 
 
-def test_recommended_never_repeats_a_performer_in_one_draw(api, db):
-    """Diversity is a hard rule: two A/A+ shows by the same Performer must
+def test_recommended_never_repeats_a_artist_in_one_draw(api, db):
+    """Diversity is a hard rule: two A/A+ shows by the same Artist must
     never both appear in a single Recommended draw."""
-    performer = Performer(name="Prolific Act")
-    db.session.add(performer); db.session.flush()
+    artist = Artist(name="Prolific Act")
+    db.session.add(artist); db.session.flush()
 
     made = []
     for i in range(4):
-        perf = Performance(performer_id=performer.id, start_year=2000 + i, start_month=1, start_day=1)
+        perf = Performance(artist_id=artist.id, start_year=2000 + i, start_month=1, start_day=1)
         db.session.add(perf); db.session.flush()
         rec = Recording(performance_id=perf.id, source="SBD", quality="A",
                         folder_path=f"x/prolific{i}")
@@ -1418,7 +1418,7 @@ def test_recommended_never_repeats_a_performer_in_one_draw(api, db):
     assert resp.status_code == 200
     picks = resp.get_json()
     ids = [r["id"] for r in picks]
-    # All four candidates share one Performer — at most one of them may be
+    # All four candidates share one Artist — at most one of them may be
     # picked no matter how many slots are requested.
     assert len(set(ids) & {r.id for r in made}) <= 1
     assert len(ids) == len(set(ids))   # no recording picked twice
@@ -1443,7 +1443,7 @@ def test_recommended_omits_waveform_and_respects_limit(api, seeded_ids, db):
     assert len(picks) <= 1
     if picks:
         assert "waveform" not in picks[0]
-        for key in ("performer", "start_year", "venue", "source"):
+        for key in ("artist", "start_year", "venue", "source"):
             assert key in picks[0]
 
 

@@ -2,10 +2,10 @@
 from .user import User, UserArtistPermission
 from .user_preference import UserPreference
 from .genre import Genre
-from .performer import Performer, PerformerResource
-from .performer_image import PerformerImage
-from .artist import Artist, Membership
+from .artist import Artist, ArtistResource
 from .artist_image import ArtistImage
+from .musician import Musician, Membership
+from .musician_image import MusicianImage
 from .venue import Venue
 from .venue_image import VenueImage
 from .event import Event

@@ -20,7 +20,7 @@ import pytest
 
 @pytest.mark.parametrize("path", [
     "/api/auth/me",
-    "/api/performers/1",
+    "/api/artists/1",
     "/api/recordings/1",
     "/api/collections/",
     "/api/peers/",
@@ -43,7 +43,7 @@ def test_api_401_is_not_html(app):
 
 def test_write_methods_also_get_401_not_a_redirect(app):
     c = app.test_client()
-    for method, path in (("put", "/api/performers/1"),
+    for method, path in (("put", "/api/artists/1"),
                          ("delete", "/api/recordings/1"),
                          ("post", "/api/collections/")):
         r = getattr(c, method)(path, json={})

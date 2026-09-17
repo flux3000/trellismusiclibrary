@@ -280,7 +280,7 @@ class Config:
     SHARE_BASE_URL = os.environ.get("SHARE_BASE_URL") or None
 
     # ── User avatars ──────────────────────────────────────────
-    # Beside the database, NOT under LIBRARY_ROOT (Ryan, 2026-08-25). Performer
+    # Beside the database, NOT under LIBRARY_ROOT (Ryan, 2026-08-25). Artist
     # and venue photos live in the music library because they are about its
     # contents; a person's own picture is about the INSTALL. A listener has no
     # music library at all — putting an avatar there would mean Jeff cannot have

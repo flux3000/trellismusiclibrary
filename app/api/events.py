@@ -8,7 +8,7 @@ Promoted to a full dimension 2026-09-01 (Ryan). It had list / search / detail /
 create / update and nothing else: no delete, no photos, no recordings on the
 detail payload, and no page in the app at all — the only way to touch an event
 was the ingest form's autocomplete. It is now the fifth dimension alongside
-Venue, Performer, Artist and Genre, and carries the same surface as the rest.
+Venue, Artist, Musician and Genre, and carries the same surface as the rest.
 
 Routes:
   GET    /api/events/            — list events (q= for search)
@@ -40,7 +40,7 @@ bp = Blueprint("events", __name__)
 
 
 # ── Photos ───────────────────────────────────────────────────────────────────
-# Same parallel-table / shared-behaviour arrangement as Venue and Artist. See
+# Same parallel-table / shared-behaviour arrangement as Venue and Musician. See
 # app/utils/entity_images.py::register_image_routes.
 
 _IMG_URL = "/api/events/images"
@@ -152,15 +152,14 @@ def get_event(event_id):
         "performances": [
             {
                 "id":        p.id,
-                # ⚠ This said `p.artist.name` until 2026-09-01 and had never
-                # been exercised — Performance has no `artist` relationship
-                # (it is `performer`; the 2026-07-11 remodel renamed the old
-                # act-Artist to Performer and this line was missed). Any
+                # ⚠ This read a relationship Performance does not have until
+                # 2026-09-01 and had never been exercised — a line the
+                # 2026-07-11 remodel missed. Any
                 # request for an event with a performance attached raised
                 # AttributeError. Nothing called it, because there was no
                 # Event page. There is one now.
-                "performer":    p.performer.name if p.performer else None,
-                "performer_id": p.performer_id,
+                "artist":    p.artist.name if p.artist else None,
+                "artist_id": p.artist_id,
                 "date":      format_partial_date(p.start_year, p.start_month, p.start_day),
                 "stage":     p.stage,
                 "venue":     p.venue.name if p.venue else None,
@@ -255,7 +254,7 @@ def delete_event(event_id):
     """
     Delete an event. Refuses while performances still point at it.
 
-    Same guard as Venue, Artist, Genre and Collection deletes — and the same
+    Same guard as Venue, Musician, Genre and Collection deletes — and the same
     reasoning: `performance.event_id` is nullable, so cascading would silently
     orphan real shows to remove a label. Unlinking is a decision, so it is the
     caller's to make explicitly.

@@ -14,7 +14,7 @@ import pytest
 
 from app.extensions import db as _db
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.recording import Recording
 from app.utils import quality_store as qs
 from app.utils.quality import score_recording, GROUP_WEIGHTS
@@ -290,10 +290,10 @@ def test_failed_analysis_records_error(app):
 # ═════════════════════════════════════════════════════════════════════════════
 @pytest.fixture()
 def recording(app):
-    p = Performer(name="Test Act")
+    p = Artist(name="Test Act")
     _db.session.add(p)
     _db.session.commit()
-    perf = Performance(performer_id=p.id)
+    perf = Performance(artist_id=p.id)
     _db.session.add(perf)
     _db.session.commit()
     rec = Recording(performance_id=perf.id, folder_path="lib/test", quality="A-")

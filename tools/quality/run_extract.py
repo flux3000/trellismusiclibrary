@@ -1,10 +1,10 @@
 """
-Extract raw quality features for every recording in a Performer folder.
+Extract raw quality features for every recording in a Artist folder.
 
 Resumable: writes results after each recording and skips anything already
 present, so it can be run repeatedly under a short execution timeout.
 
-Usage: python3 run_extract.py <performer_folder> <out.json> [max_per_run]
+Usage: python3 run_extract.py <artist_folder> <out.json> [max_per_run]
 """
 import os
 import sys

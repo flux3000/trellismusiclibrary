@@ -21,9 +21,9 @@ are the apostrophe fold and multi-term AND. Both are pinned below by name.
 import pytest
 
 from app.extensions import db as _db
-from app.models.artist import Artist, Membership
+from app.models.musician import Musician, Membership
 from app.models.performance import Performance
-from app.models.performer import Performer
+from app.models.artist import Artist
 from app.models.quality import RecordingQuality
 from app.models.recording import Recording
 from app.models.user import User
@@ -175,36 +175,36 @@ def test_score_row_rejects_a_dateless_row_when_a_date_was_typed():
 
 def _index():
     """Small fixture corpus, shaped like the real one."""
-    performers = [
+    artists = [
         {"id": 1, "name": "Hot Rize",   "sort_name": None},
         {"id": 2, "name": "Bill Evans", "sort_name": "Evans, Bill"},
     ]
-    artists = [
-        {"id": 10, "name": "Tim O'Brien", "sort_name": None, "performer_ids": [1]},
-        {"id": 11, "name": "Bill Evans",  "sort_name": None, "performer_ids": [2]},
+    musicians = [
+        {"id": 10, "name": "Tim O'Brien", "sort_name": None, "artist_ids": [1]},
+        {"id": 11, "name": "Bill Evans",  "sort_name": None, "artist_ids": [2]},
     ]
     venues = [
         {"id": 20, "name": "Lulu White's", "city": "Boston",   "state": "MA", "country": "US"},
         {"id": 21, "name": "Telluride",    "city": "Telluride", "state": "CO", "country": "US"},
     ]
     recordings = [
-        {"id": 100, "performance_id": 200, "performer_id": 1,
-         "performer_name": "Hot Rize", "performer_sort_name": None,
-         "artist_names": ["Tim O'Brien"], "venue_id": 21, "venue_name": "Telluride",
+        {"id": 100, "performance_id": 200, "artist_id": 1,
+         "artist_name": "Hot Rize", "artist_sort_name": None,
+         "musician_names": ["Tim O'Brien"], "venue_id": 21, "venue_name": "Telluride",
          "city": "Telluride", "state": "CO", "country": "US",
          "year": 1983, "month": 6, "day": 25, "source": "SBD", "listening_quality": 70.0},
-        {"id": 101, "performance_id": 201, "performer_id": 1,
-         "performer_name": "Hot Rize", "performer_sort_name": None,
-         "artist_names": ["Tim O'Brien"], "venue_id": 21, "venue_name": "Telluride",
+        {"id": 101, "performance_id": 201, "artist_id": 1,
+         "artist_name": "Hot Rize", "artist_sort_name": None,
+         "musician_names": ["Tim O'Brien"], "venue_id": 21, "venue_name": "Telluride",
          "city": "Telluride", "state": "CO", "country": "US",
          "year": 1983, "month": 6, "day": 26, "source": "AUD", "listening_quality": 90.0},
-        {"id": 102, "performance_id": 202, "performer_id": 2,
-         "performer_name": "Bill Evans", "performer_sort_name": "Evans, Bill",
-         "artist_names": ["Bill Evans"], "venue_id": 20, "venue_name": "Lulu White's",
+        {"id": 102, "performance_id": 202, "artist_id": 2,
+         "artist_name": "Bill Evans", "artist_sort_name": "Evans, Bill",
+         "musician_names": ["Bill Evans"], "venue_id": 20, "venue_name": "Lulu White's",
          "city": "Boston", "state": "MA", "country": "US",
          "year": 1979, "month": 10, "day": 30, "source": "FM", "listening_quality": 84.0},
     ]
-    return se.build_index(performers, artists, venues, recordings)
+    return se.build_index(artists, musicians, venues, recordings)
 
 
 def _ids(result, group):
@@ -215,7 +215,7 @@ def test_multi_term_and_narrows_rather_than_breaks():
     """The headline behaviour: "hot rize 1983" must satisfy BOTH."""
     r = se.run_search(_index(), "hot rize 1983", today_year=2026)
     assert sorted(_ids(r, "recordings")) == [100, 101]
-    assert _ids(r, "performers") == [1]
+    assert _ids(r, "artists") == [1]
 
 
 def test_adding_a_term_can_only_shrink_the_result():
@@ -232,10 +232,10 @@ def test_apostrophe_venue_is_reachable_without_typing_the_apostrophe():
     assert _ids(r, "recordings") == [102]
 
 
-def test_artist_reaches_shows_through_membership():
+def test_musician_reaches_shows_through_membership():
     """Tim O'Brien is a person; his shows are Hot Rize's, via membership."""
     r = se.run_search(_index(), "obrien", today_year=2026)
-    assert _ids(r, "artists") == [10]
+    assert _ids(r, "musicians") == [10]
     assert sorted(_ids(r, "recordings")) == [100, 101]
 
 
@@ -249,15 +249,15 @@ def test_date_only_query_returns_shows_and_no_entity_groups():
     """Matching every act in the library against no text is not a result."""
     r = se.run_search(_index(), "1983", today_year=2026)
     assert sorted(_ids(r, "recordings")) == [100, 101]
-    assert r["groups"]["performers"]["total"] == 0
-    assert r["groups"]["venues"]["total"] == 0
     assert r["groups"]["artists"]["total"] == 0
+    assert r["groups"]["venues"]["total"] == 0
+    assert r["groups"]["musicians"]["total"] == 0
 
 
 def test_entity_groups_survive_a_date_term_in_the_query():
     """"hot rize 1983" should still offer the act itself, not just shows."""
     r = se.run_search(_index(), "hot rize 1983", today_year=2026)
-    assert _ids(r, "performers") == [1]
+    assert _ids(r, "artists") == [1]
 
 
 def test_full_date_narrows_to_the_single_night():
@@ -292,7 +292,7 @@ def test_unmatched_query_returns_zero_not_everything():
 
 def test_group_order_is_fixed():
     """A dropdown whose groups reshuffle between keystrokes cannot be aimed at."""
-    assert se.GROUP_ORDER == ("performers", "recordings", "venues", "artists")
+    assert se.GROUP_ORDER == ("artists", "recordings", "venues", "musicians")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -364,24 +364,24 @@ def test_seeded_act_is_found_with_exact_shape(client, seeded_ids):
     body = r.get_json()
     groups = {g["type"]: g for g in body["groups"]}
 
-    assert groups["performers"]["label"] == "Performers"
-    assert groups["performers"]["total"] == 1
-    item = groups["performers"]["items"][0]
+    assert groups["artists"]["label"] == "Artists"
+    assert groups["artists"]["total"] == 1
+    item = groups["artists"]["items"][0]
     assert item == {
-        "type": "performer",
-        "id": seeded_ids["performer_id"],
+        "type": "artist",
+        "id": seeded_ids["artist_id"],
         "name": "Bill Evans",
         "recording_count": 1,
-        "hash": f"#/performer/{seeded_ids['performer_id']}",
+        "hash": f"#/artist/{seeded_ids['artist_id']}",
     }
 
 
 def test_person_and_act_route_to_different_pages(client, seeded_ids):
-    """Artist (person) and Performer (act) share a name in the seed and sit on
+    """Musician (person) and Artist (act) share a name in the seed and sit on
     adjacent routes — wiring one to the other's page is the obvious bug."""
     groups = {g["type"]: g for g in client.get("/api/search?q=evans").get_json()["groups"]}
-    assert groups["performers"]["items"][0]["hash"] == f"#/performer/{seeded_ids['performer_id']}"
-    assert groups["artists"]["items"][0]["hash"] == f"#/person/{seeded_ids['artist_id']}"
+    assert groups["artists"]["items"][0]["hash"] == f"#/artist/{seeded_ids['artist_id']}"
+    assert groups["musicians"]["items"][0]["hash"] == f"#/musician/{seeded_ids['musician_id']}"
 
 
 def test_recording_item_shape(client, seeded_ids):
@@ -390,8 +390,8 @@ def test_recording_item_shape(client, seeded_ids):
     assert item == {
         "type": "recording",
         "id": seeded_ids["recording_id"],
-        "performer": "Bill Evans",
-        "performer_id": seeded_ids["performer_id"],
+        "artist": "Bill Evans",
+        "artist_id": seeded_ids["artist_id"],
         "date": "1980-02-22",
         "venue": "Sprague Memorial Hall",
         "city": "New Haven",
@@ -519,10 +519,10 @@ def test_unanalysed_recording_sorts_last_without_crashing(app, client):
 def test_a_show_with_no_venue_is_still_found_by_act(app, client):
     """10 of 552 shows have no venue. They lose the geography dimension —
     accepted — but must not vanish from search altogether."""
-    performer = Performer(name="Ornette Coleman")
-    _db.session.add(performer)
+    artist = Artist(name="Ornette Coleman")
+    _db.session.add(artist)
     _db.session.flush()
-    perf = Performance(performer_id=performer.id, venue_id=None,
+    perf = Performance(artist_id=artist.id, venue_id=None,
                        start_year=1972, start_month=3, start_day=1)
     _db.session.add(perf)
     _db.session.flush()
@@ -536,18 +536,18 @@ def test_a_show_with_no_venue_is_still_found_by_act(app, client):
 
 
 def test_diacritic_free_typing_finds_an_accented_act(app, client):
-    performer = Performer(name="Esbjörn Svensson Trio")
-    _db.session.add(performer)
+    artist = Artist(name="Esbjörn Svensson Trio")
+    _db.session.add(artist)
     _db.session.flush()
-    person = Artist(name="Esbjörn Svensson")
+    person = Musician(name="Esbjörn Svensson")
     _db.session.add(person)
     _db.session.flush()
-    _db.session.add(Membership(performer_id=performer.id, artist_id=person.id, order=0))
+    _db.session.add(Membership(artist_id=artist.id, musician_id=person.id, order=0))
     _db.session.commit()
 
     groups = {g["type"]: g for g in client.get("/api/search?q=esbjorn").get_json()["groups"]}
-    assert groups["performers"]["items"][0]["name"] == "Esbjörn Svensson Trio"
-    assert groups["artists"]["items"][0]["name"] == "Esbjörn Svensson"
+    assert groups["artists"]["items"][0]["name"] == "Esbjörn Svensson Trio"
+    assert groups["musicians"]["items"][0]["name"] == "Esbjörn Svensson"
 
 
 def test_venue_recording_count_is_derived_correctly(app, client):

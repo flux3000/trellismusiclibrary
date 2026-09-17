@@ -9,7 +9,7 @@ opt-in, paid action layered on top when a human wants deeper research.
 
 Paula answers two separate questions with two separate 0-100 scores:
 
-  1. Primary Attribute Score — how confident are we in Performer, Date,
+  1. Primary Attribute Score — how confident are we in Artist, Date,
      Venue Name, City, State, and Country, based only on what's directly in
      the FLAC tags and the primary info text file (no web research)?
   2. Track Completeness Score — how much of the setlist do we already have,
@@ -18,14 +18,14 @@ Paula answers two separate questions with two separate 0-100 scores:
 Design history (2026-07-16 conversation):
   - Each Primary Attribute is scored from four raw signals: tag present,
     tag DB-matched, txt present, txt DB-matched. Weights reflect how much
-    each attribute matters (Performer/Date highest; Country lowest, since
+    each attribute matters (Artist/Date highest; Country lowest, since
     domestic US shows almost never state it explicitly — see WEIGHTS).
   - IMPORTANT CALIBRATION FIX: a DB match is a catalog-consistency signal
     ("have we seen this exact name before"), not a truth signal. A brand
-    new performer/venue that isn't in the DB yet is NOT less reliable data
+    new artist/venue that isn't in the DB yet is NOT less reliable data
     just because it's new — Ryan flagged this explicitly after an early
     version of this scorer badly under-scored a well-tagged show with a
-    new-to-the-DB performer (58 instead of ~75). Match is now a modest
+    new-to-the-DB artist (58 instead of ~75). Match is now a modest
     +0.20 bonus on top of a much higher presence-only base, not a gate.
   - Tag data is trusted somewhat more than txt data when neither is
     DB-matched (0.70 vs 0.55 presence base) — a raw tag field is more
@@ -48,7 +48,7 @@ Design history (2026-07-16 conversation):
     incomplete/penalized state.
 
 Both scores are DB-match-aware but this module itself is DB-free — the
-caller (app/api/recordings.py's scan endpoint) fetches known performer
+caller (app/api/recordings.py's scan endpoint) fetches known artist
 names and known venue records (name + city + state + country) and passes
 them in, the same pattern app.utils.ingest.parse_info_file already
 established for its own (currently unused in production) fuzzy matching.
@@ -63,7 +63,7 @@ from app.utils.health import _is_real_title
 # text, so this keeps an otherwise-perfect domestic show from being punished
 # hard for a field nobody fills in.
 WEIGHTS = {
-    "performer":  28,
+    "artist":  28,
     "date":       27,
     "venue_name": 20,
     "city":       12,
@@ -71,7 +71,7 @@ WEIGHTS = {
     "country":     5,
 }
 
-# Per-attribute component constants (Performer / Venue Name / City / State / Country)
+# Per-attribute component constants (Artist / Venue Name / City / State / Country)
 _PRESENCE_TAG  = 0.70   # tag field has a real value
 _PRESENCE_TXT  = 0.55   # only the info file has a value (no tag)
 _MATCH_BONUS   = 0.20   # the winning value is DB-matched (>=0.85 fuzzy), either source
@@ -108,7 +108,7 @@ def _values_agree(a, b):
 
 def _score_name_attribute(tag_value, tag_matched, txt_value, txt_matched):
     """
-    Score one of Performer / Venue Name / City / State / Country.
+    Score one of Artist / Venue Name / City / State / Country.
     Returns (subscore 0-1, detail dict) — detail carries the raw flags so
     the debug panel / UI can show exactly what produced the number.
     """
@@ -267,36 +267,36 @@ def _score_tracks(tag_tracks, txt_tracks, n_audio):
     return {"score": score, "breakdown": breakdown, "tracks": tracks_detail}
 
 
-def compute_paula_score(scan, known_performers=None, known_venues=None):
+def compute_paula_score(scan, known_artists=None, known_venues=None):
     """
     scan: a build_scan_payload()-shaped dict.
-    known_performers: list of performer name strings.
+    known_artists: list of artist name strings.
     known_venues: list of {"name":, "city":, "state":, "country":} dicts.
 
     Returns:
       {
         "score": int 0-100,                      # Primary Attribute Score
-        "attributes": {performer, date, venue_name, city, state, country},
+        "attributes": {artist, date, venue_name, city, state, country},
         "track_completeness": {score, breakdown, tracks},
       }
     Every "attributes" entry carries its raw flags/components/subscore/
     weight/points — this is intentionally verbose so the debug panel can
     show exactly what produced the final number, not just the number itself.
     """
-    known_performers = known_performers or []
+    known_artists = known_artists or []
     known_venues = known_venues or []
 
     sugg = scan.get("suggestions") or {}
     tags = sugg.get("from_tags") or {}
     info = sugg.get("from_info_file") or {}
 
-    # Performer
-    tag_performer = tags.get("artist")
-    txt_performer = info.get("artist")
-    tag_perf_matched = bool(tag_performer and _fuzzy_match(str(tag_performer), known_performers))
-    txt_perf_matched = bool(txt_performer and _fuzzy_match(str(txt_performer), known_performers))
+    # Artist
+    tag_artist = tags.get("artist")
+    txt_artist = info.get("artist")
+    tag_perf_matched = bool(tag_artist and _fuzzy_match(str(tag_artist), known_artists))
+    txt_perf_matched = bool(txt_artist and _fuzzy_match(str(txt_artist), known_artists))
     perf_sub, perf_detail = _score_name_attribute(
-        tag_performer, tag_perf_matched, txt_performer, txt_perf_matched)
+        tag_artist, tag_perf_matched, txt_artist, txt_perf_matched)
 
     # Venue Name (+ resolve the winning venue record for location cross-checks)
     tag_venue = tags.get("venue")
@@ -325,7 +325,7 @@ def compute_paula_score(scan, known_performers=None, known_venues=None):
     date_sub, date_detail = _score_date(tag_ymd, txt_ymd)
 
     subscores = {
-        "performer":  (perf_sub, perf_detail),
+        "artist":  (perf_sub, perf_detail),
         "date":       (date_sub, date_detail),
         "venue_name": (venue_sub, venue_detail),
         "city":       (city_sub, city_detail),

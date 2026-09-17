@@ -1,28 +1,28 @@
 """
-utils/performers.py — resolve/create Performers (acts) and their member Artists.
+utils/artists.py — resolve/create Artists (acts) and their member Musicians.
 
 Shared by ingest, the Add/Edit forms, and performance reassignment.
 
-The Performer (the billed act) is the core entity. Member Artists (people) are
-OPTIONAL — a Performer may have zero members. Members are only added in special
-cases: a one-off collaboration of otherwise-distinct artists, or deliberate
-personnel archiving. Nothing is auto-seeded from the performer's name.
+The Artist (the billed act) is the core entity. Member Musicians (people) are
+OPTIONAL — an Artist may have zero members. Members are only added in special
+cases: a one-off collaboration of otherwise-distinct musicians, or deliberate
+personnel archiving. Nothing is auto-seeded from the artist's name.
 """
 
 from sqlalchemy import func
 from app.extensions import db
-from app.models.performer import Performer
-from app.models.artist import Artist, Membership
+from app.models.artist import Artist
+from app.models.musician import Musician, Membership
 
 
-def resolve_or_create_artist(name):
-    """Find an Artist (person) by name (case-insensitive) or create it."""
+def resolve_or_create_musician(name):
+    """Find a Musician (person) by name (case-insensitive) or create it."""
     name = (name or "").strip()
     if not name:
         return None
-    a = db.session.query(Artist).filter(func.lower(Artist.name) == name.lower()).first()
+    a = db.session.query(Musician).filter(func.lower(Musician.name) == name.lower()).first()
     if not a:
-        a = Artist(name=name)
+        a = Musician(name=name)
         db.session.add(a)
         db.session.flush()
     return a
@@ -36,10 +36,10 @@ def _is_unbounded(membership):
     ])
 
 
-def set_performer_members(performer, member_names):
+def set_artist_members(artist, member_names):
     """
-    Sync a performer's roster to the given ordered list of names — the plain
-    "list of names" editing path (Performer page, ingest). Covers the 90% case
+    Sync an artist's roster to the given ordered list of names — the plain
+    "list of names" editing path (Artist page, ingest). Covers the 90% case
     with no stint dates involved; see Per-Show Personnel design doc §7.6.
 
     STINT-SAFE (2026-07-18 rewrite): the old version deleted and recreated the
@@ -47,7 +47,7 @@ def set_performer_members(performer, member_names):
     (e.g. Mickey Hart's two Membership rows — 1967-71 and 1974-95 — would
     collapse into one row and both sets of dates would vanish). Instead:
 
-      - a name already linked to this performer keeps ALL of its existing
+      - a name already linked to this artist keeps ALL of its existing
         stint row(s) untouched; only its `order` moves to the new position
         (order is a per-PERSON concept — the earliest stint's row carries it,
         per the design doc's dedupe rule)
@@ -60,8 +60,8 @@ def set_performer_members(performer, member_names):
         someone's tenure, put an end date on their stint — don't just drop
         them from this list.
 
-    An empty list clears every member with no stint history — a Performer
-    with zero Artists is still valid.
+    An empty list clears every member with no stint history — an Artist
+    with zero Musicians is still valid.
     """
     names, seen = [], set()
     for n in (member_names or []):
@@ -70,24 +70,24 @@ def set_performer_members(performer, member_names):
             seen.add(n.lower())
             names.append(n)
 
-    existing = db.session.query(Membership).filter_by(performer_id=performer.id).all()
-    by_artist_id = {}
+    existing = db.session.query(Membership).filter_by(artist_id=artist.id).all()
+    by_musician_id = {}
     for m in existing:
-        by_artist_id.setdefault(m.artist_id, []).append(m)
+        by_musician_id.setdefault(m.musician_id, []).append(m)
 
-    kept_artist_ids = set()
+    kept_musician_ids = set()
     for i, name in enumerate(names):
-        artist = resolve_or_create_artist(name)
-        kept_artist_ids.add(artist.id)
-        stints = by_artist_id.get(artist.id)
+        musician = resolve_or_create_musician(name)
+        kept_musician_ids.add(musician.id)
+        stints = by_musician_id.get(musician.id)
         if stints:
             earliest = min(stints, key=lambda m: m.order)
             earliest.order = i
         else:
-            db.session.add(Membership(performer_id=performer.id, artist_id=artist.id, order=i))
+            db.session.add(Membership(artist_id=artist.id, musician_id=musician.id, order=i))
 
-    for artist_id, stints in by_artist_id.items():
-        if artist_id in kept_artist_ids:
+    for musician_id, stints in by_musician_id.items():
+        if musician_id in kept_musician_ids:
             continue
         if len(stints) == 1 and _is_unbounded(stints[0]):
             db.session.delete(stints[0])
@@ -96,22 +96,22 @@ def set_performer_members(performer, member_names):
     db.session.flush()
 
 
-def add_membership_stint(performer, artist_name, order=None,
+def add_membership_stint(artist, musician_name, order=None,
                           start_year=None, start_month=None, start_day=None,
                           end_year=None, end_month=None, end_day=None):
     """
-    Add a NEW stint row linking `artist_name` to `performer`. Does not touch
+    Add a NEW stint row linking `musician_name` to `artist`. Does not touch
     any existing stint(s) already on record for that person — this is how a
     second stint (e.g. Mickey Hart's post-1974 return) gets recorded without
     disturbing the first. `order` defaults to after the current max.
     """
-    artist = resolve_or_create_artist(artist_name)
+    musician = resolve_or_create_musician(musician_name)
     if order is None:
         max_order = db.session.query(func.max(Membership.order)).filter_by(
-            performer_id=performer.id).scalar()
+            artist_id=artist.id).scalar()
         order = (max_order + 1) if max_order is not None else 0
     m = Membership(
-        performer_id=performer.id, artist_id=artist.id, order=order,
+        artist_id=artist.id, musician_id=musician.id, order=order,
         start_year=start_year, start_month=start_month, start_day=start_day,
         end_year=end_year, end_month=end_month, end_day=end_day,
     )
@@ -143,23 +143,23 @@ def remove_membership_stint(membership_id):
     return True
 
 
-def resolve_or_create_performer(name, member_names=None):
+def resolve_or_create_artist(name, member_names=None):
     """
-    Find a Performer by name (case-insensitive) or create it. On create, seed
-    members from member_names if provided (otherwise the Performer starts with no
-    Artists). Does NOT change an existing performer's members — use
-    set_performer_members.
+    Find an Artist by name (case-insensitive) or create it. On create, seed
+    members from member_names if provided (otherwise the Artist starts with no
+    Musicians). Does NOT change an existing artist's members — use
+    set_artist_members.
     """
     name = (name or "").strip()
-    performer = db.session.query(Performer).filter(
-        func.lower(Performer.name) == name.lower()).first()
-    if performer:
-        return performer
-    performer = Performer(name=name)
-    db.session.add(performer)
+    artist = db.session.query(Artist).filter(
+        func.lower(Artist.name) == name.lower()).first()
+    if artist:
+        return artist
+    artist = Artist(name=name)
+    db.session.add(artist)
     db.session.flush()
     if member_names:
-        set_performer_members(performer, member_names)
+        set_artist_members(artist, member_names)
 
     # MusicBrainz lookup on creation (2026-08-07). Synchronous, and deliberately
     # so: this runs inside the ingest BACKGROUND job, where the user is already
@@ -167,11 +167,11 @@ def resolve_or_create_performer(name, member_names=None):
     # the in-session object before the caller commits — no second thread, no
     # race against an uncommitted row.
     #
-    # Cannot fail an ingest: try_match_performer() swallows everything, is a
+    # Cannot fail an ingest: try_match_artist() swallows everything, is a
     # no-op under TESTING, and a process-wide circuit breaker stops retrying
     # once offline (otherwise a 40-show bulk import would spend eight minutes
     # timing out on DNS). See app/utils/musicbrainz.py.
     from app.utils import musicbrainz as _mb
-    _mb.try_match_performer(performer)
+    _mb.try_match_artist(artist)
 
-    return performer
+    return artist

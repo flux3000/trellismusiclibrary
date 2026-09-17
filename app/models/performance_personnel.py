@@ -2,7 +2,7 @@
 models/performance_personnel.py — show-level personnel (2026-07-18).
 
 Layer 2 of the Per-Show Personnel model (see Context Library/Per-Show
-Personnel - Design Plan). A PerformancePersonnel row says "this Artist
+Personnel - Design Plan). A PerformancePersonnel row says "this Musician
 played this specific Performance," independent of the act's Membership
 roster. What it means depends on the parent Performance's personnel_mode:
 
@@ -24,7 +24,7 @@ class PerformancePersonnel(db.Model):
 
     id             = db.Column(db.Integer, primary_key=True)
     performance_id = db.Column(db.Integer, db.ForeignKey("performance.id"), nullable=False)
-    artist_id      = db.Column(db.Integer, db.ForeignKey("artist.id"),      nullable=False)
+    musician_id      = db.Column(db.Integer, db.ForeignKey("musician.id"),      nullable=False)
 
     instrument = db.Column(db.String(128), nullable=True)   # "banjo", "mandolin"
     order      = db.Column(db.Integer, nullable=False, default=0)
@@ -34,7 +34,7 @@ class PerformancePersonnel(db.Model):
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     performance = db.relationship("Performance", back_populates="personnel")
-    artist      = db.relationship("Artist")
+    musician      = db.relationship("Musician")
 
     def __repr__(self):
-        return f"<PerformancePersonnel performance={self.performance_id} artist={self.artist_id}>"
+        return f"<PerformancePersonnel performance={self.performance_id} musician={self.musician_id}>"

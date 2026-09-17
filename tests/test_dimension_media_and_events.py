@@ -1,5 +1,5 @@
 """
-tests/test_dimension_media_and_events.py — Artist + Event photos, and the Event
+tests/test_dimension_media_and_events.py — Musician + Event photos, and the Event
 dimension's newly-complete CRUD (2026-09-01).
 
 Two things are under test here, and they share a file because they landed
@@ -7,7 +7,7 @@ together:
 
 1. ARTIST AND EVENT PHOTOS. These are the third and fourth parallel image
    tables. Every assertion below has a twin in test_venue_media.py and
-   test_performer_media.py — deliberately, because the whole argument for
+   test_artist_media.py — deliberately, because the whole argument for
    parallel tables is that the BEHAVIOUR is shared. If these two files ever
    disagree it means the sharing stopped being real.
 
@@ -17,8 +17,8 @@ together:
    hand-written ones had.
 
 2. EVENT CRUD. Event had no delete and a detail endpoint that raised
-   AttributeError the moment a performance was attached to it (`p.artist`,
-   a survivor of the 2026-07-11 Performer remodel). Nothing caught it because
+   AttributeError the moment a performance was attached to it (`p.musician`,
+   a survivor of the 2026-07-11 Artist remodel). Nothing caught it because
    nothing called it — there was no Event page. There is one now.
 """
 
@@ -26,7 +26,7 @@ from io import BytesIO
 
 import pytest
 
-from app.models.artist import Artist
+from app.models.musician import Musician
 from app.models.event import Event
 
 
@@ -39,7 +39,7 @@ def api(app):
 @pytest.fixture()
 def person(app):
     from app.extensions import db as _db
-    a = Artist(name="Danny Gatton")
+    a = Musician(name="Danny Gatton")
     _db.session.add(a)
     _db.session.commit()
     return a
@@ -55,63 +55,63 @@ def event(app):
     return e
 
 
-# ── Photos: Artist ───────────────────────────────────────────────────────────
+# ── Photos: Musician ───────────────────────────────────────────────────────────
 
-def test_artist_upload_list_serve_delete(api, app, person, tmp_path):
+def test_musician_upload_list_serve_delete(api, app, person, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
 
-    assert api.get(f"/api/artists/{person.id}").get_json()["has_image"] is False
-    assert api.get(f"/api/artists/{person.id}/images").get_json() == []
+    assert api.get(f"/api/musicians/{person.id}").get_json()["has_image"] is False
+    assert api.get(f"/api/musicians/{person.id}/images").get_json() == []
 
-    r = api.post(f"/api/artists/{person.id}/images",
+    r = api.post(f"/api/musicians/{person.id}/images",
                  data={"image": (BytesIO(b"\xff\xd8\xff jpeg"), "danny.jpg")},
                  content_type="multipart/form-data")
     assert r.status_code == 200
     img = r.get_json()["images"][0]
     assert img["is_primary"] is True                    # first one, automatically
-    assert img["url"] == f"/api/artists/images/{img['id']}"
+    assert img["url"] == f"/api/musicians/images/{img['id']}"
 
-    # The `_artists` bucket is the point: a PERSON and an ACT share a name
-    # constantly in this corpus, and performer photos live at the library root
+    # The `_musicians` bucket is the point: a PERSON and an ACT share a name
+    # constantly in this corpus, and artist photos live at the library root
     # with no prefix at all, so without it they would write to one folder.
-    images_dir = tmp_path / "_artists" / "Danny Gatton" / "_images"
+    images_dir = tmp_path / "_musicians" / "Danny Gatton" / "_images"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
     assert not (tmp_path / "Danny Gatton" / "_images").exists()
 
-    assert api.get(f"/api/artists/{person.id}").get_json()["has_image"] is True
-    assert api.get(f"/api/artists/images/{img['id']}").mimetype == "image/jpeg"
+    assert api.get(f"/api/musicians/{person.id}").get_json()["has_image"] is True
+    assert api.get(f"/api/musicians/images/{img['id']}").mimetype == "image/jpeg"
 
-    assert api.delete(f"/api/artists/images/{img['id']}").status_code == 200
+    assert api.delete(f"/api/musicians/images/{img['id']}").status_code == 200
     assert list(images_dir.glob("img_*")) == []
-    assert api.get(f"/api/artists/images/{img['id']}").status_code == 404
+    assert api.get(f"/api/musicians/images/{img['id']}").status_code == 404
 
 
-def test_artist_one_primary_and_promotion_on_delete(api, app, person, tmp_path):
+def test_musician_one_primary_and_promotion_on_delete(api, app, person, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
-    api.post(f"/api/artists/{person.id}/images", content_type="multipart/form-data",
+    api.post(f"/api/musicians/{person.id}/images", content_type="multipart/form-data",
              data={"image": [(BytesIO(b"a"), "a.jpg"),
                              (BytesIO(b"b"), "b.png"),
                              (BytesIO(b"c"), "c.webp")]})
-    imgs = api.get(f"/api/artists/{person.id}/images").get_json()
+    imgs = api.get(f"/api/musicians/{person.id}/images").get_json()
     assert len(imgs) == 3
     assert sum(1 for i in imgs if i["is_primary"]) == 1
     assert imgs[0]["is_primary"] is True                # ordered primary-first
 
     third = imgs[2]
-    assert api.post(f"/api/artists/images/{third['id']}/primary").status_code == 200
-    imgs = api.get(f"/api/artists/{person.id}/images").get_json()
+    assert api.post(f"/api/musicians/images/{third['id']}/primary").status_code == 200
+    imgs = api.get(f"/api/musicians/{person.id}/images").get_json()
     assert imgs[0]["id"] == third["id"]
     assert sum(1 for i in imgs if i["is_primary"]) == 1
 
-    assert api.delete(f"/api/artists/images/{third['id']}").status_code == 200
-    imgs = api.get(f"/api/artists/{person.id}/images").get_json()
+    assert api.delete(f"/api/musicians/images/{third['id']}").status_code == 200
+    imgs = api.get(f"/api/musicians/{person.id}/images").get_json()
     assert len(imgs) == 2
     assert sum(1 for i in imgs if i["is_primary"]) == 1  # a survivor was promoted
 
 
-def test_artist_partial_upload_lands_good_files(api, app, person, tmp_path):
+def test_musician_partial_upload_lands_good_files(api, app, person, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
-    r = api.post(f"/api/artists/{person.id}/images", content_type="multipart/form-data",
+    r = api.post(f"/api/musicians/{person.id}/images", content_type="multipart/form-data",
                  data={"image": [(BytesIO(b"a"), "ok.jpg"),
                                  (BytesIO(b"b"), "bad.heic")]})
     assert r.status_code == 200
@@ -119,19 +119,19 @@ def test_artist_partial_upload_lands_good_files(api, app, person, tmp_path):
     assert len(body["images"]) == 1 and len(body["errors"]) == 1
 
 
-def test_deleting_artist_cascades_to_images(api, app, person, tmp_path):
+def test_deleting_musician_cascades_to_images(api, app, person, tmp_path):
     from app.extensions import db as _db
-    from app.models.artist_image import ArtistImage
+    from app.models.musician_image import MusicianImage
 
     app.config["LIBRARY_ROOT"] = str(tmp_path)
-    api.post(f"/api/artists/{person.id}/images",
+    api.post(f"/api/musicians/{person.id}/images",
              data={"image": (BytesIO(b"a"), "a.jpg")},
              content_type="multipart/form-data")
-    assert _db.session.query(ArtistImage).count() == 1
+    assert _db.session.query(MusicianImage).count() == 1
 
-    _db.session.delete(_db.session.get(Artist, person.id))
+    _db.session.delete(_db.session.get(Musician, person.id))
     _db.session.commit()
-    assert _db.session.query(ArtistImage).count() == 0
+    assert _db.session.query(MusicianImage).count() == 0
 
 
 # ── Photos: Event ────────────────────────────────────────────────────────────
@@ -181,19 +181,19 @@ def test_all_four_image_models_share_one_surface():
     handle_delete / image_payload will work on some tables and not others —
     which is the exact drift parallel tables are supposed to be worth risking.
     """
-    from app.models.performer_image import PerformerImage
-    from app.models.venue_image import VenueImage
     from app.models.artist_image import ArtistImage
+    from app.models.venue_image import VenueImage
+    from app.models.musician_image import MusicianImage
     from app.models.event_image import EventImage
 
-    assert PerformerImage.__parent_fk__ == "performer_id"
+    assert ArtistImage.__parent_fk__ == "artist_id"
     assert VenueImage.__parent_fk__     == "venue_id"
-    assert ArtistImage.__parent_fk__    == "artist_id"
+    assert MusicianImage.__parent_fk__    == "musician_id"
     assert EventImage.__parent_fk__     == "event_id"
 
     shared = {"filename", "ext", "is_primary", "sort_order", "origin",
               "caption", "credit", "source_ref", "created_at"}
-    for model in (PerformerImage, VenueImage, ArtistImage, EventImage):
+    for model in (ArtistImage, VenueImage, MusicianImage, EventImage):
         assert shared <= set(model.__table__.columns.keys()), model
         assert model.__parent_fk__ in model.__table__.columns, model
 
@@ -210,7 +210,7 @@ def test_generated_routes_match_the_handwritten_shape(app):
     for r in app.url_map.iter_rules():
         methods.setdefault(str(r.rule), set()).update(r.methods)
 
-    for ns, kind in (("venues", "venue"), ("artists", "artist"), ("events", "event")):
+    for ns, kind in (("venues", "venue"), ("musicians", "musician"), ("events", "event")):
         assert {"GET", "POST"} <= methods[f"/api/{ns}/<int:{kind}_id>/images"]
         assert {"GET", "DELETE"} <= methods[f"/api/{ns}/images/<int:image_id>"]
         assert "POST" in methods[f"/api/{ns}/images/<int:image_id>/primary"]
@@ -225,7 +225,7 @@ def test_generated_routes_match_the_handwritten_shape(app):
 
 def test_event_detail_with_a_performance_attached(api, app, event):
     """
-    Regression: get_event() read `p.artist.name`, a name Performance has not
+    Regression: get_event() read `p.musician.name`, a name Performance has not
     had since the 2026-07-11 remodel. Any event with a performance on it
     raised AttributeError — invisible because nothing called the endpoint.
     """
@@ -241,8 +241,8 @@ def test_event_detail_with_a_performance_attached(api, app, event):
     assert r.status_code == 200
     body = r.get_json()
     assert body["performance_count"] == 1
-    assert body["performances"][0]["performer"]         # a name, not an exception
-    assert body["performances"][0]["performer_id"] == perf.performer_id
+    assert body["performances"][0]["artist"]         # a name, not an exception
+    assert body["performances"][0]["artist_id"] == perf.artist_id
     # Recordings ride along so the page's default tab has something to draw.
     assert body["recording_count"] == len(perf.recordings)
     assert len(body["recordings"]) == len(perf.recordings)
@@ -278,7 +278,7 @@ def test_event_delete_is_guarded_then_allowed(api, app, event):
     _db.session.commit()
 
     # `performance.event_id` is nullable, so cascading would orphan real shows
-    # to remove a label. Same guard Venue, Artist and Genre deletes carry.
+    # to remove a label. Same guard Venue, Musician and Genre deletes carry.
     r = api.delete(f"/api/events/{event.id}")
     assert r.status_code == 409
     assert "performance" in r.get_json()["error"]
@@ -320,7 +320,7 @@ def test_event_duplicate_name_is_409_with_the_existing_id(api, app, event):
 #
 # The five dimension index pages are built from the LIST endpoints, and every
 # tile reads fields that were added for them (image_id, recording_count, the
-# performer's genre_color). A missing field is not an error anywhere — it
+# artist's genre_color). A missing field is not an error anywhere — it
 # renders as a tile with no photo and no counts, which looks exactly like a
 # dimension that genuinely has none. That is CONTEXT.md's standing trap: a
 # failure disguised as an ordinary empty state. So the contract is pinned here
@@ -342,12 +342,12 @@ def test_list_endpoints_carry_the_index_tile_fields(api, app, person, event):
     contract = {
         "/api/venues/":     {"id", "name", "city", "state", "country",
                              "performance_count", "recording_count", "image_id"},
-        "/api/performers/": {"id", "name", "sort_name", "recording_count", "members",
+        "/api/artists/": {"id", "name", "sort_name", "recording_count", "members",
                              "genre_id", "genre_name", "genre_color", "image_id"},
-        "/api/artists/":    {"id", "name", "sort_name", "recording_count",
-                             "performer_count", "image_id"},
+        "/api/musicians/":    {"id", "name", "sort_name", "recording_count",
+                             "artist_count", "image_id"},
         "/api/genres/":     {"id", "name", "description", "color",
-                             "performer_count", "recording_count"},
+                             "artist_count", "recording_count"},
         "/api/events/":     {"id", "name", "city", "state", "country", "venue_id",
                              "venue_name", "start_year", "end_year",
                              "performance_count", "recording_count", "image_id"},
@@ -358,7 +358,7 @@ def test_list_endpoints_carry_the_index_tile_fields(api, app, person, event):
         assert fields <= set(rows[0]), f"{path} missing {fields - set(rows[0])}"
 
 
-def test_performer_list_counts_do_not_multiply_with_photos(api, app, tmp_path):
+def test_artist_list_counts_do_not_multiply_with_photos(api, app, tmp_path):
     """
     recording_count comes from a GROUP BY over a join, and image_id from a
     separate grouped query. Joining the image table into the same statement
@@ -369,13 +369,13 @@ def test_performer_list_counts_do_not_multiply_with_photos(api, app, tmp_path):
     from io import BytesIO
     app.config["LIBRARY_ROOT"] = str(tmp_path)
 
-    before = api.get("/api/performers/").get_json()[0]
+    before = api.get("/api/artists/").get_json()[0]
     pid, expected = before["id"], before["recording_count"]
     assert expected > 0, "conftest seeds a recording"
 
-    api.post(f"/api/performers/{pid}/images", content_type="multipart/form-data",
+    api.post(f"/api/artists/{pid}/images", content_type="multipart/form-data",
              data={"image": [(BytesIO(b"a"), "a.jpg"), (BytesIO(b"b"), "b.jpg")]})
 
-    after = next(r for r in api.get("/api/performers/").get_json() if r["id"] == pid)
+    after = next(r for r in api.get("/api/artists/").get_json() if r["id"] == pid)
     assert after["recording_count"] == expected
     assert after["image_id"] is not None

@@ -33,7 +33,7 @@ from app.extensions import db as _db
 FRONT_DOOR = [
     "/api/auth/me",
     "/api/recordings/1",
-    "/api/performers/",
+    "/api/artists/",
     "/api/collections/",
     "/api/ingest/preview",
     "/api/peers/",

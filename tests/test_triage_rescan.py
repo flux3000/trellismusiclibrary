@@ -125,14 +125,14 @@ def test_already_ingested_folders_are_reported_not_silently_dropped(qapp):
     client has a placeholder card it can never resolve. The job names them.
     """
     from app.models.user import User
-    from app.models.performer import Performer
+    from app.models.artist import Artist
     from app.models.performance import Performance
     from app.models.recording import Recording
 
-    perf = Performer(name="Danny Gatton")
+    perf = Artist(name="Danny Gatton")
     _db.session.add(perf)
     _db.session.flush()
-    show = Performance(performer_id=perf.id, start_year=1979)
+    show = Performance(artist_id=perf.id, start_year=1979)
     _db.session.add(show)
     _db.session.flush()
     rec = Recording(performance_id=show.id, folder_path=SHOW)
