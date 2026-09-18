@@ -48,3 +48,10 @@ waitress>=3.0          # production WSGI server for run_headless.py / SERVER_MOD
 # ── Dev / test ──
 pytest>=8              # run: python3 -m pytest tests/
 pyinstaller>=6         # packaged app — see trellis.spec / tools/build_macos.sh
+
+# Copy review (app/utils/copyreview/, tools/copy_review.py, and the drift gate
+# in tests/test_copy_reviewed.py). Parses app.js to find every string the app
+# shows a user. DEV ONLY — trellis.spec filters the package out of the bundle,
+# so these never ship. Wheels, no Node required.
+tree_sitter>=0.23
+tree_sitter_javascript>=0.23

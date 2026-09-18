@@ -2884,7 +2884,7 @@ const App = (() => {
                 <input type="checkbox" data-col-id="${full.id}" ${on ? 'checked' : ''} ${p.is_active ? '' : 'disabled'}>
                 <span class="peer-grant-name truncate">Share my library</span>
                 <span class="peer-grant-count">${full.recording_count}</span>
-                <span class="peer-grant-note">They see everything on the shelf — Browse, Search and your collections — but cannot change anything.</span>
+                <span class="peer-grant-note">They see everything on the shelf (Browse, Search and your collections) but cannot change anything.</span>
               </label>
             </div>`
           })()}

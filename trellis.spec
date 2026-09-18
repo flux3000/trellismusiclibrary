@@ -72,7 +72,13 @@ hiddenimports = [
     # run.py registers every model with importlib.import_module("app.models"),
     # and the models import each other lazily. A static scan misses most of it,
     # and a missing model is a missing TABLE on first run.
-    *collect_submodules("app"),
+    # app.utils.copyreview is a DEV-TIME capability: the copy review tool and
+    # the drift gate import it, the running app never does. It lives under
+    # app/utils/ to match the precedent set by app/utils/quality/, but
+    # collecting it here would chase its tree_sitter dependency into the
+    # bundle, so it is filtered out by name.
+    *[m for m in collect_submodules("app")
+      if not m.startswith("app.utils.copyreview")],
 
     # keyring picks its backend at runtime by platform. Both are named so one
     # spec serves both platforms; the wrong one simply never loads.
@@ -97,6 +103,10 @@ excludes = [
     "tkinter",          # nothing here uses it and it drags in a whole toolkit
     "pytest",
     "PyInstaller",
+    # The JavaScript parser the copy review tool uses. Belt and braces: the
+    # filter on collect_submodules above already keeps its importer out.
+    "tree_sitter",
+    "tree_sitter_javascript",
 ]
 
 a = Analysis(

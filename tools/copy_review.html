@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en" data-palette="cale">
+<head>
+<meta charset="utf-8">
+<title>Copy Review</title>
+<!--
+  The app's own stylesheet, served by the harness out of app/static. Copy is
+  judged in the skin it ships in, and a second set of tokens here would drift
+  from the first. Only the layout of this page is defined below.
+-->
+<link rel="stylesheet" href="/static/css/main.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg-0); color: var(--t0);
+    font-family: var(--font-ui); font-size: 13px;
+    display: flex; flex-direction: column;
+  }
+  button { font-family: var(--font-ui); }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  .bar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 16px; height: 52px; flex: 0 0 auto;
+    background: var(--bg-2); border-bottom: 1px solid var(--bd-1);
+  }
+  .wordmark { font-family: var(--font-display); font-size: 15px; letter-spacing: .02em; }
+  .tallies { display: flex; gap: 14px; color: var(--t2); font-variant-numeric: tabular-nums; }
+  .tallies b { color: var(--t0); font-weight: 600; }
+  .bar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip {
+    padding: 3px 9px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--bd-1); background: var(--bg-3); color: var(--t2);
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .chip[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--t0); }
+
+  .btn-main, .btn-flat {
+    border-radius: var(--r-sm); padding: 6px 12px; cursor: pointer; font-size: 12px;
+    border: 1px solid var(--bd-2); background: var(--bg-3); color: var(--t0);
+  }
+  .btn-main { background: var(--accent); border-color: var(--accent); color: var(--bg-3); }
+  .btn-main:disabled, .btn-flat:disabled { opacity: .45; cursor: default; }
+
+  /* ── Three columns ──────────────────────────────────────────────────── */
+  .cols { display: flex; flex: 1 1 auto; min-height: 0; }
+  .tree, .queue {
+    flex: 0 0 272px; overflow: auto; background: var(--bg-1);
+    padding: 10px 0;
+  }
+  .tree { border-right: 1px solid var(--bd-1); }
+  .queue { border-left: 1px solid var(--bd-1); flex-basis: 320px; }
+  .cards { flex: 1 1 auto; overflow: auto; padding: 16px 20px 200px; }
+
+  .tree-page {
+    padding: 7px 14px 3px; color: var(--t3); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .06em;
+  }
+  .tree-row {
+    display: flex; gap: 8px; align-items: baseline;
+    padding: 5px 14px 5px 22px; cursor: pointer; color: var(--t1);
+  }
+  .tree-row:hover { background: var(--bg-2); }
+  .tree-row[aria-current="true"] { background: var(--accent-dim); color: var(--t0); }
+  .tree-row .label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-row .n { color: var(--t3); font-variant-numeric: tabular-nums; font-size: 11px; }
+  .tree-row .n.open { color: var(--amber); }
+
+  /* ── A card ─────────────────────────────────────────────────────────── */
+  .card {
+    background: var(--bg-3); border: 1px solid var(--bd-1);
+    border-radius: var(--r-md); padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card.here { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card.done { opacity: .5; }
+
+  /* Only the focused card is a card. The rest are one line each: at fourteen
+     hundred decisions the review is keyboard-driven, and a screen holding six
+     items is the difference between a weekend and a month. */
+  .card.lean { padding: 7px 12px; margin-bottom: 4px; display: flex; gap: 10px; align-items: baseline; }
+  .card.lean .subject {
+    font-size: 13px; flex: 1 1 auto; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card.lean .meta, .card.lean .acts, .card.lean .variants,
+  .card.lean details, .card.lean .sites, .card.lean .editor { display: none; }
+  .card.lean .lean-tags { display: flex; gap: 5px; flex: 0 0 auto; }
+
+  .subject {
+    font-size: 16px; line-height: 1.45; color: var(--t0);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .hole {
+    display: inline-block; padding: 0 5px; border-radius: var(--r-sm);
+    background: var(--bg-5); color: var(--t2);
+    font-family: var(--font-mono); font-size: .8em; vertical-align: baseline;
+  }
+  .variants { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+  .variants div { color: var(--t1); font-size: 14px; }
+
+  .meta {
+    margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;
+    color: var(--t3); font-size: 11.5px;
+  }
+  .tag {
+    padding: 2px 7px; border-radius: var(--r-sm);
+    background: var(--bg-1); border: 1px solid var(--bd-0);
+  }
+  .tag.warn { background: var(--aud-bg); color: var(--aud-fg); border-color: transparent; }
+  .tag.err { background: rgba(166,50,50,.14); color: var(--red); border-color: transparent; }
+  .where { font-family: var(--font-mono); font-size: 11px; color: var(--t3); }
+
+  .acts { margin-top: 12px; display: flex; gap: 6px; align-items: center; }
+  .acts .k { color: var(--t3); font-size: 11px; font-family: var(--font-mono); }
+  .editor { margin-top: 10px; display: none; }
+  .editor.on { display: block; }
+  .editor textarea {
+    width: 100%; min-height: 62px; resize: vertical; box-sizing: border-box;
+    background: var(--bg-2); color: var(--t0); font-family: var(--font-ui); font-size: 15px;
+    border: 1px solid var(--bd-2); border-radius: var(--r-sm); padding: 8px 10px;
+  }
+  .editor .hint { margin-top: 5px; color: var(--t3); font-size: 11.5px; }
+
+  details.src { margin-top: 10px; }
+  details.src summary { cursor: pointer; color: var(--t3); font-size: 11.5px; }
+  details.src pre {
+    margin: 8px 0 0; padding: 10px; overflow: auto;
+    background: var(--bg-1); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
+    font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--t2);
+  }
+  details.src pre .on { color: var(--t0); background: var(--accent-dim); display: block; }
+
+  .sites { margin-top: 8px; }
+  .sites div { color: var(--t3); font-family: var(--font-mono); font-size: 11px; padding: 1px 0; }
+
+  /* ── Queue ──────────────────────────────────────────────────────────── */
+  .queue h3 {
+    margin: 0; padding: 4px 14px 10px; font-size: 11px; color: var(--t3);
+    text-transform: uppercase; letter-spacing: .06em; font-weight: 600;
+  }
+  .qrow { padding: 8px 14px; border-bottom: 1px solid var(--bd-0); }
+  .qrow .v { color: var(--t3); font-size: 11px; }
+  .qrow .t { color: var(--t0); font-size: 12px; word-break: break-word; }
+  .qrow .r { color: var(--green); font-size: 12px; word-break: break-word; }
+  .qrow button { margin-top: 5px; }
+
+  .empty { padding: 40px 20px; color: var(--t3); text-align: center; }
+
+  /* ── Write sheet ────────────────────────────────────────────────────── */
+  .sheet {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    display: none; align-items: center; justify-content: center; z-index: 50;
+  }
+  .sheet.on { display: flex; }
+  .sheet-card {
+    width: min(1000px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--bg-3); border: 1px solid var(--bd-2);
+    border-radius: var(--r-lg); padding: 18px 20px;
+  }
+  .sheet-card pre {
+    background: var(--bg-1); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
+    padding: 12px; overflow: auto; font-family: var(--font-mono); font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .sheet-card pre .add { color: var(--green); }
+  .sheet-card pre .del { color: var(--red); }
+  .sheet-card pre .hunk { color: var(--t3); }
+  .note { color: var(--amber); font-size: 12px; margin: 4px 0; }
+  .stop { color: var(--red); font-size: 12px; margin: 4px 0; }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <span class="wordmark">Copy Review</span>
+  <div class="tallies" id="tallies"></div>
+  <div class="chips" id="filters"></div>
+  <div class="bar-right">
+    <button class="btn-flat" id="rescan">Rescan</button>
+    <button class="btn-main" id="write" disabled>Write to source</button>
+  </div>
+</div>
+
+<div class="cols">
+  <div class="tree" id="tree"></div>
+  <div class="cards" id="cards"></div>
+  <div class="queue"><h3>Pending</h3><div id="pending"></div></div>
+</div>
+
+<div class="sheet" id="sheet"><div class="sheet-card" id="sheet-card"></div></div>
+
+<script>
+'use strict'
+
+const HOLE = '{}'
+let STATE = null
+let FILTER = 'open'
+let NODE = null          // [page, section] or null for everything
+let CURSOR = 0           // index into the visible cards
+let VISIBLE = []
+
+const $ = (id) => document.getElementById(id)
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// The holes are rendered as the source expression they stood for. Inventing a
+// plausible sample value would read as real copy and hide what actually lands
+// in the gap.
+function withHoles (text, holes) {
+  const parts = String(text).split(HOLE)
+  let out = esc(parts[0])
+  for (let i = 1; i < parts.length; i++) {
+    const src = (holes && holes[i - 1]) || 'value'
+    out += `<span class="hole" title="${esc(src)}">${esc(shorten(src, 22))}</span>` + esc(parts[i])
+  }
+  return out
+}
+const shorten = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+
+const FILTERS = [
+  ['open', 'Unreviewed', (u) => u.status === 'new' || u.status === 'changed'],
+  ['never', 'Never seen', (u) => u.neverSeen],
+  ['emdash', 'Em dash', (u) => u.emDash],
+  ['changed', 'Changed', (u) => u.status === 'changed'],
+  ['dupes', 'Repeated', (u) => u.occurrences > 1],
+  ['all', 'All', () => true]
+]
+
+function matching () {
+  const test = (FILTERS.find((f) => f[0] === FILTER) || FILTERS[0])[2]
+  return STATE.units.filter(test)
+}
+
+function decided (u) {
+  return u.status === 'reviewed' || u.status === 'moved' || u.status === 'pending_write'
+}
+
+// ── Tree ────────────────────────────────────────────────────────────────
+function drawTree () {
+  const pool = matching()
+  const pages = new Map()
+  for (const u of pool) {
+    if (!pages.has(u.page)) pages.set(u.page, new Map())
+    const sections = pages.get(u.page)
+    if (!sections.has(u.section)) sections.set(u.section, [])
+    sections.get(u.section).push(u)
+  }
+  const rows = [`<div class="tree-row" data-all="1" aria-current="${NODE ? 'false' : 'true'}">
+      <span class="label">Everything</span><span class="n">${pool.length}</span></div>`]
+  for (const [page, sections] of [...pages].sort((a, b) => b[1].size - a[1].size)) {
+    rows.push(`<div class="tree-page">${esc(page)}</div>`)
+    for (const [section, units] of [...sections].sort((a, b) => b[1].length - a[1].length)) {
+      const open = units.filter((u) => !decided(u)).length
+      const here = NODE && NODE[0] === page && NODE[1] === section
+      rows.push(`<div class="tree-row" data-page="${esc(page)}" data-section="${esc(section)}"
+          aria-current="${here ? 'true' : 'false'}" title="${esc(section)}">
+        <span class="label">${esc(section)}</span>
+        <span class="n ${open ? 'open' : ''}">${open || units.length}</span></div>`)
+    }
+  }
+  $('tree').innerHTML = rows.join('')
+}
+
+// ── Cards ───────────────────────────────────────────────────────────────
+// Mounting fourteen hundred cards at once is slow to draw and slower to
+// re-draw on every keystroke, so only a window around the cursor is in the DOM.
+const WINDOW = 40
+
+function drawCards () {
+  VISIBLE = matching().filter((u) => !NODE || (u.page === NODE[0] && u.section === NODE[1]))
+  if (CURSOR >= VISIBLE.length) CURSOR = Math.max(0, VISIBLE.length - 1)
+  if (!VISIBLE.length) {
+    $('cards').innerHTML = '<div class="empty">Nothing here.</div>'
+    return
+  }
+  const from = Math.max(0, CURSOR - WINDOW)
+  const to = Math.min(VISIBLE.length, CURSOR + WINDOW)
+  const above = from > 0 ? `<div class="empty">${from} above</div>` : ''
+  const below = to < VISIBLE.length ? `<div class="empty">${VISIBLE.length - to} below</div>` : ''
+  $('cards').innerHTML = above + VISIBLE.slice(from, to).map((u, i) => card(u, from + i)).join('') + below
+  const here = $('cards').querySelector('.card.here')
+  if (here) here.scrollIntoView({ block: 'center' })
+}
+
+function card (u, i) {
+  const s = u.sites[0]
+  if (i !== CURSOR) {
+    const marks = []
+    if (u.verdict) marks.push(`<span class="tag">${esc(u.verdict)}</span>`)
+    if (u.status === 'changed') marks.push('<span class="tag err">changed</span>')
+    else if (u.neverSeen) marks.push('<span class="tag warn">never seen</span>')
+    if (u.emDash) marks.push('<span class="tag warn">em dash</span>')
+    if (u.occurrences > 1) marks.push(`<span class="tag">${u.occurrences}</span>`)
+    return `<div class="card lean ${decided(u) ? 'done' : ''}" data-key="${u.key}" data-i="${i}">
+      <span class="subject">${withHoles(u.text, s.holes)}</span>
+      <span class="lean-tags">${marks.join('')}</span>
+    </div>`
+  }
+  const tags = []
+  tags.push(`<span class="tag">${esc(u.scenario)}</span>`)
+  if (u.neverSeen) tags.push('<span class="tag warn">never seen</span>')
+  if (u.emDash) tags.push('<span class="tag warn">em dash</span>')
+  if (u.occurrences > 1) tags.push(`<span class="tag">${u.occurrences} sites</span>`)
+  if (!u.userFacing) tags.push(`<span class="tag">parked: ${esc(s.reason)}</span>`)
+  if (s.attr) tags.push(`<span class="tag">${esc(s.attr)}</span>`)
+  if (!s.writable) tags.push('<span class="tag err">no literal to write</span>')
+  if (u.status === 'moved') tags.push('<span class="tag">carried over, moved</span>')
+  if (u.status === 'changed') tags.push('<span class="tag err">changed since approval</span>')
+  if (u.verdict) tags.push(`<span class="tag">${esc(u.verdict)}</span>`)
+
+  const variants = u.variants.length
+    ? `<div class="variants">${u.variants.map((v) => `<div>${withHoles(v, s.holes)}</div>`).join('')}</div>`
+    : ''
+
+  const was = u.status === 'changed'
+    ? `<div class="meta"><span class="tag err">approved before</span>
+       <span>${esc(u.was)}</span></div>`
+    : ''
+
+  const others = u.occurrences > 1
+    ? `<div class="sites">${u.sites.map((x) => `<div>${esc(x.file)}:${x.line} ${esc(x.function)}</div>`).join('')}</div>`
+    : ''
+
+  return `<div class="card ${i === CURSOR ? 'here' : ''} ${decided(u) ? 'done' : ''}" data-key="${u.key}" data-i="${i}">
+    <div class="subject">${withHoles(u.text, s.holes)}</div>
+    ${variants}
+    ${was}
+    <div class="meta">
+      ${tags.join('')}
+      <span class="where">${esc(s.file)}:${s.line}</span>
+      <span class="where">${esc(s.function)}</span>
+    </div>
+    <details class="src" data-file="${esc(s.file)}" data-line="${s.line}">
+      <summary>Source</summary><pre>…</pre>
+    </details>
+    ${others}
+    <div class="acts">
+      <button class="btn-flat" data-act="approve">Approve</button><span class="k">a</span>
+      <button class="btn-flat" data-act="replace">Replace</button><span class="k">r</span>
+      <button class="btn-flat" data-act="remove">Remove</button><span class="k">x</span>
+      <button class="btn-flat" data-act="not_user_facing">Not copy</button><span class="k">n</span>
+      ${u.verdict ? '<button class="btn-flat" data-act="undo">Undo</button>' : ''}
+    </div>
+    <div class="editor" data-editor>
+      <textarea spellcheck="true">${esc(u.replacement || u.text)}</textarea>
+      <div class="hint">${u.text.split(HOLE).length - 1
+        ? `Keep all ${u.text.split(HOLE).length - 1} ${HOLE} in the same order.`
+        : ''} Enter saves, Escape closes.</div>
+    </div>
+  </div>`
+}
+
+function drawQueue () {
+  const pending = STATE.units.filter((u) => STATE.pending.includes(u.key))
+  $('write').disabled = pending.length === 0
+  $('pending').innerHTML = pending.length
+    ? pending.map((u) => `<div class="qrow" data-key="${u.key}">
+        <div class="v">${esc(u.verdict)}</div>
+        <div class="t">${esc(u.text)}</div>
+        ${u.replacement ? `<div class="r">${esc(u.replacement)}</div>` : ''}
+        <button class="btn-flat" data-act="undo">Undo</button>
+      </div>`).join('')
+    : '<div class="empty">No unwritten decisions.</div>'
+}
+
+function drawTallies () {
+  const c = STATE.counts
+  const open = STATE.units.filter((u) => !decided(u)).length
+  $('tallies').innerHTML = `
+    <span><b>${open}</b> unreviewed</span>
+    <span><b>${c.decided}</b> decided</span>
+    <span><b>${c.neverSeen}</b> never seen</span>
+    <span><b>${c.emDash}</b> em dash</span>`
+  $('filters').innerHTML = FILTERS.map(([id, label]) =>
+    `<button class="chip" data-filter="${id}" aria-pressed="${FILTER === id}">${label}</button>`).join('')
+}
+
+function draw () {
+  drawTallies(); drawTree(); drawCards(); drawQueue()
+}
+
+// ── Talking to the harness ──────────────────────────────────────────────
+async function post (path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {})
+  })
+  return r.json()
+}
+
+async function refresh () {
+  STATE = await (await fetch('/api/state')).json()
+  draw()
+}
+
+async function decide (key, verdict, replacement) {
+  const got = await post('/api/decide', { key, verdict, replacement })
+  if (got.error) { window.console.error(got.error); return }
+  // Advance. Under the Unreviewed filter the decided string leaves the list on
+  // its own, so the cursor stays put and lands on the next one; under any
+  // other filter it has to step forward itself.
+  if (FILTER !== 'open') CURSOR = Math.min(CURSOR + 1, VISIBLE.length - 1)
+  await refresh()
+}
+
+// ── Events ──────────────────────────────────────────────────────────────
+$('tree').addEventListener('click', (e) => {
+  const row = e.target.closest('.tree-row')
+  if (!row) return
+  NODE = row.dataset.all ? null : [row.dataset.page, row.dataset.section]
+  CURSOR = 0
+  draw()
+})
+
+$('filters').addEventListener('click', (e) => {
+  const chip = e.target.closest('.chip')
+  if (!chip) return
+  FILTER = chip.dataset.filter
+  CURSOR = 0
+  draw()
+})
+
+$('cards').addEventListener('click', (e) => {
+  const card = e.target.closest('.card')
+  if (!card) return
+  const key = card.dataset.key
+  const act = e.target.closest('[data-act]')
+  if (!act) {
+    // A click inside the focused card is reading, not navigating. Re-drawing
+    // here threw away an open Source disclosure the moment it was clicked.
+    const target = Number(card.dataset.i)
+    if (target === CURSOR) return
+    CURSOR = target
+    drawCards()
+    return
+  }
+  const which = act.dataset.act
+  if (which === 'replace') { openEditor(card); return }
+  if (which === 'undo') { post('/api/undo', { key }).then(refresh); return }
+  decide(key, which)
+})
+
+$('cards').addEventListener('toggle', (e) => {
+  const box = e.target
+  if (!box.matches('details.src') || !box.open) return
+  const pre = box.querySelector('pre')
+  if (pre.dataset.loaded) return
+  fetch(`/api/source?file=${encodeURIComponent(box.dataset.file)}&line=${box.dataset.line}`)
+    .then((r) => r.json())
+    .then((got) => {
+      pre.dataset.loaded = '1'
+      pre.innerHTML = (got.lines || []).map((line, i) => {
+        const n = got.first + i
+        const text = `${String(n).padStart(6)}  ${line}`
+        return n === got.focus ? `<span class="on">${esc(text)}</span>` : esc(text)
+      }).join('\n')
+    })
+}, true)
+
+function openEditor (card) {
+  const box = card.querySelector('[data-editor]')
+  box.classList.add('on')
+  const area = box.querySelector('textarea')
+  area.focus()
+  area.selectionStart = area.selectionEnd = area.value.length
+}
+
+$('cards').addEventListener('keydown', (e) => {
+  const area = e.target.closest('textarea')
+  if (!area) return
+  const card = e.target.closest('.card')
+  if (e.key === 'Escape') {
+    card.querySelector('[data-editor]').classList.remove('on')
+    e.stopPropagation()
+  } else if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    decide(card.dataset.key, 'replace', area.value)
+  }
+})
+
+$('pending').addEventListener('click', (e) => {
+  const row = e.target.closest('.qrow')
+  if (row && e.target.closest('[data-act="undo"]')) post('/api/undo', { key: row.dataset.key }).then(refresh)
+})
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('textarea, input')) return
+  if ($('sheet').classList.contains('on')) {
+    if (e.key === 'Escape') $('sheet').classList.remove('on')
+    return
+  }
+  const unit = VISIBLE[CURSOR]
+  if (e.key === 'j') { CURSOR = Math.min(VISIBLE.length - 1, CURSOR + 1); drawCards() }
+  else if (e.key === 'k') { CURSOR = Math.max(0, CURSOR - 1); drawCards() }
+  else if (!unit) return
+  else if (e.key === 'a') decide(unit.key, 'approve')
+  else if (e.key === 'x') decide(unit.key, 'remove')
+  else if (e.key === 'n') decide(unit.key, 'not_user_facing')
+  else if (e.key === 'r') {
+    const card = $('cards').querySelector('.card.here')
+    if (card) openEditor(card)
+    e.preventDefault()
+  }
+})
+
+$('rescan').addEventListener('click', async () => {
+  STATE = await post('/api/rescan', {})
+  draw()
+})
+
+// ── Write ───────────────────────────────────────────────────────────────
+function paintDiff (text) {
+  return text.split('\n').map((line) => {
+    const cls = line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del'
+      : line.startsWith('@@') ? 'hunk' : ''
+    return cls ? `<span class="${cls}">${esc(line)}</span>` : esc(line)
+  }).join('\n')
+}
+
+async function showWrite (opts) {
+  const got = await post('/api/write', opts || {})
+  const sheet = $('sheet-card')
+  const stops = [...(got.refusals || []), ...(got.refused || [])]
+  sheet.innerHTML = `
+    <div class="wordmark">${got.written && got.written.length ? 'Written' : 'Dry run'}</div>
+    ${got.written && got.written.length
+      ? `<p class="note">Wrote ${got.written.map(esc).join(', ')}. Read it with git diff before committing.</p>`
+      : ''}
+    ${(got.warnings || []).map((w) => `<div class="note">${esc(w)}</div>`).join('')}
+    ${stops.map((r) => `<div class="stop">${esc(r)}</div>`).join('')}
+    <p style="color:var(--t2)">${got.splices} splice(s), ${(got.files || []).length} file(s)</p>
+    ${got.diff ? `<pre>${paintDiff(got.diff)}</pre>` : ''}
+    <div class="acts">
+      ${got.diff && !stops.length && !(got.written || []).length
+        ? '<button class="btn-main" id="do-write">Write it</button>' : ''}
+      <button class="btn-flat" id="close-sheet">Close</button>
+      ${stops.length && !(got.written || []).length
+        ? '<button class="btn-flat" id="confirm-empty">Allow emptying bare literals</button>' : ''}
+    </div>`
+  $('sheet').classList.add('on')
+  const write = $('do-write')
+  if (write) write.addEventListener('click', () => showWrite({ apply: true }).then(refresh))
+  const allow = $('confirm-empty')
+  if (allow) allow.addEventListener('click', () => showWrite({ confirmEmptyLiterals: true }))
+  $('close-sheet').addEventListener('click', () => $('sheet').classList.remove('on'))
+}
+
+$('write').addEventListener('click', () => showWrite({}))
+$('sheet').addEventListener('click', (e) => {
+  if (e.target === $('sheet')) $('sheet').classList.remove('on')
+})
+
+refresh()
+</script>
+</body>
+</html>

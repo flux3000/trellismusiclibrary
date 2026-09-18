@@ -87,6 +87,10 @@ whole library: they see full catalog pages, with every list of recordings
 filtered to what they can reach. Your favorites never travel. A library you join
 records what you stream, on its owner's machine.
 
+## Contact
+
+For questions and comments: ryan@trellismusiclibrary.com
+
 ## License
 
 Copyright (c) 2026 Ryan Baker. All rights reserved. See [LICENSE](LICENSE).
