@@ -2580,6 +2580,13 @@ const App = (() => {
   //         onSave(values) -> hash to navigate to, invalidate: dimName }
   //
   // field: { id, label, placeholder, required, multiline, hint, type }
+  //   placeholder — normally ABSENT. Every field here carries a visible label,
+  //           so a placeholder can only repeat it or show an example, and an
+  //           example value in a City box is one more thing to read and one
+  //           more thing to mistake for a filled-in value. All five forms
+  //           carried one per field until 2026-09-18 (Ryan); they are gone,
+  //           and a new one needs a reason the label cannot cover. A field
+  //           with none gets no attribute at all, not an empty one.
   //   hint  — a line under the input. Use it for a FORMAT the user cannot
   //           guess (partial dates) or a consequence they cannot see, never to
   //           restate the label.
@@ -2590,6 +2597,12 @@ const App = (() => {
   function renderCreateForm(opts) {
     setNavCurrent(opts.title)
     const fields = opts.fields
+    // No placeholder means no attribute. `placeholder=""` renders the same but
+    // leaves every input in the markup looking like it lost its text.
+    const ph = (f, fallback = '') => {
+      const text = f.placeholder || fallback
+      return text ? ` placeholder="${esc(text)}"` : ''
+    }
     setMainHTML(entityShellHtml({
       navBack: opts.backHash ? { label: opts.backLabel || 'Back', hash: opts.backHash } : null,
       title: esc(opts.title),
@@ -2602,14 +2615,14 @@ const App = (() => {
               <div class="ingest-field">
                 <label for="cf-${f.id}">${esc(f.label)}${f.required ? '' : ' <span class="cf-opt">(optional)</span>'}</label>
                 ${f.multiline
-                  ? `<textarea id="cf-${f.id}" placeholder="${esc(f.placeholder || '')}"></textarea>`
+                  ? `<textarea id="cf-${f.id}"${ph(f)}></textarea>`
                   : f.type === 'color'
                     ? `<span class="cf-color">
                          <input type="color" id="cf-${f.id}-swatch" value="${esc(f.value || '#7a8b99')}" />
-                         <input type="text" id="cf-${f.id}" placeholder="${esc(f.placeholder || '#rrggbb')}"
+                         <input type="text" id="cf-${f.id}"${ph(f, '#rrggbb')}
                                 value="${esc(f.value || '')}" autocomplete="off" spellcheck="false" />
                        </span>`
-                    : `<input type="text" id="cf-${f.id}" placeholder="${esc(f.placeholder || '')}" autocomplete="off" />`}
+                    : `<input type="text" id="cf-${f.id}"${ph(f)} autocomplete="off" />`}
                 ${f.hint ? `<div class="cf-hint">${esc(f.hint)}</div>` : ''}
               </div>`).join('')}
             ${opts.note ? `<p class="create-form-note">${esc(opts.note)}</p>` : ''}
@@ -3041,15 +3054,14 @@ const App = (() => {
     intro: 'A hall, club or field where shows happened. Photos and anything '
          + 'else go on the venue’s own page once it exists.',
     fields: [
-      { id: 'name',    label: 'Venue name', required: true, placeholder: 'The Fillmore' },
-      { id: 'city',    label: 'City',    placeholder: 'San Francisco' },
-      { id: 'state',   label: 'State / Region', placeholder: 'CA' },
-      { id: 'country', label: 'Country', placeholder: 'United States' },
+      { id: 'name',    label: 'Venue name', required: true },
+      { id: 'city',    label: 'City' },
+      { id: 'state',   label: 'State / Region' },
+      { id: 'country', label: 'Country' },
       // City/state/country earn their place here rather than on the page alone:
       // half a dozen halls in this library share a name, and a venue created
       // bare is one you cannot tell apart from the other Fillmore next week.
-      { id: 'bio', label: 'Notes', multiline: true,
-        placeholder: 'Capacity, the years it operated, what it was called before…' },
+      { id: 'bio', label: 'Notes', multiline: true },
     ],
     onSave: async v => `#/venue/${(await API.venues.create(v)).id}`,
   })
@@ -3060,9 +3072,8 @@ const App = (() => {
     intro: 'The act that took the stage — the billing on the poster, not an '
          + 'individual musician. Add people to it as Members afterwards.',
     fields: [
-      { id: 'name', label: 'Artist name', required: true, placeholder: 'The Meters' },
-      { id: 'bio',  label: 'Description', multiline: true,
-        placeholder: 'Leave blank and AI Assist can draft one on the artist’s page.' },
+      { id: 'name', label: 'Artist name', required: true },
+      { id: 'bio',  label: 'Description', multiline: true },
     ],
     // Genre and members stay off this form deliberately: genre is a picker over
     // a fixed vocabulary and members are a roster with tenure dates, and both
@@ -3079,7 +3090,7 @@ const App = (() => {
     intro: 'An individual musician. Link them to the acts they play in from '
          + 'their page, or from the act’s Members list.',
     fields: [
-      { id: 'name', label: 'Musician name', required: true, placeholder: 'George Porter Jr.' },
+      { id: 'name', label: 'Musician name', required: true },
       // Sort name removed 2026-09-01 (Ryan). It asked, at the moment of
       // creation, for a clerical restatement of the name that had just been
       // typed — and the field is NULL for all 179 existing rows anyway, so
@@ -3087,8 +3098,7 @@ const App = (() => {
       // COALESCE(sort_name, name) on both the server and the client, so a blank
       // one costs nothing; the column stays, and scripts/backfill_sort_names.py
       // is still the way to populate it in bulk if that day comes.
-      { id: 'bio', label: 'Bio', multiline: true,
-        placeholder: 'What they play, who they came up with…' },
+      { id: 'bio', label: 'Bio', multiline: true },
     ],
     onSave: async v => `#/musician/${(await API.musicians.create(v)).id}`,
   })
@@ -3098,15 +3108,14 @@ const App = (() => {
     intro: 'Genres are a fixed vocabulary — nothing in the app creates one '
          + 'implicitly, so this form is the only door in.',
     fields: [
-      { id: 'name',  label: 'Genre name', required: true, placeholder: 'Bluegrass' },
+      { id: 'name',  label: 'Genre name', required: true },
       // Colour is set here rather than later because it is not decoration: it
       // tints every card, row and tile belonging to this genre's artists,
       // and CONTEXT.md records it as the most complete visual signal the
       // library owns — 566 of 580 recordings carry one, far more than photos.
       { id: 'color', label: 'Colour', type: 'color', value: '#7a8b99',
         hint: 'Tints every recording card and browse row for artists in this genre.' },
-      { id: 'description', label: 'Description', multiline: true,
-        placeholder: 'What belongs here, and what doesn’t.' },
+      { id: 'description', label: 'Description', multiline: true },
     ],
     onSave: async v => `#/genre/${(await API.genres.create(v)).id}`,
   })
@@ -3116,17 +3125,17 @@ const App = (() => {
     intro: 'A named container for several shows — a festival, or a tour run. '
          + 'Attach performances to it from the recordings themselves.',
     fields: [
-      { id: 'name',  label: 'Event name', required: true, placeholder: 'Bonnaroo 2009' },
+      { id: 'name',  label: 'Event name', required: true },
       // ONE box per end, not three. A partial date is the norm for this corpus
       // — a tour run often has only a year — and six number inputs would make
       // the common case six times the work. See _parsePartialDate: anything it
       // cannot read is REJECTED rather than guessed.
-      { id: 'start_date', label: 'Start date', placeholder: '2009-06-11',
+      { id: 'start_date', label: 'Start date',
         hint: 'Year alone is fine: 2009, 2009-06 or 2009-06-11.' },
-      { id: 'end_date',   label: 'End date',   placeholder: '2009-06-14' },
-      { id: 'city',    label: 'City',    placeholder: 'Manchester' },
-      { id: 'state',   label: 'State / Region', placeholder: 'TN' },
-      { id: 'country', label: 'Country', placeholder: 'United States' },
+      { id: 'end_date',   label: 'End date' },
+      { id: 'city',    label: 'City' },
+      { id: 'state',   label: 'State / Region' },
+      { id: 'country', label: 'Country' },
       { id: 'notes',   label: 'Notes', multiline: true },
     ],
     note: 'An anchor venue can be linked on the event’s page. Shows inside an '

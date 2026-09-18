@@ -169,19 +169,19 @@ def preflight(version, dry_run):
         raise Stop(f"version.py says {now}, which is newer than {version}. Releases go forward.")
     say(f"  ✓ version.py is at {now}")
 
-    # The notes are checked here, not at publish time, because publish is the
-    # last thing that happens and a missing file at that point means the whole
-    # slow half already ran for nothing.
+    # Notes are settled here, not at publish time, because publish is the last
+    # thing that happens and a missing file at that point means the whole slow
+    # half already ran for nothing.
     nf = notes_file(version)
-    if not nf.exists():
+    if nf.exists() and nf.read_text(encoding="utf-8").strip():
+        say(f"  ✓ release notes: {nf.relative_to(REPO)}")
+    elif not shutil.which("claude"):
         raise Stop(
-            f"No release notes at {nf.relative_to(REPO)}.\n"
-            f"  Write them first. They ship as the release body and they are the\n"
-            f"  only part of a release a reader actually sees."
+            f"No release notes at {nf.relative_to(REPO)}, and the claude CLI is\n"
+            f"  not on PATH to draft them. Write the file, or install the CLI."
         )
-    if not nf.read_text(encoding="utf-8").strip():
-        raise Stop(f"{nf.relative_to(REPO)} is empty.")
-    say(f"  ✓ release notes: {nf.relative_to(REPO)}")
+    else:
+        say(f"  · release notes will be drafted (no {nf.relative_to(REPO)} yet)")
 
     if not shutil.which("gh"):
         raise Stop("The gh CLI is not on PATH, so the release cannot be published.")
@@ -189,18 +189,25 @@ def preflight(version, dry_run):
         raise Stop("gh is installed but not logged in. Run: gh auth login")
     say("  ✓ gh is logged in")
 
-    # A tag that already points somewhere else means two different binaries
-    # would claim one version. That is the failure this whole script exists to
-    # make impossible, so it is fatal rather than a warning.
+    # A tag that already points at a commit OFF this branch means two different
+    # binaries would claim one version. That is the failure this script exists
+    # to make impossible, so it is fatal.
+    #
+    # But the tag being BEHIND head is ordinary and must not stop anything: you
+    # tag the commit you built, then keep working. The question is ancestry,
+    # not equality. Getting this wrong refused a legitimate publish on 0.2.2,
+    # where the tag sat one commit back.
     tagged = out(["git", "rev-list", "-n1", f"v{version}"])
     if tagged:
-        head = out(["git", "rev-parse", "HEAD"])
-        if tagged != head:
+        if not ok(["git", "merge-base", "--is-ancestor", tagged, "HEAD"]):
             raise Stop(
-                f"Tag v{version} already exists at {tagged[:7]}, which is not HEAD.\n"
-                f"  Either bump to a new version, or delete that tag if it was a mistake."
+                f"Tag v{version} points at {tagged[:7]}, which is not in this\n"
+                f"  branch's history. Two different commits would ship as one\n"
+                f"  version. Bump, or delete that tag if it was a mistake."
             )
-        say(f"  ✓ tag v{version} already exists, on HEAD")
+        head = out(["git", "rev-parse", "HEAD"])
+        where = "on HEAD" if tagged == head else f"at {tagged[:7]}, behind HEAD"
+        say(f"  ✓ tag v{version} already exists, {where}")
 
     identity = signing_identity()
     say(f"  ✓ signing as: {identity}")
@@ -212,6 +219,131 @@ def preflight(version, dry_run):
         say()
         say("  DRY RUN. Nothing below this line will actually run.")
     return identity, profile
+
+
+# ── release notes ────────────────────────────────────────────────────────────
+
+# House rules, handed to the model because they are the difference between
+# usable copy and copy Ryan has to rewrite. They are the same rules that govern
+# every other user-facing string in Trellis.
+NOTES_RULES = """Audience: people who collect live concert recordings and are
+comfortable with the technical side. They run their own libraries, mind where
+their files live, and some of them share over a tunnel or a VPN. Write for
+someone competent, not someone who needs protecting from detail.
+
+Rules, all of them firm:
+- No em dashes anywhere. Use a comma, a colon, a full stop or parentheses.
+- Never the word "absolutely".
+- Plain words. Say "live concert recordings", never "ROIO" or insider jargon.
+- No offers of help, support or future work. No "let us know", no "feel free".
+- Do not compare this release to anything, do not apologise for it, and do not
+  hedge. State what changed.
+- No headings, no bullet list, no title. Short bolded lead-ins followed by
+  prose, one paragraph per change.
+- Describe ONLY the committed changes listed below. The working tree may hold
+  uncommitted work; it is not in this release and must not appear.
+- Output the notes body and nothing else. Never address the reader, never
+  explain what you did or did not include, never comment on the task.
+
+Lead with what a user would notice. When a release changes nothing visible,
+say what it does change and why that reader would care: packaging, signing,
+what gets written to disk, dependencies, performance, anything affecting how
+the app installs, runs or handles their library. Every release has something
+worth stating to this audience. Pure churn is the exception: test refactors,
+formatting passes and editor settings are not worth a paragraph, and a release
+that is genuinely only those says so in one sentence and stops."""
+
+
+def previous_tag(version):
+    """The highest existing release tag below this one, or None."""
+    listed = out(["git", "tag", "--list", "v*", "--sort=-version:refname"]) or ""
+    for tag in listed.splitlines():
+        if tag.strip() and tag.strip() != f"v{version}":
+            return tag.strip()
+    return None
+
+
+def generate_notes(version, dry_run):
+    """
+    Draft docs/release-notes/vX.Y.Z.md with the claude CLI.
+
+    Never overwrites an existing file: once you have edited the notes, they are
+    yours, and a re-run must not quietly replace them.
+
+    Commit subjects alone are far too thin here. "Persistence fix" and "AI
+    assist transformation" are real commit messages from 0.2.2, and no amount
+    of prompting turns those three words into a paragraph a collector can use.
+    The diffstat is what carries the actual shape of the release, so it goes in
+    too.
+    """
+    nf = notes_file(version)
+    if nf.exists() and nf.read_text(encoding="utf-8").strip():
+        return None
+
+    prev = previous_tag(version)
+    span = f"{prev}..HEAD" if prev else "HEAD"
+    rule("Release notes")
+    say(f"  Drafting from {span}. This calls the claude CLI and takes a moment.")
+
+    commits = out(["git", "log", span, "--pretty=%s"]) or ""
+    diffstat = out(["git", "diff", "--stat", span]) or ""
+
+    prompt = (
+        f"Write the release notes body for Trellis Music Library {version}, a "
+        f"macOS app for people who collect live concert recordings.\n\n"
+        f"{NOTES_RULES}\n\n"
+        f"Commit subjects since {prev or 'the beginning'}:\n{commits}\n\n"
+        f"Files changed:\n{diffstat}\n\n"
+        f"Output only the notes body. No preamble, no sign-off."
+    )
+
+    p = subprocess.run(["claude", "-p", prompt], cwd=REPO,
+                       capture_output=True, text=True)
+    body = p.stdout.strip()
+    if p.returncode != 0 or not body:
+        raise Stop(
+            "The claude CLI did not return any notes.\n"
+            f"  {(p.stderr or '').strip()[:400]}\n"
+            f"  Write {nf.relative_to(REPO)} by hand and run this again."
+        )
+
+    if dry_run:
+        say(f"  Would write {nf.relative_to(REPO)}. Drafted below, not saved.")
+        return body
+
+    nf.parent.mkdir(parents=True, exist_ok=True)
+    nf.write_text(body + "\n", encoding="utf-8")
+    say(f"  ✓ wrote {nf.relative_to(REPO)}")
+    return body
+
+
+def show_notes(version, draft=None):
+    """
+    Print the notes, in full, immediately before they are published.
+
+    Here rather than at draft time because this is the last moment before the
+    text is public, and because notes Ryan wrote or edited himself deserve the
+    same look as generated ones. Long lines wrap in the terminal; that is the
+    terminal's job, not this function's.
+    """
+    nf = notes_file(version)
+    if nf.exists():
+        body = nf.read_text(encoding="utf-8").rstrip()
+    elif draft:
+        # A dry run drafted this but deliberately did not save it.
+        body = draft.rstrip()
+    else:
+        say()
+        say("  (no notes drafted)")
+        say()
+        return
+
+    say()
+    say("  ┌─ release body ───────────────────────────────────────────────")
+    for line in body.splitlines():
+        say(f"  │ {line}")
+    say("  └──────────────────────────────────────────────────────────────")
+    say()
 
 
 # ── phases ───────────────────────────────────────────────────────────────────
@@ -297,7 +429,7 @@ def phase_tag(version, dry_run, auto_yes):
     say("  ✓ pushed")
 
 
-def phase_publish(version, dry_run, auto_yes):
+def phase_publish(version, dry_run, auto_yes, draft=None):
     rule("4. GitHub release")
     tag = f"v{version}"
     dmg, zipf = artifacts(version)
@@ -308,16 +440,22 @@ def phase_publish(version, dry_run, auto_yes):
         return
 
     say(f"  {tag}, with {dmg.name} and {zipf.name},")
-    say(f"  and the body from {nf.relative_to(REPO)}.")
+    say(f"  and the body from {nf.relative_to(REPO)}:")
+    show_notes(version, draft)
     if dry_run:
         say("  Would run: gh release create ...")
         return
 
-    confirm(f"Publish {tag} to GitHub?", auto_yes)
+    confirm(f"Publish {tag} with the notes above?", auto_yes)
+    # --latest is explicit rather than inferred. v0.2.2 published without the
+    # Latest label and it stayed on v0.2.1, which meant the download link on
+    # the website pointed at the previous build. Not worth leaving to GitHub's
+    # ordering rules.
     run([
         "gh", "release", "create", tag,
         str(dmg.relative_to(REPO)), str(zipf.relative_to(REPO)),
         "--title", tag, "--notes-file", str(nf.relative_to(REPO)),
+        "--latest",
     ])
     say(f"  ✓ published {tag}")
 
@@ -334,10 +472,11 @@ def main():
 
     try:
         identity, profile = preflight(args.version, args.dry_run)
+        draft = generate_notes(args.version, args.dry_run)
         phase_bump(args.version, args.dry_run)
         phase_build(args.version, identity, profile, args.dry_run, args.rebuild)
         phase_tag(args.version, args.dry_run, args.yes)
-        phase_publish(args.version, args.dry_run, args.yes)
+        phase_publish(args.version, args.dry_run, args.yes, draft)
     except Stop as e:
         say()
         say(f"  ✗ {e}")
@@ -354,6 +493,10 @@ def main():
 
     rule("Done")
     say(f"  https://github.com/flux3000/trellismusiclibrary/releases/tag/v{args.version}")
+    say()
+    say("  To correct the notes after the fact, edit the file and then:")
+    say(f"    gh release edit v{args.version} "
+        f"--notes-file docs/release-notes/v{args.version}.md")
     say()
     return 0
 

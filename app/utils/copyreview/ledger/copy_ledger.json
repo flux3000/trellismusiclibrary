@@ -28,6 +28,19 @@
       "previous_text": ""
     },
     {
+      "id": "01e6478cb40f08c5",
+      "text": "Genre name",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:57:52+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:57:52+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "024a3326b47f9655",
       "text": "active",
       "verdict": "approve",
@@ -158,6 +171,19 @@
       "previous_text": ""
     },
     {
+      "id": "0b7ce452ed1e9d2d",
+      "text": "An anchor venue can be linked on the event’s page. Shows inside an event can override its location with their own.",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:55:33+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:55:33+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "0c0ac2de6924c2e2",
       "text": "Saved from an earlier run",
       "verdict": "approve",
@@ -249,6 +275,32 @@
       "previous_text": ""
     },
     {
+      "id": "1415dca4ae1a77f7",
+      "text": "pp-editable vn-val{}",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:59+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:59+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "14789abaf0a8eb40",
+      "text": "(default: unassigned only)",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:27+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:27+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "156539afcf3fb5b3",
       "text": "Create new musician",
       "verdict": "approve",
@@ -271,6 +323,19 @@
       "decided_at": "2026-09-18T05:07:48+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:07:48+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "1728ef00789f3f34",
+      "text": "Events",
+      "verdict": "approve",
+      "section": "Events",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:52:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:52:02+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -301,6 +366,19 @@
       "previous_text": ""
     },
     {
+      "id": "18b992c416265de4",
+      "text": "Inferred track titles",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:38+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:38+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "19d8592ac8f69c05",
       "text": "Members, genre and photos are edited on the artist’s page. A MusicBrainz lookup runs automatically when the artist is created.",
       "verdict": "approve",
@@ -327,6 +405,19 @@
       "previous_text": ""
     },
     {
+      "id": "1adaf4a9df05dce8",
+      "text": "Values the scan proposes from the FLAC tags and the info file. Anything marked Missing is metadata you will need to supply.",
+      "verdict": "replace",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": "Values the scan proposes from the FLAC tags and the info file.",
+      "decided_at": "2026-09-18T18:01:31+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:01:31+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "1b227b7aa1dc368d",
       "text": "Fetching…",
       "verdict": "approve",
@@ -336,6 +427,19 @@
       "decided_at": "2026-09-17T21:40:47+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:40:47+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "1b68105b850877c9",
+      "text": "Bonnaroo 2009",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:53:51+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:53:51+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -509,6 +613,19 @@
       "previous_text": ""
     },
     {
+      "id": "29d4c085d59db8b1",
+      "text": "End",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:56+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:56+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "2a3f99b631755dde",
       "text": "Try again",
       "verdict": "approve",
@@ -570,6 +687,19 @@
       "decided_at": "2026-09-17T21:40:58+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:40:58+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "301bd77aba48572c",
+      "text": "A show inside this event can override any of these with its own venue or city — this is the event's default, not a claim about every night.",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:56+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:56+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -652,6 +782,19 @@
       "previous_text": ""
     },
     {
+      "id": "36e8884471e0156a",
+      "text": "Link a venue…",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:59+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:59+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "3823e6658a4e65ef",
       "text": "No source given, so this cannot be added",
       "verdict": "approve",
@@ -661,6 +804,19 @@
       "decided_at": "2026-09-17T21:41:02+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:02+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "386fa18b3b2d76b3",
+      "text": "Saved",
+      "verdict": "approve",
+      "section": "Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:52:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:52:02+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -743,6 +899,32 @@
       "previous_text": ""
     },
     {
+      "id": "3f5be93ca7ef595e",
+      "text": "End date: use 2009, 2009-06 or 2009-06-11",
+      "verdict": "replace",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": "Start date: use YYYY, YYYY-MM or YYYY-MM-DD",
+      "decided_at": "2026-09-18T17:56:16+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:16+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "4052eb98b59160ac",
+      "text": "Colour",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:00+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:00+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "412903e2fe8417de",
       "text": "Look up",
       "verdict": "approve",
@@ -821,6 +1003,19 @@
       "previous_text": ""
     },
     {
+      "id": "481470cf4ab11ac6",
+      "text": "Show all",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:20+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:20+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "4a62ccf3b424c4f5",
       "text": "Delete",
       "verdict": "approve",
@@ -843,6 +1038,19 @@
       "decided_at": "2026-09-17T21:39:19+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:39:19+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "4eeabd2aa6930e45",
+      "text": "Description",
+      "verdict": "approve",
+      "section": "Browse (rebuilt 2026-08-23, \"Direction A — The Shelf\")",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:54+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:54+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -873,6 +1081,19 @@
       "previous_text": ""
     },
     {
+      "id": "5255bb70c68ca8da",
+      "text": "Manchester",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:55:13+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:55:13+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "52744c7762319ba7",
       "text": "Review each person below — nothing is added until you say so",
       "verdict": "replace",
@@ -882,6 +1103,19 @@
       "decided_at": "2026-09-17T21:41:20+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:20+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "5393bfbaa5e6c6af",
+      "text": "Assign Genres",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:18+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:18+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -921,6 +1155,19 @@
       "decided_at": "2026-09-17T21:41:03+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:03+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "58df4b9752f40e60",
+      "text": "Dates",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:55+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:55+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1003,6 +1250,19 @@
       "previous_text": ""
     },
     {
+      "id": "6356be7685de8f6d",
+      "text": "bulk assignment screen",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:37+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:37+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "63b04b9f30669394",
       "text": "Ingest failed: {}",
       "verdict": "approve",
@@ -1012,6 +1272,32 @@
       "decided_at": "2026-09-18T05:08:23+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:23+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "644995bcfd39a329",
+      "text": "no day",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:49+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:49+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "6511faaf7bbaf694",
+      "text": "Start",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:55+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:55+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1120,6 +1406,19 @@
       "previous_text": ""
     },
     {
+      "id": "6d32e1508adf2f36",
+      "text": "Sorted by recording count, descending — the top acts cover most of the library fastest. Each pick saves immediately.",
+      "verdict": "remove",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:34+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:34+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "6e2f57073536e06d",
       "text": "Nothing found for “{}”.",
       "verdict": "approve",
@@ -1146,6 +1445,19 @@
       "previous_text": ""
     },
     {
+      "id": "6edc1b15a135f6c3",
+      "text": "New event",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:52:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:52:02+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "70331c155206d41b",
       "text": "On roster",
       "verdict": "approve",
@@ -1155,6 +1467,19 @@
       "decided_at": "2026-09-17T21:41:03+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:03+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "7093e0741e952a7b",
+      "text": "Delete genre",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "affordance",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:22+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:22+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1224,6 +1549,19 @@
       "previous_text": ""
     },
     {
+      "id": "748c20889825fc0e",
+      "text": "year only",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:49+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:49+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "76023dd996f1582f",
       "text": "Wikimedia Commons",
       "verdict": "approve",
@@ -1272,6 +1610,19 @@
       "decided_at": "2026-09-17T21:39:45+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:39:45+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "79de9633494f3c16",
+      "text": "No fingerprint files found. Nothing here can be verified against — the audio may still be perfect, but there is no independent proof of it.",
+      "verdict": "replace",
+      "section": "Fingerprints panel",
+      "scenario": "empty",
+      "replacement": "No fingerprint files found.",
+      "decided_at": "2026-09-18T18:00:52+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:00:52+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1367,6 +1718,19 @@
       "previous_text": ""
     },
     {
+      "id": "80a63e3046b7c040",
+      "text": "Genres are a fixed vocabulary — nothing in the app creates one implicitly, so this form is the only door in.",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:53+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:53+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "81a58ebd2563fe16",
       "text": "{}, depending on how many searches it needs. Billed by Anthropic to your key.",
       "verdict": "approve",
@@ -1402,6 +1766,19 @@
       "decided_at": "2026-09-18T05:07:55+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:07:55+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "84f34abb54846286",
+      "text": "No performances linked to this event yet.",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:57+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:57+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1510,6 +1887,19 @@
       "previous_text": ""
     },
     {
+      "id": "8e436c36af0d0bba",
+      "text": "Start date",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:54:08+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:54:08+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "8ee804fb424c51e9",
       "text": "Lineup found {}",
       "verdict": "approve",
@@ -1519,6 +1909,19 @@
       "decided_at": "2026-09-17T21:41:03+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:03+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "8f7efcd95e9a6a6d",
+      "text": "Delete genre \"{}\"? This can't be undone.",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "modal",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:39+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:39+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1571,6 +1974,19 @@
       "decided_at": "2026-09-17T21:38:01+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:38:01+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "90e43e43e79848b2",
+      "text": "Year alone is fine: 2009, 2009-06 or 2009-06-11.",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:54:53+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:54:53+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1666,6 +2082,19 @@
       "previous_text": ""
     },
     {
+      "id": "997f381f1df5e981",
+      "text": "What belongs here, and what doesn’t.",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:13+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:13+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "99dab4947c30ec54",
       "text": "Delete collection",
       "verdict": "approve",
@@ -1701,6 +2130,19 @@
       "decided_at": "2026-09-17T21:40:56+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:40:56+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "9c170b378535bdcf",
+      "text": "Start date: use 2009, 2009-06 or 2009-06-11",
+      "verdict": "replace",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": "Start date: use YYYY, YYYY-MM or YYYY-MM-DD",
+      "decided_at": "2026-09-18T17:56:07+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:07+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1766,6 +2208,19 @@
       "decided_at": "2026-09-17T21:41:48+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:48+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "9f06755ced37b368",
+      "text": "New genre",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:43+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:43+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -1874,6 +2329,19 @@
       "previous_text": ""
     },
     {
+      "id": "a29839fe5c0f5c33",
+      "text": "Bluegrass",
+      "verdict": "remove",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:57:48+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:57:48+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "a2cf66b488a8e913",
       "text": "Choose a match",
       "verdict": "approve",
@@ -1965,6 +2433,45 @@
       "previous_text": ""
     },
     {
+      "id": "a9e9dcb2fd260f7b",
+      "text": "Missing",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:47+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:47+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ab10f2a1b6f7f00f",
+      "text": "Bulk assign →",
+      "verdict": "approve",
+      "section": "Genres",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:40+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:40+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ab655b017faaf455",
+      "text": "No metadata could be read from this folder.",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:48+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:48+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "ab992da925e337ad",
       "text": "Delete collection \"{}\"? Recordings are not affected.",
       "verdict": "approve",
@@ -2043,6 +2550,19 @@
       "previous_text": ""
     },
     {
+      "id": "b15d4e0e398db347",
+      "text": "Genres",
+      "verdict": "approve",
+      "section": "Genres",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:40+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:40+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "b3ea7f29220ad445",
       "text": "No recordings match that.",
       "verdict": "approve",
@@ -2095,6 +2615,19 @@
       "previous_text": ""
     },
     {
+      "id": "b8a7d5565bb627c5",
+      "text": "Delete event \"{}\"? This can't be undone.",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "modal",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:52:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:52:02+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "bb3d8a6d004d6541",
       "text": "No sourced lineup could be established for this act.",
       "verdict": "approve",
@@ -2117,6 +2650,19 @@
       "decided_at": "2026-09-18T05:08:26+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:26+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "bea7278f2b0bfa13",
+      "text": "festival concert",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:58+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:58+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2186,6 +2732,19 @@
       "previous_text": ""
     },
     {
+      "id": "c0b96de7cbd6b677",
+      "text": "End date",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:55:07+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:55:07+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "c0f42d1d8d6d29e9",
       "text": "Searching MusicBrainz…",
       "verdict": "approve",
@@ -2221,6 +2780,19 @@
       "decided_at": "2026-09-18T05:08:28+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:28+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "c2c8c22eb16078e3",
+      "text": "placeholder",
+      "verdict": "remove",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:36+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:36+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2277,6 +2849,19 @@
       "previous_text": ""
     },
     {
+      "id": "c74ab535535ddd03",
+      "text": "Saving…",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:59:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:59:25+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "c897fe0769043148",
       "text": "Unknown",
       "verdict": "approve",
@@ -2316,6 +2901,19 @@
       "previous_text": ""
     },
     {
+      "id": "c9a64b54eae062de",
+      "text": "No audio tracks",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:02:40+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:02:40+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "ca53560329dc2d22",
       "text": "Sent to MusicBrainz as the artist name — edit and search again if none of these are right",
       "verdict": "approve",
@@ -2351,6 +2949,32 @@
       "decided_at": "2026-09-18T05:08:29+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:29+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "cb7c0aeadf207527",
+      "text": "No recordings from this event yet",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:54+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:54+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ccb0d094ac2aa130",
+      "text": "Event",
+      "verdict": "approve",
+      "section": "Events",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:52:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:52:02+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2433,6 +3057,19 @@
       "previous_text": ""
     },
     {
+      "id": "d347126f5c8896d9",
+      "text": "{} recording{}",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:20+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:20+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "d3c52f161cefe618",
       "text": "mo",
       "verdict": "approve",
@@ -2472,6 +3109,19 @@
       "previous_text": ""
     },
     {
+      "id": "d5b41df486cb037a",
+      "text": "{} rec",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:59:19+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:59:19+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "d67f488f1be59154",
       "text": "Failed: {}",
       "verdict": "approve",
@@ -2507,6 +3157,19 @@
       "decided_at": "2026-09-18T05:08:19+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:19+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "d74a515557193085",
+      "text": "This genre no longer exists",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "error",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:18+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:18+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2693,6 +3356,32 @@
       "previous_text": ""
     },
     {
+      "id": "e7870f5444201226",
+      "text": "Event name",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:54:02+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:54:02+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "e82720e0ae3b97cf",
+      "text": "Couldn't read \"{}\" as a date. Use 1989, 1989-06 or 1989-06-11.",
+      "verdict": "approve",
+      "section": "Player integration",
+      "scenario": "modal",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:51:58+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:51:58+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "e900a4e9172835be",
       "text": "Could not add {} to the roster",
       "verdict": "approve",
@@ -2702,6 +3391,32 @@
       "decided_at": "2026-09-17T21:41:04+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:41:04+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ea63433c978d8522",
+      "text": "No artists assigned to this genre yet",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:23+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:23+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ec6256dc64a07ff8",
+      "text": "Pick a genre…",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "affordance",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:59:24+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:59:24+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2745,6 +3460,19 @@
       "previous_text": ""
     },
     {
+      "id": "f0f5675e757fb139",
+      "text": "Track Titles",
+      "verdict": "approve",
+      "section": "Metadata Completeness panel",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T18:01:35+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T18:01:35+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "f2da2dbe7a3d93b7",
       "text": "Oldest",
       "verdict": "approve",
@@ -2767,6 +3495,19 @@
       "decided_at": "2026-09-17T21:42:32+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:42:32+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "f3523052250f94aa",
+      "text": "A named container for several shows — a festival, or a tour run. Attach performances to it from the recordings themselves.",
+      "verdict": "replace",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": "A named container for several shows, in particular intended for festival records, but could also be used for other groupings of shows that belong to an \"event\". Attach performances to it from the recordings themselves.",
+      "decided_at": "2026-09-18T17:53:43+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:53:43+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2836,6 +3577,19 @@
       "previous_text": ""
     },
     {
+      "id": "faf90dadffa817a1",
+      "text": "Tints every recording card and browse row for artists in this genre.",
+      "verdict": "approve",
+      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:58:06+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:58:06+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
       "id": "fba4e42f4928573c",
       "text": "File handling",
       "verdict": "approve",
@@ -2897,6 +3651,19 @@
       "decided_at": "2026-09-17T21:40:45+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:40:45+00:00",
+      "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ffc8ccd9dc4c4f7f",
+      "text": "Assign some from the",
+      "verdict": "approve",
+      "section": "Genre (2026-08-02)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-09-18T17:56:34+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-09-18T17:56:34+00:00",
       "note": "",
       "previous_text": ""
     }
