@@ -28,7 +28,18 @@ python3 -m PyInstaller --version >/dev/null 2>&1 || {
 
 # A stale build/ is the usual explanation for "I fixed that and it is still
 # broken" — PyInstaller caches aggressively.
-rm -rf build dist
+#
+# Empty the directories rather than removing them. `rm -rf dist` deletes the
+# contents, then rmdir's the directory itself, and that last step fails with
+# "Directory not empty" if anything recreates a file in the gap. Finder does
+# exactly that: leave a window open on dist/ and it writes .DS_Store straight
+# back, which failed a 0.2.3 build on 2026-09-18. Emptying has the same effect
+# on PyInstaller and nothing to race against.
+for d in build dist; do
+  mkdir -p "$d"
+  # -mindepth 1 keeps the directory, clears everything in it including dotfiles.
+  find "$d" -mindepth 1 -delete
+done
 
 python3 -m PyInstaller trellis.spec --noconfirm --clean
 
