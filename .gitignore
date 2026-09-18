@@ -81,3 +81,7 @@ cache/
 # every version forever, so three releases would make a source clone bigger
 # than the app. Release binaries attach to the tag, not to the tree.
 Trellis-Music-Library-*.zip
+
+# Staging for deletion. The Cowork device bridge cannot delete files,
+# so anything it needs removed gets moved here for Ryan to delete.
+_to_delete/
