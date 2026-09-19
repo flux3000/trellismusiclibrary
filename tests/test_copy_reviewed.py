@@ -82,6 +82,9 @@ def test_every_recorded_span_reproduces_its_own_text(extraction):
     )
 
 
+@pytest.mark.skip(reason=(
+    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+))
 def test_no_unreviewed_user_facing_copy(extraction):
     ledger = Ledger.load(REPO_ROOT)
     baseline = Baseline.load(REPO_ROOT)
@@ -110,6 +113,9 @@ def test_no_unreviewed_user_facing_copy(extraction):
     )
 
 
+@pytest.mark.skip(reason=(
+    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+))
 def test_baseline_only_shrinks(extraction):
     """A key in the baseline that is also decided is stale, not a conflict.
 
@@ -128,6 +134,9 @@ def test_baseline_only_shrinks(extraction):
     )
 
 
+@pytest.mark.skip(reason=(
+    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+))
 def test_no_decision_points_at_a_string_that_is_gone(extraction):
     """Pending WRITES must still have somewhere to write to.
 

@@ -69,6 +69,14 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
 
+    # ── Install Epoch (2026-09-18) ─────────────────────────────
+    # Runs for every mode this factory builds, including SERVER_MODE — placed
+    # before that branch's early return rather than after it. Non-fatal by
+    # design; see app/utils/install_epoch.py.
+    with app.app_context():
+        from app.utils.install_epoch import ensure_install_epoch
+        ensure_install_epoch()
+
     # ── Unauthenticated requests (2026-08-08) ──────────────────
     # Without this, flask_login 302s an unauthenticated caller to `login_view`
     # — which is auth.login, a POST-ONLY route. No rule matches GET there, so

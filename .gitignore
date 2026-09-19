@@ -85,3 +85,6 @@ Trellis-Music-Library-*.zip
 # Staging for deletion. The Cowork device bridge cannot delete files,
 # so anything it needs removed gets moved here for Ryan to delete.
 _to_delete/
+
+# Install epoch — per-install record, written at first launch.
+install.json

@@ -1718,19 +1718,6 @@
       "previous_text": ""
     },
     {
-      "id": "80a63e3046b7c040",
-      "text": "Genres are a fixed vocabulary — nothing in the app creates one implicitly, so this form is the only door in.",
-      "verdict": "remove",
-      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
-      "scenario": "ui",
-      "replacement": null,
-      "decided_at": "2026-09-18T17:56:53+00:00",
-      "applied_commit": null,
-      "last_seen": "2026-09-18T17:56:53+00:00",
-      "note": "",
-      "previous_text": ""
-    },
-    {
       "id": "81a58ebd2563fe16",
       "text": "{}, depending on how many searches it needs. Billed by Anthropic to your key.",
       "verdict": "approve",
@@ -2078,19 +2065,6 @@
       "decided_at": "2026-09-18T05:08:45+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:45+00:00",
-      "note": "",
-      "previous_text": ""
-    },
-    {
-      "id": "997f381f1df5e981",
-      "text": "What belongs here, and what doesn’t.",
-      "verdict": "remove",
-      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
-      "scenario": "ui",
-      "replacement": null,
-      "decided_at": "2026-09-18T17:58:13+00:00",
-      "applied_commit": null,
-      "last_seen": "2026-09-18T17:58:13+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -2598,19 +2572,6 @@
       "decided_at": "2026-09-18T05:08:17+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-18T05:08:17+00:00",
-      "note": "",
-      "previous_text": ""
-    },
-    {
-      "id": "b88d8c67ba6b6103",
-      "text": "Sites worth trusting for this act specifically — a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and ingest jobs.",
-      "verdict": "replace",
-      "section": "Browse (rebuilt 2026-08-23, \"Direction A — The Shelf\")",
-      "scenario": "ui",
-      "replacement": "Sites worth trusting for this act specifically — a fan-maintained show database, an archivist's site. These are treated as sources of truth in future research and ingest jobs.",
-      "decided_at": "2026-09-17T21:38:46+00:00",
-      "applied_commit": null,
-      "last_seen": "2026-09-17T21:38:46+00:00",
       "note": "",
       "previous_text": ""
     },
@@ -3278,19 +3239,6 @@
       "previous_text": ""
     },
     {
-      "id": "dea3e188e9b388c0",
-      "text": "The act that took the stage — the billing on the poster, not an individual musician. Add people to it as Members afterwards.",
-      "verdict": "remove",
-      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
-      "scenario": "ui",
-      "replacement": null,
-      "decided_at": "2026-09-17T21:42:41+00:00",
-      "applied_commit": null,
-      "last_seen": "2026-09-17T21:42:41+00:00",
-      "note": "",
-      "previous_text": ""
-    },
-    {
       "id": "e02ac3bd538f8274",
       "text": "{} in / {} out tokens{}{}",
       "verdict": "approve",
@@ -3495,19 +3443,6 @@
       "decided_at": "2026-09-17T21:42:32+00:00",
       "applied_commit": null,
       "last_seen": "2026-09-17T21:42:32+00:00",
-      "note": "",
-      "previous_text": ""
-    },
-    {
-      "id": "f3523052250f94aa",
-      "text": "A named container for several shows — a festival, or a tour run. Attach performances to it from the recordings themselves.",
-      "verdict": "replace",
-      "section": "Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings",
-      "scenario": "ui",
-      "replacement": "A named container for several shows, in particular intended for festival records, but could also be used for other groupings of shows that belong to an \"event\". Attach performances to it from the recordings themselves.",
-      "decided_at": "2026-09-18T17:53:43+00:00",
-      "applied_commit": null,
-      "last_seen": "2026-09-18T17:53:43+00:00",
       "note": "",
       "previous_text": ""
     },
