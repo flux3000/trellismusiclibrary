@@ -151,6 +151,34 @@ def signing_identity():
     return unique[0]
 
 
+def claude_cli():
+    """
+    Path to the claude CLI, or None.
+
+    Not just shutil.which: the native installer puts the binary in
+    ~/.local/bin, which is on PATH in a login shell and frequently not in
+    whatever shell a build is running from. A 0.2.4 release stopped on exactly
+    that, one release after the same CLI had worked, because the PATH export
+    lived in one terminal session. Set CLAUDE_CLI to override.
+    """
+    override = os.environ.get("CLAUDE_CLI")
+    if override:
+        return override if Path(override).is_file() else None
+
+    found = shutil.which("claude")
+    if found:
+        return found
+
+    for candidate in (
+        Path.home() / ".local" / "bin" / "claude",     # native installer
+        Path("/opt/homebrew/bin/claude"),              # Homebrew, Apple silicon
+        Path("/usr/local/bin/claude"),                 # Homebrew, Intel
+    ):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def preflight(version, dry_run):
     """Every cheap check, before the expensive phase. Order is deliberate."""
     rule("Preflight")
@@ -175,13 +203,14 @@ def preflight(version, dry_run):
     nf = notes_file(version)
     if nf.exists() and nf.read_text(encoding="utf-8").strip():
         say(f"  ✓ release notes: {nf.relative_to(REPO)}")
-    elif not shutil.which("claude"):
+    elif not claude_cli():
         raise Stop(
-            f"No release notes at {nf.relative_to(REPO)}, and the claude CLI is\n"
-            f"  not on PATH to draft them. Write the file, or install the CLI."
+            f"No release notes at {nf.relative_to(REPO)}, and the claude CLI was\n"
+            f"  not found on PATH, in ~/.local/bin or in Homebrew's bin. Install\n"
+            f"  it, set CLAUDE_CLI to its path, or write the notes file yourself."
         )
     else:
-        say(f"  · release notes will be drafted (no {nf.relative_to(REPO)} yet)")
+        say(f"  · release notes will be drafted by {claude_cli()}")
 
     if not shutil.which("gh"):
         raise Stop("The gh CLI is not on PATH, so the release cannot be published.")
@@ -297,7 +326,7 @@ def generate_notes(version, dry_run):
         f"Output only the notes body. No preamble, no sign-off."
     )
 
-    p = subprocess.run(["claude", "-p", prompt], cwd=REPO,
+    p = subprocess.run([claude_cli(), "-p", prompt], cwd=REPO,
                        capture_output=True, text=True)
     body = p.stdout.strip()
     if p.returncode != 0 or not body:
