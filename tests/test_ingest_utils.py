@@ -1,11 +1,10 @@
 """
-tests/test_ingest_utils.py — move_to_library()'s Move-behavior cleanup
-(2026-07-23): once a recording folder is moved into the library, its
-immediate parent (the "Artist Name" staging folder in a typical Bulk
-Import layout) should be removed too if left empty — but only ONE level up,
-only ever for behavior="move" (never "copy"), and never anything that isn't
-unambiguously a disposable staging folder. Pure filesystem logic, no DB/app
-context needed.
+tests/test_ingest_utils.py — move_to_library()'s cleanup (2026-07-23): once
+a recording folder is moved into the library, its immediate parent (the
+"Artist Name" staging folder in a typical Bulk Import layout) should be
+removed too if left empty — but only ONE level up, and never anything that
+isn't unambiguously a disposable staging folder. Pure filesystem logic, no
+DB/app context needed.
 """
 
 from pathlib import Path
@@ -30,8 +29,7 @@ def test_move_deletes_empty_parent_staging_folder(tmp_path):
     show = _make_show(artist_dir)
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
-                     behavior="move")
+    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show")
 
     assert not show.exists()
     assert not artist_dir.exists()
@@ -46,7 +44,7 @@ def test_move_keeps_nonempty_parent(tmp_path):
     _make_show(artist_dir, "Show 2")
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show1), str(lib), "Artist Name", "Show 1", behavior="move")
+    move_to_library(str(show1), str(lib), "Artist Name", "Show 1")
 
     assert not show1.exists()
     assert artist_dir.exists()
@@ -62,26 +60,9 @@ def test_move_ignores_ds_store_when_checking_empty(tmp_path):
     (artist_dir / ".DS_Store").write_bytes(b"junk")
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
-                     behavior="move")
+    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show")
 
     assert not artist_dir.exists()
-
-
-def test_copy_never_touches_source(tmp_path):
-    """behavior="copy" must never remove the source show folder OR its
-    parent, regardless of emptiness — copy's whole contract is "source stays
-    untouched."""
-    artist_dir = tmp_path / "Artist Name"
-    show = _make_show(artist_dir)
-    lib = tmp_path / "lib"; lib.mkdir()
-
-    move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show",
-                     behavior="copy")
-
-    assert show.exists()
-    assert (show / "track.flac").exists()
-    assert artist_dir.exists()
 
 
 def test_move_never_deletes_protected_dir_name(tmp_path):
@@ -93,7 +74,7 @@ def test_move_never_deletes_protected_dir_name(tmp_path):
     show = _make_show(desktop)
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "Desktop", "1994-07-30 Show", behavior="move")
+    move_to_library(str(show), str(lib), "Desktop", "1994-07-30 Show")
 
     assert not show.exists()
     assert desktop.exists()   # protected by name, even though now empty
@@ -110,7 +91,7 @@ def test_move_never_deletes_home_directory(tmp_path, monkeypatch):
     show = _make_show(home)
     lib = tmp_path / "lib"; lib.mkdir()
 
-    move_to_library(str(show), str(lib), "whoever", "1994-07-30 Show", behavior="move")
+    move_to_library(str(show), str(lib), "whoever", "1994-07-30 Show")
 
     assert not show.exists()
     assert home.exists()
@@ -320,8 +301,7 @@ def test_move_dedupes_against_an_existing_same_named_folder(tmp_path):
 
     new_rel = move_to_library(
         str(show), str(lib), "Various Artists",
-        "Various Artists - 1964 - Ryman Auditorium - Nashville, TN",
-        behavior="move")
+        "Various Artists - 1964 - Ryman Auditorium - Nashville, TN")
 
     assert new_rel == "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN (2)"
     # The first recording's folder and its file are untouched...
@@ -339,7 +319,7 @@ def test_move_does_not_dedupe_a_genuinely_new_folder_name(tmp_path):
     show = _make_show(tmp_path / "Import", "1994-07-30 Show")
 
     new_rel = move_to_library(str(show), str(lib), "Artist Name",
-                              "1994-07-30 Show", behavior="move")
+                              "1994-07-30 Show")
 
     assert new_rel == "Artist Name/1994-07-30 Show"
 
@@ -353,8 +333,7 @@ def test_move_dedupes_a_third_collision_past_the_second(tmp_path):
     (artist_dir / "Show (2)").mkdir(parents=True)
 
     show = _make_show(tmp_path / "Import", "Show")
-    new_rel = move_to_library(str(show), str(lib), "Various Artists", "Show",
-                              behavior="move")
+    new_rel = move_to_library(str(show), str(lib), "Various Artists", "Show")
 
     assert new_rel == "Various Artists/Show (3)"
 
@@ -487,7 +466,7 @@ def test_new_recordings_file_under_an_artist_folder_by_default(tmp_path):
     show = _make_show(tmp_path / "Import", "Show")
 
     rel = move_to_library(str(show), str(lib), "Grateful Dead",
-                          "Grateful Dead - 1977-05-08", behavior="copy")
+                          "Grateful Dead - 1977-05-08")
 
     assert rel == "Grateful Dead/Grateful Dead - 1977-05-08"
     assert (lib / rel / "track.flac").is_file()
@@ -499,7 +478,7 @@ def test_layout_off_files_flat_at_the_library_root(tmp_path):
     show = _make_show(tmp_path / "Import", "Show")
 
     rel = move_to_library(str(show), str(lib), "Grateful Dead",
-                          "Grateful Dead - 1977-05-08", behavior="copy",
+                          "Grateful Dead - 1977-05-08",
                           under_artist_folder=False)
 
     assert rel == "Grateful Dead - 1977-05-08"
@@ -517,12 +496,152 @@ def test_flat_layout_dedupes_against_the_root(tmp_path):
     name = "Grateful Dead - 1977-05-08"
 
     first = move_to_library(str(_make_show(tmp_path / "A", "S")), str(lib),
-                            "Grateful Dead", name, behavior="copy",
+                            "Grateful Dead", name,
                             under_artist_folder=False)
     second = move_to_library(str(_make_show(tmp_path / "B", "S")), str(lib),
-                             "Grateful Dead", name, behavior="copy",
+                             "Grateful Dead", name,
                              under_artist_folder=False)
 
     assert first == name
     assert second == f"{name} (2)"
     assert (lib / second / "track.flac").is_file()
+
+# ── flatten= (spec section 1.1, "Keep my files as-is" preserves nesting) ──────
+#
+# Everything above this predates the file-handling feature and always
+# flattened; move_to_library() now takes flatten= so 'keep' mode (rename_files
+# off) can preserve a multi-disc source's own subdir structure instead.
+
+def test_flatten_false_preserves_disc_subdir_nesting(tmp_path):
+    """A CD1/CD2 source with flatten=False keeps each audio file under its
+    own original subdir in the destination, renamed only if audio_rename_map
+    says so -- here it doesn't, so the basenames are untouched too (the
+    'keep' mode default: names and nesting both preserved)."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = tmp_path / "Import" / "Show"
+    (src / "CD1").mkdir(parents=True)
+    (src / "CD2").mkdir(parents=True)
+    (src / "CD1" / "01.flac").write_bytes(b"a" * 50)
+    (src / "CD2" / "01.flac").write_bytes(b"b" * 50)
+
+    rel = move_to_library(str(src), str(lib), "Artist Name", "Show",
+                          flatten=False)
+
+    dest = lib / rel
+    assert (dest / "CD1" / "01.flac").is_file()
+    assert (dest / "CD2" / "01.flac").is_file()
+    assert not (dest / "01.flac").exists()   # never flattened to the root
+
+
+def test_flatten_false_still_applies_a_rename_map_to_the_basename(tmp_path):
+    """flatten=False keeps the subdir but a non-empty audio_rename_map (a
+    custom scheme without a position token, still renaming) substitutes the
+    basename only -- the directory prefix is untouched."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = tmp_path / "Import" / "Show"
+    (src / "CD1").mkdir(parents=True)
+    (src / "CD1" / "01.flac").write_bytes(b"a" * 50)
+
+    rel = move_to_library(str(src), str(lib), "Artist Name", "Show",
+                          flatten=False,
+                          audio_rename_map={"CD1/01.flac": "renamed.flac"})
+
+    dest = lib / rel
+    assert (dest / "CD1" / "renamed.flac").is_file()
+    assert not (dest / "CD1" / "01.flac").exists()
+
+
+# ── In-root adoption (Bulk Adoption spec section 1.1, chunk 1, 2026-09-26) ────
+#
+# A source folder whose realpath is already inside LIBRARY_ROOT is never
+# moved, renamed, flattened or deduped -- it is adopted exactly where it
+# sits, whatever placement/flatten/audio_rename_map the caller passes in.
+# This supersedes the 2026-09-25 S1/R2 in-place branch, which still applied
+# the rename map/flatten pair in place; that behavior no longer exists.
+
+def test_in_root_nested_source_stays_exactly_where_it_is(tmp_path):
+    """A show several levels deep under LIBRARY_ROOT (e.g. an adopted
+    collector library's own Artist/Year/Show tree) is left alone, and the
+    returned path is the full nested path relative to the root -- not a
+    two-level Artist/Show path invented from artist_name/folder_name."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = lib / "Grateful Dead" / "1977" / "gd77-05-08"
+    src.mkdir(parents=True)
+    (src / "01.flac").write_bytes(b"a" * 50)
+    (src / "02.flac").write_bytes(b"b" * 50)
+
+    rel = move_to_library(str(src), str(lib), "Grateful Dead", "gd77-05-08")
+
+    assert rel == "Grateful Dead/1977/gd77-05-08"
+    assert (src / "01.flac").is_file()
+    assert (src / "02.flac").is_file()
+    # No new directory invented under the library root for this artist.
+    assert not (lib / "Grateful Dead" / "gd77-05-08").exists()
+
+
+def test_in_root_nested_source_stays_put_in_organize_mode_too(tmp_path):
+    """The same nested source, but with an audio_rename_map/flatten pair a
+    real organize-mode caller would pass (compute_audio_rename_map +
+    flattens()) -- in-root adoption overrides both; nothing renames or
+    flattens."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = lib / "Grateful Dead" / "1977" / "gd77-05-08"
+    src.mkdir(parents=True)
+    (src / "01.flac").write_bytes(b"a" * 50)
+    (src / "02.flac").write_bytes(b"b" * 50)
+
+    rel = move_to_library(
+        str(src), str(lib), "Grateful Dead", "gd77-05-08",
+        audio_rename_map={"01.flac": "01 - One.flac", "02.flac": "02 - Two.flac"},
+        flatten=True)
+
+    assert rel == "Grateful Dead/1977/gd77-05-08"
+    assert (src / "01.flac").is_file()
+    assert (src / "02.flac").is_file()
+    assert not (src / "01 - One.flac").exists()
+    assert not (src / "02 - Two.flac").exists()
+
+
+def test_in_root_flat_source_under_placement_artist_stays_flat(tmp_path):
+    """A flat <root>/show source (placement `artist`, under_artist_folder
+    True) is not filed under a new <Artist>/ directory -- in-root adoption
+    outranks placement."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = lib / "gd77-05-08"
+    src.mkdir()
+    (src / "01.flac").write_bytes(b"a" * 50)
+
+    rel = move_to_library(str(src), str(lib), "Grateful Dead", "gd77-05-08",
+                          under_artist_folder=True)
+
+    assert rel == "gd77-05-08"
+    assert (src / "01.flac").is_file()
+    assert not (lib / "Grateful Dead").exists()
+
+
+def test_in_root_source_under_a_misspelled_artist_folder_stays_there(tmp_path):
+    """A collector's own misspelled artist folder is not "corrected" by
+    moving the show into a newly-created, properly-spelled one."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    src = lib / "Gratefull Dead" / "gd77-05-08"
+    src.mkdir(parents=True)
+    (src / "01.flac").write_bytes(b"a" * 50)
+
+    rel = move_to_library(str(src), str(lib), "Grateful Dead", "gd77-05-08")
+
+    assert rel == "Gratefull Dead/gd77-05-08"
+    assert (src / "01.flac").is_file()
+    assert not (lib / "Grateful Dead").exists()
+
+
+def test_out_of_root_source_still_moves_as_before(tmp_path):
+    """A control: a source OUTSIDE LIBRARY_ROOT is unaffected by the in-root
+    check and still moves in exactly as it always has."""
+    lib = tmp_path / "Library"; lib.mkdir()
+    show = _make_show(tmp_path / "Import", "1994-07-30 Show")
+
+    rel = move_to_library(str(show), str(lib), "Artist Name", "1994-07-30 Show")
+
+    assert rel == "Artist Name/1994-07-30 Show"
+    assert not show.exists()
+    assert (lib / rel / "track.flac").is_file()

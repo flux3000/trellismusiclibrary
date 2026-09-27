@@ -191,10 +191,6 @@ const App = (() => {
                            // "Add Recording →" button now submits directly)
     folderPath: null,
     scan:       null,      // full scan API response
-    // 'copy' | 'move'. DEFAULT MOVE as of 2026-08-07 (Ryan): copy leaves the
-    // source in place, so a re-scan re-offers the same show and duplicates
-    // creep in. Move makes a second ingest of the same files impossible.
-    behavior:   'move',
     form: {},              // resolved metadata (populated on review step)
     tracks:     [],        // array of { track_number, title, set, duration, filename }
     // True when this review was opened via Bulk Import's "Review →" (see
@@ -292,6 +288,60 @@ const App = (() => {
   // would otherwise sit in localStorage forever, rendering as the :root
   // fallback while Settings showed nothing selected.
   setPalette(currentPalette().id)
+
+  // ── File handling: shared naming constants, cached reader, reiteration
+  //    strip (spec sections 4 and 6.3) ─────────────────────────────────────
+  const NAMING_SCHEME_LABELS = [
+    ['original',      'Keep original'],
+    ['number_title',  'Number and title'],
+    ['etree',         'etree'],
+    ['etree_sets',    'etree, sets'],
+    ['custom',        'Custom'],
+  ]
+  // Mirrors app/utils/file_naming.py's PRESETS — display only, so the
+  // Settings template field shows something real for a preset scheme
+  // instead of sitting blank.
+  const NAMING_PRESET_TEMPLATES = {
+    original:     '{original}',
+    number_title: '{track} - {title}',
+    etree:        '{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].[d{disc}]t{track_in_disc}',
+    etree_sets:   '{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}][s{set}]t{track_in_set}',
+  }
+  const NAMING_TOKENS = [
+    'artist', 'artist_abbr', 'date', 'year', 'venue', 'location', 'source',
+    'source_tag', 'shnid', 'disc', 'track_in_disc', 'set', 'track_in_set',
+    'track', 'title', 'original',
+  ]
+
+  let _fileHandlingCache = null
+  // Cached for the life of the page load; Settings clears it (passing
+  // force=true) whenever it saves a change, so the reiteration strip on the
+  // ingest screens never shows a value the user just overwrote.
+  async function fileHandling(force) {
+    if (_fileHandlingCache && !force) return _fileHandlingCache
+    _fileHandlingCache = await API.system.getFileHandling()
+    return _fileHandlingCache
+  }
+
+  /** Fills a container (by id) with the reiteration strip once file handling
+   *  has loaded. The three ingest screens render the container empty (its
+   *  content depends on an async fetch) and call this right after. */
+  async function _wireFhStrip(containerId) {
+    const el = document.getElementById(containerId)
+    if (!el) return
+    try {
+      el.innerHTML = fileHandlingStripHtml(await fileHandling())
+    } catch (e) { /* leave it empty rather than showing a broken strip */ }
+  }
+
+  function fileHandlingStripHtml(fh) {
+    const modeLabel  = fh.file_handling_mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
+    const filesLabel = fh.rename_files ? 'Rename files' : 'Files not renamed'
+    const tagsLabel  = fh.write_tags_on_ingest ? 'Write tags' : 'Tags not written'
+    return `<span class="fh-strip">
+      <b>${esc(modeLabel)}</b><span class="sep">·</span>${esc(filesLabel)}<span class="sep">·</span>${esc(tagsLabel)}<span class="sep">·</span>
+      <a href="#/settings" class="change">Change</a></span>`
+  }
 
   // ── Resizable sidebar ──────────────────────────────────────────────────────
   ;(function () {
@@ -657,23 +707,35 @@ const App = (() => {
     // rel_path, not bare filename: a multi-disc source has a "01.flac" per
     // disc and the bare name collides.
     const setByRelPath = {}
+    const discByRelPath = {}
     files.forEach(af => {
       if (af.set_number && af.rel_path) setByRelPath[af.rel_path] = af.set_number
+      if (af.rel_path && (af.disc_number != null || af.disc_track_number != null)) {
+        discByRelPath[af.rel_path] = {
+          disc_number:       af.disc_number,
+          disc_track_number: af.disc_track_number,
+        }
+      }
     })
     const setsDetected = !!scan?.sets_detected
 
-    const mk = (title, relPath, trackNumber, duration, setNumber, songwriter) => ({
-      track_number: trackNumber,
-      title,
-      songwriter:   songwriter || null,
-      set_number:   setNumber || null,
-      duration:     duration || null,
-      filename:     relPath,
-      // Suggestions, not assertions. The wizard shows them as pills to approve
-      // or remove; the auto paths accept them as-is, which is the same bargain
-      // the auto paths already make with every other extracted field.
-      flags:        detectTrackFlags(title),
-    })
+    const mk = (title, relPath, trackNumber, duration, setNumber, songwriter) => {
+      const disc = discByRelPath[relPath] || {}
+      return {
+        track_number: trackNumber,
+        title,
+        songwriter:   songwriter || null,
+        set_number:   setNumber || null,
+        disc_number:       disc.disc_number != null ? disc.disc_number : null,
+        disc_track_number: disc.disc_track_number != null ? disc.disc_track_number : null,
+        duration:     duration || null,
+        filename:     relPath,
+        // Suggestions, not assertions. The wizard shows them as pills to approve
+        // or remove; the auto paths accept them as-is, which is the same bargain
+        // the auto paths already make with every other extracted field.
+        flags:        detectTrackFlags(title),
+      }
+    }
 
     // Preferred: one entry per tagged audio file.
     if (tagTracks.length) {
@@ -4846,6 +4908,13 @@ const App = (() => {
             <div class="pp-musicians" id="pp-musicians"></div>
             <div class="pp-stint-editor" id="pp-stint-editor" style="display:none"></div>
 
+            <!-- Abbreviation feeds the {artist_abbr} naming token (falls back
+                 to lowercase initials when empty) — see app/utils/ingest.py -->
+            <div class="pp-sec-row">
+              <div class="pp-sec">Abbreviation</div>
+            </div>
+            <div class="pp-editable ${artist.abbreviation ? '' : 'pp-empty'}" id="pp-abbr" title="Click to edit">${artist.abbreviation ? esc(artist.abbreviation) : 'Add an abbreviation…'}</div>
+
             <!-- Lineup research is its OWN button, not a section of the
                  Description's AI Assist (Ryan, 2026-09-07). Two reasons: it is
                  far more search-hungry than a biography, and AI Assist
@@ -4923,6 +4992,14 @@ const App = (() => {
       onSave: async v => {
         v = v.trim(); artist.bio = v
         await saveField({ bio: v || null })
+      },
+    })
+    makeInlineEditable(document.getElementById('pp-abbr'), {
+      placeholder: 'Add an abbreviation…',
+      get: () => artist.abbreviation || '',
+      onSave: async v => {
+        v = v.trim(); artist.abbreviation = v
+        await saveField({ abbreviation: v || null })
       },
     })
 
@@ -6316,6 +6393,11 @@ const App = (() => {
       .filter(e => e.event_type === 'metadata_updated')
       .length
 
+    // Rename Files staging (spec section 6.4): the GET payload already says
+    // how many tracks the active global scheme would rename, no disk access
+    // needed here to decide the button's amber state.
+    const filesStaged = rec.files_staged || 0
+
     // Inner HTML of a track's title cell: title + official badge + flag chips
     // + inline note. Factored so the right-click quick-edit menu can refresh a
     // single row in place after changing flags or notes.
@@ -6324,27 +6406,58 @@ const App = (() => {
       return `<span class="track-title-text">${esc(t.title)}</span>${badges ? ' ' + badges : ''}`
     }
 
-    // Flat track list — no disc/set grouping. Note/Songwriter are click-to-edit
-    // directly in the row; right-click is Flags (+ Official) only — matches
-    // Add Recording's track table treatment (Ryan, 2026-07-15).
+    // Track list. Grouped under set headers when any track carries a
+    // set_number (spec section 6.4, mockup panel 4e); flat otherwise --
+    // same row markup either way. Note/Songwriter/Set are click-to-edit
+    // directly in the row; right-click is Flags (+ Official) only --
+    // matches Add Recording's track table treatment (Ryan, 2026-07-15).
+    // Grouping is markup only: it never touches Player or playback order,
+    // which follows the continuous track_number as it always has.
     const canEdit  = canEditLibrary()
     const editHint = canEdit ? ' title="Click title to rename · right-click for flags"' : ''
-    const trackRows = (rec.tracks || []).map(t => {
+    // Set cell is content for everyone (the label always renders) and a
+    // click-to-edit control only for admins -- makeInlineEditable() itself
+    // gates the control on canEditLibrary(), same as Note/Songwriter above.
+    function trackRowHtml(t) {
       const isPlaying  = t.id === state.playingTrackId
       const playingCls = isPlaying ? ' playing' : ''
       const playIcon   = icon(isPlaying ? 'pause' : 'play')
+      const discLabel  = t.disc_number
+        ? `${t.disc_number}-${String(t.disc_track_number || '').padStart(2, '0')}`
+        : ''
       return `
         <div class="track-row${playingCls}" data-track-id="${t.id}" data-flags="${(t.flags||[]).join(',')}"${editHint}>
           <span class="track-play">${playIcon}</span>
           <span class="track-num">${String(t.track_number || '').padStart(2,'0')}</span>
+          <span class="track-disc-col">${esc(discLabel)}</span>
           <span class="track-title-wrap">
             <span class="track-title truncate${canEdit ? ' track-title--editable' : ''}">${trackTitleInnerHtml(t)}</span>
           </span>
           <span class="track-note-col truncate${canEdit ? ' pp-editable' : ''}${t.notes ? '' : ' pp-empty'}" id="t-note-${t.id}" title="${esc(t.notes || (canEdit ? 'Click to add a note' : ''))}">${esc(t.notes || (canEdit ? '—' : ''))}</span>
           <span class="track-sw-col truncate${canEdit ? ' pp-editable' : ''}${t.songwriter ? '' : ' pp-empty'}" id="t-sw-${t.id}" title="${esc(t.songwriter || (canEdit ? 'Click to add a songwriter' : ''))}">${esc(t.songwriter || (canEdit ? '—' : ''))}</span>
+          <span class="track-set-col truncate${canEdit ? ' pp-editable' : ''}${t.set_number ? '' : ' pp-empty'}" id="t-set-${t.id}" title="${esc(t.set_number || (canEdit ? 'Click to set the set' : ''))}">${esc(t.set_number || (canEdit ? '—' : ''))}</span>
           <span class="track-dur">${fmtDuration(t.duration)}</span>
         </div>`
-    }).join('')
+    }
+    // Groups form by set_number label in first-appearance order -- the same
+    // rule the derived set_track_number/track_in_set use (spec section 5),
+    // so the header order and the per-set numbering always agree.
+    function buildTrackListHtml() {
+      const tracks = rec.tracks || []
+      if (!tracks.some(t => t.set_number)) return tracks.map(trackRowHtml).join('')
+      const groups = []
+      tracks.forEach(t => {
+        const label = t.set_number || null
+        let g = groups.find(g => g.label === label)
+        if (!g) { g = { label, items: [] }; groups.push(g) }
+        g.items.push(t)
+      })
+      return groups.map(g =>
+        (g.label ? `<div class="track-set-header">${esc(g.label)}</div>` : '') +
+        g.items.map(trackRowHtml).join('')
+      ).join('')
+    }
+    let trackRows = buildTrackListHtml()
 
     // Info File is READ-ONLY until asked otherwise (Ryan, 2026-08-21). It used
     // to be a live textarea that autosaved on blur, matching Add Recording —
@@ -6415,7 +6528,8 @@ const App = (() => {
     //
     // Aligned with the Members/Guests rows above it — same .mg-row-label type
     // treatment and the same left edge, because it is the same kind of content.
-    const sourceLineageRow = (!qEditable && !rec.source && !rec.lineage && !rec.quality) ? '' : `
+    const sourceLineageRow = (!qEditable && !rec.source && !rec.lineage && !rec.quality
+                              && !rec.source_tag && !rec.etree_shnid) ? '' : `
       <div class="rec-sl-row">
         <div class="rec-sl-item rec-sl-item--quality">
           <span class="mg-row-label">Rating</span>
@@ -6425,6 +6539,18 @@ const App = (() => {
           <span class="mg-row-label">Source</span>
           <span class="hm-val hm-val--chip${qc}"${qa('source')}>${sourceBadge(rec.source) || '\u2014'}</span>
         </div>
+        <div class="rec-sl-item">
+          <span class="mg-row-label">Source tag</span>
+          <span class="hm-val${qc}"${qa('source_tag')}>${esc(rec.source_tag || '\u2014')}</span>
+        </div>
+        <div class="rec-sl-item">
+          <span class="mg-row-label">shnid</span>
+          <span class="hm-val mono${qc}"${qa('etree_shnid')}>${esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '\u2014')}</span>
+        </div>
+        ${rec.disc_count > 1 ? `<div class="rec-sl-item">
+          <span class="mg-row-label">Discs</span>
+          <span class="hm-val">${esc(String(rec.disc_count))}</span>
+        </div>` : ''}
         <div class="rec-sl-item rec-sl-item--lineage">
           <span class="mg-row-label">Lineage</span>
           <span class="hm-val${qc}"${qa('lineage')}>${esc(lineageDisplay || rec.lineage || '\u2014')}</span>
@@ -6673,7 +6799,9 @@ const App = (() => {
               <span class="pane-act-note${stagedCount > 0 ? '' : ' act-suppressed'}" id="tags-staged-note" data-for="filetags"
                     ${stagedCount > 0 ? '' : 'hidden'}>Edits not yet written to the files</span>
               <button class="pane-act${stagedCount > 0 ? ' pane-act--staged' : ''}" id="btn-write-tags" data-for="filetags"
-                      title="Write the database's metadata into the FLAC files' Vorbis comments">Write Tags to Files</button>` : ''}
+                      title="Write the database's metadata into the FLAC files' Vorbis comments">Write Tags to Files</button>
+              <button class="pane-act${filesStaged > 0 ? ' pane-act--staged' : ''}" id="btn-rename-files" data-for="filetags"
+                      title="Rename the files on disk to match a naming scheme">Rename Files</button>` : ''}
               <button class="pane-act" id="btn-cksum-revalidate" data-for="checksums"
                       title="Re-check against the files on disk">Re-validate</button>
               ${canEdit ? `
@@ -6761,19 +6889,24 @@ const App = (() => {
     // Clicking the row for the track that's already loaded toggles play/pause
     // in place; clicking any other row starts that track fresh (Ryan,
     // 2026-08-27 — previously every click restarted playback from 0, so the
-    // "pause" icon could never actually get back to "play").
-    mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
-      row.addEventListener('click', () => {
-        if (row.classList.contains('track-row--skipped')) return
-        const tid = parseInt(row.dataset.trackId)
-        if (tid === Player.currentId()) {
-          Player.togglePlay()
-          return
-        }
-        const idx = rec.tracks.findIndex(t => t.id === tid)
-        if (idx >= 0) playRecording(recordingId, idx, rec.tracks)
+    // "pause" icon could never actually get back to "play"). Named so a Set
+    // edit's re-render (below) can re-wire the rebuilt rows the same way —
+    // grouping is markup only and must never touch how playback finds a row.
+    function wirePlaybackTrackRowClicks() {
+      mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
+        row.addEventListener('click', () => {
+          if (row.classList.contains('track-row--skipped')) return
+          const tid = parseInt(row.dataset.trackId)
+          if (tid === Player.currentId()) {
+            Player.togglePlay()
+            return
+          }
+          const idx = rec.tracks.findIndex(t => t.id === tid)
+          if (idx >= 0) playRecording(recordingId, idx, rec.tracks)
+        })
       })
-    })
+    }
+    wirePlaybackTrackRowClicks()
 
     // ── Quick edit: recording metadata (Source/Lineage/Quality) ──────────────
     // Click an editable value → inline input → Enter saves, Esc cancels.
@@ -6783,14 +6916,18 @@ const App = (() => {
     // silently downgrades it from a coloured badge to grey text until reload.
     function metaCellDisplay(field) {
       if (field === 'source')  return sourceBadge(rec.source) || '—'
+      if (field === 'source_tag') return esc(rec.source_tag || '—')
+      if (field === 'etree_shnid') return esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '—')
       if (field === 'lineage') { const l = rec.lineage; return esc(l ? (l.length > 220 ? l.slice(0, 220) + '…' : l) : '—') }
       return `<span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '—')}</span>`  // quality
     }
     function startMetaQuickEdit(cell) {
       const field = cell.dataset.qedit
-      const raw = field === 'source'  ? (rec.source  || '')
-                : field === 'lineage' ? (rec.lineage || '')
-                :                       (rec.quality || '')
+      const raw = field === 'source'      ? (rec.source      || '')
+                : field === 'source_tag'  ? (rec.source_tag  || '')
+                : field === 'etree_shnid' ? (rec.etree_shnid != null ? String(rec.etree_shnid) : '')
+                : field === 'lineage'     ? (rec.lineage     || '')
+                :                           (rec.quality     || '')
       cell.innerHTML = `<input class="hm-qedit-input" type="text" value="${esc(String(raw))}" />`
       const input = cell.querySelector('input')
       input.focus(); input.select()
@@ -6943,7 +7080,10 @@ const App = (() => {
       })
       input.addEventListener('blur', () => finish(true))
     }
-    if (canEditLibrary()) {
+    // Named so a Set edit can re-wire the rebuilt rows (grouping/derived
+    // numbering changes on every Set save — spec section 6.4).
+    function wireEditableTrackRows() {
+      if (!canEditLibrary()) return
       mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
         const track = rec.tracks.find(t => t.id === parseInt(row.dataset.trackId))
         if (!track) return
@@ -6992,7 +7132,38 @@ const App = (() => {
             refreshTrackRow(track)
           },
         })
+        // Set — click-to-edit; empty clears it. Saving never touches disk,
+        // tags or track_number (spec section 6.4) — it re-renders the WHOLE
+        // list, not just this row, since grouping and every set's derived
+        // per-set position can change from a single edit.
+        makeInlineEditable(document.getElementById(`t-set-${track.id}`), {
+          placeholder: '—',
+          get: () => track.set_number || '',
+          onSave: async v => {
+            v = v.trim() || null
+            track.set_number = v
+            // No markStaged() (N6, review 2026-09-25): write_flac_tags writes
+            // no set tag, so editing the Set cell has nothing for Write Tags
+            // to write and must not turn that button amber.
+            try { await API.tracks.update(track.id, { set_number: v }) }
+            catch (e) { alert('Failed: ' + e.message) }
+            renderTrackList()
+          },
+        })
       })
+    }
+    wireEditableTrackRows()
+
+    // Rebuilds the track panel from the current rec.tracks (grouped by set
+    // when any track has one) and re-wires every row the same way the
+    // initial render did. Player itself is untouched — only markup changes.
+    function renderTrackList() {
+      trackRows = buildTrackListHtml()
+      const panel = document.getElementById('track-panel')
+      if (panel) panel.innerHTML = trackRows || '<div class="info-panel-empty">No tracks</div>'
+      wirePlaybackTrackRowClicks()
+      wireEditableTrackRows()
+      applySkipFilter()
     }
 
     // Collection tags (add / remove)
@@ -7386,12 +7557,12 @@ const App = (() => {
       }
     }
 
-    // Write FLAC tags
-    document.getElementById('btn-write-tags')?.addEventListener('click', async () => {
-      const ok = confirm('Write current metadata as FLAC tags to all tracks in this recording?\n\nThis replaces all existing Vorbis comments in the files.')
-      if (!ok) return
+    // Write FLAC tags. A real dialog (panel 4d) rather than confirm(), skipped
+    // entirely when write_tags_default is on (the setting exists precisely so
+    // this stops asking every time).
+    async function _doWriteTags() {
+      const btn = document.getElementById('btn-write-tags')
       try {
-        const btn = document.getElementById('btn-write-tags')
         btn.disabled = true
         btn.textContent = 'Writing…'
         const result = await API.recordings.writeTags(recordingId)
@@ -7410,10 +7581,143 @@ const App = (() => {
         }
       } catch (e) {
         alert('Error writing tags: ' + e.message)
-        const btn = document.getElementById('btn-write-tags')
         if (btn) { btn.disabled = false; btn.textContent = 'Write Tags to Files' }
       }
+    }
+    document.getElementById('btn-write-tags')?.addEventListener('click', async () => {
+      let fh = null
+      try { fh = await fileHandling() } catch (e) { /* fall through to the dialog */ }
+      if (fh && fh.write_tags_default) { await _doWriteTags(); return }
+
+      const n = (rec.tracks || []).length
+      const wrap = document.createElement('div')
+      wrap.className = 'modal-overlay'
+      wrap.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="wrt-title">
+          <div class="modal-header"><h3 id="wrt-title">Write tags to ${n} file${n === 1 ? '' : 's'}</h3></div>
+          <div class="modal-body">
+            <p>Existing tags in the files are replaced. FFP and ST5 checksums still verify. MD5 will not.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-sm btn-ghost" id="wrt-cancel">Cancel</button>
+            <button class="btn btn-sm btn-primary" id="wrt-confirm">Write Tags</button>
+          </div>
+        </div>`
+      document.body.appendChild(wrap)
+      const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+      const onKey = e => { if (e.key === 'Escape') close() }
+      document.addEventListener('keydown', onKey)
+      wrap.querySelector('#wrt-cancel').addEventListener('click', close)
+      wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+      wrap.querySelector('#wrt-confirm').addEventListener('click', async () => {
+        close()
+        await _doWriteTags()
+      })
     })
+
+    // Rename Files (spec section 6.4/panels 4b/4c) — a real dialog, not
+    // confirm(), because there is a scheme to choose inside it. Defaults to
+    // the active global scheme; a per-click override in the select applies
+    // to this one confirm only and is never saved.
+    const NAMING_SCHEME_LABELS = [
+      ['original',      'Keep original'],
+      ['number_title',  'Number and title'],
+      ['etree',         'etree'],
+      ['etree_sets',    'etree, sets'],
+    ]
+    function renamePreviewRowsHtml(plan) {
+      const rows = plan.slice(0, 3).map(p => `
+        <tr><td class="fh-prev-old">${esc(p.current)}</td><td class="fh-prev-arrow">→</td><td>${esc(p.proposed)}</td></tr>`).join('')
+      const more = plan.length > 3
+        ? `<tr><td class="fh-prev-more" colspan="3">${plan.length - 3} more</td></tr>` : ''
+      return rows + more
+    }
+    async function actRenameFiles() {
+      let fh
+      try { fh = await API.system.getFileHandling() }
+      catch (e) { alert('Could not load file handling settings: ' + e.message); return }
+
+      const wrap = document.createElement('div')
+      wrap.className = 'modal-overlay'
+      wrap.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="rnf-title">
+          <div class="modal-header"><h3 id="rnf-title">Rename files</h3></div>
+          <div class="modal-body">
+            ${fh.file_handling_mode === 'keep'
+              ? `<p>File handling is set to Keep my files as-is. These files will be renamed anyway.</p>` : ''}
+            <div class="set-field" style="margin-bottom:8px">
+              <label class="set-label">Naming scheme</label>
+              <select class="set-input" id="rnf-scheme">
+                ${NAMING_SCHEME_LABELS.map(([v, label]) =>
+                  `<option value="${v}"${v === fh.naming_scheme ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+                <option value="custom"${fh.naming_scheme === 'custom' ? ' selected' : ''}${fh.naming_template ? '' : ' disabled'}>Custom</option>
+              </select>
+            </div>
+            <table class="fh-prev" id="rnf-preview">
+              <tr><th>Now</th><th></th><th>After</th></tr>
+            </table>
+            <p class="note" style="color:var(--t2);font-size:12px;margin-top:6px">Checksum files list the current names. Matching runs again after the rename.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-sm btn-ghost" id="rnf-cancel">Cancel</button>
+            <button class="btn btn-sm btn-primary" id="rnf-confirm" disabled>Rename</button>
+          </div>
+        </div>`
+      document.body.appendChild(wrap)
+
+      const select     = wrap.querySelector('#rnf-scheme')
+      const previewTbl = wrap.querySelector('#rnf-preview')
+      const confirmBtn = wrap.querySelector('#rnf-confirm')
+      const title       = wrap.querySelector('#rnf-title')
+      const close      = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+      const onKey      = e => { if (e.key === 'Escape') close() }
+      document.addEventListener('keydown', onKey)
+      wrap.querySelector('#rnf-cancel').addEventListener('click', close)
+      wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+
+      let currentPlan = []
+      let previewSeq  = 0
+      async function refreshPreview() {
+        const seq = ++previewSeq
+        confirmBtn.disabled = true
+        try {
+          const result = await API.naming.preview({
+            scheme: select.value, recording_id: recordingId,
+            template: select.value === 'custom' ? fh.naming_template : undefined,
+          })
+          if (seq !== previewSeq) return   // a later change already superseded this
+          currentPlan = (result.plan || []).filter(p => p.current !== p.proposed)
+          previewTbl.innerHTML = `<tr><th>Now</th><th></th><th>After</th></tr>` + renamePreviewRowsHtml(currentPlan)
+          title.textContent = `Rename ${currentPlan.length} file${currentPlan.length === 1 ? '' : 's'}`
+          confirmBtn.disabled = currentPlan.length === 0
+        } catch (e) {
+          previewTbl.innerHTML = `<tr><td colspan="3">${esc(e.message)}</td></tr>`
+        }
+      }
+      select.addEventListener('change', refreshPreview)
+      refreshPreview()
+
+      confirmBtn.addEventListener('click', async () => {
+        confirmBtn.disabled = true
+        confirmBtn.textContent = 'Renaming…'
+        try {
+          const result = await API.recordings.renameFiles(recordingId, {
+            scheme: select.value,
+            template: select.value === 'custom' ? fh.naming_template : undefined,
+          })
+          close()
+          if (result.errors?.length) {
+            alert(`Renamed ${result.renamed} file(s).\n\nWarnings:\n${result.errors.map(([f, e]) => `${f}: ${e}`).join('\n')}`)
+          }
+          renderRecordingView(recordingId)
+        } catch (e) {
+          alert('Rename failed: ' + e.message)
+          confirmBtn.disabled = false
+          confirmBtn.textContent = 'Rename'
+        }
+      })
+    }
+    document.getElementById('btn-rename-files')?.addEventListener('click', actRenameFiles)
 
     // Mark / unmark as official release (cascades to tracks server-side).
     async function actToggleOfficial(item) {
@@ -7909,7 +8213,6 @@ const App = (() => {
                          // through Listening Quality first).
     ingestedIds: new Map(), // path → recording_id for items ingested this session
     expandedPaths: new Set(), // expanded row paths
-    behavior:    null,   // 'copy' | 'move' — synced with the shared ingest_file_behavior pref
   }
 
   async function renderBatchImportView() {
@@ -8066,17 +8369,6 @@ const App = (() => {
     const r = batch.results
     if (!r) { window.location.hash = '#/ingest'; return }
 
-    // Default the file-behavior choice from the shared preference, once per session.
-    if (batch.behavior == null) {
-      // Hydrate the cache from the stored preference. loadPrefs() also fills
-      // `appPrefs`, which fileBehavior() falls back to, so this is belt and
-      // braces rather than the only path.
-      try {
-        const prefs = await getPrefs()
-        batch.behavior = prefs.ingest_file_behavior || 'move'
-      } catch (_) { batch.behavior = 'move' }
-    }
-
     // Listening Quality gate (2026-07-30): only folders the triage step
     // accepted make it to metadata review. `acceptedPaths` is null when this
     // directory was never triaged (e.g. a stale '#/batch' bookmark) — in that
@@ -8115,13 +8407,6 @@ const App = (() => {
             <button class="btn btn-ghost btn-sm" id="batch-rescan-btn">↺ New Scan</button>
           </div>
           ${hiddenCount > 0 ? `<p class="batch-subtitle" style="margin:6px 0 0">${hiddenCount} scanned folder${hiddenCount === 1 ? '' : 's'} not shown, rejected or still pending in Listening Quality.</p>` : ''}
-          <div class="batch-behavior-row">
-            <label class="batch-behavior-label" for="batch-behavior-select">File handling</label>
-            <select id="batch-behavior-select">
-              <option value="move" ${fileBehavior() !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
-              <option value="copy" ${fileBehavior() === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
-            </select>
-          </div>
           <div class="batch-tier-pills" style="margin-top:10px">
             ${tierPill('green', greens.length, 'green')}
             ${tierPill('yellow', yellows.length, 'yellow')}
@@ -8134,16 +8419,15 @@ const App = (() => {
               : ''}
             <span class="batch-tier-pill batch-tier-total">${items.length} total</span>
           </div>
+          <div class="setbar" style="margin-top:10px">
+            <span id="batch-fh-strip"></span>
+          </div>
         </div>
         <div class="batch-list">${allRows}</div>
         ${items.length === 0 ? `<div class="empty-state">No accepted recordings to review. <a href="#/ingest">Back to Listening Quality</a></div>` : ''}
       </div>`)
 
     // ── Events ──────────────────────────────────────────────────────────────
-
-    document.getElementById('batch-behavior-select')?.addEventListener('change', async e => {
-      await setFileBehavior(e.target.value)
-    })
 
     document.getElementById('batch-rescan-btn')?.addEventListener('click', () => {
       // Explicit "start over" — restart the whole unified flow (source picker
@@ -8154,6 +8438,7 @@ const App = (() => {
       batch.acceptedPaths = null
       window.location.hash = '#/ingest'
     })
+    _wireFhStrip('batch-fh-strip')
 
     // Ingest All Green + Yellow — red stays manual (missing artist/date entirely).
     document.getElementById('batch-ingest-all-btn')?.addEventListener('click', async () => {
@@ -8263,8 +8548,12 @@ const App = (() => {
       country:            e.country || null,
       source:             e.source  || null,
       lineage:            e.lineage || null,
+      // No form in this auto path (spec section 5) -- take the folder-name
+      // detection straight off the scan, same suggestion Add Recording's
+      // fields would have been seeded from.
+      source_tag:         scan.suggestions?.from_info_file?.source_tag  || null,
+      etree_shnid:        scan.suggestions?.from_info_file?.etree_shnid || null,
       is_complete:        true,
-      behavior:           batch.behavior || 'move',   // synced with the shared preference
       info_file_content:  scan.info_file_content || null,
       fingerprints:       scan.fingerprints || [],
       tracks,
@@ -8311,7 +8600,7 @@ const App = (() => {
   // and "individual" are the same screens — a bulk run just has more cards.
   // ══════════════════════════════════════════════════════════════════════════
 
-  // Server-side preferences snapshot (config.IMPORT_DIR, ingest_file_behavior…).
+  // Server-side preferences snapshot (config.IMPORT_DIR…).
   // Module-scoped and cached: several views need `import_dir`, it doesn't change
   // within a session, and there is deliberately NO bare `prefs` global — the
   // only other `prefs` in this file is a local inside renderSettingsPage().
@@ -8349,36 +8638,6 @@ const App = (() => {
     }).join('')
   }
 
-  // ── File handling: ONE setting, four controls (Ryan, 2026-09-02) ──────────
-  //
-  // Copy-vs-move is offered in four places — Bulk Import's bar, the Review &
-  // Ingest settings bar, the Add Recording form, and Settings — and they did
-  // not agree. Choosing "Copy into library" on the ingest queue set
-  // `batch.behavior` and nothing else, while the Add Recording form drew its
-  // <select> from `appPrefs.ingest_file_behavior`; so the queue said Copy and
-  // the form, one click later, said Move. Only ONE of the four wrote the
-  // preference back.
-  //
-  // It is a property of the library, not of a screen. So there is one reader
-  // and one writer, both below, and `batch.behavior` is a cache of the
-  // preference rather than a second opinion about it.
-  function fileBehavior() {
-    return (batch.behavior || appPrefs?.ingest_file_behavior || 'move')
-  }
-
-  // Writes all three: the in-memory cache, the cached prefs object every
-  // render reads, and the server. Updating the first two locally is what makes
-  // the change visible on the NEXT screen without waiting on (or trusting) the
-  // round trip — and the write is fire-and-forget for the same reason the
-  // other preference menus are, since a failure here costs a setting, not
-  // data.
-  async function setFileBehavior(value) {
-    const v = value === 'copy' ? 'copy' : 'move'
-    batch.behavior = v
-    if (appPrefs) appPrefs.ingest_file_behavior = v
-    try { await API.preferences.update({ ingest_file_behavior: v }) } catch (_) {}
-    return v
-  }
   async function getPrefs() {
     if (appPrefs) return appPrefs
     try { appPrefs = await API.preferences.get() } catch (_) { appPrefs = {} }
@@ -9940,7 +10199,7 @@ const App = (() => {
   // the phase bar exists to prevent. Keep in step with PHASES in api/ingest.py.
   const _LQ_PHASE_PCT = { resolving: 4, copying: null, moving: null,
                           cataloging: 88, checksums: 94, signals: 96,
-                          saving: 99, done: 100 }
+                          saving: 99, tags: 99, done: 100 }
   function _lqCopyPct(pr) {
     if (!pr) return 2
     const fixed = _LQ_PHASE_PCT[pr.phase]
@@ -10255,13 +10514,6 @@ const App = (() => {
             ${icon('rotate-cw', 'lq-setbar-ic')}<span>Reprocess</span></button>
         </span>
 
-        <label class="bfilter" title="What happens to each source folder once its recording is filed">Source files
-          <select id="lq-behavior" ${dis}>
-            <option value="move"${fileBehavior() !== 'copy' ? ' selected' : ''}>Move into library</option>
-            <option value="copy"${fileBehavior() === 'copy' ? ' selected' : ''}>Copy, keep originals</option>
-          </select>
-        </label>
-
         <label class="bfilter" title="Quick Add files the recording with full metadata, checksums and a sound-quality score, and leaves the per-track audio analysis for later. Complete does that analysis during the ingest, which takes roughly a minute per minute of music.">Mode
           <select id="lq-mode" ${dis}>
             <option value="quick"${lq.mode !== 'full' ? ' selected' : ''}>Quick Add</option>
@@ -10269,11 +10521,7 @@ const App = (() => {
           </select>
         </label>
 
-        <span class="lq-setbar-note" title="${fileBehavior() === 'copy'
-          ? 'Originals stay in the source folder, so a later scan will offer them again.'
-          : 'The source folder is removed once the recording is filed.'}">${fileBehavior() === 'copy'
-          ? 'Originals stay in the source folder, so a later scan will offer them again.'
-          : 'The source folder is removed once the recording is filed.'}</span>
+        <span id="lq-fh-strip"></span>
       </div>`
 
     // ── Apply to all ─────────────────────────────────────────────────────
@@ -10764,15 +11012,6 @@ const App = (() => {
       renderIngestSource()
     })
 
-    document.getElementById('lq-behavior')?.addEventListener('change', async e => {
-      // Was `batch.behavior = …` and nothing else, which is the whole bug:
-      // the choice lived in one screen's memory and the Add Recording form
-      // read the stored preference, so Review one row later showed "Move"
-      // over a queue set to Copy (Ryan, 2026-09-02).
-      await setFileBehavior(e.target.value)
-      renderTriageView({ preserveScroll: true })   // the rail's note tracks it
-    })
-
     // Apply-to-all. Typed fields are read on INPUT rather than on change so
     // a value is never lost by clicking straight from a field to Ingest, and
     // typing does NOT re-render on every keystroke — that would rebuild the
@@ -10905,6 +11144,7 @@ const App = (() => {
       lq.mode = e.target.value === 'full' ? 'full' : 'quick'
       try { localStorage.setItem('trellisIngestMode', lq.mode) } catch (_) { /* private mode */ }
     })
+    _wireFhStrip('lq-fh-strip')
 
     // Sound Quality / Metadata pills — click either to open (or switch) the
     // row's drill-in straight to that tab. A separate handler from the Tab
@@ -11272,10 +11512,13 @@ const App = (() => {
         country: a.country || e.country || null,
         source: a.source || e.source || null,
         lineage: a.lineage || e.lineage || null,
+        // No form field for these in the queue either (spec section 5) --
+        // same folder-name detection fallback as the green-path auto ingest.
+        source_tag:  scan.suggestions?.from_info_file?.source_tag  || null,
+        etree_shnid: scan.suggestions?.from_info_file?.etree_shnid || null,
         notes: a.notes || null,
         is_complete: true,
         event_name: a.event || null,
-        behavior: fileBehavior(),
         // Quick Add. The server reads this to decide whether to enqueue the
         // Librosa track analysis; nothing else about the ingest changes.
         skip_analysis: lq.mode !== 'full',
@@ -12294,6 +12537,11 @@ const App = (() => {
       f.state           = tags.state   || info.state   || ''
       f.country         = tags.country || info.country || ''
       f.source          = pick(tags, info, 'source') || ''
+      // Folder-name only (spec section 5) -- suggestions.from_info_file
+      // carries these even though neither tags nor the info file's text
+      // itself produces them; never written without the form.
+      f.source_tag      = info.source_tag || ''
+      f.etree_shnid     = info.etree_shnid != null ? String(info.etree_shnid) : ''
       f.quality         = ''
       // Bug (Ryan, 2026-08-09): lineage almost always comes from the info
       // file's "Source:"/"Lineage:" text, not a FLAC tag, but this only ever
@@ -12649,6 +12897,20 @@ const App = (() => {
               </div>
             </div>
 
+            <!-- Source tag, shnid -- spec section 5: folder-name detection
+                 only, never written without this form. Same labels as the
+                 View Recording Source block. -->
+            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px">
+              <div class="ingest-field">
+                <label>Source tag</label>
+                <input type="text" id="f-source-tag" value="${esc(f.source_tag)}" />
+              </div>
+              <div class="ingest-field">
+                <label>shnid</label>
+                <input type="text" id="f-shnid" class="mono" value="${esc(f.etree_shnid)}" />
+              </div>
+            </div>
+
             <!-- Track table -->
             <!-- Preview player moved into this header row (Ryan, 2026-08-08),
                  right-aligned opposite the "Tracks (N)" title — same idea as
@@ -12725,19 +12987,7 @@ const App = (() => {
                  done. "Add & View" (farthest right) opens the finished record
                  instead — a lighter fill than the primary button so the pair
                  doesn't read as primary+disabled-looking-ghost. -->
-            <!-- The file-treatment control uses .bfilter, the same
-                 label-plus-select idiom as the Review & Ingest settings bar
-                 (Ryan, 2026-08-28) — it was the one select in the ingest flow
-                 wearing its own styling. -->
-            <div class="ingest-actions-left">
-              <span class="bfilter">
-                <label for="ingest-behavior-select">Files</label>
-                <select id="ingest-behavior-select" title="What happens to the source folder once this recording is filed">
-                <option value="move" ${fileBehavior() !== 'copy' ? 'selected' : ''}>Move into library (source removed)</option>
-                <option value="copy" ${fileBehavior() === 'copy' ? 'selected' : ''}>Copy into library (keep source)</option>
-                </select>
-              </span>
-            </div>
+            <div class="ingest-actions-left" id="ingest-fh-strip"></div>
             <div class="ingest-actions-right">
               <button class="btn btn-primary" id="btn-confirm"
                       data-after="return" title="Add to library and return to the list">Add &amp; Return ↵</button>
@@ -13282,13 +13532,6 @@ const App = (() => {
       }
     })
 
-    // The form's own Files dropdown writes the preference like every other
-    // copy/move control does (2026-09-02) — otherwise changing it here would
-    // apply to this one recording and silently revert for the next.
-    document.getElementById('ingest-behavior-select')?.addEventListener('change', e => {
-      setFileBehavior(e.target.value)
-    })
-
     // Re-apply the queue-level values to whatever is still empty. Writes to
     // ingest.form and repaints through renderIngestStep, so the boxes on
     // screen agree with what Confirm will send — the entire point of the
@@ -13826,6 +14069,8 @@ const App = (() => {
       f.source          = document.getElementById('f-source').value
       f.quality         = document.getElementById('f-quality').value.trim()
       f.lineage         = document.getElementById('f-lineage').value.trim()
+      f.source_tag      = document.getElementById('f-source-tag').value.trim()
+      f.etree_shnid     = document.getElementById('f-shnid').value.trim()
       f.notes           = document.getElementById('f-notes').value.trim()
 
       if (!f.artist_name) { alert('Artist name is required.'); return }
@@ -13860,26 +14105,9 @@ const App = (() => {
       btn.classList.add('is-busy')
       errEl.style.display = 'none'
 
-      // Copy/move had TWO sources of truth: the triage page's Files dropdown
-      // (batch.behavior) and the saved preference read here. A user who set the
-      // dropdown to Copy could still get a Move, because Review submitted
-      // through this path (2026-07-31). It was patched then by preferring
-      // whichever screen the user came from — three branches, and a fourth
-      // control (Settings) that none of them saw.
-      //
-      // 2026-09-02: there is now ONE source of truth. Every control writes the
-      // preference through setFileBehavior(), so this reads fileBehavior() and
-      // the question of which screen wins does not arise. The form's own
-      // <select> is still consulted first, but only because it may have been
-      // changed on THIS page and not yet blurred — and it renders from the
-      // same accessor, so in every other case the two already agree.
-      const behaviorSel = document.getElementById('ingest-behavior-select')
-      const behavior = behaviorSel ? behaviorSel.value : fileBehavior()
-
       const payload = {
         source_folder_path: ingest.folderPath,
         ...f,
-        behavior,
         tracks: ingest.tracks,
         fingerprints: ingest.scan.fingerprints || [],
         info_file_content: ingest.scan.info_file_content || null,
@@ -14000,6 +14228,7 @@ const App = (() => {
 
     document.getElementById('btn-confirm').addEventListener('click', _submitReview)
     document.getElementById('btn-confirm-view')?.addEventListener('click', _submitReview)
+    _wireFhStrip('ingest-fh-strip')
 
     // Resize handle
     // The DETAILS panel is the sized side now, so it can be animated open and
@@ -15487,16 +15716,80 @@ const App = (() => {
       </div>`
   }
 
+  /** Settings › File handling (mockup panels 2/2b). The template field is
+   *  read-only for a preset (shows that preset's own template, purely for
+   *  display) and editable only for Custom. */
+  function _fileHandlingSectionHtml(fh) {
+    const renaming  = !!fh.rename_files
+    const isCustom  = fh.naming_scheme === 'custom'
+    const template  = isCustom ? (fh.naming_template || '') : (NAMING_PRESET_TEMPLATES[fh.naming_scheme] || '')
+    return `
+      <div class="set-field">
+        <div class="seg" id="fh-mode" role="group" aria-label="File handling mode">
+          <button type="button" class="${fh.file_handling_mode !== 'organize' ? 'on' : ''}" data-mode="keep">Keep my files as-is</button>
+          <button type="button" class="${fh.file_handling_mode === 'organize' ? 'on' : ''}" data-mode="organize">Organize my files</button>
+        </div>
+        <span class="set-flash" id="fh-mode-flash"></span>
+      </div>
+
+      <div class="set-field">
+        <label class="check"><input type="checkbox" id="fh-rename-folders" ${fh.rename_folders ? 'checked' : ''}>
+          <div>Rename folders<div class="hint">Folder names follow each recording's details.</div></div></label>
+        <label class="check"><input type="checkbox" id="fh-rename-files" ${fh.rename_files ? 'checked' : ''}>
+          <div>Rename files<div class="hint">File names follow the naming scheme.</div></div></label>
+        <span class="set-flash" id="fh-switches-flash"></span>
+      </div>
+
+      <div class="set-field${renaming ? '' : ' dim'}">
+        <label class="set-label" for="fh-scheme">Naming scheme</label>
+        <select class="set-input" id="fh-scheme" ${renaming ? '' : 'disabled'}>
+          ${NAMING_SCHEME_LABELS.map(([v, label]) =>
+            `<option value="${v}"${v === fh.naming_scheme ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+        </select>
+      </div>
+
+      <div class="set-field${renaming ? '' : ' dim'}">
+        <label class="set-label" for="fh-template">Template</label>
+        <input type="text" class="set-input mono" id="fh-template" value="${esc(template)}"
+               ${renaming && isCustom ? '' : 'readonly'}>
+        <div class="tokens">${NAMING_TOKENS.map(t => `<span>{${t}}</span>`).join('')}</div>
+        <p class="set-hint">Modifiers: <span class="mono">:lower</span> <span class="mono">:upper</span>
+          <span class="mono">:nospace</span> <span class="mono">:underscore</span>. Text in square brackets
+          is dropped when a token inside it is empty.</p>
+        <span class="set-flash" id="fh-template-flash"></span>
+      </div>
+
+      <div class="set-field${renaming ? '' : ' dim'}">
+        <label class="set-label" id="fh-preview-label">Preview</label>
+        <table class="fh-prev" id="fh-preview"><tr><th>Now</th><th></th><th>After</th></tr></table>
+      </div>
+
+      <div class="set-field">
+        <label class="check"><input type="checkbox" id="fh-write-tags-ingest" ${fh.write_tags_on_ingest ? 'checked' : ''}>
+          <div>Write tags when a recording is added<div class="hint">FFP and ST5 checksums still verify. MD5 will not.</div></div></label>
+        <label class="check"><input type="checkbox" id="fh-write-tags-default" ${fh.write_tags_default ? 'checked' : ''}>
+          <div>Write tags to files without asking each time</div></label>
+        <span class="set-flash" id="fh-tags-flash"></span>
+      </div>
+
+      <div class="set-field" style="margin-bottom:0">
+        <label class="set-label">Placement</label>
+        <label class="check"><input type="radio" name="fh-place" value="artist" ${fh.placement === 'artist' ? 'checked' : ''}><div>Under the artist folder</div></label>
+        <label class="check"><input type="radio" name="fh-place" value="root" ${fh.placement === 'root' ? 'checked' : ''}><div>Library root</div></label>
+        <span class="set-flash" id="fh-place-flash"></span>
+      </div>`
+  }
+
   async function renderSettingsPage() {
     setActiveNav('settings')
     setNavCurrent('Settings')
     setLoading()
 
-    let prefs = {}, me = {}, about = {}, layout = {}
+    let prefs = {}, me = {}, about = {}, fh = {}
     try {
-      [prefs, me, about, layout] = await Promise.all([
+      [prefs, me, about, fh] = await Promise.all([
         API.preferences.get(), API.auth.me(), API.system.about(),
-        API.system.libraryLayout(),
+        fileHandling(true),
       ])
     } catch (e) {
       setMainHTML(`<div class="empty-state">
@@ -15508,10 +15801,6 @@ const App = (() => {
     const keySet     = prefs.has_api_key
     const noKeychain = prefs.keychain_available === false
     const model      = prefs.ai_model || 'claude-sonnet-5'
-    const behavior   = batch.behavior || prefs.ingest_file_behavior || 'move'
-    // Default TRUE when the endpoint said nothing: an install whose library
-    // Trellis laid out itself must not appear to have changed shape.
-    const underArtist = layout.file_under_artist_folder !== false
 
     setMainHTML(`
       <div class="set-wrap">
@@ -15539,7 +15828,8 @@ const App = (() => {
               <div class="set-field">
                 <label class="set-label" for="set-username">Sign-in name</label>
                 <input class="set-input" id="set-username" maxlength="64"
-                       value="${esc(me.username)}" autocomplete="off">
+                       value="${esc(me.username)}" autocomplete="off"
+                       autocorrect="off" autocapitalize="off" spellcheck="false">
                 <span class="set-flash" id="set-username-flash"></span>
                 <p class="set-hint">The name you sign in with. Peers see your
                   display name instead, unless you have left that empty.</p>
@@ -15572,27 +15862,9 @@ const App = (() => {
         </section>
 
         <section class="set-sec">
-          <h2 class="set-sec-title">Adding recordings</h2>
-          <div class="set-field">
-            <label class="set-label" for="set-behavior">Source files</label>
-            <select class="set-input" id="set-behavior">
-              <option value="move" ${behavior !== 'copy' ? 'selected' : ''}>Move into the library, emptying the source folder</option>
-              <option value="copy" ${behavior === 'copy' ? 'selected' : ''}>Copy into the library, leaving the source folder alone</option>
-            </select>
-            <span class="set-flash" id="set-behavior-flash"></span>
-            <p class="set-hint">What happens to a folder after its recording is filed.</p>
-          </div>
-          ${canEditLibrary() ? `
-          <div class="set-field">
-            <label class="set-label" for="set-layout">Where new recordings go</label>
-            <select class="set-input" id="set-layout">
-              <option value="artist" ${underArtist ? 'selected' : ''}>Under a folder named for the artist</option>
-              <option value="flat" ${underArtist ? '' : 'selected'}>Straight into the library folder</option>
-            </select>
-            <span class="set-flash" id="set-layout-flash"></span>
-            <p class="set-hint">Only affects recordings added from now on.
-              Nothing already in the library moves.</p>
-          </div>` : ''}
+          <h2 class="set-sec-title">File handling</h2>
+          ${canEditLibrary() ? _fileHandlingSectionHtml(fh) : ''}
+          <div id="set-folders"></div>
         </section>
 
         <section class="set-sec">
@@ -15751,28 +16023,165 @@ const App = (() => {
         _settingsSaved($(`${id}-flash`))
       } catch (err) { _settingsSaved($(`${id}-flash`), err.message) }
     })
-    // File handling goes through the shared writer instead of the generic
-    // menu helper: it has an in-memory cache (`batch.behavior`) that the
-    // ingest screens read, and Settings must move it too or changing the
-    // setting here would be invisible to a triage session already open.
-    $('set-behavior')?.addEventListener('change', async e => {
-      await setFileBehavior(e.target.value)
-      _settingsSaved($('set-behavior-flash'))
+    // ── File handling (spec section 6.2) ─────────────────────────────────────
+    // Every control is install-level (admin_required server-side), so a
+    // failure is always surfaced, never swallowed, and the fh cache is
+    // dropped on every successful save so the ingest screens' strip and any
+    // other open Settings tab pick the new value up on next read.
+    // Spec 1.1: changing the mode in Settings shows a one-sentence
+    // confirmation before it rewrites every switch below to match --
+    // unlike first run, this can flip switches an admin already set
+    // deliberately, so it does not apply silently on a click.
+    function _confirmModeChange(mode, onConfirm) {
+      const label = mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
+      const wrap = document.createElement('div')
+      wrap.className = 'modal-overlay'
+      wrap.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fhmode-title">
+          <div class="modal-header"><h3 id="fhmode-title">Change file handling</h3></div>
+          <div class="modal-body">
+            <p>Switching to "${esc(label)}" rewrites the switches below to match it.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-sm btn-ghost" id="fhmode-cancel">Cancel</button>
+            <button class="btn btn-sm btn-primary" id="fhmode-confirm">Change</button>
+          </div>
+        </div>`
+      document.body.appendChild(wrap)
+      const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+      const onKey = e => { if (e.key === 'Escape') close() }
+      document.addEventListener('keydown', onKey)
+      wrap.querySelector('#fhmode-cancel').addEventListener('click', close)
+      wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+      wrap.querySelector('#fhmode-confirm').addEventListener('click', () => { close(); onConfirm() })
+    }
+    if ($('fh-mode')) {
+      $('fh-mode').addEventListener('click', e => {
+        const btn = e.target.closest('button[data-mode]')
+        if (!btn) return
+        const mode = btn.dataset.mode
+        if (btn.classList.contains('on')) return
+        _confirmModeChange(mode, async () => {
+          try {
+            const result = await API.system.setFileHandling({ file_handling_mode: mode })
+            await fileHandling(true)
+            _settingsSaved($('fh-mode-flash'))
+            renderSettingsPage()   // switches/scheme/tags all follow the mode
+          } catch (err) {
+            _settingsSaved($('fh-mode-flash'), err.message || 'Could not save')
+          }
+        })
+      })
+    }
+
+    async function _fhSaveField(key, value, flashId) {
+      try {
+        await API.system.setFileHandling({ [key]: value })
+        await fileHandling(true)
+        _settingsSaved($(flashId))
+        return true
+      } catch (err) {
+        _settingsSaved($(flashId), err.message || 'Could not save')
+        return false
+      }
+    }
+
+    $('fh-rename-folders')?.addEventListener('change', async e => {
+      const el = e.target
+      if (!await _fhSaveField('rename_folders', el.checked, 'fh-switches-flash')) el.checked = !el.checked
+    })
+    $('fh-rename-files')?.addEventListener('change', async e => {
+      const el = e.target
+      const ok = await _fhSaveField('rename_files', el.checked, 'fh-switches-flash')
+      if (!ok) { el.checked = !el.checked; return }
+      renderSettingsPage()   // scheme/template/preview enable or dim
+    })
+    $('fh-scheme')?.addEventListener('change', async e => {
+      const el = e.target
+      const prev = Array.from(el.options).find(o => o.defaultSelected)?.value
+      const ok = await _fhSaveField('naming_scheme', el.value, 'fh-template-flash')
+      if (!ok) { if (prev) el.value = prev; return }
+      renderSettingsPage()   // template field's readonly-ness and content follow
+    })
+    $('fh-template')?.addEventListener('blur', async e => {
+      const el = e.target
+      if (el.readOnly) return
+      await _fhSaveField('naming_template', el.value, 'fh-template-flash')
+      _fhRefreshPreview()
+    })
+    $('fh-write-tags-ingest')?.addEventListener('change', async e => {
+      const el = e.target
+      if (!await _fhSaveField('write_tags_on_ingest', el.checked, 'fh-tags-flash')) el.checked = !el.checked
+    })
+    $('fh-write-tags-default')?.addEventListener('change', async e => {
+      const el = e.target
+      if (!await _fhSaveField('write_tags_default', el.checked, 'fh-tags-flash')) el.checked = !el.checked
+    })
+    document.querySelectorAll('input[name="fh-place"]').forEach(radio => {
+      radio.addEventListener('change', async e => {
+        const el = e.target
+        if (!el.checked) return
+        await _fhSaveField('placement', el.value, 'fh-place-flash')
+      })
     })
 
-    // Library layout. Unlike its neighbours this is an install-level setting,
-    // so a failure is worth surfacing rather than swallowing: the select would
-    // otherwise sit showing a choice the server never accepted.
-    $('set-layout')?.addEventListener('change', async e => {
-      const wantArtist = e.target.value === 'artist'
+    // Working folders of an adopted library (2026-09-26). First run no longer
+    // asks for them, so they are set here. Desktop only: the folder dialog
+    // is PyWebView's, and a created library's working folders are fixed, so
+    // the block renders only when run.py says they are editable.
+    ;(async () => {
+      const host = $('set-folders')
+      const api  = window.pywebview && window.pywebview.api
+      if (!host || !canEditLibrary() || !api || !api.get_working_folders) return
+      let wf
+      try { wf = await api.get_working_folders() } catch (_) { return }
+      if (!wf || !wf.editable) return
+      const rows = [['import_dir', 'Downloads'], ['backlog_dir', 'Backlog'], ['workshop_dir', 'Workshop']]
+      host.innerHTML = rows.map(([key, label]) => `
+        <div class="set-field">
+          <span class="set-label">${label}</span>
+          <div class="set-actions">
+            <span class="set-hint" id="wf-${key}">${esc(wf[key] || 'not set')}</span>
+            <button class="btn btn-ghost btn-sm" data-wf="${key}">Choose…</button>
+            <span class="set-flash" id="wf-${key}-flash"></span>
+          </div>
+        </div>`).join('')
+      host.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-wf]')
+        if (!btn) return
+        const key = btn.dataset.wf
+        const picked = await api.pick_folder()
+        if (!picked) return
+        const res = await api.set_working_folder(key, picked)
+        if (res && res.ok) {
+          $('wf-' + key).textContent = res.path
+          _settingsSaved($('wf-' + key + '-flash'))
+        } else {
+          _settingsSaved($('wf-' + key + '-flash'), (res && res.error) || 'Could not save')
+        }
+      })
+    })()
+
+    // Preview table — refreshed whenever the scheme select changes, and once
+    // on load so the panel opens populated (spec section 6.2's "Shown ...
+    // with the etree preset, so the preview is populated").
+    async function _fhRefreshPreview() {
+      const tbl = $('fh-preview')
+      if (!tbl) return
+      const scheme = $('fh-scheme')?.value
+      const template = $('fh-template') && !$('fh-template').readOnly ? $('fh-template').value : undefined
       try {
-        await API.system.setLibraryLayout(wantArtist)
-        _settingsSaved($('set-layout-flash'))
+        const result = await API.naming.preview({ scheme, template })
+        const rows = (result.plan || []).map(p => `
+          <tr><td class="fh-prev-old">${esc(p.current)}</td><td class="fh-prev-arrow">→</td><td>${esc(p.proposed)}</td></tr>`).join('')
+        tbl.innerHTML = `<tr><th>Now</th><th></th><th>After</th></tr>` + rows
       } catch (err) {
-        e.target.value = wantArtist ? 'flat' : 'artist'
-        _settingsSaved($('set-layout-flash'), err.message || 'Could not save')
+        tbl.innerHTML = `<tr><td colspan="3">${esc(err.message)}</td></tr>`
       }
-    })
+    }
+    $('fh-scheme')?.addEventListener('change', _fhRefreshPreview)
+    if ($('fh-preview')) _fhRefreshPreview()
+
     menu('set-model',    'ai_model')
 
     // ── The one explicit Save: a secret you paste and cannot read back ──────

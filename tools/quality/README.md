@@ -1,7 +1,7 @@
 # Listening Quality
 
 Standalone analyser for how enjoyable a live recording is to listen to.
-Runs completely independently of Flux — own server, own UI, no database.
+Runs independently of the app — own server, own UI, no database.
 
 ## Run it
 
@@ -35,36 +35,33 @@ and produces a 0-100 **Listening Quality** score from three groups:
 Separately, **Technical Issues** (clipping, dead channel, out of phase,
 dropouts) are pass/fail and only deduct when they actually trip.
 
-Every score comes with a plain-English sentence from a fixed band ruleset —
-there is no per-recording prose anywhere, so explanations can never drift out
-of sync with the numbers they describe.
+Every score comes with a plain-English sentence from a fixed band ruleset, so
+explanations always match the numbers they describe.
 
 You can stream the exact tracks that were analysed straight from the results,
-and click a timestamp to jump to the precise window that was measured. That is
-the point: check the findings by ear rather than trusting the number.
+and click a timestamp to jump to the precise window that was measured, so
+every finding can be checked by ear.
 
 ## Files
 
-**The engine moved on 2026-07-30.** `quality_features.py`, `quality_scoring.py`
-and `quality_interpret.py` now live in **`app/utils/quality/`**, because
-Listening Quality was integrated into the app's ingestion flow and two copies
-would have drifted. Everything here is now a thin client of that package.
+The engine lives in **`app/utils/quality/`**, shared with the app's ingestion
+flow. Everything here is a thin client of that package.
 
 | File | Purpose |
 |---|---|
 | `quality_app.py` | Flask server — scanning, jobs, audio streaming |
-| `quality_app.html` | The whole UI, single file, Flux design tokens |
+| `quality_app.html` | The whole UI, single file, the app's design tokens |
 | `run_extract.py` | CLI batch extraction to JSON |
 | `track_variance.py` | Diagnostic: feature spread across tracks in one recording |
-| `width_probe.py` | Diagnostic: stereo width (tested, rejected) |
+| `width_probe.py` | Diagnostic: stereo width (not used in scoring) |
 
-| Engine (now in `app/utils/quality/`) | Purpose |
+| Engine (in `app/utils/quality/`) | Purpose |
 |---|---|
 | `quality_features.py` | Audio → raw measurements |
 | `quality_scoring.py` | Measurements → scores (pure function, no audio) |
 | `quality_interpret.py` | Scores → plain English, band-driven |
 
-Feature extraction and scoring are deliberately separate: scoring is a pure
+Feature extraction and scoring are separate: scoring is a pure
 function over stored measurements, so curves and weights can be retuned without
 decoding any audio again.
 
@@ -79,8 +76,7 @@ points, worst case 7.9, correlation 0.857.**
 
 Known limitation: it separates good from bad well (correlation 0.885 on the
 corpus spanning C to A) but ranks good-from-good poorly (0.34 on the two
-corpora that are all A/A−/B+). See
-`Context Library/Listening Quality — v2 Results (20 recordings, 3 corpora).md`.
+corpora that are all A/A−/B+).
 
 ## Notes
 

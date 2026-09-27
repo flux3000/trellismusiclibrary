@@ -269,6 +269,7 @@ def get_artist(artist_id):
         "id":        p.id,
         "name":      p.name,
         "sort_name": p.sort_name,
+        "abbreviation": p.abbreviation,
         "bio":       p.bio,
         "default_personnel_mode": p.default_personnel_mode,
         # Each entry still has {id, name} (existing frontend code reading
@@ -391,7 +392,7 @@ def update_artist(artist_id):
         if gid is not None and not db.session.get(Genre, gid):
             return jsonify({"error": "genre not found"}), 400
         p.genre_id = gid
-    for f in ["name", "sort_name", "bio", "default_personnel_mode"]:
+    for f in ["name", "sort_name", "bio", "default_personnel_mode", "abbreviation"]:
         if f in data:
             setattr(p, f, data[f])
     if data.get("members") is not None:

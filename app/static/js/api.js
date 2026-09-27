@@ -191,6 +191,11 @@ const API = (() => {
       setLibraryLayout:    (fileUnderArtistFolder) =>
         put('/api/system/library-layout',
             { file_under_artist_folder: fileUnderArtistFolder }),
+      // Mode, the six switches, and placement (spec section 1.1/2.1). Read
+      // by Settings, the reiteration strip and any dialog that needs to know
+      // the ACTIVE global scheme (e.g. Rename Files' default).
+      getFileHandling: () => get('/api/system/file-handling'),
+      setFileHandling: (changes) => put('/api/system/file-handling', changes),
     },
 
     // ── Auth ────────────────────────────────────────────────────────────────
@@ -411,6 +416,10 @@ const API = (() => {
       fileTags:   (id)       => get(`/api/recordings/${id}/tags`),
       reprocess:  (id)       => post(`/api/recordings/${id}/reprocess`),
       verifyChecksums: (id)  => post(`/api/recordings/${id}/verify-checksums`),
+      // scheme/template omitted -> the server applies the active global
+      // scheme; passed -> a one-click-only override, never persisted.
+      renameFiles: (id, { scheme, template } = {}) =>
+        post(`/api/recordings/${id}/rename-files`, { scheme, template }),
     },
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -502,6 +511,17 @@ const API = (() => {
       },
       health:         (scan)    => post('/api/ingest/health', scan),
       batchScan:  (source_dir) => post('/api/ingest/batch-scan', { source_dir }),
+    },
+
+    // ── Naming engine preview (app/utils/file_naming.py) ───────────────────────
+    naming: {
+      preview: ({ scheme, template, recording_id } = {}) => {
+        const p = new URLSearchParams()
+        if (scheme)       p.set('scheme', scheme)
+        if (template)     p.set('template', template)
+        if (recording_id) p.set('recording_id', recording_id)
+        return get(`/api/naming/preview?${p.toString()}`)
+      },
     },
 
     // ── Listening Quality ────────────────────────────────────────────────────

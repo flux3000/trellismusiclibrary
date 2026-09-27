@@ -2300,7 +2300,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    the original sizes. The bigger play glyph stayed. */
 .track-row {
   display: grid;
-  grid-template-columns: 16px 24px minmax(0, 2fr) minmax(0, 1.2fr) auto 44px;
+  grid-template-columns: 16px 24px 34px minmax(0, 2fr) minmax(0, 1.1fr) auto 60px 44px;
   align-items: center;
   gap: 8px;
   padding: 9px 24px;
@@ -2308,6 +2308,24 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   border-radius: var(--r-sm);
   margin: 1px 6px;
   transition: background 0.1s;
+}
+
+/* Disc + disc-track ("2-03"), blank on a single-disc recording (spec 6.4) */
+.track-disc-col {
+  font-size: 11px; color: var(--t2); font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; text-align: right;
+}
+
+/* Set label, click-to-edit for admins via makeInlineEditable() (spec 6.4) */
+.track-set-col {
+  font-size: 11px; color: var(--t2); min-width: 0; text-align: right;
+}
+
+/* Set-group header row inside the grouped track list (mockup panel 4e) */
+.track-set-header {
+  grid-column: 1 / -1;
+  font-family: var(--font-display); font-weight: 600; font-size: 12.5px;
+  color: var(--t1); padding: 10px 24px 2px; margin-top: 4px;
 }
 
 /* Note (right of title, muted) + Songwriter (right-aligned, before duration) */
@@ -8838,6 +8856,63 @@ select.set-input { max-width: 480px; }
 /* A value the app knows but you cannot change — the sign-in name. Styled as
    text, not as a disabled input: a greyed-out field invites clicking. */
 .set-static { font-size: var(--fs-body); color: var(--t1); padding: 2px 0; }
+
+/* Naming preview table -- the file-handling Settings panel (chunk 9) and the
+   Rename Files dialog (chunk 8) share this one table shape (03-mockup.html
+   panels 2/2b and 4b/4c): mono Now/After rows, added here first since the
+   dialog needs it before the Settings panel exists. */
+.fh-prev { border-collapse: collapse; width: 100%; margin-top: 8px;
+  font-family: var(--font-mono, monospace); font-size: 12px; }
+.fh-prev th { text-align: left; color: var(--t2); font-family: var(--font-ui);
+  font-weight: 500; font-size: 11.5px; padding: 0 8px 6px 0;
+  border-bottom: 1px solid var(--bd-1); }
+.fh-prev td { padding: 4px 8px 4px 0; color: var(--t0); vertical-align: top;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.fh-prev td.fh-prev-old { color: var(--t1); }
+.fh-prev td.fh-prev-arrow { color: var(--t3); padding: 4px 10px; }
+.fh-prev td.fh-prev-more { color: var(--t3); font-family: var(--font-ui); }
+
+/* File handling's mode segmented control (03-mockup.html panel 2). */
+.seg { display: inline-flex; border: 1px solid var(--bd-1); border-radius: 6px; overflow: hidden; }
+.seg button {
+  background: transparent; color: var(--t1); border: 0; padding: 7px 16px;
+  font-family: var(--font-ui); font-size: var(--fs-body); cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--bd-1); }
+.seg button.on { background: var(--accent-dim); color: var(--t0); }
+
+/* A labelled checkbox/radio row with its own hint line, used throughout the
+   File handling panel (panels 2/2b). */
+.check { display: flex; align-items: flex-start; gap: 9px; margin: 0 0 10px; cursor: pointer; }
+.check:last-child { margin-bottom: 0; }
+.check input { margin: 3px 0 0; accent-color: var(--accent); }
+.check .hint { color: var(--t3); font-size: 11.5px; margin-top: 1px; font-weight: 400; }
+
+/* A field whose control is disabled because a switch above it turned its
+   effect off (e.g. the naming scheme when Rename files is unchecked). */
+.set-field.dim { opacity: .5; }
+
+/* Token chips under the naming template field. */
+.tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; max-width: 560px; }
+.tokens span {
+  font-family: var(--font-mono, monospace); font-size: 11.5px; color: var(--t1);
+  background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: 4px; padding: 2px 6px;
+}
+
+/* File handling reiteration strip (03-mockup.html panel 3) — Add Recording,
+   Bulk Import and Review & Ingest all show the same read-only summary with a
+   link back to Settings, so a screen mid-ingest never lies about what will
+   happen to the files. */
+.setbar {
+  background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: 6px;
+  padding: 8px 12px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  font-size: 12.5px;
+}
+.fh-strip { display: inline-flex; align-items: center; gap: 10px; color: var(--t1); font-size: 12.5px; }
+.fh-strip b { color: var(--t0); font-weight: 600; }
+.fh-strip .sep { color: var(--t3); }
+.fh-strip .change { color: var(--accent); text-decoration: none; }
+.fh-strip .change:hover { text-decoration: underline; }
 
 .set-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 

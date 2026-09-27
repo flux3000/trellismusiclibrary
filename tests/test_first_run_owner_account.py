@@ -12,6 +12,12 @@ that machine ever made. Deleting the library folder does not reset an install.
 `__main__`. Neither is wanted here: `webview` is stubbed so the import works
 on a headless box, and `run.app` is repointed at the throwaway test app so
 every write in these tests lands in the temp database, never a real one.
+
+`_apply_file_handling_choice()` (chunk 10, file-handling spec section 6.1) is
+tested the same direct way as `_create_owner_account()` above it: the setup
+page's two confirm_* methods create real folders and patch global Config,
+which the rest of this file deliberately does not exercise, so the choice it
+hands off is tested at the same unit boundary the file already uses.
 """
 
 import sys
@@ -24,6 +30,7 @@ from app.models.play_log import PlayLog
 from app.models.recording_event import RecordingEvent
 from app.models.user import User, UserArtistPermission
 from app.models.user_preference import UserPreference
+from app.utils import node_settings
 
 
 def _empty_the_user_table():
@@ -107,3 +114,36 @@ def test_a_name_another_account_holds_is_raised_not_swallowed(api, app):
         api._create_owner_account("jeff")
 
     assert _db.session.query(User).filter_by(username="admin").first() is not None
+
+
+# ── Files / Placement, the first-run screen's other new control ─────────────
+
+def test_the_chosen_mode_and_placement_are_persisted(api, app):
+    api._apply_file_handling_choice("organize", "root")
+
+    fh = node_settings.get_file_handling()
+    assert fh["file_handling_mode"] == "organize"
+    assert fh["placement"] == "root"
+    # organize's own defaults follow, same as a Settings-page mode switch.
+    assert fh["rename_files"] is True
+
+
+def test_keep_and_artist_placement_persist_too(api, app):
+    api._apply_file_handling_choice("keep", "artist")
+
+    fh = node_settings.get_file_handling()
+    assert fh["file_handling_mode"] == "keep"
+    assert fh["placement"] == "artist"
+    assert fh["rename_files"] is False
+
+
+def test_an_unrecognized_choice_falls_back_to_the_safe_default(api, app):
+    """A malformed or missing value from the setup page (a stale client, a
+    JS bug) must not raise -- the folders and account already succeeded by
+    the time this runs, so this step degrades to the safe default instead of
+    turning a working setup into a visible error."""
+    api._apply_file_handling_choice(None, None)
+
+    fh = node_settings.get_file_handling()
+    assert fh["file_handling_mode"] == "keep"
+    assert fh["placement"] == "artist"

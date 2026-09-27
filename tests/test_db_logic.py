@@ -208,7 +208,9 @@ def test_do_confirm_copies_files_and_reports_progress(app, db, tmp_path):
     non-audio extras (cover.jpg) keep their original name."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
+    from app.utils import node_settings
 
+    node_settings.apply_mode("organize")   # renaming is scheme-driven, not default
     src = tmp_path / "src_show"; src.mkdir()
     (src / "t01.flac").write_bytes(b"x" * 2000)
     (src / "cover.jpg").write_bytes(b"y" * 1000)   # non-audio extra, copied too
@@ -575,7 +577,9 @@ def test_verify_checksums_discovers_and_verifies_backfill(app, db, api, tmp_path
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
+    from app.utils import node_settings
 
+    node_settings.apply_mode("organize")   # renaming is scheme-driven, not default
     src = tmp_path / "src_show4"; src.mkdir()
     audio_bytes = b"more fake flac bytes" * 10
     (src / "t01.flac").write_bytes(audio_bytes)
@@ -693,7 +697,9 @@ def test_scan_folder_detects_and_orders_multi_disc(tmp_path):
     assert len(result["audio_files"]) == 5
     indices = [f["index"] for f in result["audio_files"]]
     assert indices == [1, 2, 3, 4, 5]                     # continuous, no reset
-    assert [f["set_number"] for f in result["audio_files"]] == ["CD 1", "CD 1", "CD 1", "CD 2", "CD 2"]
+    assert [f["disc_number"] for f in result["audio_files"]] == [1, 1, 1, 2, 2]
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 3, 1, 2]
+    assert all(f["set_number"] is None for f in result["audio_files"])
     assert result["audio_files"][0]["rel_path"] in ("CD1/01.flac", "CD1\\01.flac")
     assert result["audio_files"][3]["rel_path"] in ("CD2/01.flac", "CD2\\01.flac")
     assert [o["filename"] for o in result["other_files"]] == ["cover.jpg"]
@@ -724,13 +730,15 @@ def test_parse_set_dir_word_and_digit_forms():
     (or the staging folder 'done' becomes 'Disc 1'), and a prefix with no
     number at all is not a set."""
     from app.utils.ingest import _parse_set_dir
-    assert _parse_set_dir("disc one")  == ("Disc 1", 1)
-    assert _parse_set_dir("Disc Two")  == ("Disc 2", 2)
-    assert _parse_set_dir("Set_Three") == ("Set 3", 3)
-    assert _parse_set_dir("vol two")   == ("Vol 2", 2)
-    assert _parse_set_dir("cd1")       == ("CD 1", 1)
-    assert _parse_set_dir("CD 02")     == ("CD 2", 2)   # zero-pad normalised
-    assert _parse_set_dir("d-3")       == ("Disc 3", 3)
+    assert _parse_set_dir("disc one")  == ("Disc 1", 1, "disc")
+    assert _parse_set_dir("Disc Two")  == ("Disc 2", 2, "disc")
+    assert _parse_set_dir("Set_Three") == ("Set 3", 3, "set")
+    assert _parse_set_dir("vol two")   == ("Vol 2", 2, "disc")
+    assert _parse_set_dir("cd1")       == ("CD 1", 1, "disc")
+    assert _parse_set_dir("CD 02")     == ("CD 2", 2, "disc")   # zero-pad normalised
+    assert _parse_set_dir("d-3")       == ("Disc 3", 3, "disc")
+    assert _parse_set_dir("Set 1")     == ("Set 1", 1, "set")
+    assert _parse_set_dir("Encore")    == ("Encore", None, "set")
     for junk in ("done", "disc", "setlist", "Artwork", "dm1996-05-31d1", ""):
         assert _parse_set_dir(junk) is None, junk
 
@@ -780,7 +788,9 @@ def test_scan_folder_spelled_out_disc_subdirs(tmp_path):
     assert result["sets_detected"] is True
     assert len(result["audio_files"]) == 26
     assert [f["index"] for f in result["audio_files"]] == list(range(1, 27))
-    assert [f["set_number"] for f in result["audio_files"]] == ["Disc 1"] * 18 + ["Disc 2"] * 8
+    assert [f["disc_number"] for f in result["audio_files"]] == [1] * 18 + [2] * 8
+    assert [f["disc_track_number"] for f in result["audio_files"]] == list(range(1, 19)) + list(range(1, 9))
+    assert all(f["set_number"] is None for f in result["audio_files"])
     d2_first = next(f for f in result["audio_files"] if "d2t01" in f["filename"])
     assert d2_first["index"] == 19
     assert sorted(f["filename"] for f in result["fingerprints"]) == [
@@ -811,7 +821,9 @@ def test_scan_folder_detects_disc_prefix_in_filenames(tmp_path):
     assert result["sets_detected"] is True
     assert len(result["audio_files"]) == 16
     assert [f["index"] for f in result["audio_files"]] == list(range(1, 17))
-    assert [f["set_number"] for f in result["audio_files"]] == ["Disc 1"] * 9 + ["Disc 2"] * 7
+    assert [f["disc_number"] for f in result["audio_files"]] == [1] * 9 + [2] * 7
+    assert [f["disc_track_number"] for f in result["audio_files"]] == list(range(1, 10)) + list(range(1, 8))
+    assert all(f["set_number"] is None for f in result["audio_files"])
     # Disc 2 track 1 must land at index 10, not interleaved with disc 1's track 1
     assert result["audio_files"][9]["filename"].startswith("D02T01")
     assert [t["filename"] for t in result["text_files"]] == ["info.txt"]
@@ -831,7 +843,9 @@ def test_scan_folder_filename_disc_variants_and_ordering(tmp_path):
     assert result["sets_detected"] is True
     assert [f["filename"] for f in result["audio_files"]] == [
         "cd1t1.flac", "cd1t2.flac", "cd1t10.flac", "CD2-03.flac"]
-    assert [f["set_number"] for f in result["audio_files"]] == ["CD 1"] * 3 + ["CD 2"]
+    assert [f["disc_number"] for f in result["audio_files"]] == [1, 1, 1, 2]
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 10, 3]
+    assert all(f["set_number"] is None for f in result["audio_files"])
 
 
 def test_scan_folder_filename_disc_requires_all_files_and_two_discs(tmp_path):
@@ -844,6 +858,7 @@ def test_scan_folder_filename_disc_requires_all_files_and_two_discs(tmp_path):
     r1 = scan_folder(str(single))
     assert r1["sets_detected"] is False
     assert all(f["set_number"] is None for f in r1["audio_files"])
+    assert all(f["disc_number"] is None for f in r1["audio_files"])
 
     mixed = tmp_path / "mixed"; mixed.mkdir()
     (mixed / "d01t01.flac").write_bytes(b"x")
@@ -878,7 +893,9 @@ def test_scan_folder_subdirs_win_over_filename_prefixes(tmp_path):
 
     result = scan_folder(str(root))
     assert result["sets_detected"] is True
-    assert [f["set_number"] for f in result["audio_files"]] == ["CD 1", "CD 1", "CD 2"]
+    assert [f["disc_number"] for f in result["audio_files"]] == [1, 1, 2]
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 1]
+    assert all(f["set_number"] is None for f in result["audio_files"])
     assert [f["index"] for f in result["audio_files"]] == [1, 2, 3]
 
 
@@ -927,13 +944,15 @@ def test_do_confirm_flattens_and_renames_multi_disc_with_checksums(app, db, tmp_
     content (the checksum files themselves) keeps its original nested
     location, and checksums still correctly match + verify despite the
     rename — proving both the confirm-time proxy match
-    (app.api.ingest._ChecksumMatchProxy) AND the per-fingerprint-file
+    (app.utils.checksums.ChecksumMatchProxy) AND the per-fingerprint-file
     directory scoping (needed because "01.flac" is not unique across discs
     once matching falls back to original names) work end to end."""
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
+    from app.utils import node_settings
 
+    node_settings.apply_mode("organize")   # renaming is scheme-driven, not default
     src = tmp_path / "src_multidisc"; src.mkdir()
     cd1 = src / "CD1"; cd1.mkdir()
     cd2 = src / "CD2"; cd2.mkdir()
@@ -1004,6 +1023,268 @@ def test_do_confirm_flattens_and_renames_multi_disc_with_checksums(app, db, tmp_
     assert tracks[1].expected_checksum == md5_2   # CD1/02.flac → Track 2
     assert tracks[2].expected_checksum == md5_3   # CD2/01.flac → Track 3 (not CD1's md5_1)
     assert tracks[2].expected_checksum == md5_3
+
+
+def test_do_confirm_keeps_names_and_nesting_in_keep_mode(app, db, tmp_path):
+    """Mirrors test_do_confirm_flattens_and_renames_multi_disc_with_checksums
+    but in the default 'keep' state (no apply_mode call -- absent
+    file_handling_mode reads as 'keep', spec section 1.1): names and nesting
+    both survive ingest untouched. Disc detection itself is independent of
+    file handling -- disc_number/disc_track_number still fill in -- and no
+    tags_written event is ever created since write_tags_on_ingest defaults
+    off under 'keep'."""
+    import hashlib
+    from app.api.ingest import _do_confirm
+    from app.models.user import User
+    from app.models.recording_event import RecordingEvent
+
+    src = tmp_path / "src_multidisc_keep"; src.mkdir()
+    cd1 = src / "CD1"; cd1.mkdir()
+    cd2 = src / "CD2"; cd2.mkdir()
+
+    b1 = b"disc one track one audio bytes" * 5
+    b2 = b"disc one track two audio bytes" * 5
+    b3 = b"disc two track one audio bytes" * 5     # same local name "01.flac" as b1
+    (cd1 / "01.flac").write_bytes(b1)
+    (cd1 / "02.flac").write_bytes(b2)
+    (cd2 / "01.flac").write_bytes(b3)
+
+    md5_1, md5_2, md5_3 = (hashlib.md5(b).hexdigest() for b in (b1, b2, b3))
+    (cd1 / "checksum.md5").write_text(f"{md5_1} *01.flac\n{md5_2} *02.flac\n")
+    (cd2 / "checksum.md5").write_text(f"{md5_3} *01.flac\n")
+
+    lib = tmp_path / "lib_multidisc_keep"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    uid = db.session.query(User).first().id
+
+    scan = scan_folder(str(src))
+    tracks_payload = [
+        {"track_number": i + 1, "title": f"Track {i + 1}",
+         "duration": 100, "filename": af["rel_path"], "set_number": af["set_number"],
+         "disc_number": af["disc_number"], "disc_track_number": af["disc_track_number"]}
+        for i, af in enumerate(scan["audio_files"])
+    ]
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Keep Mode Multi Disc Trio",
+        "start_year": 1980, "start_month": 1, "start_day": 1,
+        "source": "SBD",
+        "tracks": tracks_payload,
+        "fingerprints": [
+            {"type": fp["type"], "filename": fp["filename"], "rel_path": fp["rel_path"]}
+            for fp in scan["fingerprints"]
+        ],
+    }
+    result = _do_confirm(data, uid, None)
+    rec = _db.session.get(Recording, result["recording_id"])
+    tracks = sorted(rec.tracks, key=lambda t: t.track_number)
+
+    # Continuous numbering across discs, unaffected by file handling.
+    assert [t.track_number for t in tracks] == [1, 2, 3]
+    # Nested: file_path keeps the source's own CD1/CD2 subdir, unrenamed.
+    assert [t.file_path for t in tracks] == [
+        "CD1/01.flac", "CD1/02.flac", "CD2/01.flac",
+    ]
+    assert [t.disc_number for t in tracks] == [1, 1, 2]
+    assert [t.disc_track_number for t in tracks] == [1, 2, 1]
+    assert [t.set_number for t in tracks] == [None, None, None]
+    assert [t.original_file_path for t in tracks] == [
+        "CD1/01.flac", "CD1/02.flac", "CD2/01.flac",
+    ]
+    for t in tracks:
+        assert (lib / rec.folder_path / t.file_path).exists()
+
+    # Checksums still matched and verified per disc despite the shared
+    # "01.flac" basename across CD1/CD2 -- scoping is unaffected by mode.
+    assert [t.checksum_status for t in tracks] == ["match", "match", "match"]
+    assert tracks[0].expected_checksum == md5_1
+    assert tracks[1].expected_checksum == md5_2
+    assert tracks[2].expected_checksum == md5_3
+
+
+
+# ── Bulk Adoption, in-root sources (spec section 1.1, chunk 1, 2026-09-26) ────
+#
+# A source folder whose realpath is already inside LIBRARY_ROOT is adopted
+# exactly where it sits -- folder_path becomes its path relative to
+# LIBRARY_ROOT (however deeply nested), and every Track.file_path matches
+# the file's real on-disk name, whatever file_handling mode is active.
+
+def test_do_confirm_adopts_nested_in_root_source_in_keep_mode(app, db, tmp_path):
+    """A collector's own Artist/Year/Show tree, already inside LIBRARY_ROOT,
+    ingested under the default 'keep' mode: nothing moves, folder_path is
+    the full nested relative path, and every file is untouched at its
+    original name."""
+    from app.api.ingest import _do_confirm
+    from app.models.user import User
+
+    lib = tmp_path / "lib_adopt_keep"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    uid = db.session.query(User).first().id
+
+    src = lib / "Grateful Dead" / "1977" / "gd77-05-08"
+    src.mkdir(parents=True)
+    (src / "01.flac").write_bytes(b"a" * 50)
+    (src / "02.flac").write_bytes(b"b" * 50)
+
+    tracks_payload = [
+        {"track_number": 1, "title": "One", "filename": "01.flac"},
+        {"track_number": 2, "title": "Two", "filename": "02.flac"},
+    ]
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Grateful Dead",
+        "start_year": 1977, "start_month": 5, "start_day": 8,
+        "source": "AUD",
+        "tracks": tracks_payload,
+        "fingerprints": [],
+        "skip_analysis": True,
+    }
+    result = _do_confirm(data, uid, None)
+    rec = _db.session.get(Recording, result["recording_id"])
+    tracks = sorted(rec.tracks, key=lambda t: t.track_number)
+
+    assert rec.folder_path == "Grateful Dead/1977/gd77-05-08"
+    assert [t.file_path for t in tracks] == ["01.flac", "02.flac"]
+    assert (src / "01.flac").is_file()
+    assert (src / "02.flac").is_file()
+    # No new directory was created under the library root for this artist.
+    assert not (lib / "Grateful Dead" / "gd77-05-08").exists()
+
+
+def test_do_confirm_adopts_nested_in_root_source_in_organize_mode(app, db, tmp_path):
+    """The same nested source, but with 'organize' mode active (renaming
+    scheme-driven) -- in-root adoption still overrides renaming; the files
+    keep their original names and nesting."""
+    from app.api.ingest import _do_confirm
+    from app.models.user import User
+    from app.utils import node_settings
+
+    node_settings.apply_mode("organize")
+    lib = tmp_path / "lib_adopt_organize"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    uid = db.session.query(User).first().id
+
+    src = lib / "Grateful Dead" / "1977" / "gd77-05-08"
+    src.mkdir(parents=True)
+    (src / "01.flac").write_bytes(b"a" * 50)
+    (src / "02.flac").write_bytes(b"b" * 50)
+
+    tracks_payload = [
+        {"track_number": 1, "title": "One", "filename": "01.flac"},
+        {"track_number": 2, "title": "Two", "filename": "02.flac"},
+    ]
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Grateful Dead",
+        "start_year": 1977, "start_month": 5, "start_day": 8,
+        "source": "AUD",
+        "tracks": tracks_payload,
+        "fingerprints": [],
+        "skip_analysis": True,
+    }
+    result = _do_confirm(data, uid, None)
+    rec = _db.session.get(Recording, result["recording_id"])
+    tracks = sorted(rec.tracks, key=lambda t: t.track_number)
+
+    assert rec.folder_path == "Grateful Dead/1977/gd77-05-08"
+    # Not renamed to organize's "01 - One.flac" scheme -- in-root adoption
+    # forces the identity map regardless of mode.
+    assert [t.file_path for t in tracks] == ["01.flac", "02.flac"]
+    assert (src / "01.flac").is_file()
+    assert (src / "02.flac").is_file()
+
+
+def test_do_confirm_flat_in_root_source_stays_flat_under_placement_artist(app, db, tmp_path):
+    """A flat <root>/show source, placement 'artist' (under_artist_folder
+    True): in-root adoption means no <Artist>/ directory gets created."""
+    from app.api.ingest import _do_confirm
+    from app.models.user import User
+    from app.utils import node_settings
+
+    node_settings.set_file_handling(placement="artist")
+    lib = tmp_path / "lib_adopt_flat"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    uid = db.session.query(User).first().id
+
+    src = lib / "gd77-05-08"
+    src.mkdir()
+    (src / "01.flac").write_bytes(b"a" * 50)
+
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Grateful Dead",
+        "start_year": 1977, "start_month": 5, "start_day": 8,
+        "source": "AUD",
+        "tracks": [{"track_number": 1, "title": "One", "filename": "01.flac"}],
+        "fingerprints": [],
+        "skip_analysis": True,
+    }
+    result = _do_confirm(data, uid, None)
+    rec = _db.session.get(Recording, result["recording_id"])
+
+    assert rec.folder_path == "gd77-05-08"
+    assert not (lib / "Grateful Dead").exists()
+    assert (src / "01.flac").is_file()
+
+
+def test_do_confirm_in_root_cd1_cd2_source_organize_mode(app, db, tmp_path):
+    """An in-root CD1/CD2 source in organize mode: track_number is still
+    continuous across discs (disc detection is independent of file
+    handling), file_path keeps each disc's own subdir prefix unrenamed, and
+    checksums still match despite no rename happening."""
+    import hashlib
+    from app.api.ingest import _do_confirm
+    from app.models.user import User
+    from app.utils import node_settings
+
+    node_settings.apply_mode("organize")
+    lib = tmp_path / "lib_adopt_multidisc"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    uid = db.session.query(User).first().id
+
+    src = lib / "Multi Disc In Root Trio" / "show77"
+    cd1 = src / "CD1"; cd1.mkdir(parents=True)
+    cd2 = src / "CD2"; cd2.mkdir(parents=True)
+
+    b1 = b"disc one track one audio bytes" * 5
+    b2 = b"disc two track one audio bytes" * 5     # same local name "01.flac" as b1
+    (cd1 / "01.flac").write_bytes(b1)
+    (cd2 / "01.flac").write_bytes(b2)
+    md5_1, md5_2 = (hashlib.md5(b).hexdigest() for b in (b1, b2))
+    (cd1 / "checksum.md5").write_text(f"{md5_1} *01.flac\n")
+    (cd2 / "checksum.md5").write_text(f"{md5_2} *01.flac\n")
+
+    scan = scan_folder(str(src))
+    tracks_payload = [
+        {"track_number": i + 1, "title": f"Track {i + 1}",
+         "duration": 100, "filename": af["rel_path"], "set_number": af["set_number"],
+         "disc_number": af["disc_number"], "disc_track_number": af["disc_track_number"]}
+        for i, af in enumerate(scan["audio_files"])
+    ]
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Multi Disc In Root Trio",
+        "start_year": 1977, "start_month": 5, "start_day": 8,
+        "source": "AUD",
+        "tracks": tracks_payload,
+        "fingerprints": [
+            {"type": fp["type"], "filename": fp["filename"], "rel_path": fp["rel_path"]}
+            for fp in scan["fingerprints"]
+        ],
+    }
+    result = _do_confirm(data, uid, None)
+    rec = _db.session.get(Recording, result["recording_id"])
+    tracks = sorted(rec.tracks, key=lambda t: t.track_number)
+
+    assert rec.folder_path == "Multi Disc In Root Trio/show77"
+    assert [t.track_number for t in tracks] == [1, 2]
+    assert [t.file_path for t in tracks] == ["CD1/01.flac", "CD2/01.flac"]
+    for t in tracks:
+        assert (lib / rec.folder_path / t.file_path).is_file()
+    assert [t.checksum_status for t in tracks] == ["match", "match"]
+    assert tracks[0].expected_checksum == md5_1
+    assert tracks[1].expected_checksum == md5_2
 
 
 # ── Duplicate detection across artist/musician variants (2026-08-02) ─────────

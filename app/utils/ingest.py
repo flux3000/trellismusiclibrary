@@ -23,7 +23,8 @@ import geonamescache as _geonamescache
 
 from app.utils.format import format_partial_date
 from app.utils.health import compute_health
-from app.utils.folder_naming import unique_folder_name
+from app.utils.folder_naming import unique_folder_name, unique_file_name
+from app.utils.file_naming import rename_plan, flattens
 
 
 # ── File classification ────────────────────────────────────────────────────────
@@ -65,16 +66,32 @@ _SET_PREFIX_LABELS = {
 }
 
 
+# Prefixes that carry the DISC family (track.disc_number / disc_track_number).
+# "set" is the only prefix in _SET_DIGIT_RE / _SET_WORD_RE that carries the
+# SET family instead (track.set_number) — see section 1.4 of the spec: the
+# two families never bridge.
+_DISC_PREFIXES = {"D", "CD", "DISC", "DISK", "VOL", "VOLUME", "PART", "TAPE", "SHOW"}
+
+
 def _parse_set_dir(name):
     """
-    Parse a set/disc subdir name into (canonical_label, number).
-    'disc one' -> ('Disc 1', 1);  'CD 02' -> ('CD 2', 2).  None if no match.
+    Parse a set/disc subdir name into (canonical_label, number, kind).
+    'disc one' -> ('Disc 1', 1, 'disc');  'CD 02' -> ('CD 2', 2, 'disc');
+    'Set 1' -> ('Set 1', 1, 'set').  A subdir literally named 'Encore'
+    returns ('Encore', None, 'set').  None if no match.
 
-    Single source of truth for "is this folder a disc, and which one" —
-    resolve_shows() and scan_folder() both ask it, so the triage queue and the
-    ingest scanner can never disagree about whether a folder is one show.
+    kind is 'disc' for cd/disc/disk/d/vol/volume/part/tape/show, and 'set'
+    for set (and the literal Encore). Disc carriers fill
+    track.disc_number/disc_track_number; set carriers fill track.set_number.
+    The two families never bridge (spec section 1.4).
+
+    Single source of truth for "is this folder a disc or set, and which one"
+    — resolve_shows() and scan_folder() both ask it, so the triage queue and
+    the ingest scanner can never disagree about whether a folder is one show.
     """
     name = (name or "").strip()
+    if name == "Encore":
+        return "Encore", None, "set"
     m = _SET_DIGIT_RE.match(name)
     if m:
         prefix, number = m.group(1), int(m.group(2))
@@ -84,7 +101,8 @@ def _parse_set_dir(name):
             return None
         prefix, number = m.group(1), _SET_NUMBER_WORDS[m.group(2).lower()]
     label = _SET_PREFIX_LABELS.get(prefix.upper(), prefix.title())
-    return f"{label} {number}", number
+    kind  = "disc" if prefix.upper() in _DISC_PREFIXES else "set"
+    return f"{label} {number}", number, kind
 
 # Keywords that suggest a text file is the info/setlist file rather than
 # a README or technical notes. Higher score = preferred.
@@ -293,16 +311,25 @@ _FILENAME_SET_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Leading digits at the start of a filename ("01.flac", "02 - Title.flac") —
+# used to derive Track.disc_track_number from a disc-carrier filename when
+# it carries its own number (spec section 2.2); falls back to 1-based sorted
+# order within the disc folder when it doesn't.
+_LEADING_NUM_RE = re.compile(r"^(\d{1,3})(?=\D|$)")
+
 
 def _parse_filename_set(filename):
     """
     Parse a leading disc/track prefix off an audio filename.
-    'D01T01. Show - Song.flac' -> ('Disc 1', 1, 1).  None if no match.
+    'D01T01. Show - Song.flac' -> ('Disc 1', 1, 1, 'disc').
+    'S01T01. Show - Song.flac' -> ('Set 1', 1, 1, 'set').  None if no match.
 
-    Reuses _auto_set_label so a filename-carried disc produces exactly the
-    same label vocabulary as a subdir-carried one ('CD 1', 'Disc 2', 'Set 1')
-    — two sources of disc labels that disagree would surface as inconsistent
-    set names across otherwise identical recordings.
+    Reuses _auto_set_label so a filename-carried disc/set produces exactly
+    the same label vocabulary as a subdir-carried one ('CD 1', 'Disc 2',
+    'Set 1') — two sources of labels that disagree would surface as
+    inconsistent names across otherwise identical recordings. kind is
+    'disc' for the cd/d prefixes and 'set' for s (spec section 5); the two
+    families never bridge.
     """
     m = _FILENAME_SET_RE.match(os.path.basename(filename).strip())
     if not m:
@@ -313,22 +340,25 @@ def _parse_filename_set(filename):
     label = _auto_set_label(f"{token}{disc}")
     if not label:
         return None
-    return label, disc, track
+    kind = "set" if prefix == "s" else "disc"
+    return label, disc, track, kind
 
 
 def _apply_filename_sets(result):
     """
     Second-chance set detection for flat folders whose FILENAMES carry the
-    disc (see _FILENAME_SET_RE). Mutates `result` in place: stamps
-    `set_number` on every audio file, re-sorts them into (disc, track) order
-    and renumbers `index` continuously across discs.
+    disc or set (see _FILENAME_SET_RE). Mutates `result` in place: stamps
+    disc_number/disc_track_number (kind 'disc') or set_number (kind 'set')
+    on every audio file, re-sorts them into (number, track) order and
+    renumbers `index` continuously across discs/sets. The two families never
+    bridge (spec section 1.4) — a filename-encoded run is always one kind.
 
     That continuous index is the whole point — it is the contract subdir
     detection provides, and it is what tells the rest of the pipeline
     (read_source_tags -> the ingest wizard -> compute_audio_rename_map) to
     stop trusting per-disc TRACKNUMBER tags.
 
-    No-op unless every audio file matches and 2+ distinct discs are present.
+    No-op unless every audio file matches and 2+ distinct numbers are present.
     """
     audio = result["audio_files"]
     if not audio:
@@ -344,9 +374,13 @@ def _apply_filename_sets(result):
         key=lambda ap: (ap[1][1], ap[1][2], ap[0]["filename"].lower()),
     )
     result["audio_files"] = []
-    for i, (a, (label, _disc, _track)) in enumerate(order, start=1):
-        a["index"]      = i
-        a["set_number"] = label
+    for i, (a, (label, number, track, kind)) in enumerate(order, start=1):
+        a["index"] = i
+        if kind == "disc":
+            a["disc_number"]       = number
+            a["disc_track_number"] = track
+        else:
+            a["set_number"] = label
         result["audio_files"].append(a)
 
     result["sets_detected"] = True
@@ -379,7 +413,9 @@ def scan_folder(folder_path):
       1. Flat folder — all audio in root (no subdirs with audio)
       2. Single transparent subdir — e.g. a 'flac/' subfolder; treated as flat
       3. Multi-set structure — subdirs named cd1/cd2, disc1/disc2, set1/set2, etc.
-         Audio files get a 'set_number' field auto-populated from the subdir name.
+         Audio files get disc_number/disc_track_number (disc carriers) or
+         set_number (set carriers) auto-populated from the subdir name. The
+         two families never bridge (spec section 1.4).
 
     When multiple .txt files are present, the most likely info file is surfaced
     as text_files[0] based on filename scoring. All candidates are returned so
@@ -387,7 +423,8 @@ def scan_folder(folder_path):
 
     Returns:
       {
-        "audio_files":       [ { index, filename, path, set_number } ],
+        "audio_files":       [ { index, filename, path,
+                                  disc_number, disc_track_number, set_number } ],
         "text_files":        [ { filename, path, score } ],   # sorted best-first
         "fingerprints":      [ { type, filename, path } ],
         "unsupported_audio": [ { filename, path, ext } ],   # recognised audio format, but not one Trellis can read
@@ -432,12 +469,12 @@ def scan_folder(folder_path):
     # set=None regardless of folder structure, which is how a CD1/CD2 source
     # ended up with two tracks numbered 1-5 each: nothing here ever told the
     # rest of the pipeline the FLAC TRACKNUMBER tags reset per disc.)
-    set_dirs = []   # [(abs_dirpath, label, number)]
+    set_dirs = []   # [(abs_dirpath, label, number, kind)]
     for e in subdirs:
         parsed = _parse_set_dir(e)
         if not parsed:
             continue
-        label, num = parsed
+        label, num, kind = parsed
         dpath = os.path.join(folder_path, e)
         try:
             has_audio = any(
@@ -448,8 +485,9 @@ def scan_folder(folder_path):
         except OSError:
             has_audio = False
         if has_audio:
-            set_dirs.append((dpath, label, num))
-    set_dirs.sort(key=lambda x: x[2])
+            set_dirs.append((dpath, label, num, kind))
+    # Encore's number is None — sort it after every numbered set/disc.
+    set_dirs.sort(key=lambda x: (x[2] is None, x[2]))
     sets_detected = len(set_dirs) >= 2   # one lone "Disc 1" folder isn't multi-anything
     result["sets_detected"] = sets_detected
 
@@ -465,7 +503,7 @@ def scan_folder(folder_path):
     audio_index = 0
     all_text    = []
 
-    def _classify(fname, dirpath, set_label):
+    def _classify(fname, dirpath, disc_number=None, disc_track_number=None, set_number=None):
         nonlocal audio_index
         full = os.path.join(dirpath, fname)
         ext  = Path(fname).suffix.lower()
@@ -478,12 +516,18 @@ def scan_folder(folder_path):
                 "filename": fname,
                 # rel_path is relative to the scan root — includes any subdir prefix
                 # (e.g. "flac/01 - Dark Star.flac" or "CD 1/01.flac"). Ingest
-                # flattens audio into the library folder root regardless (see
-                # compute_audio_rename_map / move_to_library) — rel_path here is
-                # only used to locate the original file pre-flatten.
+                # flattens audio into the library folder root when the active
+                # naming scheme calls for it (see compute_audio_rename_map /
+                # move_to_library's flatten param) — rel_path here is only
+                # used to locate the original file pre-flatten.
                 "rel_path": os.path.relpath(full, folder_path),
                 "path":     full,
-                "set_number": set_label,   # None for flat; "CD 1" etc. for multi-set
+                # disc_number/disc_track_number: None outside a disc carrier.
+                # set_number: None outside a set carrier. The two families
+                # never both hold a value for the same file (spec 1.4).
+                "disc_number":       disc_number,
+                "disc_track_number": disc_track_number,
+                "set_number":        set_number,
             })
         elif ext == TEXT_EXTENSION:
             # Content-aware since 2026-08-02 — a checksum list named after the
@@ -521,23 +565,53 @@ def scan_folder(folder_path):
         for fname in sorted(top_entries):
             full = os.path.join(folder_path, fname)
             if os.path.isfile(full):
-                _classify(fname, folder_path, None)
-        for dpath, label, _num in set_dirs:
+                _classify(fname, folder_path)
+        for dpath, label, num, kind in set_dirs:
             try:
-                for fname in sorted(os.listdir(dpath)):
+                listing = sorted(os.listdir(dpath))
+                if kind == "disc":
+                    # disc_track_number: the filename's own leading number
+                    # when EVERY audio file in this disc folder carries one
+                    # (spec section 2.2) — a taper's date-first convention
+                    # ("1977-05-08 - 01 - Title.flac") would otherwise let
+                    # the leading digits parse as a bogus track number, so
+                    # a parsed number is trusted only when the whole disc
+                    # agrees; one file with no leading number falls the
+                    # entire disc back to 1-based counter order. A per-disc
+                    # checksum file sorting ahead of "01.flac" is excluded —
+                    # only audio files count toward this decision.
+                    audio_names = [f for f in listing
+                                   if Path(f).suffix.lower() in AUDIO_EXTENSIONS]
+                    all_parse = bool(audio_names) and all(
+                        _LEADING_NUM_RE.match(f) for f in audio_names)
+                disc_track_counter = 0
+                for fname in listing:
                     full = os.path.join(dpath, fname)
-                    if os.path.isfile(full):
-                        _classify(fname, dpath, label)
+                    if not os.path.isfile(full):
+                        continue
+                    is_audio = Path(fname).suffix.lower() in AUDIO_EXTENSIONS
+                    if kind == "disc" and is_audio:
+                        if all_parse:
+                            disc_track_number = int(_LEADING_NUM_RE.match(fname).group(1))
+                        else:
+                            disc_track_counter += 1
+                            disc_track_number = disc_track_counter
+                        _classify(fname, dpath, disc_number=num,
+                                  disc_track_number=disc_track_number)
+                    elif kind == "set":
+                        _classify(fname, dpath, set_number=label)
+                    else:
+                        _classify(fname, dpath)
             except OSError:
                 pass
-        set_dir_paths = {dpath for dpath, _label, _num in set_dirs}
+        set_dir_paths = {dpath for dpath, _label, _num, _kind in set_dirs}
         for dirpath, dirnames, filenames in os.walk(folder_path):
             if dirpath == folder_path:
                 dirnames[:] = [d for d in dirnames
                                if os.path.join(dirpath, d) not in set_dir_paths]
                 continue   # root files already classified above
             for fname in sorted(filenames):
-                _classify(fname, dirpath, None)
+                _classify(fname, dirpath)
     elif scan_dirs is not None:
         # Structured walk: visit each (dir, set_label) pair, non-recursive
         seen_dirs = set()
@@ -549,14 +623,14 @@ def scan_folder(folder_path):
                 for fname in sorted(os.listdir(dir_path)):
                     full = os.path.join(dir_path, fname)
                     if os.path.isfile(full):
-                        _classify(fname, dir_path, set_label)
+                        _classify(fname, dir_path)
             except OSError:
                 pass
     else:
         # Flat walk
         for dirpath, _, filenames in os.walk(folder_path):
             for fname in sorted(filenames):
-                _classify(fname, dirpath, None)
+                _classify(fname, dirpath)
 
     # ── Filename-encoded sets ─────────────────────────────────────────────────
     # Flat folder, disc in the filename (d01t01…). Runs only when the subdir
@@ -901,8 +975,10 @@ def write_flac_tags(recording, library_root):
     Builds container-level tags via build_recording_tags(), then per-track
     TITLE/TRACKNUMBER/TRACKTOTAL for each Track. Existing Vorbis comments are
     replaced entirely (clean write, Ryan 2026-09-16). A track's note becomes
-    COMMENT. Anything we do not write,
-    DISCNUMBER and DISCTOTAL included, is removed.
+    COMMENT. DISCNUMBER/DISCTOTAL are written whenever any track carries a
+    disc_number (DISCNUMBER = that track's disc_number, DISCTOTAL =
+    max(disc_number) across the recording); a single-disc recording gets
+    neither. Anything else we do not write is removed.
 
     Args:
         recording:    Recording ORM object with relationships loaded
@@ -913,6 +989,9 @@ def write_flac_tags(recording, library_root):
     """
     tracks = recording.tracks  # ordered by track_number via relationship
     container_tags, track_total = build_recording_tags(recording)
+
+    disc_numbers = [t.disc_number for t in tracks if t.disc_number is not None]
+    disc_total   = max(disc_numbers) if disc_numbers else None
 
     n_written = 0
     errors    = []
@@ -933,6 +1012,9 @@ def write_flac_tags(recording, library_root):
             audio["TITLE"]       = track.title
             audio["TRACKNUMBER"] = str(track.track_number)
             audio["TRACKTOTAL"]  = track_total
+            if track.disc_number is not None:
+                audio["DISCNUMBER"] = str(track.disc_number)
+                audio["DISCTOTAL"]  = str(disc_total)
             if track.songwriter:
                 audio["COMPOSER"] = track.songwriter
             if track.notes and track.notes.strip():
@@ -1353,6 +1435,67 @@ def detect_gear_from_name(folder_name):
             seen.add(key)
             out.append(hit)
     return out
+
+
+def detect_source_tag_from_name(name):
+    """
+    Best-guess Recording.source_tag from a folder name: the first equipment
+    token _GEAR_IN_FOLDER matches, verbatim (same detector as
+    detect_gear_from_name, first hit only — a source TAG is one token, not
+    the joined list a lineage guess would be).
+
+    Never written without the form — see suggestions.from_info_file's
+    source_tag_from_folder_name flag (spec section 5).
+    """
+    if not name:
+        return None
+    m = _GEAR_IN_FOLDER.search(name)
+    return m.group(1) if m else None
+
+
+# A date embedded in a folder name ("gd1988-05-01", "pat.metheny-2026-06-07")
+# — used only to keep detect_shnid_from_name() from mistaking the date's own
+# year for an LMA/etree shnid. Deliberately narrow (4-digit year, delimited
+# month/day): the goal is recognising a date that's THERE, not parsing every
+# date shape a folder name might use.
+_DATE_IN_NAME_RE = re.compile(r"((?:19|20)\d{2})[._-]\d{1,2}[._-]\d{1,2}")
+
+# 3 to 7 all-digit characters, delimited by . _ or - (or string start/end) on
+# both sides — never glued to letters ("flac16" must not match).
+_SHNID_SEGMENT_RE = re.compile(r"(?:^|[._-])(\d{3,7})(?:[._-]|$)")
+
+
+def detect_shnid_from_name(name):
+    """
+    Best-guess Recording.etree_shnid (the LMA/etree source id) from a folder
+    name: the LAST dot-, underscore- or hyphen-delimited all-digit segment of
+    3 to 7 digits that is not the year of a matched date and not itself in
+    1900..2099 (a plausible year even without a full date match).
+
+    'gd1988-05-01.ec7.bowen.foster.118671.flac16' -> 118671 ("flac16" is
+    glued to letters, not a segment, so it never competes).
+    'gd1969-01-25.sbd.kaplan.7923.sbeok.shnf' -> 7923.
+    'pat.metheny-2026-06-07_24.96_tr.16' -> None (every digit run left after
+    excluding the date's year and other 1900..2099 look-alikes is 2 digits).
+
+    Never written without the form — see suggestions.from_info_file's
+    shnid_from_folder_name flag (spec section 5).
+    """
+    if not name:
+        return None
+    date_year = None
+    dm = _DATE_IN_NAME_RE.search(name)
+    if dm:
+        date_year = dm.group(1)
+    candidates = []
+    for seg in _SHNID_SEGMENT_RE.finditer(name):
+        digits = seg.group(1)
+        if digits == date_year:
+            continue
+        if 1900 <= int(digits) <= 2099:
+            continue
+        candidates.append(int(digits))
+    return candidates[-1] if candidates else None
 
 
 def detect_source(text):
@@ -1927,6 +2070,7 @@ def build_scan_payload(folder_path, info_override=None):
         fingerprints.append({
             "type":     fp["type"],
             "filename": fp["filename"],
+            "rel_path": fp.get("rel_path", fp["filename"]),
             "content":  content,
         })
     if files["fingerprints"]:
@@ -1943,6 +2087,8 @@ def build_scan_payload(folder_path, info_override=None):
                 "filename": f["filename"],
                 "rel_path": f.get("rel_path", f["filename"]),
                 "set_number": f.get("set_number"),
+                "disc_number": f.get("disc_number"),
+                "disc_track_number": f.get("disc_track_number"),
             }
             for f in files["audio_files"]
         ],
@@ -1986,6 +2132,8 @@ def build_scan_payload(folder_path, info_override=None):
                 "country":      from_info.get("country"),
                 "source":       from_info.get("source"),
                 "lineage":      from_info.get("lineage"),
+                "source_tag":   from_info.get("source_tag"),
+                "etree_shnid":  from_info.get("etree_shnid"),
                 "tracks": [
                     {"number": t["number"], "title": t["title"],
                      "songwriter": t.get("songwriter")}
@@ -2023,6 +2171,21 @@ def build_scan_payload(folder_path, info_override=None):
             resp["suggestions"]["from_info_file"]["lineage"] = ", ".join(gear)
             resp["lineage_from_folder_name"] = True
 
+    # Source tag and shnid (spec section 5): folder-name only — neither the
+    # FLAC tags nor the info file parser produces these, so there is no
+    # "explicit statement wins" guard to apply, and the suggestion is never
+    # written to the Recording without the form (Add Recording / View
+    # Recording's inline edit).
+    source_tag = detect_source_tag_from_name(resp["folder_name"])
+    if source_tag:
+        resp["suggestions"]["from_info_file"]["source_tag"] = source_tag
+        resp["source_tag_from_folder_name"] = True
+
+    shnid = detect_shnid_from_name(resp["folder_name"])
+    if shnid:
+        resp["suggestions"]["from_info_file"]["etree_shnid"] = shnid
+        resp["shnid_from_folder_name"] = True
+
     resp["health"] = compute_health(resp)
     log_step(job, "done", f"health {resp['health']['score']} ({resp['health']['band']})")
     return resp
@@ -2030,25 +2193,22 @@ def build_scan_payload(folder_path, info_override=None):
 
 # ── File system operations ─────────────────────────────────────────────────────
 
-def _undo_transfer(moved, dest_folder, behavior):
+def _undo_transfer(moved, dest_folder):
     """
     Put things back after a cancelled `move_to_library`.
 
-    For a MOVE, every file already relocated goes back to where it came from —
-    otherwise cancelling would silently scatter a show across two directories.
-    For a COPY the source was never touched, so deleting the half-built
-    destination is enough.
+    Every file already relocated goes back to where it came from — otherwise
+    cancelling would silently scatter a show across two directories.
 
     Best-effort throughout: a failure to clean up must not mask the
     cancellation itself, which is what the user actually asked for.
     """
-    if behavior == "move":
-        for original, target in reversed(moved):
-            try:
-                original.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(target), str(original))
-            except OSError:
-                pass
+    for original, target in reversed(moved):
+        try:
+            original.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(target), str(original))
+        except OSError:
+            pass
     try:
         shutil.rmtree(str(dest_folder), ignore_errors=True)
     except OSError:
@@ -2066,20 +2226,55 @@ class IngestCancelled(Exception):
     """
 
 
-def move_to_library(source_folder, library_root, artist_name, folder_name,
-                    behavior="copy", progress_cb=None, audio_rename_map=None,
-                    cancel_cb=None, under_artist_folder=True):
+def resolve_ingest_file_path(orig_rel_path, audio_rename_map, flatten):
     """
-    Move or copy a source folder into the library.
+    Where a single audio file lands, relative to the destination folder's
+    root, for a given ingest. Shared between move_to_library() (which
+    actually writes the file there) and app.api.ingest._do_confirm's Track
+    creation step (which stores the same path as Track.file_path), so the
+    two can never drift apart (spec section 3.1, D1).
 
-    Audio files are always flattened into the destination folder's ROOT and
-    renamed per `audio_rename_map` (original rel_path → new flat filename),
-    regardless of how deeply nested they were in the source (CD1/, Disc 2/,
-    flac/, ...). This keeps Track.file_path free of subdir prefixes and
-    guarantees continuous, collision-free filenames even when a multi-disc
-    source reset filenames independently per disc (the CD1/CD2 bug this
-    replaced — 2026-07-14). Non-audio content (art, text files, etc.) keeps
-    its original relative structure under dest_folder.
+    flatten=True: the file lands at the destination root under its (possibly
+    renamed) basename, regardless of how deeply nested it was in the source
+    (CD1/, Disc 2/, ...) -- this is what fixes multi-disc sources whose
+    per-disc filenames collide once flattened.
+
+    flatten=False: the file keeps its original subdir prefix (spec: "names
+    and nesting preserved" when rename_files is off); only the basename is
+    substituted from audio_rename_map, so a renaming scheme without a
+    position token (spec section 4's flattens()) can still be applied
+    without disturbing the source's own folder structure.
+    """
+    orig_rel_path = orig_rel_path or ""
+    basename = os.path.basename(orig_rel_path)
+    new_name = (audio_rename_map or {}).get(orig_rel_path) \
+        or (audio_rename_map or {}).get(basename) \
+        or basename
+    if flatten:
+        return new_name
+    parent = os.path.dirname(orig_rel_path).replace(os.sep, "/")
+    return f"{parent}/{new_name}" if parent else new_name
+
+
+def move_to_library(source_folder, library_root, artist_name, folder_name,
+                    progress_cb=None, audio_rename_map=None,
+                    cancel_cb=None, under_artist_folder=True, flatten=True):
+    """
+    Move a source folder into the library. A source outside LIBRARY_ROOT is
+    always moved; there is no copy behavior.
+
+    Audio files are renamed per `audio_rename_map` (original rel_path → new
+    filename) and, when `flatten` is true, moved into the destination
+    folder's ROOT regardless of how deeply nested they were in the source
+    (CD1/, Disc 2/, flac/, ...) — this keeps Track.file_path free of subdir
+    prefixes and guarantees continuous, collision-free filenames even when a
+    multi-disc source reset filenames independently per disc (the CD1/CD2
+    bug this replaced — 2026-07-14). When `flatten` is false, an audio file
+    keeps its original subdir prefix too (spec section 1.1: "Off: names and
+    nesting preserved" under rename_files) — see resolve_ingest_file_path(),
+    the one place this decision is made, shared with the caller's Track.file_path.
+    Non-audio content (art, text files, etc.) always keeps its original
+    relative structure under dest_folder.
 
     Renaming does not affect fingerprint verification: FFP/MD5/ST5 are
     content hashes, independent of filename. Fingerprint-file matching is
@@ -2096,7 +2291,6 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
                               directory — see unique_folder_name(). The caller should
                               re-read the actual name from the returned path rather
                               than assume this argument is what landed on disk.
-        behavior           : "copy" | "move"
         under_artist_folder: bool — whether to file the show under an
                               <artist_name>/ directory (the default, and what
                               Trellis-created libraries look like) or flat at
@@ -2119,15 +2313,40 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
                               When it returns True this function undoes
                               everything it has done so far and raises
                               IngestCancelled.
+        flatten            : bool — whether audio files land at dest_folder's
+                              root (True, the default — matches every caller
+                              before this parameter existed) or keep their
+                              original subdir prefix (False). See
+                              resolve_ingest_file_path().
+
+    In-root adoption (spec section 1.1, Bulk Adoption chunk 1, 2026-09-26,
+    supersedes the 2026-09-25 S1/R2 notes above): a source folder whose
+    realpath already sits inside LIBRARY_ROOT is never moved, renamed,
+    flattened or deduped, in either file_handling mode or placement -- it is
+    adopted exactly where it is, however deeply nested (e.g.
+    "Grateful Dead/1977/gd77-05-08"), and its stored folder_path is simply
+    that path relative to LIBRARY_ROOT. Placement (under_artist_folder) only
+    governs where a source arriving from OUTSIDE the root gets filed.
 
     Cancellation is handled HERE rather than by the caller because this is the
-    only place that knows what has been written where. For a copy that means
-    deleting the half-built destination; for a MOVE it means putting the files
-    already moved back where they came from, which no caller could do.
+    only place that knows what has been written where — it means putting the
+    files already moved back where they came from, which no caller could do.
 
     Returns:
         str — new folder path relative to library_root
     """
+    src = Path(source_folder)
+    try:
+        in_root = src.resolve().is_relative_to(Path(library_root).resolve())
+    except AttributeError:  # pragma: no cover - Python < 3.9 fallback
+        try:
+            src.resolve().relative_to(Path(library_root).resolve())
+            in_root = True
+        except ValueError:
+            in_root = False
+    if in_root:
+        return str(src.resolve().relative_to(Path(library_root).resolve())).replace(os.sep, "/")
+
     # The artist directory is a CONVENTION, not a law (2026-09-17). When it is
     # off, the show lands directly at the library root and dedupe happens
     # against every folder there instead of that one artist's shelf.
@@ -2143,12 +2362,11 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     # report). Collisions get the same "(2)", "(3)", ... suffix
     # rename_recording_folder() already applies post-ingest, via the shared
     # unique_folder_name() helper — see its docstring.
-    folder_name = unique_folder_name(str(dest_dir), folder_name)
+    folder_name = unique_folder_name(str(dest_dir), folder_name, keep_abs=str(src))
     dest_folder = dest_dir / folder_name
     dest_folder.mkdir(parents=True, exist_ok=True)
 
     audio_rename_map = audio_rename_map or {}
-    src   = Path(source_folder)
     files = [p for p in src.rglob("*") if p.is_file()]
     total = sum(p.stat().st_size for p in files) or 1
     done  = 0
@@ -2156,47 +2374,40 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         progress_cb(0, total)
 
     # (source, destination) for every file actually transferred, so a cancel can
-    # be undone precisely. Only meaningful for behavior="move"; a copy is undone
-    # by deleting the destination tree.
+    # be undone precisely.
     moved = []
 
     for p in files:
         # Poll BETWEEN files, never mid-file: a partially written file is the one
         # thing that would be genuinely hard to clean up.
         if cancel_cb is not None and cancel_cb():
-            _undo_transfer(moved, dest_folder, behavior)
+            _undo_transfer(moved, dest_folder)
             raise IngestCancelled("ingest cancelled by user")
 
         rel  = str(p.relative_to(src)).replace(os.sep, "/")
         size = p.stat().st_size
         if p.suffix.lower() in AUDIO_EXTENSIONS:
-            # Flatten: destination has no subdir, regardless of source nesting.
-            new_name = audio_rename_map.get(rel) or audio_rename_map.get(p.name) or p.name
-            target   = dest_folder / new_name
+            new_rel = resolve_ingest_file_path(rel, audio_rename_map, flatten)
+            target  = dest_folder / new_rel
         else:
             # Preserve relative structure for everything else (Art/, loose .txt, ...).
             target = dest_folder / p.relative_to(src)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if behavior == "move":
-            shutil.move(str(p), str(target))
-            moved.append((p, target))
-        else:
-            shutil.copy2(str(p), str(target))
+        shutil.move(str(p), str(target))
+        moved.append((p, target))
         done += size
         if progress_cb:
             progress_cb(done, total)
 
-    if behavior == "move":
-        # Files are gone from source; clear out the now-empty (or
-        # empty-of-anything-useful) directory tree that's left behind.
-        shutil.rmtree(str(src), ignore_errors=True)
-        # The recording folder itself is gone — now check whether ITS parent
-        # (typically the "Artist Name" staging folder in a Bulk Import
-        # layout, e.g. Import/Artist Name/Show Folder/) is left empty too,
-        # and remove it if so (Ryan, 2026-07-23 — applies to every
-        # move-behavior ingest, not just Bulk Import; see
-        # _cleanup_empty_parent's own docstring for the safety guards).
-        _cleanup_empty_parent(src)
+    # Files are gone from source; clear out the now-empty (or
+    # empty-of-anything-useful) directory tree that's left behind.
+    shutil.rmtree(str(src), ignore_errors=True)
+    # The recording folder itself is gone — now check whether ITS parent
+    # (typically the "Artist Name" staging folder in a Bulk Import
+    # layout, e.g. Import/Artist Name/Show Folder/) is left empty too,
+    # and remove it if so (Ryan, 2026-07-23 — applies to every ingest; see
+    # _cleanup_empty_parent's own docstring for the safety guards).
+    _cleanup_empty_parent(src)
 
     # Return path relative to library_root for storage in DB
     return str(dest_folder.relative_to(library_root))
@@ -2305,65 +2516,106 @@ def _cleanup_empty_parent(folder):
         pass   # best-effort — never let cleanup failure affect the ingest
 
 
-def compute_audio_rename_map(tracks):
+class _NamingProxy:
+    """Plain duck-typed stand-in for an ORM object, used only to feed
+    app.utils.file_naming's engine (naming_context()/rename_plan()) from raw
+    ingest-time dicts before any Recording/Track row exists yet."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def compute_audio_rename_map(tracks, scheme="number_title", template=None,
+                              performance=None, source=None,
+                              source_tag=None, etree_shnid=None):
     """
     Build a collision-safe mapping from each track's ORIGINAL rel_path (as
     scanned from the source folder — may carry a disc/set subdir prefix like
-    "CD1/01.flac") to a new flat filename to use once the recording is moved
-    into the library.
+    "CD1/01.flac") to a new filename, via the shared naming engine
+    (app.utils.file_naming.rename_plan — spec section 4). Renaming is safe
+    for verification: FFP/MD5/ST5 are content hashes and don't change when a
+    file is renamed — see [[project_checksum_format_preference]].
 
-    Library audio is always flattened to the folder root and renamed on
-    ingest (Ryan's "always flatten + rename" decision, 2026-07-14) — this is
-    what fixes multi-disc sources whose per-disc TRACKNUMBER tags reset and
-    collide (e.g. two files both literally named "01.flac"). Renaming is
-    safe for verification: FFP/MD5/ST5 are content hashes and don't change
-    when a file is renamed — see [[project_checksum_format_preference]].
-
-    Naming pattern: "NN - Title.ext", zero-padded to the width of the
-    highest track_number (min 2 digits) so names sort correctly once a
-    recording has 10+ tracks.
+    scheme='original' (the identity template, {original}) is how a caller
+    that wants no renaming asks for it — see app.api.ingest._do_confirm,
+    which passes this when rename_files is off. There's no separate
+    "identity map" code path: the 'original' preset renders each track's own
+    current basename, which already IS the identity map.
 
     Args:
-        tracks: list of dicts with at least "track_number", "title", and
-                "filename" (the original rel_path/filename from scan/tags).
+        tracks:      list of dicts with at least "track_number", "title",
+                     and "filename" (the original rel_path/filename from
+                     scan/tags), plus optionally "disc_number",
+                     "disc_track_number", "set_number".
+        scheme:      one of file_naming.PRESETS' keys, or 'custom'.
+        template:    required when scheme == 'custom'.
+        performance: the real Performance ORM object for this ingest (its
+                     .artist/.venue relationships feed {artist}/{artist_abbr}/
+                     {venue}/{location}/etc) — None renders those tokens
+                     empty rather than raising.
+        source, source_tag, etree_shnid: the recording-level values the
+                     {source}/{source_tag}/{shnid} tokens read; a real
+                     Recording row doesn't exist yet at this point in ingest.
 
     Returns:
-        {original_rel_path_or_filename: new_flat_filename}
+        {original_rel_path_or_filename: new_filename}
     """
     if not tracks:
         return {}
 
-    max_num = max((t.get("track_number") or 0) for t in tracks) or len(tracks)
-    width   = max(2, len(str(max_num)))
+    if scheme == "original":
+        # No renaming happens under 'original' (spec section 4: {original}
+        # literally IS the current stem) -- and 'original' never flattens
+        # (flattens('original') is always False), so two tracks that share a
+        # basename can only be two DIFFERENT directories' files once nesting
+        # is preserved, never a real on-disk collision. Skip the engine
+        # entirely rather than let its batch-wide _dedupe_names() invent a
+        # "(2)" for a collision that can't happen here (caught by
+        # test_do_confirm_keeps_names_and_nesting_in_keep_mode, a CD1/01.flac
+        # + CD2/01.flac source -- the engine's dedup is about the FLATTENED
+        # destination namespace, which 'original' never enters).
+        return {t.get("filename"): os.path.basename(t.get("filename") or "")
+                for t in tracks if t.get("filename")}
 
-    rename_map = {}
-    used_names = set()
+    track_likes = []
     for t in tracks:
         orig = t.get("filename") or ""
         if not orig:
             continue
-        ext   = os.path.splitext(orig)[1].lower()
-        num   = t.get("track_number") or 0
-        title = _sanitize_filename(t.get("title") or f"Track {num}")
-        base  = f"{str(num).zfill(width)} - {title}{ext}"
-        name  = base
-        n = 2
-        while name.lower() in used_names:
-            name = f"{str(num).zfill(width)} - {title} ({n}){ext}"
-            n += 1
-        used_names.add(name.lower())
-        rename_map[orig] = name
+        track_likes.append(_NamingProxy(
+            track_number        = t.get("track_number"),
+            title                = t.get("title") or "",
+            file_path            = orig,
+            original_file_path   = orig,
+            disc_number          = t.get("disc_number"),
+            disc_track_number    = t.get("disc_track_number"),
+            set_number           = t.get("set_number"),
+        ))
+    if not track_likes:
+        return {}
+
+    perf = performance
+    if perf is None:
+        perf = _NamingProxy(start_year=None, start_month=None, start_day=None,
+                            artist=None, venue=None, city=None, state=None,
+                            country=None)
+
+    rec_like = _NamingProxy(source=source, source_tag=source_tag,
+                            etree_shnid=etree_shnid, performance=perf,
+                            tracks=track_likes)
+
+    plan = rename_plan(rec_like, scheme, template)
+    rename_map = {}
+    for track_like, _current, proposed in plan:
+        # R1 (review, 2026-09-25): rename_plan() now returns a full proposed
+        # REL PATH (B2's fix -- it carries the current directory prefix when
+        # the scheme doesn't flatten, so its own dedupe never collides two
+        # discs' same-named files). resolve_ingest_file_path() is what
+        # decides the destination directory at ingest time (prepending the
+        # ORIGINAL parent for a non-flattening scheme) -- storing the full
+        # path here as well double-prepends it ("CD1/CD1/Dark Star.flac").
+        # The map's job is only ever the FILENAME.
+        rename_map[track_like.original_file_path] = os.path.basename(proposed)
     return rename_map
-
-
-def _sanitize_filename(name):
-    """Strip characters illegal/awkward in filenames (macOS + Windows-safe,
-    since library folders sometimes get shared to non-Mac drives) and
-    collapse whitespace. Distinct from _sanitize_path(), which is only used
-    for directory names and deliberately leaves "/" untouched."""
-    name = re.sub(r'[\\/:*?"<>|\x00]', '-', name)
-    name = re.sub(r'\s+', ' ', name).strip()
-    return name or "Track"
 
 
 def _sanitize_path(name):

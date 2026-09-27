@@ -3,7 +3,7 @@ api/tracks.py — Track endpoints.
 
 Routes:
   GET  /api/tracks/<id>              — track detail
-  PUT  /api/tracks/<id>              — update track metadata; renames file when title changes
+  PUT  /api/tracks/<id>              — update track metadata; renames file when title changes and rename_files is on
   GET  /api/tracks/<id>/spectrogram  — linear-frequency spectrogram PNG
   POST /api/tracks/<id>/play         — log a play event
 """
@@ -31,26 +31,28 @@ except Exception as _mpl_err:
 from app.extensions import db
 from app.models.track import Track
 from app.models.play_log import PlayLog
-from app.utils.folder_naming import _sanitize, unique_file_name
+from app.utils.folder_naming import unique_file_name
+from app.utils import node_settings
 
 bp  = Blueprint("tracks", __name__)
 log = logging.getLogger(__name__)
 
 
-def _build_track_filename(track_number, title, old_file_path):
+def _build_track_filename(track, scheme, template=None):
     """
-    Build a canonical filename for a track given its number and title.
+    Build a canonical filename for a track via the naming engine, under the
+    ACTIVE naming scheme (spec section 3.1, D9) — see app/utils/file_naming.py.
 
-    Format: {track_number:02d} - {sanitized_title}.{ext}
-
-    Preserves the original file extension and any leading directory component
-    in old_file_path (e.g. "disc1/01 - Dark Star.flac" stays under "disc1/").
+    Mode-gating (rename_files off skips this call entirely) is the caller's
+    job, in update_track() below. `track.title` is read live, so the caller
+    sets it on the ORM object (uncommitted) before calling this.
     """
-    ext      = os.path.splitext(old_file_path)[1] or '.flac'
-    subdir   = os.path.dirname(old_file_path)           # '' for flat layouts
-    stem     = f"{track_number:02d} - {_sanitize(title)}"
-    filename = stem + ext
-    return os.path.join(subdir, filename) if subdir else filename
+    from app.utils.file_naming import rename_plan
+    plan = rename_plan(track.recording, scheme, template)
+    for plan_track, _old, new_name in plan:
+        if plan_track is track:
+            return new_name
+    return track.file_path   # unreachable: track is always its own recording's
 
 
 @bp.route("/<int:track_id>")
@@ -59,12 +61,18 @@ def get_track(track_id):
     t = db.session.get(Track, track_id)
     if not t:
         return jsonify({"error": "Not found"}), 404
+    from app.utils.serialize import derive_set_track_numbers
+    set_track_number = derive_set_track_numbers(t.recording.tracks).get(t.id)
+
     return jsonify({
         "id":           t.id,
         "recording_id": t.recording_id,
         "track_number": t.track_number,
         "title":        t.title,
         "set_number":   t.set_number,
+        "set_track_number": set_track_number,
+        "disc_number":       t.disc_number,
+        "disc_track_number": t.disc_track_number,
         "duration":     t.duration,
         "is_official":  bool(t.is_official),
         "flags":        json.loads(t.flags) if t.flags else [],
@@ -83,13 +91,18 @@ def update_track(track_id):
 
     data          = request.get_json()
     rename_warning = None
+    file_handling  = node_settings.get_file_handling()
 
     # ── File rename when title changes ────────────────────────────────────────
+    # rename_files governs this (spec section 1.1): off means a retitle only
+    # ever changes the DB row -- the file on disk is untouched, no warning.
     new_title = data.get("title", "").strip() or None
-    if new_title and new_title != t.title:
+    if new_title and new_title != t.title and file_handling["rename_files"]:
         library_root  = current_app.config.get("LIBRARY_ROOT", "")
         rec           = t.recording
-        new_file_path = _build_track_filename(t.track_number, new_title, t.file_path)
+        t.title       = new_title   # read live by _build_track_filename() -> rename_plan()
+        new_file_path = _build_track_filename(
+            t, file_handling["naming_scheme"], file_handling["naming_template"] or None)
 
         old_abs = os.path.join(library_root, rec.folder_path, t.file_path)
         new_abs = os.path.join(library_root, rec.folder_path, new_file_path)

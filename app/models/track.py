@@ -26,7 +26,20 @@ class Track(db.Model):
 
     track_number = db.Column(db.Integer,     nullable=False)
     title        = db.Column(db.String(255), nullable=False)   # defaults to "Track {n}" on creation
-    set_number   = db.Column(db.String(64),  nullable=True)    # e.g. "Set 1", "Encore"
+    set_number   = db.Column(db.String(64),  nullable=True)    # e.g. "Set 1", "Encore" -- musical set only, never a disc (2026-09-25)
+
+    # Disc, separate from set (2026-09-25). Populated only from disc carriers
+    # (cd/disc/disk/d/vol/volume/part/tape/show subdirs, cd1t01/d1t01 filenames)
+    # -- never from set carriers, and never bridged with set_number. NULL on a
+    # single-disc recording. disc_track_number is this track's 1-based position
+    # within its disc; track_number stays continuous across the whole recording.
+    disc_number       = db.Column(db.Integer, nullable=True)
+    disc_track_number = db.Column(db.Integer, nullable=True)
+
+    # The rel_path this file had in the SOURCE folder at ingest time (e.g.
+    # "CD1/01.flac"). Populated on every new ingest; used by the {original}
+    # naming token and to scope checksum matching to one disc (2026-09-25).
+    original_file_path = db.Column(db.String(512), nullable=True)
 
     # Duration in seconds, read from FLAC metadata on ingestion
     duration     = db.Column(db.Integer, nullable=True)

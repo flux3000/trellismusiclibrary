@@ -153,6 +153,7 @@ def create_app(config_class=Config):
     from app.api.quality      import bp as quality_bp
     from app.api.search       import bp as search_bp
     from app.api.system       import bp as system_bp
+    from app.api.naming       import bp as naming_bp
 
     app.register_blueprint(auth_bp,         url_prefix="/api/auth")
     app.register_blueprint(musicians_bp,      url_prefix="/api/musicians")
@@ -178,6 +179,7 @@ def create_app(config_class=Config):
     app.register_blueprint(quality_bp,      url_prefix="/api/quality")
     app.register_blueprint(search_bp,       url_prefix="/api/search")
     app.register_blueprint(system_bp,       url_prefix="/api/system")
+    app.register_blueprint(naming_bp,       url_prefix="/api/naming")
 
     # ── Auto-login as the owner ───────────────────────────────
     # Two quite different reasons land here:

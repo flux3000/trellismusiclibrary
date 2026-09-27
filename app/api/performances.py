@@ -26,6 +26,7 @@ from app.utils.pruning import (
     prune_artist_if_orphaned, prune_venue_if_orphaned, prune_event_if_orphaned,
 )
 from app.utils.folder_naming import rename_recording_folder
+from app.utils import node_settings
 
 bp = Blueprint("performances", __name__)
 
@@ -212,10 +213,14 @@ def update_performance(performance_id):
     # Non-fatal per-recording: one folder rename failing (e.g. its directory
     # already moved out from under it) must not stop the others or block the
     # metadata commit below.
+    # rename_folders governs this (spec section 1.1): off means a metadata
+    # save never touches any of this performance's recordings' folders.
     library_root   = current_app.config.get("LIBRARY_ROOT", "")
-    rename_errors  = [err for err in
-                       (rename_recording_folder(r, library_root) for r in p.recordings)
-                       if err]
+    rename_errors  = []
+    if node_settings.get_file_handling()["rename_folders"]:
+        rename_errors = [err for err in
+                           (rename_recording_folder(r, library_root) for r in p.recordings)
+                           if err]
 
     db.session.commit()
 

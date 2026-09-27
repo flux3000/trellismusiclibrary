@@ -33,14 +33,17 @@ from app.models.artist import Artist
 from app.models.play_log import PlayLog
 from app.models.venue import Venue
 from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recording_tags)
-from app.utils.folder_naming import rename_recording_folder
+from app.utils.folder_naming import rename_recording_folder, unique_file_name
+from app.utils import node_settings
+from app.utils.file_naming import rename_plan, TemplateError
 from app.utils.analysis import analyse_recording
 from app.utils.pruning import prune_after_recording_delete
-from app.utils.serialize import recording_row
+from app.utils.serialize import recording_row, derive_set_track_numbers
 from app.utils.paula import compute_paula_score
 from app.utils.checksums import (
     discover_fingerprint_files, parse_checksum_file,
     match_entries_to_tracks, verify_track_checksum, FINGERPRINT_TYPE_PRIORITY,
+    ChecksumMatchProxy,
 )
 
 bp = Blueprint("recordings", __name__)
@@ -353,12 +356,40 @@ def get_recording(recording_id):
             "analyzed_at":          ta.analyzed_at.isoformat() if ta.analyzed_at else None,
         }
 
+    # Rename Files staging (spec section 6.4): how many tracks the ACTIVE
+    # global naming scheme would actually rename, with no disk access. A
+    # bad custom template can't crash the recording page, so this fails
+    # closed to 0 rather than surfacing the error here (Settings/the dialog
+    # itself is where a bad template gets reported, via the preview
+    # endpoint's 400).
+    _file_handling = node_settings.get_file_handling()
+    files_staged = 0
+    try:
+        _plan = rename_plan(rec, _file_handling["naming_scheme"],
+                            _file_handling["naming_template"] or None)
+        files_staged = sum(1 for _t, _cur, _new in _plan
+                           if _new != _cur)
+    except TemplateError:
+        files_staged = 0
+
+    _set_track_numbers = derive_set_track_numbers(rec.tracks)
+
+    # Spec 6.4: "N discs" on the details line. Derived, not stored
+    # (recording.disc_count is never a column -- spec section 1's field
+    # table).
+    _disc_numbers = [t.disc_number for t in rec.tracks if t.disc_number is not None]
+    disc_count = max(_disc_numbers) if _disc_numbers else None
+
     return jsonify({
         "id":                   rec.id,
+        "disc_count":           disc_count,
         "performance_id":       rec.performance_id,
         "title":                rec.title,
         "source":               rec.source,
         "lineage":              rec.lineage,
+        "source_tag":           rec.source_tag,
+        "etree_shnid":          rec.etree_shnid,
+        "files_staged":         files_staged,
         "quality":              rec.quality,
         "is_favorite":          bool(rec.is_favorite),
         "is_complete":          rec.is_complete,
@@ -383,10 +414,16 @@ def get_recording(recording_id):
         ],
         "tracks": [
             {
-                "id":           t.id,
-                "track_number": t.track_number,
-                "title":        t.title,
-                "set_number":   t.set_number,
+                "id":              t.id,
+                "track_number":    t.track_number,
+                "title":           t.title,
+                "set_number":      t.set_number,
+                # Derived, not stored (spec section 5) -- recomputed here on
+                # every read so an edited set_number never leaves a stale
+                # per-set position behind.
+                "set_track_number": _set_track_numbers.get(t.id),
+                "disc_number":       t.disc_number,
+                "disc_track_number": t.disc_track_number,
                 "duration":     t.duration,
                 "is_official":  bool(t.is_official),
                 "flags":        _json.loads(t.flags) if t.flags else [],
@@ -559,10 +596,18 @@ def update_recording(recording_id):
     # the product, so accepting a write for it would quietly repopulate a column
     # nothing reads. See app/utils/serialize.py for the rationale.
     updatable = ["title", "source", "lineage",
-                 "quality", "is_complete", "notes", "info_file_content"]
+                 "quality", "is_complete", "notes", "info_file_content",
+                 "source_tag"]
     for field in updatable:
         if field in data:
             setattr(rec, field, data[field])
+
+    # etree_shnid is an Integer column; makeInlineEditable() sends a plain
+    # string (or an empty one to clear it), so it needs its own coercion
+    # rather than the blind setattr the string fields above get.
+    if "etree_shnid" in data:
+        raw = data["etree_shnid"]
+        rec.etree_shnid = int(raw) if str(raw).strip() else None
 
     # is_official — cascade True to all tracks; never force-cascade False
     if "is_official" in data:
@@ -593,8 +638,13 @@ def update_recording(recording_id):
     # unconditional means one fewer place this can drift out of sync with
     # build_folder_name() later growing a new input field. Non-fatal: a
     # rename failure never blocks the metadata commit below.
+    # rename_folders governs this (spec section 1.1): off means the folder
+    # name is never touched by a metadata save, however much the metadata
+    # feeding build_folder_name() has drifted.
     library_root  = current_app.config.get("LIBRARY_ROOT", "")
-    rename_error  = rename_recording_folder(rec, library_root)
+    rename_error  = (rename_recording_folder(rec, library_root)
+                     if node_settings.get_file_handling()["rename_folders"]
+                     else None)
 
     db.session.commit()
 
@@ -921,6 +971,105 @@ def write_tags(recording_id):
     return jsonify({"written": n_written, "errors": errors})
 
 
+# ── POST /api/recordings/<id>/rename-files ────────────────────────────────────
+
+@bp.route("/<int:recording_id>/rename-files", methods=["POST"])
+@login_required
+def rename_files_action(recording_id):
+    """
+    Rename this recording's audio files on disk to match a naming scheme
+    (spec section 6.4/3.1 D12) -- an explicit action, allowed in either
+    file-handling mode. {scheme, template} in the body; defaults to the
+    active global scheme/template when omitted (the button's own default
+    click, with no override chosen in the dialog).
+
+    Flattens into the recording folder's root when flattens(scheme) is
+    true, otherwise keeps each file's current subdir prefix and only
+    substitutes the basename -- same rule ingest uses (resolve_ingest_
+    file_path), applied here to files already sitting in the library.
+    Collisions are disambiguated with unique_file_name(), same convention
+    as every other rename in this app. Per-file failures are reported, not
+    rolled back. Re-runs checksum matching afterwards (D7) since a rename
+    changes what filenames the fingerprint-matching proxy should present.
+
+    Returns:
+      200  { renamed: n, errors: [(filename, msg), ...], plan: [...] }
+      400  bad custom template
+      404  recording not found
+    """
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+
+    data     = request.get_json(silent=True) or {}
+    scheme   = data.get("scheme")
+    template = data.get("template")
+    if not scheme:
+        file_handling = node_settings.get_file_handling()
+        scheme   = file_handling["naming_scheme"]
+        template = template or file_handling["naming_template"] or None
+
+    try:
+        plan = rename_plan(rec, scheme, template)
+    except TemplateError as e:
+        return jsonify({"error": str(e)}), 400
+
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    folder_abs   = os.path.join(str(library_root), rec.folder_path)
+
+    renamed = 0
+    errors  = []
+    for track, current_rel, proposed_rel in plan:
+        # rename_plan() already applies the flatten rule (spec section 4):
+        # proposed_rel carries the current directory prefix when this scheme
+        # doesn't flatten, so it's compared and used directly -- no second
+        # dir-prefix step here (that used to double it up under 'original').
+        new_rel = proposed_rel
+        if new_rel == current_rel:
+            continue
+
+        old_abs     = os.path.join(folder_abs, current_rel)
+        new_dir_rel = os.path.dirname(new_rel)
+        new_dir_abs = os.path.join(folder_abs, new_dir_rel) if new_dir_rel else folder_abs
+        try:
+            os.makedirs(new_dir_abs, exist_ok=True)
+            unique_name = unique_file_name(new_dir_abs, os.path.basename(new_rel),
+                                           keep_abs=old_abs)
+            final_rel = f"{new_dir_rel}/{unique_name}" if new_dir_rel else unique_name
+            final_abs = os.path.join(folder_abs, final_rel)
+            if not os.path.exists(old_abs):
+                errors.append((track.file_path, "File not found on disk"))
+                continue
+            os.rename(old_abs, final_abs)
+            track.file_path = final_rel
+            renamed += 1
+        except OSError as e:
+            errors.append((track.file_path, str(e)))
+
+    if renamed:
+        db.session.add(RecordingEvent(
+            recording_id = rec.id,
+            user_id      = current_user.id,
+            event_type   = "files_renamed",
+            note         = f"{renamed} file(s) renamed",
+        ))
+    db.session.commit()
+
+    checked, verified_at = _rematch_and_verify_checksums(rec, folder_abs)
+
+    return jsonify({
+        "renamed":     renamed,
+        "errors":      errors,
+        "checked":     checked,
+        "verified_at": verified_at.isoformat(),
+        "tracks": [
+            {"id": t.id, "file_path": t.file_path,
+             "checksum_status": t.checksum_status}
+            for t in rec.tracks
+        ],
+    })
+
+
 # ── POST /api/recordings/<id>/reveal ─────────────────────────────────────────
 
 @bp.route("/<int:recording_id>/reveal", methods=["POST"])
@@ -1013,35 +1162,28 @@ def reprocess_recording(recording_id):
 
 # ── POST /api/recordings/<id>/verify-checksums ───────────────────────────────
 
-@bp.route("/<int:recording_id>/verify-checksums", methods=["POST"])
-@login_required
-def verify_checksums(recording_id):
+def _rematch_and_verify_checksums(rec, folder_abs):
     """
-    (Re-)validate this recording's fingerprint checksums against the audio
-    files currently sitting in the library. Safe to call any time — nothing
-    here depends on the original source folder still existing.
+    (Re-)validate `rec`'s fingerprint checksums against the audio files
+    currently at `folder_abs`. Shared by verify_checksums() (below) and the
+    Rename Files action (spec section 3.1 D7: a rename "re-runs checksum
+    matching"), since both need the identical scoped-matching logic and
+    neither should drift from the other.
 
     Also opportunistically discovers fingerprint files that were copied into
     the library with this recording but never parsed into RecordingFingerprint
-    rows (covers shows ingested before this feature existed) — so this one
-    endpoint serves both "re-validate" and "go back and process the ones I
-    already have in the library."
+    rows (covers shows ingested before this feature existed).
+
+    Returns: (checked_count, verified_at_datetime). Commits.
     """
-    rec = db.session.get(Recording, recording_id)
-    if not rec:
-        return jsonify({"error": "Not found"}), 404
-
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder_abs   = os.path.join(str(library_root), rec.folder_path)
-
     # Collect into a local list rather than re-reading rec.fingerprints after
     # adding to it — the relationship collection was already cached by the
     # line above and db.session.flush() doesn't invalidate that cache, so a
     # freshly-discovered row wouldn't show up in it this same request.
     all_fingerprints = list(rec.fingerprints)
-    known_filenames  = {fp.filename for fp in all_fingerprints}
+    known_rel_paths  = {(fp.rel_path or fp.filename) for fp in all_fingerprints}
     for found in discover_fingerprint_files(folder_abs):
-        if found["filename"] in known_filenames:
+        if found.get("rel_path", found["filename"]) in known_rel_paths:
             continue
         try:
             with open(os.path.join(folder_abs, found["rel_path"]),
@@ -1054,6 +1196,7 @@ def verify_checksums(recording_id):
             fingerprint_type = found["type"],
             filename         = found["filename"],
             content          = content,
+            rel_path         = found["rel_path"],
         )
         db.session.add(new_fp)
         all_fingerprints.append(new_fp)
@@ -1068,8 +1211,47 @@ def verify_checksums(recording_id):
     for fp in fingerprints:
         if not fp.content:
             continue
-        matches = match_entries_to_tracks(parse_checksum_file(fp.content), rec.tracks)
-        for track, expected in matches.items():
+        # Scope candidates to this fingerprint file's own directory (spec
+        # section 3.1 D7) -- a nested-per-disc checksum file's bare "01.flac"
+        # is not unique across discs once matching falls back to original
+        # names, so an unscoped match could hand one disc's checksum to
+        # another disc's track. Try scoping by original_file_path's own
+        # directory first (that's what a fingerprint file generated against
+        # the ORIGINAL source layout lists), then by the track's current
+        # file_path directory (a fingerprint file backfilled against what's
+        # actually in the library today); an empty rel_path (fingerprint at
+        # the recording root, or a pre-this-feature row with none stored)
+        # considers every track, same as before scoping existed.
+        fp_dir = os.path.dirname(fp.rel_path or "").replace(os.sep, "/")
+        if fp_dir:
+            candidates = [
+                t for t in rec.tracks
+                if os.path.dirname(t.original_file_path or "").replace(os.sep, "/") == fp_dir
+            ]
+            if not candidates:
+                candidates = [
+                    t for t in rec.tracks
+                    if os.path.dirname(t.file_path or "").replace(os.sep, "/") == fp_dir
+                ]
+            if not candidates:   # scoping found nothing usable -- fall back
+                candidates = list(rec.tracks)
+        else:
+            candidates = list(rec.tracks)
+
+        # Try matching against ORIGINAL filenames first (what a fingerprint
+        # file shipped at/near ingest time lists), then fall back to the
+        # CURRENT file_path (a backfill checksum file generated fresh
+        # against what's actually in the library today, spec section 3.1
+        # D7) -- whichever pass actually finds anything wins.
+        entries = parse_checksum_file(fp.content)
+        orig_proxies = [ChecksumMatchProxy(t, t.original_file_path)
+                        for t in candidates if t.original_file_path]
+        matches = match_entries_to_tracks(entries, orig_proxies) if orig_proxies else {}
+        if not matches:
+            cur_proxies = [ChecksumMatchProxy(t, t.file_path) for t in candidates]
+            matches = match_entries_to_tracks(entries, cur_proxies)
+        for proxy, expected in matches.items():
+            track    = proxy.real
             abs_path = os.path.join(folder_abs, track.file_path)
             track.checksum_type        = fp.fingerprint_type
             track.expected_checksum    = expected
@@ -1077,6 +1259,26 @@ def verify_checksums(recording_id):
             track.checksum_verified_at = now
             checked += 1
     db.session.commit()
+    return checked, now
+
+
+@bp.route("/<int:recording_id>/verify-checksums", methods=["POST"])
+@login_required
+def verify_checksums(recording_id):
+    """
+    (Re-)validate this recording's fingerprint checksums against the audio
+    files currently sitting in the library. Safe to call any time — nothing
+    here depends on the original source folder still existing. See
+    _rematch_and_verify_checksums() above for the actual matching logic,
+    shared with the Rename Files action.
+    """
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    folder_abs   = os.path.join(str(library_root), rec.folder_path)
+    checked, now = _rematch_and_verify_checksums(rec, folder_abs)
 
     return jsonify({
         "verified_at": now.isoformat(),

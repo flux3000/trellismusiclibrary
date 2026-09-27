@@ -109,6 +109,35 @@ def test_no_guessing_when_filenames_present_but_unmatched():
     assert match_entries_to_tracks(entries, tracks) == {}
 
 
+def test_nested_basename_collision_requires_caller_side_scoping():
+    """match_entries_to_tracks matches by BASENAME with no directory
+    awareness at all -- two tracks from different discs that both happen to
+    be named "01.flac" (e.g. CD1/01.flac and CD2/01.flac before flattening)
+    collide: the later track in the list simply overwrites the earlier one
+    in its internal basename index, so an unscoped match can silently hand
+    CD1's checksum to CD2's track. The caller (app.api.ingest._do_confirm
+    step 9) avoids this by pre-scoping candidates to one fingerprint file's
+    own directory (spec section 3.1 D6/D7) before ever calling this
+    function -- this test nails down why that scoping has to happen on the
+    caller's side, not inside match_entries_to_tracks."""
+    cd1_track = _FakeTrack(1, "01.flac")   # originally CD1/01.flac
+    cd2_track = _FakeTrack(2, "01.flac")   # originally CD2/01.flac, same basename
+    entries = [{"filename": "01.flac", "checksum": "cd1-hash"}]
+
+    # Unscoped: both tracks share a basename, so the SECOND one listed wins
+    # the internal index and gets matched to the FIRST disc's checksum --
+    # exactly the wrong-disc mismatch scoping exists to prevent.
+    matched_unscoped = match_entries_to_tracks(entries, [cd1_track, cd2_track])
+    assert matched_unscoped == {cd2_track: "cd1-hash"}
+    assert cd1_track not in matched_unscoped
+
+    # Scoped to CD1's own tracks only (what the caller does when a
+    # fingerprint file's rel_path dirname is used to filter candidates
+    # before matching) -- unambiguous, and correct.
+    matched_scoped = match_entries_to_tracks(entries, [cd1_track])
+    assert matched_scoped == {cd1_track: "cd1-hash"}
+
+
 # ── verify_track_checksum ────────────────────────────────────────────────────
 
 def test_verify_md5_match_and_mismatch():

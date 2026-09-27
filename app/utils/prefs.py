@@ -1,7 +1,7 @@
 """
 app/utils/prefs.py — user preferences + BYOK secret storage.
 
-Non-secret prefs (ai_model, ingest_file_behavior) live in the user_preference
+Non-secret prefs (ai_model) live in the user_preference
 table. The Anthropic API key is a real secret, so it goes in the OS keychain via
 the `keyring` package — the DB never stores it, only whether one is present.
 """

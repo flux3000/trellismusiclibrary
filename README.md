@@ -59,8 +59,7 @@ Headless mode is configured by environment variables: `TRELLIS_PORT`,
 
 Sharing over the internet runs as a **second process**, in share-only mode
 (`SERVER_MODE=true`). It binds to `127.0.0.1`, so reaching it from another
-machine means putting a tunnel or a VPN in front of it yourself. Trellis has no
-opinion about which.
+machine means putting a tunnel or a VPN in front of it yourself.
 
 ## Tests
 

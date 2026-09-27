@@ -173,3 +173,32 @@ def put_library_layout():
         return jsonify({"error": "file_under_artist_folder must be true or false"}), 400
     node_settings.set_file_under_artist_folder(value)
     return jsonify({"file_under_artist_folder": value})
+
+
+# ── File handling (2026-09-25) ───────────────────────────────────────────────
+#
+# The mode (keep/organize) and its six switches, plus placement. Admin-gated
+# for the same reason as library-layout above: one install, one shape.
+
+@bp.route("/file-handling", methods=["GET"])
+@login_required
+def get_file_handling():
+    return jsonify(node_settings.get_file_handling())
+
+
+@bp.route("/file-handling", methods=["PUT"])
+@admin_required
+def put_file_handling():
+    from flask import request
+    data = request.get_json(silent=True) or {}
+    try:
+        if "file_handling_mode" in data:
+            result = node_settings.apply_mode(data["file_handling_mode"])
+        else:
+            changes = {k: v for k, v in data.items() if k != "file_handling_mode"}
+            if not changes:
+                return jsonify({"error": "no recognized file handling fields"}), 400
+            result = node_settings.set_file_handling(**changes)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result)

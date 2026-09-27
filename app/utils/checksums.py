@@ -142,6 +142,25 @@ def _norm_key(name):
     return unicodedata.normalize("NFC", name).lower() if name else None
 
 
+class ChecksumMatchProxy:
+    """
+    Stand-in for a Track during fingerprint matching, shared between
+    app.api.ingest._do_confirm (step 9, at ingest time) and
+    app.api.recordings.verify_checksums (post-ingest re-validate/backfill).
+
+    match_entries_to_tracks() matches by reading `.file_path` / `.track_number`
+    off whatever it's given. A fingerprint file lists ORIGINAL filenames --
+    which may differ from Track.file_path whenever the recording was renamed
+    on ingest (compute_audio_rename_map/move_to_library) or later (Rename
+    Files) -- so this proxy presents the ORIGINAL filename to the matcher
+    while `.real` routes a successful match back to the actual Track.
+    """
+    def __init__(self, real_track, original_filename):
+        self.real          = real_track
+        self.file_path     = original_filename
+        self.track_number  = real_track.track_number
+
+
 def match_entries_to_tracks(entries, tracks):
     """
     Match parsed fingerprint entries to Track rows. Prefers filename matching
@@ -152,10 +171,12 @@ def match_entries_to_tracks(entries, tracks):
     filename at all and the counts line up exactly — anything less certain
     is left unmatched rather than guessed.
 
-    Note (2026-07-14): since library audio is now always flattened + renamed
-    on ingest (compute_audio_rename_map/move_to_library in app.utils.ingest),
-    a fingerprint file lists ORIGINAL scanned filenames while Track.file_path
-    holds the new flattened name — filename matching alone won't connect
+    Note (2026-07-14): library audio is renamed on ingest whenever the
+    active naming scheme calls for it (compute_audio_rename_map/
+    move_to_library in app.utils.ingest — keep mode's 'original' scheme
+    renames nothing), so a fingerprint file can list ORIGINAL scanned
+    filenames while Track.file_path holds a new name — filename matching
+    alone won't always connect
     them. Confirm-time matching (app.api.ingest._do_confirm) handles this
     with a proxy that presents each track's original filename here instead
     of its real one; this function's matching logic is unchanged and stays

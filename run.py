@@ -217,14 +217,15 @@ def _setup_html():
     The one-time first-run screen. Inline, not a static file -- Flask isn't
     serving anything yet at this point, and this only ever runs once per
     machine. window.location.href navigates this same window over to the
-    real app once setup succeeds -- ordinary web navigation, nothing
-    PyWebView-specific needed for that part.
+    real app once setup succeeds.
 
-    Two answers since 2026-09-17: create a library, or use one you already
-    have. The second path is why the copy has to say what Trellis will and
-    will not do to someone's existing folders -- a collector handing over a
-    collection they spent years arranging is owed that before they click,
-    not after.
+    Redesigned 2026-09-26 (Ryan) as one question per screen, in the order a
+    newcomer can answer them: a username, whether they are starting fresh or
+    bringing recordings, where, then how recordings they add are handled.
+    Nothing is created until the last step. Placement and the optional
+    Downloads/Backlog/Workshop folders are no longer asked here: placement
+    defaults to under the artist folder, and both live in Settings. Every
+    string on this page was approved by Ryan; do not add any without him.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
     return f"""<!doctype html>
@@ -237,170 +238,148 @@ def _setup_html():
     font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
     padding: 40px 20px;
   }}
-  .card {{ max-width: 520px; width: 100%; }}
-  h1 {{ font-size: 21px; margin: 0 0 16px; }}
-  h2 {{ font-size: 15px; margin: 0 0 6px; }}
-  p {{ font-size: 14px; line-height: 1.6; color: #b8b5ae; margin: 0 0 12px; }}
-  .folders {{
-    font-family: ui-monospace, "JetBrains Mono", monospace; font-size: 13px;
-    color: #d8d5ce; background: #1e2126; border-radius: 6px;
-    padding: 12px 16px; margin: 0 0 8px;
-  }}
-  button {{
-    font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
-    background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
-  }}
-  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; }}
-  button:disabled {{ opacity: .5; cursor: default; }}
-  .opt {{
-    border: 1px solid #3a3d43; border-radius: 8px; padding: 20px;
-    margin-bottom: 14px;
-  }}
-  .opt p:last-of-type {{ margin-bottom: 16px; }}
-  .chosen {{ margin-top: 14px; font-size: 13px; color: #8fbf7f; word-break: break-all; }}
-  .err {{ margin-top: 14px; font-size: 13px; color: #e0806a; }}
-  label {{ display: block; font-size: 13px; color: #b8b5ae; margin: 4px 0 6px; }}
+  .card {{ max-width: 460px; width: 100%; }}
+  .step {{ display: none; }}
+  .step.on {{ display: block; }}
+  h1 {{ font-size: 21px; font-weight: 600; margin: 0 0 20px; }}
+  .lbl {{ display: block; font-size: 13px; color: #b8b5ae; margin: 0 0 6px; }}
   input.field {{
-    width: 100%; font-size: 14px; padding: 9px 12px; margin-bottom: 20px;
+    width: 100%; font-size: 14px; padding: 9px 12px;
     border-radius: 6px; border: 1px solid #3a3d43; background: #1e2126;
     color: #e8e6e1; font-family: inherit;
   }}
   input.field:focus {{ outline: none; border-color: #d98f4e; }}
-  .extras {{ display: none; margin-top: 16px; }}
-  .extras.on {{ display: block; }}
-  .extra-row {{
-    display: flex; align-items: center; gap: 10px; margin-bottom: 8px;
-    font-size: 13px; color: #b8b5ae;
+  .opt {{
+    display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
+    border: 1px solid #3a3d43; border-radius: 6px; margin-bottom: 8px;
+    cursor: pointer; font-size: 14px;
   }}
-  .extra-row span.path {{ color: #8fbf7f; word-break: break-all; }}
-  .extra-row button {{ padding: 5px 12px; font-size: 12px; }}
+  .opt.on {{ border-color: #d98f4e; background: rgba(217,143,78,.12); }}
+  .opt input {{ margin: 3px 0 0; accent-color: #d98f4e; }}
+  .opt b {{ display: block; font-weight: 600; }}
+  .opt span {{ display: block; color: #b8b5ae; font-size: 13px; line-height: 1.5; margin-top: 2px; }}
+  .path {{ margin-top: 12px; font-size: 13px; color: #d8d5ce; word-break: break-all; }}
+  .nav {{ display: flex; justify-content: space-between; margin-top: 28px; }}
+  button {{
+    font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
+    background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }}
+  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; }}
+  button:disabled {{ opacity: .5; cursor: default; }}
+  #status {{ margin-top: 16px; font-size: 13px; color: #b8b5ae; }}
+  #status.err {{ color: #e0806a; }}
 </style></head>
 <body><div class="card">
-  <h1>Welcome to Trellis</h1>
-  <label for="username">What should we call you?</label>
-  <input id="username" class="field" type="text" placeholder="e.g. jeff" autocomplete="off">
+  <section class="step on" data-step="1">
+    <h1>Welcome to Trellis</h1>
+    <label class="lbl" for="username">Choose a username</label>
+    <input id="username" class="field" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" autofocus>
+    <div class="nav"><span></span><button id="next-1" disabled>Continue</button></div>
+  </section>
 
-  <div class="opt">
-    <h2>Use a library I already have</h2>
-    <p>Pick the folder your recordings are already in. Trellis reads them
-       where they sit. Nothing is copied or moved, and your folder structure
-       stays as you arranged it.</p>
-    <p>Two things Trellis will do: it may rename a recording's folder when
-       its details change, so a corrected date is reflected on disk, and any
-       recording you add from now on is filed as
-       <strong>Artist / Artist - Date - Venue - Location</strong>. You can
-       turn that second one off in Settings.</p>
-    <button id="import">Choose My Library Folder&hellip;</button>
-    <div class="extras" id="extras">
-      <p>Optional. If you keep folders for these, point Trellis at them.
-         Skip any you do not have.</p>
-      <div class="extra-row">Downloads: <span class="path" id="p-import">not set</span>
-        <button class="ghost" data-extra="import">Choose&hellip;</button></div>
-      <div class="extra-row">Backlog: <span class="path" id="p-backlog">not set</span>
-        <button class="ghost" data-extra="backlog">Choose&hellip;</button></div>
-      <div class="extra-row">Workshop: <span class="path" id="p-workshop">not set</span>
-        <button class="ghost" data-extra="workshop">Choose&hellip;</button></div>
-      <button id="import-done">Use This Library</button>
-    </div>
-  </div>
+  <section class="step" data-step="2">
+    <h1>Where are your recordings?</h1>
+    <label class="opt"><input type="radio" name="kind" value="new"><b>Start a new library</b></label>
+    <label class="opt"><input type="radio" name="kind" value="existing"><b>Use a folder I already have</b></label>
+    <div class="nav"><button class="ghost" data-back>Back</button><button id="next-2" disabled>Continue</button></div>
+  </section>
 
-  <div class="opt">
-    <h2>Start a new library</h2>
-    <p>Choose a location. Trellis creates a
-       &ldquo;<strong>{TRELLIS_ROOT_FOLDER_NAME}</strong>&rdquo; folder there,
-       with four folders inside of it:</p>
-    <div class="folders">{", ".join(TRELLIS_SUBFOLDERS)}</div>
-    <button id="choose">Choose Location&hellip;</button>
-  </div>
+  <section class="step" data-step="3">
+    <h1 id="s3-title"></h1>
+    <button class="ghost" id="pick"></button>
+    <div class="path" id="picked"></div>
+    <div class="nav"><button class="ghost" data-back>Back</button><button id="next-3" disabled>Continue</button></div>
+  </section>
+
+  <section class="step" data-step="4">
+    <h1>How should Trellis handle recordings you add?</h1>
+    <label class="opt on"><input type="radio" name="fh-mode" value="keep" checked>
+      <div><b>Keep my files as-is</b><span>Recordings retain their existing file and folder names.</span></div></label>
+    <label class="opt"><input type="radio" name="fh-mode" value="organize">
+      <div><b>Organize my files</b><span>Folders are renamed from the artist, date and venue, and files from the track number and title.</span></div></label>
+    <div class="nav"><button class="ghost" data-back>Back</button><button id="finish">Start Trellis</button></div>
+  </section>
 
   <div id="status"></div>
 </div>
 <script>
-  const status = document.getElementById('status')
-  const usernameInput = document.getElementById('username')
-  const extras = document.getElementById('extras')
-  const picked = {{ library: null, import: null, backlog: null, workshop: null }}
+  const $ = id => document.getElementById(id)
+  const status = $('status')
+  const uname  = $('username')
+  let step = 1, kind = null, folder = null
 
-  function name() {{
-    const v = usernameInput.value.trim()
-    if (!v) {{
-      status.className = 'err'
-      status.textContent = 'Tell us what to call you first.'
-      usernameInput.focus()
-    }}
-    return v
+  function show(n) {{
+    step = n
+    document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', +s.dataset.step === n))
+    status.className = ''
+    status.textContent = ''
+    if (n === 1) uname.focus()
   }}
-
   function fail(msg) {{
     status.className = 'err'
     status.textContent = msg
   }}
-
-  async function finish(result) {{
-    if (result && result.ok) {{
-      status.className = 'chosen'
-      status.textContent = 'Ready: ' + result.root
-      window.location.href = {app_url!r}
-      return true
-    }}
-    fail((result && result.error) || 'Something went wrong. Try again.')
-    return false
+  function syncOpts(name) {{
+    document.querySelectorAll(`input[name="${{name}}"]`).forEach(x =>
+      x.closest('.opt').classList.toggle('on', x.checked))
   }}
 
-  // ── Use an existing library ────────────────────────────────────────────
-  document.getElementById('import').addEventListener('click', async () => {{
-    if (!name()) return
-    const folder = await window.pywebview.api.pick_folder()
-    if (!folder) return
-    picked.library = folder
-    extras.classList.add('on')
-    status.className = 'chosen'
-    status.textContent = 'Library: ' + folder
+  // 1. Username. Continue stays disabled until something is typed, so no
+  // "enter a name first" message is ever needed.
+  uname.addEventListener('input', () => {{ $('next-1').disabled = !uname.value.trim() }})
+  uname.addEventListener('keydown', e => {{ if (e.key === 'Enter' && uname.value.trim()) show(2) }})
+  $('next-1').addEventListener('click', () => show(2))
+  document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => show(step - 1)))
+
+  // 2. New or existing. A folder picked for one answer does not carry over
+  // to the other: a parent location and a library folder are different things.
+  document.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener('change', () => {{
+    syncOpts('kind')
+    if (kind !== r.value) folder = null
+    kind = r.value
+    $('next-2').disabled = false
+  }}))
+  $('next-2').addEventListener('click', () => {{
+    const isNew = kind === 'new'
+    $('s3-title').textContent = isNew ? 'Choose a location for your library' : 'Choose your library folder'
+    $('pick').textContent     = isNew ? 'Choose Location…' : 'Choose Folder…'
+    $('picked').textContent   = folder || ''
+    $('next-3').disabled      = !folder
+    show(3)
   }})
 
-  document.querySelectorAll('[data-extra]').forEach(btn => {{
-    btn.addEventListener('click', async () => {{
-      const which = btn.getAttribute('data-extra')
-      const folder = await window.pywebview.api.pick_folder()
-      if (!folder) return
-      picked[which] = folder
-      document.getElementById('p-' + which).textContent = folder
-    }})
+  // 3. Where. Nothing is created yet; that waits for the last step.
+  $('pick').addEventListener('click', async () => {{
+    const f = await window.pywebview.api.pick_folder()
+    if (!f) return
+    folder = f
+    $('picked').textContent = f
+    $('next-3').disabled = false
   }})
+  $('next-3').addEventListener('click', () => show(4))
 
-  document.getElementById('import-done').addEventListener('click', async e => {{
-    const username = name()
-    if (!username || !picked.library) return
-    e.target.disabled = true
+  // 4. File handling, then set everything up in one call.
+  document.querySelectorAll('input[name="fh-mode"]').forEach(r =>
+    r.addEventListener('change', () => syncOpts('fh-mode')))
+  $('finish').addEventListener('click', async e => {{
+    const btn = e.target
+    btn.disabled = true
     status.className = ''
-    status.textContent = 'Setting up\u2026'
+    status.textContent = 'Setting up your library…'
+    const mode = document.querySelector('input[name="fh-mode"]:checked').value
+    const username = uname.value.trim()
     try {{
-      const result = await window.pywebview.api.confirm_existing_library(
-        picked.library, username, picked.import, picked.backlog, picked.workshop)
-      if (!await finish(result)) e.target.disabled = false
+      const api = window.pywebview.api
+      const result = kind === 'new'
+        ? await api.confirm_trellis_root(folder, username, mode, null)
+        : await api.confirm_existing_library(folder, username, null, null, null, mode, null)
+      if (result && result.ok) {{ window.location.href = {app_url!r}; return }}
+      fail((result && result.error) || 'Something went wrong. Try again.')
     }} catch (err) {{
       fail(String(err))
-      e.target.disabled = false
     }}
-  }})
-
-  // ── Create a new library ───────────────────────────────────────────────
-  document.getElementById('choose').addEventListener('click', async e => {{
-    const username = name()
-    if (!username) return
-    e.target.disabled = true
-    status.className = ''
-    status.textContent = ''
-    try {{
-      const parent = await window.pywebview.api.pick_folder()
-      if (!parent) {{ e.target.disabled = false; return }}
-      status.textContent = 'Setting up your library\u2026'
-      const result = await window.pywebview.api.confirm_trellis_root(parent, username)
-      if (!await finish(result)) e.target.disabled = false
-    }} catch (err) {{
-      fail(String(err))
-      e.target.disabled = false
-    }}
+    btn.disabled = false
   }})
 </script></body></html>"""
 
@@ -453,7 +432,10 @@ def first_run_setup(create_default_user=True):
     # every static check passed it.
     importlib.import_module("app.models")   # registers every model with SQLAlchemy
 
-    Config.DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    # resolve() follows a db/trellis.db symlink to its target. Creating only
+    # the link's own folder left SQLite facing a missing target folder and
+    # failing with "unable to open database file" (2026-09-26).
+    Config.DB_PATH.resolve().parent.mkdir(parents=True, exist_ok=True)
     with app.app_context():
         db.create_all()
         if create_default_user and db.session.query(User).first() is None:
@@ -580,15 +562,17 @@ class FluxAPI:
         """Return the configured library root path (for display purposes only)."""
         return str(Config.LIBRARY_ROOT)
 
-    def confirm_trellis_root(self, parent_path, username=None):
+    def confirm_trellis_root(self, parent_path, username=None,
+                              file_handling_mode=None, placement=None):
         """
         First-run only. The user picked a parent folder via pick_folder() and
         typed a name for themselves; this creates
         <parent>/Trellis Music Library/{Library,Download,Backlog,Workshop},
         remembers the folder choice for next launch, patches the already-
         running app's config -- Flask started before this could possibly be
-        known -- and creates the owner account under the chosen name. Called
-        from the setup page's JS.
+        known -- creates the owner account under the chosen name, and applies
+        the Files/Placement choice from the same screen (spec section 6.1).
+        Called from the setup page's JS.
 
         The account only gets created here on a genuinely empty database --
         first_run_setup() skips its own automatic account for exactly this
@@ -610,6 +594,7 @@ class FluxAPI:
 
         try:
             self._create_owner_account(username)
+            self._apply_file_handling_choice(file_handling_mode, placement)
         except Exception as e:
             return {"ok": False, "error": f"Folder created, but account setup failed: {e}"}
 
@@ -617,7 +602,8 @@ class FluxAPI:
 
     def confirm_existing_library(self, library_path, username=None,
                                  import_dir=None, backlog_dir=None,
-                                 workshop_dir=None):
+                                 workshop_dir=None, file_handling_mode=None,
+                                 placement=None):
         """
         First-run, the OTHER answer (2026-09-17): the user already has a
         library and wants Trellis to use it where it sits.
@@ -651,10 +637,60 @@ class FluxAPI:
 
         try:
             self._create_owner_account(username)
+            self._apply_file_handling_choice(file_handling_mode, placement)
         except Exception as e:
             return {"ok": False, "error": f"Library set, but account setup failed: {e}"}
 
         return {"ok": True, "root": str(root)}
+
+    # The optional working folders of an adopted library (2026-09-26). They
+    # were first-run only; first run stopped asking (a newcomer does not know
+    # what a Backlog is), so Settings sets them instead. Only an "imported"
+    # library has them to set: a created library's working folders are its
+    # own fixed subfolders.
+    _WORKING_FOLDER_KEYS = ("import_dir", "backlog_dir", "workshop_dir")
+
+    def get_working_folders(self):
+        data = _read_trellis_root_marker() or {}
+        out = {"editable": data.get("mode") == "imported"}
+        for k in self._WORKING_FOLDER_KEYS:
+            out[k] = data.get(k)
+        return out
+
+    def set_working_folder(self, which, path):
+        """Store one working folder in the marker and apply it to the running
+        app, exactly as first run did. Returns {"ok": ...}."""
+        data = _read_trellis_root_marker()
+        if not data or data.get("mode") != "imported":
+            return {"ok": False, "error": "Not available for this library."}
+        if which not in self._WORKING_FOLDER_KEYS:
+            return {"ok": False, "error": "Unknown folder."}
+        if not path or not Path(path).is_dir():
+            return {"ok": False, "error": "That folder could not be opened."}
+        data[which] = str(path)
+        try:
+            _write_marker(data)
+            _apply_marker(data)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "path": str(path)}
+
+    def _apply_file_handling_choice(self, file_handling_mode, placement):
+        """
+        Persists the Files/Placement radios from the setup page (mockup panel
+        1) via the same node_settings functions Settings itself uses. Both
+        params fall back to the safe default (keep / artist) rather than
+        raising when the setup page sends something unrecognized, since a
+        malformed first-run choice must not be the thing that fails the whole
+        setup after the folders and account already succeeded.
+        """
+        from app.utils import node_settings
+
+        with app.app_context():
+            node_settings.apply_mode(
+                file_handling_mode if file_handling_mode in ("keep", "organize") else "keep")
+            node_settings.set_file_handling(
+                placement=placement if placement in ("artist", "root") else "artist")
 
     def _create_owner_account(self, username):
         """

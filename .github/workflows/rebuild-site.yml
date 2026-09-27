@@ -5,9 +5,11 @@
 # invisible on the site until the site rebuilds. This tells it to.
 #
 # One-time setup:
-#   1. Cloudflare dashboard, the Pages project, Settings, Builds & deployments,
-#      Deploy hooks, Add deploy hook. Point it at the production branch and
-#      copy the URL.
+#   1. Cloudflare dashboard, Workers & Pages, the Pages project, Settings,
+#      Builds, Add deploy hook. Point it at the production branch and copy the
+#      URL. (Cloudflare called this section "Builds & deployments" until
+#      sometime before 2026-09; if "Builds" is not there either, the path has
+#      moved again, so check the Pages deploy-hooks docs rather than hunting.)
 #   2. Here: Settings, Secrets and variables, Actions, New repository secret,
 #      named SITE_DEPLOY_HOOK, pasted in.
 #

@@ -153,3 +153,27 @@ def _card_waveform(rec, n=100):
     if not peaks:
         return None
     return downsample_peaks(peaks, n)
+
+
+def derive_set_track_numbers(tracks):
+    """
+    Map each track's id to its 1-based position within its own set_number
+    group, ordered by track_number, grouping by first-appearance order
+    (spec section 5: per-set track number is derived, not stored, so it is
+    recomputed on every read rather than going stale when a track's
+    set_number is edited). A track with no set_number maps to None.
+
+    Mirrors _derive_track_in_set() in app/utils/file_naming.py, which the
+    naming engine uses for the {track_in_set} token -- same rule, two
+    read paths (a track payload here, a filename token there).
+    """
+    groups = {}
+    for t in (tracks or []):
+        if t.set_number:
+            groups.setdefault(t.set_number, []).append(t)
+    result = {}
+    for label, group in groups.items():
+        ordered = sorted(group, key=lambda t: t.track_number if t.track_number is not None else 0)
+        for i, t in enumerate(ordered, start=1):
+            result[t.id] = i
+    return result

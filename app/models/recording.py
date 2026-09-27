@@ -105,6 +105,14 @@ class Recording(db.Model):
 
     notes      = db.Column(db.Text, nullable=True)
 
+    # etree-style naming facts (2026-09-25). Both are suggestions the user can
+    # edit; never written by scan/detection without going through the form.
+    # source_tag: gear/taper token (schoeps, nak300, miller...), the
+    # {source_tag} naming token. etree_shnid: the LMA/etree source id
+    # (118671), the {shnid} naming token.
+    source_tag  = db.Column(db.String(64), nullable=True)
+    etree_shnid = db.Column(db.Integer,    nullable=True)
+
     # Latest AI Assist research result (JSON blob: thinking, proposals,
     # track_titles, verify_items, provenance_notes, sources). Overwritten on
     # each re-run — no history kept. Persisted so a research pass isn't lost
@@ -147,6 +155,11 @@ class RecordingFingerprint(db.Model):
 
     # Full file content
     content          = db.Column(db.Text, nullable=True)
+
+    # This fingerprint file's location relative to the recording folder (e.g.
+    # "CD1/checksum.md5"). Scopes checksum matching to one disc on a
+    # multi-disc recording (2026-09-25). NULL until backfilled.
+    rel_path         = db.Column(db.String(512), nullable=True)
     created_at       = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationship

@@ -258,17 +258,26 @@ def _other_recordings_in_folder(recording, folder_rel):
         return 0
 
 
-def rename_recording_folder(recording, library_root):
+def rename_recording_folder(recording, library_root, rename_folders=None):
     """
     Rename a recording's on-disk folder to match its CURRENT metadata, if it
     has drifted from what's on disk (e.g. a date or venue correction after
     ingest, when the folder was only ever named once, at ingest time).
 
-    Decided 2026-07-25 (Context Library — Ingest section): the folder name is
-    Flux's own construction from metadata, never the taper's artefact, so it
-    takes no preference and no button — it just follows the metadata whenever
-    a Performance or Recording field that feeds build_folder_name() changes.
-    Built 2026-08-09.
+    Gated on the `rename_folders` switch (spec section 1.1 -- part of file
+    handling, off under Keep mode): returns None immediately when it's off,
+    same as when there's nothing to rename. The gate lives HERE, not only in
+    the two current callers (Recording PUT, Performance PUT), so a caller
+    added later can't forget it and call this unconditionally.
+
+    rename_folders: pass True/False to state the switch's value explicitly
+    (a caller with no Flask/DB context -- or the pure duck-typed unit tests
+    in test_folder_naming.py, by design). Left as None (the default), it is
+    read from node_settings -- and if THAT has no app context either, this
+    fails CLOSED (returns None, no rename) rather than proceeding as if the
+    switch were on (S10, re-review 2026-09-25): a caller must either run in
+    a real request context or say what it wants, never get a rename by
+    accident because neither was available to ask.
 
     NON-FATAL BY DESIGN: a filesystem problem must never block a metadata
     save. On any failure this leaves `recording.folder_path` exactly as it
@@ -279,12 +288,21 @@ def rename_recording_folder(recording, library_root):
     "(2)" with no source segment — never a renumber of an existing suffix,
     since this always computes fresh from the canonical name outward.
 
-    Only renames the FOLDER itself. Renaming the audio files inside it is the
-    separate, still-unbuilt "Update File Names" button (Context Library) —
-    deliberately kept apart because file renaming has to interact with
-    checksum matching (.ffp/.md5 files reference file NAMES) in a way a
-    folder rename never does.
+    Only renames the FOLDER itself. Renaming the audio files is the separate
+    Rename Files action (spec section 6.4, app.api.recordings.rename_files_
+    action), gated on `rename_files` -- kept apart because file renaming has
+    to interact with checksum matching (.ffp/.md5 files reference file
+    NAMES) in a way a folder rename never does.
     """
+    if rename_folders is None:
+        from app.utils import node_settings
+        try:
+            rename_folders = node_settings.get_file_handling()["rename_folders"]
+        except RuntimeError:
+            # No Flask/DB context and no explicit mode given -- fail CLOSED.
+            return None
+    if not rename_folders:
+        return None
     performance = recording.performance
     if not performance:
         return None

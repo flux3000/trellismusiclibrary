@@ -16,6 +16,7 @@ import json
 import queue
 import threading
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
@@ -36,9 +37,10 @@ from app.models.performance import Performance
 from app.models.recording import Recording, RecordingFingerprint
 from app.models.recording_event import RecordingEvent
 from app.models.track import Track
-from app.models.user_preference import UserPreference
 from app.utils.ingest import (move_to_library, compute_audio_rename_map,
+                              resolve_ingest_file_path, write_flac_tags,
                               IngestCancelled)
+from app.utils.file_naming import flattens
 from app.utils.folder_naming import build_folder_name
 from app.utils.ai_assist import run_ai_assist, AiAssistError
 from app.utils.prefs import get_api_key, get_pref
@@ -46,30 +48,11 @@ from app.utils import node_settings
 from app.utils.health import compute_health
 from app.utils.checksums import (
     parse_checksum_file, match_entries_to_tracks, verify_track_checksum,
-    FINGERPRINT_TYPE_PRIORITY,
+    FINGERPRINT_TYPE_PRIORITY, ChecksumMatchProxy,
 )
 from app.utils.debug_log import log_step
 
 bp = Blueprint("ingest", __name__)
-
-
-class _ChecksumMatchProxy:
-    """
-    Stand-in for a Track during fingerprint matching (step 9 of _do_confirm).
-
-    match_entries_to_tracks() matches by reading `.file_path` / `.track_number`
-    off whatever it's given. Since Track.file_path now always holds the NEW
-    flattened+renamed filename (see compute_audio_rename_map / move_to_library
-    in app.utils.ingest), matching a fingerprint file — which lists ORIGINAL
-    filenames — directly against real Track rows would silently fail for any
-    recording whose audio got renamed on ingest. This proxy presents the
-    original filename to the matcher while `.real` routes a successful match
-    back to the actual Track so the checksum lands on the right row.
-    """
-    def __init__(self, real_track, original_filename):
-        self.real          = real_track
-        self.file_path     = original_filename
-        self.track_number  = real_track.track_number
 
 
 @bp.route("/health", methods=["POST"])
@@ -440,6 +423,7 @@ PHASES = {
     # internals rather than about their ingest.
     "signals":    "Analyzing tracks",
     "saving":     "Saving to the library",
+    "tags":       "Writing tags to files",
     "queued":     "Queued for analysis",
     "analyzing":  "Analyzing audio for metrics",
     "done":       "Done",
@@ -663,6 +647,20 @@ def confirm_ingest():
         return jsonify({"error": f"Source folder not found: {source_folder!r}"}), 400
     if not artist_name:
         return jsonify({"error": "artist_name is required"}), 400
+    # R3 (review, 2026-09-25): the Add Recording shnid field is free text.
+    # etree_shnid used to be coerced to int only when building Recording()
+    # in step 7 of _do_confirm, AFTER step 6 had already moved the source
+    # into the library -- a stray non-digit character there failed the job
+    # post-move, with the files relocated and no row to show for it. Reject
+    # here, before the background job (and its file move) ever starts.
+    raw_shnid = data.get("etree_shnid")
+    if raw_shnid not in (None, ""):
+        try:
+            data["etree_shnid"] = int(str(raw_shnid).strip())
+        except (TypeError, ValueError):
+            return jsonify({"error": f"shnid must be a number: {raw_shnid!r}"}), 400
+    else:
+        data["etree_shnid"] = None
     job_id = uuid.uuid4().hex
     _INGEST_JOBS[job_id] = {
         "status": "running", "copied": 0, "total": 0,
@@ -850,6 +848,20 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         if phase_cb:
             phase_cb(key, detail)
 
+    # R3 (review, 2026-09-25): validated again here, before ANYTHING else in
+    # this function (including step 6's move), for a direct caller that
+    # skips the /confirm route's own check above (tests, or a future
+    # caller). A stray non-digit in the free-text shnid field must never
+    # surface only after the source folder is already gone.
+    _raw_shnid = data.get("etree_shnid")
+    if _raw_shnid not in (None, ""):
+        try:
+            data["etree_shnid"] = int(str(_raw_shnid).strip())
+        except (TypeError, ValueError):
+            raise ValueError(f"shnid must be a number: {_raw_shnid!r}")
+    else:
+        data["etree_shnid"] = None
+
     source_folder = (data.get("source_folder_path") or "").strip()
     artist_name   = (data.get("artist_name")        or "").strip()
 
@@ -1002,32 +1014,30 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     sync_performance_personnel(performance, member_names_sync, guest_names_sync)
 
     # ── 5. Build canonical folder name ────────────────────────────────────────
-    folder_name = build_folder_name(
-        artist_name     = artist_name,
-        start_year      = start_year,
-        start_month     = start_month,
-        start_day       = start_day,
-        venue_name      = venue_name,
-        city            = city,
-        state           = state,
-        country         = country,
-        source          = data.get("source"),
-    )
+    # rename_folders governs this (spec section 1.1): off keeps the source
+    # folder's own name (still deduped like any other by move_to_library's
+    # unique_folder_name()); on names it from the recording's own details.
+    file_handling = node_settings.get_file_handling()
+    if file_handling["rename_folders"]:
+        folder_name = build_folder_name(
+            artist_name     = artist_name,
+            start_year      = start_year,
+            start_month     = start_month,
+            start_day       = start_day,
+            venue_name      = venue_name,
+            city            = city,
+            state           = state,
+            country         = country,
+            source          = data.get("source"),
+        )
+    else:
+        folder_name = os.path.basename(source_folder.rstrip("/\\")) or "Untitled"
 
-    # ── 6. Move / copy folder into library ────────────────────────────────────
-    # Behavior precedence: explicit request payload → saved user preference →
-    # DEFAULT "move" as of 2026-08-07 (Ryan). It was "copy" on the reasoning
-    # that never destroying the source is the safe choice — but the failure it
-    # actually produced was DUPLICATES: copy leaves the show sitting in the
-    # import folder, a later re-scan offers it again, and nothing stops a
-    # second ingest. Move makes re-ingesting the same files structurally
-    # impossible, and the source is still recoverable from the library itself.
-    behavior = (data.get("behavior") or "").strip().lower()
-    if behavior not in ("move", "copy"):
-        pref = db.session.query(UserPreference).filter_by(
-            user_id=user_id, key="ingest_file_behavior"
-        ).first()
-        behavior = pref.value if pref else "move"
+    # ── 6. Move folder into library ─────────────────────────────────────────
+    # Copy behavior removed 2026-09-25 (spec section 3.3): a source outside
+    # LIBRARY_ROOT is always moved. Move makes re-ingesting the same files
+    # structurally impossible, and the source is still recoverable from the
+    # library itself.
     library_root = str(current_app.config["LIBRARY_ROOT"])
     # Library LAYOUT is an install-level setting, read here rather than inside
     # move_to_library(), which has no app context (2026-09-17). Off means the
@@ -1035,20 +1045,51 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # Trellis at a library they built themselves.
     under_artist = node_settings.file_under_artist_folder()
 
-    tracks_in = data.get("tracks", [])
-    # Audio is always flattened + renamed into the library folder's root on
-    # the way in (Ryan's 2026-07-14 decision — this is what fixes multi-disc
-    # sources like CD1/CD2 whose per-disc TRACKNUMBER tags reset and collide).
-    # Map is keyed by each track's ORIGINAL rel_path/filename as scanned;
-    # move_to_library() applies it while copying/moving. Fingerprint files
-    # (step 9) list the ORIGINAL names too, so matching happens against the
-    # original name and only the final DB/verification path uses the new one.
-    audio_rename_map = compute_audio_rename_map(tracks_in)
+    # Bulk Adoption spec section 1.1, chunk 1 (2026-09-26): a source whose
+    # realpath is already inside LIBRARY_ROOT is adopted exactly as it sits
+    # on disk -- never moved, renamed, flattened or deduped, in either
+    # file_handling mode or placement. move_to_library() enforces the
+    # move/rename/dedupe half of that; this flag makes the Track.file_path
+    # computation below match it, forcing the identity map + no-flatten
+    # regardless of rename_files/naming_scheme.
+    try:
+        in_root_source = Path(source_folder).resolve().is_relative_to(
+            Path(library_root).resolve())
+    except OSError:
+        in_root_source = False
 
-    # The long one. Named for what it will actually do to the source folder, so
-    # "Moving files into the library" and "Copying files into the library" are
-    # not the same sentence — one of them removes the original.
-    _phase("moving" if behavior == "move" else "copying", folder_name)
+    tracks_in = data.get("tracks", [])
+    # rename_files governs both the filename scheme and whether a multi-
+    # disc/-set source flattens into the recording folder's root (spec
+    # section 1.1: off means "names and nesting preserved"). Off: every file
+    # keeps its own basename via the engine's identity ('original') preset.
+    # On: the active naming_scheme decides both the names AND (through
+    # flattens()) whether the source's disc/set nesting collapses — the same
+    # rule the Rename Files action and the Settings preview use. Map is keyed
+    # by each track's ORIGINAL rel_path/filename as scanned; move_to_library()
+    # applies it while moving. Fingerprint files (step 9) list the ORIGINAL
+    # names too, so matching happens against the original name and only the
+    # final DB/verification path uses the new one.
+    naming_scheme   = file_handling["naming_scheme"]
+    naming_template = file_handling["naming_template"] or None
+    if in_root_source:
+        audio_rename_map = compute_audio_rename_map(tracks_in, "original")
+        flatten = False
+    elif file_handling["rename_files"]:
+        audio_rename_map = compute_audio_rename_map(
+            tracks_in, naming_scheme, naming_template,
+            performance = performance,
+            source      = data.get("source"),
+            source_tag  = data.get("source_tag"),
+            etree_shnid = data.get("etree_shnid"),
+        )
+        flatten = flattens(naming_scheme, naming_template)
+    else:
+        audio_rename_map = compute_audio_rename_map(tracks_in, "original")
+        flatten = False
+
+    # The long one.
+    _phase("moving", folder_name)
 
     try:
         new_folder_path = move_to_library(
@@ -1056,11 +1097,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             library_root     = library_root,
             artist_name      = artist_name,
             folder_name      = folder_name,
-            behavior         = behavior,
             progress_cb      = progress_cb,
             audio_rename_map = audio_rename_map,
             cancel_cb        = cancel_cb,
             under_artist_folder = under_artist,
+            flatten          = flatten,
         )
     except IngestCancelled:
         # A cancel is not a failure. move_to_library has already undone its own
@@ -1089,9 +1130,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # path (app.api.ingest._run_ai_job), just written synchronously here
     # instead of after a background job.
     ai_result = data.get("ai_result")
+    # etree_shnid was already validated/coerced to int-or-None at the top of
+    # this function (R3, review 2026-09-25) -- reads straight through here.
     rec = Recording(
         performance_id       = performance.id,
         source               = data.get("source"),
+        source_tag           = (data.get("source_tag") or None),
+        etree_shnid          = data.get("etree_shnid"),
         lineage              = data.get("lineage"),
         quality              = data.get("quality"),
         is_complete          = data.get("is_complete", True),
@@ -1116,18 +1161,21 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         track_official = rec_is_official or bool(t.get("is_official", False))
         flags_raw      = t.get("flags") or []
         orig_filename  = t.get("filename", "")
-        new_filename   = audio_rename_map.get(orig_filename, os.path.basename(orig_filename))
+        new_filename   = resolve_ingest_file_path(orig_filename, audio_rename_map, flatten)
         track = Track(
-            recording_id = rec.id,
-            track_number = t.get("track_number"),
-            title        = t.get("title") or f"Track {t.get('track_number', '?')}",
-            set_number   = t.get("set_number") or None,
-            duration     = t.get("duration"),
-            file_path    = new_filename,
-            is_official  = track_official,
-            flags        = json.dumps(flags_raw) if flags_raw else None,
-            songwriter   = t.get("songwriter") or None,
-            notes        = t.get("notes") or None,
+            recording_id       = rec.id,
+            track_number       = t.get("track_number"),
+            title              = t.get("title") or f"Track {t.get('track_number', '?')}",
+            set_number         = t.get("set_number") or None,
+            disc_number        = t.get("disc_number"),
+            disc_track_number  = t.get("disc_track_number"),
+            original_file_path = orig_filename or None,
+            duration           = t.get("duration"),
+            file_path          = new_filename,
+            is_official        = track_official,
+            flags              = json.dumps(flags_raw) if flags_raw else None,
+            songwriter         = t.get("songwriter") or None,
+            notes              = t.get("notes") or None,
         )
         db.session.add(track)
         created_tracks.append(track)
@@ -1172,18 +1220,20 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             with open(fp_abs_path, "r", encoding="utf-8", errors="replace") as fh:
                 content = fh.read()
         except OSError:
-            pass
+            content = fp.get("content")
         db.session.add(RecordingFingerprint(
             recording_id     = rec.id,
             fingerprint_type = fp_type,
             filename         = fp.get("filename"),
             content          = content,
+            rel_path         = rel_path,
         ))
         if content and created_tracks:
             # A fingerprint file nested inside a disc/set subdir (e.g.
             # "CD1/checksum.md5") almost always lists filenames scoped to
-            # that disc only ("01.flac", "02.flac", ...). Since audio is now
-            # always flattened, those bare names can collide across discs —
+            # that disc only ("01.flac", "02.flac", ...). When the active
+            # naming scheme flattens audio, those bare names can collide
+            # across discs —
             # every disc's own "01.flac" — so matching against ALL tracks
             # could hand a CD1 checksum to a CD2 track that happens to share
             # a basename. Restrict candidates to tracks whose ORIGINAL path
@@ -1200,7 +1250,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             else:
                 candidates = created_tracks
             proxies = [
-                _ChecksumMatchProxy(track, original_filenames.get(track, track.file_path))
+                ChecksumMatchProxy(track, original_filenames.get(track, track.file_path))
                 for track in candidates
             ]
             matches = match_entries_to_tracks(parse_checksum_file(content), proxies)
@@ -1218,7 +1268,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         recording_id = rec.id,
         user_id      = user_id,
         event_type   = "ingested",
-        note         = f"behavior={behavior} original={os.path.basename(source_folder)}",
+        note         = f"behavior=move original={os.path.basename(source_folder)}",
     ))
 
     # ── 11. Carry the Listening Quality analysis across ───────────────────────
@@ -1260,12 +1310,37 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
 
     checksum_mismatches = sum(1 for t in created_tracks if t.checksum_status == "mismatch")
 
+    # ── 12. Ingest tag write ────────────────────────────────────────────────
+    # write_tags_on_ingest gates this; off by default under 'keep'. Runs
+    # after the move, after the rename map, and after the main commit above,
+    # so it writes to the tracks' FINAL path with FINAL track_number/title —
+    # the same write_flac_tags() the View Recording action uses (spec
+    # section 3.2). Per-file errors are reported on the job result, not
+    # rolled back; the ingest itself already succeeded. Step 9's stored
+    # checksum status is not recomputed.
+    tag_errors = []
+    if file_handling["write_tags_on_ingest"]:
+        _phase("tags", f"{len(created_tracks)} tracks")
+        n_written, tag_errors = write_flac_tags(rec, library_root)
+        if n_written > 0:
+            note = f"{n_written} file(s) written"
+            if tag_errors:
+                note += f"; {len(tag_errors)} error(s): " + "; ".join(f[0] for f in tag_errors)
+            db.session.add(RecordingEvent(
+                recording_id = rec.id,
+                user_id      = user_id,
+                event_type   = "tags_written",
+                note         = note,
+            ))
+            db.session.commit()
+
     return {
         "recording_id":        rec.id,
         "artist_id":        artist.id,
         "folder_name":         folder_name,
         "event_id":            event.id if event else None,
         "checksum_mismatches": checksum_mismatches,
+        "tag_errors":          tag_errors,
     }
 
 

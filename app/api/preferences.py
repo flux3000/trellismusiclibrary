@@ -19,12 +19,6 @@ _ALLOWED_MODELS = {"claude-sonnet-5", "claude-haiku-4-5"}
 def _snapshot(uid):
     return {
         "ai_model":             get_pref(uid, "ai_model", "claude-sonnet-5"),
-        # DEFAULT CHANGED TO "move" 2026-08-07: Ryan started seeing duplicates
-        # in the library. Copy leaves the source in the import folder, so a
-        # re-scan of that folder offers the same show again and a second
-        # ingest is one click away. Move makes re-ingesting the same files
-        # structurally impossible, which is the stronger guarantee.
-        "ingest_file_behavior": get_pref(uid, "ingest_file_behavior", "move"),
         "has_api_key":          has_api_key(uid),
         "keychain_available":   _HAS_KEYRING,
         # Server-owned, not a user preference — surfaced here so the frontend
@@ -59,8 +53,6 @@ def update_preferences():
 
     if data.get("ai_model") in _ALLOWED_MODELS:
         set_pref(uid, "ai_model", data["ai_model"])
-    if data.get("ingest_file_behavior") in ("move", "copy"):
-        set_pref(uid, "ingest_file_behavior", data["ingest_file_behavior"])
 
     # API key: a non-empty string sets it; clear_api_key removes it.
     if data.get("clear_api_key"):

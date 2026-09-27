@@ -10,6 +10,7 @@ Safe to re-run — will not overwrite an existing admin user.
 
 import sys
 import os
+from pathlib import Path
 
 # Allow imports from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,7 +25,7 @@ def init_db():
     app = create_app()
     with app.app_context():
         # Ensure db directory exists
-        os.makedirs(app.config["DB_PATH"].parent, exist_ok=True)
+        os.makedirs(Path(app.config["DB_PATH"]).resolve().parent, exist_ok=True)  # follow a symlinked db
 
         # Create all tables
         db.create_all()

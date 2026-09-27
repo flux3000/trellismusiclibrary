@@ -24,6 +24,12 @@ class Artist(db.Model):
     sort_name  = db.Column(db.String(255), nullable=True)
     bio        = db.Column(db.Text,        nullable=True)
 
+    # etree band abbreviation (2026-09-25), the {artist_abbr} naming token
+    # (e.g. "gd" for Grateful Dead). Null falls back to the lowercase initials
+    # of the artist name's words at render time -- not stored, so a later
+    # abbreviation still overrides it.
+    abbreviation = db.Column(db.String(16), nullable=True)
+
     # Personnel resolution mode new Performances of this act start in.
     # 'inherit' (default) = act roster/stints apply; 'explicit' = every show
     # starts with an empty lineup that must be entered per-show (rotating

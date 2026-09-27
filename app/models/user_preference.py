@@ -4,9 +4,7 @@ models/user_preference.py — Per-user key/value preference store.
 Extensible without schema changes. New preferences are just new rows.
 
 Known keys (MVP):
-  ingest_file_behavior : "move" | "copy"
-      Controls whether source folder is moved or copied into library on ingest.
-      Default: "copy" (safer — preserves original until user is satisfied)
+  ai_model : the Anthropic model used for AI Assist.
 """
 
 from app.extensions import db

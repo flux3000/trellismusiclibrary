@@ -110,6 +110,43 @@ def test_write_erases_foreign_tags_and_writes_multi_performer(app, seeded_ids, t
     assert audio["TRACKTOTAL"] == ["2"]
 
 
+def test_disc_number_and_total_written_for_a_multi_disc_recording(app, seeded_ids, tmp_path):
+    """DISCNUMBER/DISCTOTAL are written per track once any track carries a
+    disc_number, and DISCTOTAL is max(disc_number) across the recording."""
+    rec = _rec(seeded_ids)
+    rec.tracks[0].disc_number = 1
+    rec.tracks[1].disc_number = 2
+    _db.session.commit()
+
+    for t in rec.tracks:
+        f = tmp_path / rec.folder_path / t.file_path
+        _silent_flac(f)
+
+    n, errors = write_flac_tags(rec, str(tmp_path))
+    assert (n, errors) == (2, [])
+
+    audio0 = FLAC(str(tmp_path / rec.folder_path / rec.tracks[0].file_path))
+    audio1 = FLAC(str(tmp_path / rec.folder_path / rec.tracks[1].file_path))
+    assert audio0["DISCNUMBER"] == ["1"]
+    assert audio0["DISCTOTAL"] == ["2"]
+    assert audio1["DISCNUMBER"] == ["2"]
+    assert audio1["DISCTOTAL"] == ["2"]
+
+
+def test_disc_tags_absent_for_a_single_disc_recording(app, seeded_ids, tmp_path):
+    rec = _rec(seeded_ids)
+    assert all(t.disc_number is None for t in rec.tracks)
+
+    for t in rec.tracks:
+        f = tmp_path / rec.folder_path / t.file_path
+        _silent_flac(f)
+
+    assert write_flac_tags(rec, str(tmp_path)) == (2, [])
+    for t in rec.tracks:
+        keys = {k.upper() for k in FLAC(str(tmp_path / rec.folder_path / t.file_path)).keys()}
+        assert not {"DISCNUMBER", "DISCTOTAL"} & keys
+
+
 def test_track_note_becomes_comment(app, seeded_ids, tmp_path):
     rec = _rec(seeded_ids)
     rec.tracks[0].notes = "  Garcia on pedal steel.  "

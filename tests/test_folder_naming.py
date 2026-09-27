@@ -103,7 +103,7 @@ def test_rename_dedupes_against_a_different_recordings_folder(tmp_path):
         "Various Artists/Various Artists - 1964 - Ryman Auditorium - Unknown Location",
         performance)
 
-    err = rename_recording_folder(rec, str(lib))
+    err = rename_recording_folder(rec, str(lib), rename_folders=True)
 
     assert err is None
     assert rec.folder_path == "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN (2)"
@@ -128,8 +128,54 @@ def test_rename_no_op_when_name_already_matches_metadata(tmp_path):
         "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN",
         performance)
 
-    err = rename_recording_folder(rec, str(lib))
+    err = rename_recording_folder(rec, str(lib), rename_folders=True)
 
     assert err is None
     assert rec.folder_path == "Various Artists/Various Artists - 1964 - Ryman Auditorium - Nashville, TN"
     assert correct.exists()
+
+
+# ── S10 (re-review, 2026-09-25): the rename_folders gate must fail CLOSED
+# with no app/DB context and no explicit mode, never fail open. ─────────────
+
+def test_no_app_context_and_no_explicit_mode_fails_closed(tmp_path):
+    """No app context (this file's whole point -- pure duck-typed stand-ins)
+    and no `rename_folders` argument: must NOT rename, even though the name
+    has drifted and would otherwise qualify."""
+    lib = tmp_path
+    artist_dir = lib / "Various Artists"
+    artist_dir.mkdir()
+    stale = artist_dir / "Old Name"
+    stale.mkdir()
+
+    artist = SimpleNamespace(name="Various Artists")
+    venue = _venue()
+    performance = _performance(artist, venue)
+    rec = _recording("Various Artists/Old Name", performance)
+
+    err = rename_recording_folder(rec, str(lib))   # rename_folders not passed
+
+    assert err is None
+    assert rec.folder_path == "Various Artists/Old Name"   # untouched
+    assert stale.exists()
+
+
+def test_explicit_rename_folders_false_is_a_no_op(tmp_path):
+    """An explicit False (the caller HAS an answer, and it's off) must also
+    not rename -- same as the switch reading off in a real request."""
+    lib = tmp_path
+    artist_dir = lib / "Various Artists"
+    artist_dir.mkdir()
+    stale = artist_dir / "Old Name"
+    stale.mkdir()
+
+    artist = SimpleNamespace(name="Various Artists")
+    venue = _venue()
+    performance = _performance(artist, venue)
+    rec = _recording("Various Artists/Old Name", performance)
+
+    err = rename_recording_folder(rec, str(lib), rename_folders=False)
+
+    assert err is None
+    assert rec.folder_path == "Various Artists/Old Name"
+    assert stale.exists()

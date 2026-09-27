@@ -25,6 +25,7 @@ from app.models.venue import Venue
 from app.models.performance import Performance
 from app.models.recording import Recording
 from app.models.track import Track
+from app.utils import node_settings
 
 
 BASE = "Various Artists - 1964 - Ryman Auditorium - Nashville, TN"
@@ -59,6 +60,8 @@ def ryman(app, tmp_path):
     the two names identical, which is the collision under test.
     """
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    node_settings.apply_mode("organize")   # folder renaming is organize's default,
+                                            # not unconditional -- see chunk 7
 
     artist = Artist(name="Various Artists")
     _db.session.add(artist)
@@ -171,6 +174,8 @@ def two_tracks(app, tmp_path):
     """One recording, one folder, two tracks whose filenames differ only by
     title — the shape a retitle can collapse."""
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    node_settings.apply_mode("organize")   # file renaming is organize's default,
+                                            # not unconditional -- see chunk 7
 
     artist = Artist(name="Various Artists")
     _db.session.add(artist)
@@ -281,3 +286,56 @@ def test_unshared_folder_still_renames_normally(client, ryman):
     assert resp.status_code == 200
     assert "folder_rename_error" not in resp.get_json(), resp.get_json()
     assert (artist_dir / f"{BASE} (SBD)").is_dir()
+
+# ── 'keep' mode: metadata saves and retitles never touch disk (chunk 7) ──────
+
+def test_metadata_save_in_keep_mode_never_renames_the_folder(client, ryman):
+    """rename_folders off (the 'keep' default): a Recording PUT and a
+    Performance PUT both leave every folder exactly as it was, even when the
+    edited metadata would otherwise produce a different canonical name."""
+    _login_as(client)
+    node_settings.apply_mode("keep")
+    root = ryman["root"]
+    artist_dir = root / "Various Artists"
+
+    # Recording PUT: clearing Source would normally collide the AUD folder's
+    # name with the plain one (see test_clearing_source_to_collide_does_not_
+    # merge_folders) -- under keep, no rename is attempted at all, so there
+    # is nothing to disambiguate either.
+    resp = client.put(f"/api/recordings/{ryman['aud_id']}", json={"source": None})
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert "folder_rename_error" not in resp.get_json()
+    assert (artist_dir / BASE).is_dir()
+    assert (artist_dir / f"{BASE} (AUD)").is_dir()   # unchanged, no "(2)" ever created
+    rec = _db.session.get(Recording, ryman["aud_id"])
+    assert rec.folder_path == f"Various Artists/{BASE} (AUD)"
+
+    # Performance PUT: a date edit would normally rename every recording of
+    # this performance -- under keep, neither folder moves.
+    resp = client.put(f"/api/performances/{ryman['perf_id']}",
+                      json={"start_year": 1965})
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    assert (artist_dir / BASE).is_dir()
+    assert (artist_dir / f"{BASE} (AUD)").is_dir()
+    new_base = "Various Artists - 1965 - Ryman Auditorium - Nashville, TN"
+    assert not (artist_dir / new_base).exists()
+
+
+def test_retitle_in_keep_mode_leaves_the_file_alone(client, two_tracks):
+    """rename_files off: a track retitle changes only the DB row -- the file
+    on disk keeps its original name, and no rename_warning is raised (the
+    file was never touched, so there is nothing to warn about)."""
+    _login_as(client)
+    node_settings.apply_mode("keep")
+    folder = two_tracks["root"] / two_tracks["rel"]
+
+    resp = client.put(f"/api/tracks/{two_tracks['ids']['Something Else']}",
+                      json={"title": "Wabash Blues"})
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    body = resp.get_json()
+    assert body.get("warning") is None
+    assert body["file_path"] == "01 - Something Else.flac"   # unchanged
+
+    assert (folder / "01 - Something Else.flac").read_bytes() == b"second"
+    assert not (folder / "01 - Wabash Blues.flac").exists()
+    assert len(_audio_in(folder)) == 2
