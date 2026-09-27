@@ -171,6 +171,30 @@ def _apply_imported_library(library_root, import_dir=None,
     app.config["IMPORT_ROOTS"] = roots
 
 
+def _maybe_start_adoption_from_marker():
+    """
+    Bulk Adoption (spec 1.9/4, chunk 7): if the marker says
+    adopt_existing (set by confirm_existing_library() when someone answers
+    "Use a folder I already have"), start a run over the configured
+    LIBRARY_ROOT so the app opens straight onto #/adoption instead of an
+    empty library.
+
+    Called both right after confirm_existing_library() creates the account
+    (the ordinary first-run path) and from first_run_setup() on every boot
+    (the marker can already exist by the time first_run_setup() runs, e.g.
+    a restart mid-setup) -- adoption_run.start_run() is idempotent (returns
+    the already-active run rather than starting a second one), and
+    _read_trellis_root_marker() returns None on a machine that never chose
+    a folder, so this is always safe to call.
+    """
+    data = _read_trellis_root_marker()
+    if not data or not data.get("adopt_existing"):
+        return
+    from app.utils import adoption_run
+    with app.app_context():
+        adoption_run.start_run(app.config["LIBRARY_ROOT"])
+
+
 def _apply_marker(data):
     """Patch config from either marker shape. See _read_trellis_root_marker."""
     if data.get("mode") == "imported":
@@ -203,12 +227,11 @@ def resolve_trellis_root_and_patch_config():
         _apply_marker(marker)
         return True
 
-    # Nothing chosen yet. If the old hardcoded default happens to be
-    # reachable right now (Ryan's NAS-mounted dev machine), keep working
-    # exactly as it always has -- this machine never needs the picker.
-    if _looks_reachable(Config.LIBRARY_ROOT):
-        return True
-
+    # Nothing chosen yet: first-run setup runs. A reachable hardcoded
+    # default used to count as "configured" (a bypass for the NAS-mounted
+    # dev machine); removed 2026-09-27 on Ryan's call. The machine that
+    # actually uses /Volumes/music/Trellis has a marker, and a dev checkout
+    # must behave like a newcomer's machine so onboarding can be tested.
     return False
 
 
@@ -452,6 +475,7 @@ def first_run_setup(create_default_user=True):
                 is_active     = True,
             ))
             db.session.commit()
+    _maybe_start_adoption_from_marker()
     print(f"First run: created a new library at {Config.DB_PATH}")
 
 
@@ -630,6 +654,10 @@ class FluxAPI:
                 "import_dir":   str(import_dir)   if import_dir   else None,
                 "backlog_dir":  str(backlog_dir)  if backlog_dir  else None,
                 "workshop_dir": str(workshop_dir) if workshop_dir else None,
+                # Bulk Adoption (spec 1.9/4, chunk 7): "Use a folder I
+                # already have" means there is existing material to walk and
+                # turn into Recordings, not an empty library to just open on.
+                "adopt_existing": True,
             })
             _apply_imported_library(root, import_dir, backlog_dir, workshop_dir)
         except Exception as e:
@@ -638,6 +666,7 @@ class FluxAPI:
         try:
             self._create_owner_account(username)
             self._apply_file_handling_choice(file_handling_mode, placement)
+            _maybe_start_adoption_from_marker()
         except Exception as e:
             return {"ok": False, "error": f"Library set, but account setup failed: {e}"}
 

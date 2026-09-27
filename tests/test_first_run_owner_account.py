@@ -147,3 +147,69 @@ def test_an_unrecognized_choice_falls_back_to_the_safe_default(api, app):
     fh = node_settings.get_file_handling()
     assert fh["file_handling_mode"] == "keep"
     assert fh["placement"] == "artist"
+
+
+# ── Bulk Adoption on first run (spec 1.9/4, chunk 7a) ─────────────────────────
+
+def test_marker_with_adopt_existing_starts_one_running_run(api, app, tmp_path, monkeypatch):
+    """confirm_existing_library()'s "Use a folder I already have" answer
+    writes adopt_existing into the marker; first_run_setup()'s own boot-time
+    check (exercised here directly, the same call it makes) must turn that
+    into exactly one running AdoptionRun."""
+    import run
+    from app.models.adoption import AdoptionRun
+
+    root = tmp_path / "existing-library"
+    root.mkdir()
+    app.config["LIBRARY_ROOT"] = str(root)
+    monkeypatch.setattr(run, "_read_trellis_root_marker",
+                        lambda: {"mode": "imported", "library_root": str(root),
+                                 "adopt_existing": True})
+
+    run._maybe_start_adoption_from_marker()
+
+    runs = _db.session.query(AdoptionRun).all()
+    assert len(runs) == 1
+    assert runs[0].status == "running"
+    assert runs[0].root == str(root)
+
+
+def test_marker_without_adopt_existing_starts_no_run(api, app, tmp_path, monkeypatch):
+    import run
+    from app.models.adoption import AdoptionRun
+
+    root = tmp_path / "created-library"
+    root.mkdir()
+    monkeypatch.setattr(run, "_read_trellis_root_marker",
+                        lambda: {"mode": "created", "trellis_root": str(root)})
+
+    run._maybe_start_adoption_from_marker()
+
+    assert _db.session.query(AdoptionRun).count() == 0
+
+
+def test_no_marker_at_all_starts_no_run(api, app, monkeypatch):
+    import run
+    from app.models.adoption import AdoptionRun
+
+    monkeypatch.setattr(run, "_read_trellis_root_marker", lambda: None)
+
+    run._maybe_start_adoption_from_marker()
+
+    assert _db.session.query(AdoptionRun).count() == 0
+
+
+def test_a_reachable_default_root_no_longer_skips_first_run(api, app, tmp_path, monkeypatch):
+    """
+    2026-09-27: with no marker and no LIBRARY_ROOT env var, first-run setup
+    runs even when the hardcoded default library root is reachable. The old
+    bypass hid onboarding on the one machine onboarding is tested on.
+    """
+    import run
+    monkeypatch.delenv("LIBRARY_ROOT", raising=False)
+    monkeypatch.setattr(run, "_read_trellis_root_marker", lambda: None)
+    reachable = tmp_path / "Library"
+    reachable.mkdir()
+    monkeypatch.setattr(run.Config, "LIBRARY_ROOT", str(reachable))
+    assert run._looks_reachable(str(reachable)) is True
+    assert run.resolve_trellis_root_and_patch_config() is False
