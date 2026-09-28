@@ -163,7 +163,7 @@ def _apply_imported_library(library_root, import_dir=None,
     app.config["TRIAGE_DIRS"] = triage
 
     # No Download folder means "Add Recordings" simply opens at the library
-    # itself, which is where an adopting collector's material already is.
+    # itself, which is where an ingesting collector's material already is.
     app.config["IMPORT_DIR"] = str(import_dir) if import_dir else library_root
 
     roots = [library_root, "/Volumes"]
@@ -171,28 +171,28 @@ def _apply_imported_library(library_root, import_dir=None,
     app.config["IMPORT_ROOTS"] = roots
 
 
-def _maybe_start_adoption_from_marker():
+def _maybe_start_bulk_ingest_from_marker():
     """
-    Bulk Adoption (spec 1.9/4, chunk 7): if the marker says
-    adopt_existing (set by confirm_existing_library() when someone answers
+    Bulk Ingest (spec 1.9/4, chunk 7): if the marker says
+    ingest_existing (set by confirm_existing_library() when someone answers
     "Use a folder I already have"), start a run over the configured
-    LIBRARY_ROOT so the app opens straight onto #/adoption instead of an
+    LIBRARY_ROOT so the app opens straight onto #/bulk-ingest instead of an
     empty library.
 
     Called both right after confirm_existing_library() creates the account
     (the ordinary first-run path) and from first_run_setup() on every boot
     (the marker can already exist by the time first_run_setup() runs, e.g.
-    a restart mid-setup) -- adoption_run.start_run() is idempotent (returns
+    a restart mid-setup) -- bulk_ingest_run.start_run() is idempotent (returns
     the already-active run rather than starting a second one), and
     _read_trellis_root_marker() returns None on a machine that never chose
     a folder, so this is always safe to call.
     """
     data = _read_trellis_root_marker()
-    if not data or not data.get("adopt_existing"):
+    if not data or not data.get("ingest_existing"):
         return
-    from app.utils import adoption_run
+    from app.utils import bulk_ingest_run
     with app.app_context():
-        adoption_run.start_run(app.config["LIBRARY_ROOT"])
+        bulk_ingest_run.start_run(app.config["LIBRARY_ROOT"])
 
 
 def _apply_marker(data):
@@ -242,30 +242,32 @@ def _setup_html():
     machine. window.location.href navigates this same window over to the
     real app once setup succeeds.
 
-    Redesigned 2026-09-26 (Ryan) as one question per screen, in the order a
-    newcomer can answer them: a username, whether they are starting fresh or
-    bringing recordings, where, then how recordings they add are handled.
-    Nothing is created until the last step. Placement and the optional
-    Downloads/Backlog/Workshop folders are no longer asked here: placement
-    defaults to under the artist folder, and both live in Settings. Every
-    string on this page was approved by Ryan; do not add any without him.
+    Redesigned 2026-09-27 (Ryan) from the four-screen wizard down to one
+    screen: username and library location are both visible and answered in
+    any order, Start Trellis is the only action. File handling is no longer
+    asked here at all -- confirm_trellis_root()/confirm_existing_library()
+    get null for file_handling_mode/placement, and
+    _apply_file_handling_choice()'s own fallback seeds the safe default
+    (keep/artist); Settings is where that gets changed later. Every string
+    on this page was approved by Ryan; do not add any without him.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
+    default_parent = str(Path.home() / "Music")
+    home_str = str(Path.home())
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>
   :root {{ color-scheme: dark; }}
   * {{ box-sizing: border-box; }}
   body {{
-    margin: 0; min-height: 100vh; display: flex; align-items: center;
-    justify-content: center; background: #14161a; color: #e8e6e1;
+    margin: 0; min-height: 100vh; display: flex; justify-content: center;
+    background: #14161a; color: #e8e6e1;
     font-family: -apple-system, "Helvetica Neue", Arial, sans-serif;
-    padding: 40px 20px;
+    padding: 64px 20px 40px;
   }}
-  .card {{ max-width: 460px; width: 100%; }}
-  .step {{ display: none; }}
-  .step.on {{ display: block; }}
-  h1 {{ font-size: 21px; font-weight: 600; margin: 0 0 20px; }}
-  .lbl {{ display: block; font-size: 13px; color: #b8b5ae; margin: 0 0 6px; }}
+  .card {{ max-width: 640px; width: 100%; }}
+  h1 {{ font-size: 28px; font-weight: 600; margin: 0 0 28px; text-align: center; }}
+  .field-block {{ margin-bottom: 24px; }}
+  .lbl {{ display: block; font-size: 15px; color: #b8b5ae; margin: 0 0 8px; }}
   input.field {{
     width: 100%; font-size: 14px; padding: 9px 12px;
     border-radius: 6px; border: 1px solid #3a3d43; background: #1e2126;
@@ -273,130 +275,139 @@ def _setup_html():
   }}
   input.field:focus {{ outline: none; border-color: #d98f4e; }}
   .opt {{
-    display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px;
-    border: 1px solid #3a3d43; border-radius: 6px; margin-bottom: 8px;
-    cursor: pointer; font-size: 14px;
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 12px 14px; border: 1px solid #3a3d43; border-radius: 6px;
+    margin-bottom: 8px; cursor: pointer; font-size: 14px;
   }}
   .opt.on {{ border-color: #d98f4e; background: rgba(217,143,78,.12); }}
-  .opt input {{ margin: 3px 0 0; accent-color: #d98f4e; }}
-  .opt b {{ display: block; font-weight: 600; }}
-  .opt span {{ display: block; color: #b8b5ae; font-size: 13px; line-height: 1.5; margin-top: 2px; }}
-  .path {{ margin-top: 12px; font-size: 13px; color: #d8d5ce; word-break: break-all; }}
-  .nav {{ display: flex; justify-content: space-between; margin-top: 28px; }}
+  .opt input[type=radio] {{ margin: 0; accent-color: #d98f4e; flex-shrink: 0; }}
+  .opt-label {{ flex: 1 1 auto; min-width: 160px; }}
+  .opt button {{ flex-shrink: 0; }}
+  .path {{
+    margin: 6px 0 8px 26px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; color: #b8b5ae; word-break: break-all;
+  }}
   button {{
     font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
     background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
     font-family: inherit;
   }}
-  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; }}
+  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; padding: 7px 14px; font-size: 13px; }}
   button:disabled {{ opacity: .5; cursor: default; }}
+  #start-row {{ margin-top: 28px; }}
   #status {{ margin-top: 16px; font-size: 13px; color: #b8b5ae; }}
   #status.err {{ color: #e0806a; }}
 </style></head>
 <body><div class="card">
-  <section class="step on" data-step="1">
-    <h1>Welcome to Trellis</h1>
-    <label class="lbl" for="username">Choose a username</label>
+  <h1>Welcome to Trellis Music Library</h1>
+
+  <div class="field-block">
+    <label class="lbl" for="username">Enter a username</label>
     <input id="username" class="field" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" autofocus>
-    <div class="nav"><span></span><button id="next-1" disabled>Continue</button></div>
-  </section>
+  </div>
 
-  <section class="step" data-step="2">
-    <h1>Where are your recordings?</h1>
-    <label class="opt"><input type="radio" name="kind" value="new"><b>Start a new library</b></label>
-    <label class="opt"><input type="radio" name="kind" value="existing"><b>Use a folder I already have</b></label>
-    <div class="nav"><button class="ghost" data-back>Back</button><button id="next-2" disabled>Continue</button></div>
-  </section>
+  <div class="field-block">
+    <label class="lbl">Choose your library location</label>
 
-  <section class="step" data-step="3">
-    <h1 id="s3-title"></h1>
-    <button class="ghost" id="pick"></button>
-    <div class="path" id="picked"></div>
-    <div class="nav"><button class="ghost" data-back>Back</button><button id="next-3" disabled>Continue</button></div>
-  </section>
+    <label class="opt on" id="opt-existing">
+      <input type="radio" name="kind" value="existing" checked>
+      <span class="opt-label">Use a folder I already have</span>
+      <button class="ghost" id="pick-existing" type="button">Choose Folder…</button>
+    </label>
+    <div class="path" id="existing-path"></div>
 
-  <section class="step" data-step="4">
-    <h1>How should Trellis handle recordings you add?</h1>
-    <label class="opt on"><input type="radio" name="fh-mode" value="keep" checked>
-      <div><b>Keep my files as-is</b><span>Recordings retain their existing file and folder names.</span></div></label>
-    <label class="opt"><input type="radio" name="fh-mode" value="organize">
-      <div><b>Organize my files</b><span>Folders are renamed from the artist, date and venue, and files from the track number and title.</span></div></label>
-    <div class="nav"><button class="ghost" data-back>Back</button><button id="finish">Start Trellis</button></div>
-  </section>
+    <label class="opt" id="opt-new">
+      <input type="radio" name="kind" value="new">
+      <span class="opt-label" id="new-label"></span>
+      <button class="ghost" id="pick-new" type="button">Choose Location…</button>
+    </label>
+  </div>
 
+  <div id="start-row"><button id="start" disabled>Start Trellis and Build Library</button></div>
   <div id="status"></div>
 </div>
 <script>
   const $ = id => document.getElementById(id)
   const status = $('status')
   const uname  = $('username')
-  let step = 1, kind = null, folder = null
+  const FOLDER_NAME = {TRELLIS_ROOT_FOLDER_NAME!r}
+  const HOME = {home_str!r}
+  let kind = 'existing'
+  let existingFolder = null
+  let newParent = {default_parent!r}
 
-  function show(n) {{
-    step = n
-    document.querySelectorAll('.step').forEach(s => s.classList.toggle('on', +s.dataset.step === n))
-    status.className = ''
-    status.textContent = ''
-    if (n === 1) uname.focus()
-  }}
-  function fail(msg) {{
-    status.className = 'err'
-    status.textContent = msg
-  }}
-  function syncOpts(name) {{
-    document.querySelectorAll(`input[name="${{name}}"]`).forEach(x =>
-      x.closest('.opt').classList.toggle('on', x.checked))
+  function clearStatus() {{ status.className = ''; status.textContent = '' }}
+  function fail(msg) {{ status.className = 'err'; status.textContent = msg }}
+
+  // The marker path sent to the API is always the absolute newParent -- this
+  // only shortens what the person reads.
+  function displayParent(p) {{
+    if (p === HOME) return '~'
+    if (p.startsWith(HOME + '/')) return '~' + p.slice(HOME.length)
+    return p
   }}
 
-  // 1. Username. Continue stays disabled until something is typed, so no
-  // "enter a name first" message is ever needed.
-  uname.addEventListener('input', () => {{ $('next-1').disabled = !uname.value.trim() }})
-  uname.addEventListener('keydown', e => {{ if (e.key === 'Enter' && uname.value.trim()) show(2) }})
-  $('next-1').addEventListener('click', () => show(2))
-  document.querySelectorAll('[data-back]').forEach(b => b.addEventListener('click', () => show(step - 1)))
+  function renderNewLabel() {{
+    $('new-label').textContent = `Create a new library in ${{displayParent(newParent)}}/${{FOLDER_NAME}}`
+  }}
+  renderNewLabel()
 
-  // 2. New or existing. A folder picked for one answer does not carry over
-  // to the other: a parent location and a library folder are different things.
+  function syncOpts() {{
+    $('opt-existing').classList.toggle('on', kind === 'existing')
+    $('opt-new').classList.toggle('on', kind === 'new')
+    $('start').textContent = kind === 'existing' ? 'Start Trellis and Build Library' : 'Start Trellis'
+  }}
+  syncOpts()
+
+  function refreshStart() {{
+    const folderResolved = kind === 'existing' ? !!existingFolder : !!newParent
+    $('start').disabled = !uname.value.trim() || !folderResolved
+  }}
+
   document.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener('change', () => {{
-    syncOpts('kind')
-    if (kind !== r.value) folder = null
     kind = r.value
-    $('next-2').disabled = false
+    syncOpts()
+    refreshStart()
   }}))
-  $('next-2').addEventListener('click', () => {{
-    const isNew = kind === 'new'
-    $('s3-title').textContent = isNew ? 'Choose a location for your library' : 'Choose your library folder'
-    $('pick').textContent     = isNew ? 'Choose Location…' : 'Choose Folder…'
-    $('picked').textContent   = folder || ''
-    $('next-3').disabled      = !folder
-    show(3)
-  }})
 
-  // 3. Where. Nothing is created yet; that waits for the last step.
-  $('pick').addEventListener('click', async () => {{
+  uname.addEventListener('input', refreshStart)
+
+  // Picking a folder for one answer also selects its radio -- the picker is
+  // the strongest signal of intent there is.
+  $('pick-existing').addEventListener('click', async e => {{
+    e.preventDefault()
     const f = await window.pywebview.api.pick_folder()
     if (!f) return
-    folder = f
-    $('picked').textContent = f
-    $('next-3').disabled = false
+    existingFolder = f
+    $('existing-path').textContent = f
+    document.querySelector('input[name="kind"][value="existing"]').checked = true
+    kind = 'existing'
+    syncOpts()
+    refreshStart()
   }})
-  $('next-3').addEventListener('click', () => show(4))
 
-  // 4. File handling, then set everything up in one call.
-  document.querySelectorAll('input[name="fh-mode"]').forEach(r =>
-    r.addEventListener('change', () => syncOpts('fh-mode')))
-  $('finish').addEventListener('click', async e => {{
+  $('pick-new').addEventListener('click', async e => {{
+    e.preventDefault()
+    const f = await window.pywebview.api.pick_folder()
+    if (!f) return
+    newParent = f
+    renderNewLabel()
+    document.querySelector('input[name="kind"][value="new"]').checked = true
+    kind = 'new'
+    syncOpts()
+    refreshStart()
+  }})
+
+  $('start').addEventListener('click', async e => {{
     const btn = e.target
     btn.disabled = true
-    status.className = ''
-    status.textContent = 'Setting up your library…'
-    const mode = document.querySelector('input[name="fh-mode"]:checked').value
+    clearStatus()
     const username = uname.value.trim()
     try {{
       const api = window.pywebview.api
-      const result = kind === 'new'
-        ? await api.confirm_trellis_root(folder, username, mode, null)
-        : await api.confirm_existing_library(folder, username, null, null, null, mode, null)
+      const result = kind === 'existing'
+        ? await api.confirm_existing_library(existingFolder, username, null, null, null, null, null)
+        : await api.confirm_trellis_root(newParent, username, null, null)
       if (result && result.ok) {{ window.location.href = {app_url!r}; return }}
       fail((result && result.error) || 'Something went wrong. Try again.')
     }} catch (err) {{
@@ -475,7 +486,7 @@ def first_run_setup(create_default_user=True):
                 is_active     = True,
             ))
             db.session.commit()
-    _maybe_start_adoption_from_marker()
+    _maybe_start_bulk_ingest_from_marker()
     print(f"First run: created a new library at {Config.DB_PATH}")
 
 
@@ -654,10 +665,10 @@ class FluxAPI:
                 "import_dir":   str(import_dir)   if import_dir   else None,
                 "backlog_dir":  str(backlog_dir)  if backlog_dir  else None,
                 "workshop_dir": str(workshop_dir) if workshop_dir else None,
-                # Bulk Adoption (spec 1.9/4, chunk 7): "Use a folder I
+                # Bulk Ingest (spec 1.9/4, chunk 7): "Use a folder I
                 # already have" means there is existing material to walk and
                 # turn into Recordings, not an empty library to just open on.
-                "adopt_existing": True,
+                "ingest_existing": True,
             })
             _apply_imported_library(root, import_dir, backlog_dir, workshop_dir)
         except Exception as e:
@@ -666,13 +677,13 @@ class FluxAPI:
         try:
             self._create_owner_account(username)
             self._apply_file_handling_choice(file_handling_mode, placement)
-            _maybe_start_adoption_from_marker()
+            _maybe_start_bulk_ingest_from_marker()
         except Exception as e:
             return {"ok": False, "error": f"Library set, but account setup failed: {e}"}
 
         return {"ok": True, "root": str(root)}
 
-    # The optional working folders of an adopted library (2026-09-26). They
+    # The optional working folders of an ingested library (2026-09-26). They
     # were first-run only; first run stopped asking (a newcomer does not know
     # what a Backlog is), so Settings sets them instead. Only an "imported"
     # library has them to set: a created library's working folders are its

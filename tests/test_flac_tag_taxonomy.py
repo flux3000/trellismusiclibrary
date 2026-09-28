@@ -11,10 +11,16 @@ Read side (read_flac_tags): the new keys and every retired key both land in
 the same container fields, because every file tagged before this change still
 carries the old ones.
 """
+import base64
+import shutil
+import subprocess
+from pathlib import Path
+
 import numpy as np
 import pytest
 import soundfile as sf
 from mutagen.flac import FLAC
+from mutagen.mp3 import MP3
 
 from app.extensions import db as _db
 from app.models.genre import Genre
@@ -22,7 +28,8 @@ from app.models.musician import Musician
 from app.models.performance_personnel import PerformancePersonnel
 from app.models.recording import Recording
 from app.utils.ingest import (build_recording_tags, write_flac_tags,
-                              read_flac_tags, _loose_tag_date)
+                              read_flac_tags, read_recording_tags,
+                              open_tags, scan_folder, _loose_tag_date)
 
 RETIRED = {"CONCERTDATE", "CONCERTVENUE", "CONCERTLOCATION", "RECORDINGSOURCE"}
 
@@ -206,3 +213,248 @@ def test_date_in_venue_fills_empty_fields(app, tmp_path):
 ])
 def test_loose_tag_date(raw, expected):
     assert _loose_tag_date(raw) == expected
+
+
+# ── DISCNUMBER tag carrier (scan_folder) ─────────────────────────────────────
+
+def _flac_with_tags(path, **tags):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(path), np.zeros(4410, dtype="int16"), 44100, format="FLAC")
+    audio = FLAC(str(path))
+    for k, v in tags.items():
+        audio[k] = v
+    audio.save()
+
+
+def test_flat_folder_disc_tags_fill_disc_fields_from_index_order(tmp_path):
+    root = tmp_path / "flat_tagged"; root.mkdir()
+    _flac_with_tags(root / "01.flac", DISCNUMBER="1", TRACKNUMBER="1", DISCTOTAL="2")
+    _flac_with_tags(root / "02.flac", DISCNUMBER="1", TRACKNUMBER="2", DISCTOTAL="2")
+    _flac_with_tags(root / "03.flac", DISCNUMBER="2", TRACKNUMBER="1", DISCTOTAL="2")
+    _flac_with_tags(root / "04.flac", DISCNUMBER="2", TRACKNUMBER="2", DISCTOTAL="2")
+
+    result = scan_folder(str(root))
+
+    assert [f["index"] for f in result["audio_files"]] == [1, 2, 3, 4]
+    assert [f["disc_number"] for f in result["audio_files"]] == [1, 1, 2, 2]
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 1, 2]
+
+
+def test_disc_tags_win_over_subdirs_that_disagree(tmp_path):
+    root = tmp_path / "cd_vs_tag"; root.mkdir()
+    cd1 = root / "CD1"; cd1.mkdir()
+    cd2 = root / "CD2"; cd2.mkdir()
+    # Subdir says CD1/CD2 -> disc 1/2, but every file's own tag says the
+    # opposite. The tag wins.
+    _flac_with_tags(cd1 / "01.flac", DISCNUMBER="2", TRACKNUMBER="1")
+    _flac_with_tags(cd1 / "02.flac", DISCNUMBER="2", TRACKNUMBER="2")
+    _flac_with_tags(cd2 / "01.flac", DISCNUMBER="1", TRACKNUMBER="1")
+    _flac_with_tags(cd2 / "02.flac", DISCNUMBER="1", TRACKNUMBER="2")
+
+    result = scan_folder(str(root))
+
+    by_path = {f["path"]: f for f in result["audio_files"]}
+    assert by_path[str(cd1 / "01.flac")]["disc_number"] == 2
+    assert by_path[str(cd1 / "02.flac")]["disc_number"] == 2
+    assert by_path[str(cd2 / "01.flac")]["disc_number"] == 1
+    assert by_path[str(cd2 / "02.flac")]["disc_number"] == 1
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 1, 2]
+
+
+def test_partially_tagged_subdirs_keep_carrier_result(tmp_path):
+    root = tmp_path / "cd_partial"; root.mkdir()
+    cd1 = root / "CD1"; cd1.mkdir()
+    cd2 = root / "CD2"; cd2.mkdir()
+    _flac_with_tags(cd1 / "01.flac", DISCNUMBER="1")   # tagged
+    (cd1 / "02.flac").parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(cd1 / "02.flac"), np.zeros(4410, dtype="int16"), 44100, format="FLAC")
+    # no DISCNUMBER tag on cd1/02.flac -> not every file agrees -> ignored
+    _flac_with_tags(cd2 / "01.flac", DISCNUMBER="2")
+
+    result = scan_folder(str(root))
+
+    # Matches today's subdir-only result exactly: disc_number from CD1/CD2,
+    # disc_track_number 1-based within each disc.
+    by_path = {f["path"]: f for f in result["audio_files"]}
+    assert by_path[str(cd1 / "01.flac")]["disc_number"] == 1
+    assert by_path[str(cd1 / "02.flac")]["disc_number"] == 1
+    assert by_path[str(cd2 / "01.flac")]["disc_number"] == 2
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2, 1]
+
+
+def test_lone_disc_one_with_no_disctotal_stays_null(tmp_path):
+    root = tmp_path / "lone_disc"; root.mkdir()
+    _flac_with_tags(root / "01.flac", DISCNUMBER="1", TRACKNUMBER="1")
+    _flac_with_tags(root / "02.flac", DISCNUMBER="1", TRACKNUMBER="2")
+
+    result = scan_folder(str(root))
+
+    assert all(f["disc_number"] is None for f in result["audio_files"])
+    assert all(f["disc_track_number"] is None for f in result["audio_files"])
+
+
+def test_disc_one_of_disctotal_greater_than_one_is_kept(tmp_path):
+    root = tmp_path / "disc_one_of_many"; root.mkdir()
+    _flac_with_tags(root / "01.flac", DISCNUMBER="1", TRACKNUMBER="1", DISCTOTAL="3")
+    _flac_with_tags(root / "02.flac", DISCNUMBER="1", TRACKNUMBER="2", DISCTOTAL="3")
+
+    result = scan_folder(str(root))
+
+    assert [f["disc_number"] for f in result["audio_files"]] == [1, 1]
+    assert [f["disc_track_number"] for f in result["audio_files"]] == [1, 2]
+
+
+def test_tag_disc_carrier_sets_sets_detected(tmp_path):
+    """The latent bug (spec chunk 7f): a flat folder with no subdir/filename
+    carrier at all still got its disc fields stamped by DISCNUMBER tags, but
+    sets_detected stayed False -- app.js's toTracks() trusts that flag, not
+    the presence of disc_number, to pick index vs tag ordering."""
+    root = tmp_path / "flat_tagged_sets"; root.mkdir()
+    _flac_with_tags(root / "01.flac", DISCNUMBER="1", TRACKNUMBER="1", DISCTOTAL="2")
+    _flac_with_tags(root / "02.flac", DISCNUMBER="1", TRACKNUMBER="2", DISCTOTAL="2")
+    _flac_with_tags(root / "03.flac", DISCNUMBER="2", TRACKNUMBER="1", DISCTOTAL="2")
+    _flac_with_tags(root / "04.flac", DISCNUMBER="2", TRACKNUMBER="2", DISCTOTAL="2")
+
+    result = scan_folder(str(root))
+
+    assert result["sets_detected"] is True
+
+
+# ── MP3 parity ────────────────────────────────────────────────────────────────
+
+# A minimal, real (ffmpeg-encoded) silent MP3 captured once, base64-encoded,
+# for machines that don't have ffmpeg available to render a fresh one.
+_TINY_MP3_B64 = (
+    "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tAwAAAAAAA"
+    "AAAAAAAAAAAAAAAAASW5mbwAAAA8AAAADAAAB7wCTk5OTk5OTk5OTk5OTk5OTk5OTk5OTk5"
+    "OTk5OTk5OTk5PKysrKysrKysrKysrKysrKysrKysrKysrKysrKysrKysr////////////"
+    "////////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAA"
+    "JAKjAAAAAAAAAe8wbCjYAAAAAAD/+xDEAAPAAAGkAAAAIAAANIAAAARMQU1FMy4xMDBVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVf/7EsQpg8AAAaQAAAAgAAA0gAAABFVVVVVVVVVVVVVVVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/7EMRTg8AAAaQAAAAgAAA0gAAABFVVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+)
+
+
+def _silent_mp3(path):
+    """A tiny valid MP3 -- ffmpeg-rendered when available, else a canned
+    known-good encode of the same clip (see _TINY_MP3_B64 above)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("ffmpeg"):
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+             "-t", "0.05", "-codec:a", "libmp3lame", "-b:a", "32k", str(path)],
+            check=True, capture_output=True,
+        )
+    else:
+        path.write_bytes(base64.b64decode(_TINY_MP3_B64))
+
+
+def test_mp3_round_trip_through_open_tags(app, seeded_ids, tmp_path):
+    rec = _rec(seeded_ids)
+    rec.tracks[0].disc_number = 1
+    rec.tracks[1].disc_number = 2
+    _db.session.commit()
+
+    mp3_paths = []
+    for t in rec.tracks:
+        stem = Path(t.file_path).stem
+        f = tmp_path / rec.folder_path / f"{stem}.mp3"
+        _silent_mp3(f)
+        mp3_paths.append(f)
+        t.file_path = f"{stem}.mp3"
+    _db.session.commit()
+
+    # read_flac_tags (despite the name) reads an MP3 folder through open_tags
+    audio_files = [{"path": str(p), "index": i, "filename": p.name}
+                   for i, p in enumerate(mp3_paths, start=1)]
+    # No tags yet -- container should just come back empty, not error.
+    assert read_flac_tags(audio_files)["container"] == {}
+
+    n, errors = write_flac_tags(rec, str(tmp_path))
+    assert (n, errors) == (2, [])
+
+    container = read_flac_tags(audio_files)["container"]
+    assert container["artist"] == "Bill Evans"
+    assert container["venue"] == "Sprague Memorial Hall"
+    assert container["concert_date"] == "1980-02-22"
+
+    tag_rows = read_recording_tags(rec, str(tmp_path))
+    assert all(row["error"] is None for row in tag_rows)
+    assert tag_rows[0]["tags"]["VENUE"] == "Sprague Memorial Hall"
+
+    audio0 = open_tags(str(mp3_paths[0]))
+    audio1 = open_tags(str(mp3_paths[1]))
+    assert audio0["ARTIST"] == ["Bill Evans"]
+    assert audio0["ALBUM"] == ["1980-02-22 - Sprague Memorial Hall"]
+    assert audio0["DATE"] == ["1980-02-22"]
+    assert audio0["VENUE"] == ["Sprague Memorial Hall"]
+    assert audio0["DISCNUMBER"] == ["1"]
+    assert audio0["DISCTOTAL"] == ["2"]
+    assert audio1["DISCNUMBER"] == ["2"]
+    assert audio1["DISCTOTAL"] == ["2"]
+
+    # Underlying ID3: VENUE really is a TXXX frame, disc really is TPOS.
+    raw_id3 = MP3(str(mp3_paths[0])).tags
+    txxx_venue = raw_id3.getall("TXXX:VENUE")
+    assert txxx_venue and txxx_venue[0].text == ["Sprague Memorial Hall"]
+    assert raw_id3.getall("TPOS")[0].text == ["1/2"]
+
+
+# ── S6: MP3 write_tags must keep cover art and foreign frames ──────────────
+
+def test_mp3_write_tags_keeps_apic_and_foreign_txxx(app, seeded_ids, tmp_path):
+    """S6: _MP3TagAdapter.clear() used to call ID3.clear(), which removes
+    EVERYTHING -- cover art (APIC) and any TXXX frame Trellis does not own.
+    It must only remove the frames it is about to rewrite, matching
+    FLAC.clear()'s blast radius (Vorbis block only, pictures kept)."""
+    from mutagen.id3 import APIC, TXXX
+
+    rec = _rec(seeded_ids)
+    f = tmp_path / rec.folder_path / rec.tracks[0].file_path
+    f = f.with_suffix(".mp3")
+    _silent_mp3(f)
+    rec.tracks[0].file_path = f.name
+    _silent_flac(tmp_path / rec.folder_path / rec.tracks[1].file_path)
+    _db.session.commit()
+
+    audio = MP3(str(f))
+    audio.tags.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="cover",
+                         data=b"\xff\xd8\xff\xd9"))
+    audio.tags.add(TXXX(encoding=3, desc="MY_CUSTOM", text=["keep me"]))
+    audio.save()
+
+    n, errors = write_flac_tags(rec, str(tmp_path))
+    assert (n, errors) == (2, [])
+
+    raw_id3 = MP3(str(f)).tags
+    keys = set(raw_id3.keys())
+    assert any(k.startswith("APIC") for k in keys), "cover art must survive the tag write"
+    assert "TXXX:MY_CUSTOM" in keys, "a foreign TXXX frame must survive the tag write"
+
+
+# ── N6: tag-key case must not differ by format ─────────────────────────────
+
+def test_read_recording_tags_case_matches_across_formats(app, seeded_ids, tmp_path):
+    """N6: read_recording_tags must return the same-case keys for a FLAC
+    track and an MP3 track -- mutagen's native FLAC dict yields lowercase
+    Vorbis-comment keys while _MP3TagAdapter always yields uppercase."""
+    rec = _rec(seeded_ids)
+    flac_f = tmp_path / rec.folder_path / rec.tracks[0].file_path
+    mp3_f = (tmp_path / rec.folder_path / rec.tracks[1].file_path).with_suffix(".mp3")
+    _silent_flac(flac_f)
+    _silent_mp3(mp3_f)
+    rec.tracks[1].file_path = mp3_f.name
+    _db.session.commit()
+
+    n, errors = write_flac_tags(rec, str(tmp_path))
+    assert (n, errors) == (2, [])
+
+    tag_rows = read_recording_tags(rec, str(tmp_path))
+    for row in tag_rows:
+        assert row["error"] is None
+        assert row["tags"]["VENUE"] == "Sprague Memorial Hall"
+        assert "venue" not in row["tags"]

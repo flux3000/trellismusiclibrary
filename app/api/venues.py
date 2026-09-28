@@ -133,8 +133,7 @@ _IMG_URL = "/api/venues/images"
 
 
 def _venue_images_dir(venue):
-    return ei.entity_images_dir(current_app.config["LIBRARY_ROOT"],
-                                "_venues", venue.name, _sanitize_path)
+    return ei.image_dir("venues", venue.name)
 
 
 ei.register_image_routes(

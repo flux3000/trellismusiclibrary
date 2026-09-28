@@ -338,6 +338,11 @@
    :root that no palette overrides. */
 
 :root {
+  /* Small square thumbnail token (Studio Records spec v1, chunk 5) --
+     recording-artwork thumbnails in Browse's linear list and search results.
+     No existing size token covered this (the Recently Added row's artist
+     avatar is a hardcoded 38px, not a variable), so this is the one added. */
+  --thumb-sm: 40px;
   /* Type. --font is kept as an ALIAS for --font-ui so the ~60 existing
      `font-family: var(--font)` rules keep resolving — do not delete it.
      --font-display is identity only (wordmark, act names, page titles);
@@ -449,6 +454,15 @@ html, body {
   overflow: hidden;
 }
 
+/* One rule for every plain text link (2026-09-27, product-wide). Every
+   palette block above defines --t1/--t0 to its own contrast contract, light
+   and dark alike, and .peer-mode sets no colours at all (see above), so this
+   holds everywhere with no per-theme override needed. Element selector on
+   purpose: a nav link or a button styled as a control already carries its
+   own class (.nav-item, .btn, …), which outranks this and is untouched. */
+a, a:visited { color: var(--t1); text-decoration: underline; }
+a:hover { color: var(--t0); }
+
 /* ── Utilities ──────────────────────────────────────────────────────────────── */
 
 .hidden { display: none !important; }
@@ -553,6 +567,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   color: var(--t0);
   white-space: nowrap;
   flex-shrink: 0;
+  cursor: pointer;
 }
 
 .app-nav-btns { display: flex; align-items: center; gap: 2px; }
@@ -951,6 +966,65 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   font-size: 12px;
   color: var(--t1);
 }
+
+/* Shared ingest queue table ("The Belt", unified 2026-09-27) -- one table for
+   Review & Ingest, Bulk Ingest and #/batch Bulk Import (see
+   ingestQueueTable()/_iqRow()/app.js). Almost everything reuses Review &
+   Ingest's own classes verbatim (.lq-brow-head/.lq-brow, .lq-brow-band/
+   .lq-brow-meta for the pill columns, .lq-verdict, .lq-act*, .lq-move-*,
+   .lq-brow-caret) -- these few are the columns/states none of them had a
+   name for yet: the FORMAT/TYPE pills, the plain skipped/failed status
+   text, the expand panel's base field grid, and the in-progress pulse. */
+.bi-dupes { margin-top: 24px; }
+.bi-dupes ul { margin: 8px 0 0; padding: 0; list-style: none; }
+.bi-dupes li { font-size: 13px; margin-bottom: 6px; }
+
+@keyframes iq-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+.iq-now-row { animation: iq-pulse 2s ease-in-out infinite; }
+
+/* FORMAT + TYPE columns, and (soundQuality:false callers) no Sound Quality
+   column -- narrower than .lq-brow's own 7-column grid, so it is overridden
+   with an extra class the same way .bi-brow used to. */
+.lq-brow-head.iq-brow, .lq-brow.iq-brow {
+  grid-template-columns: 3px minmax(0, 1fr) 56px 52px 92px 62px 214px 30px;
+}
+.lq-brow-head.iq-brow.iq-brow--nosq, .lq-brow.iq-brow.iq-brow--nosq {
+  grid-template-columns: 3px minmax(0, 1fr) 56px 52px 62px 214px 30px;
+}
+.lq-brow.iq-brow { min-height: 46px; }
+.lq-brow-head.iq-brow > :nth-child(3),
+.lq-brow-head.iq-brow > :nth-child(4) { text-align: center; }
+.iq-col-format, .iq-col-type { text-align: center; }
+.iq-pill {
+  display: inline-block; font-size: 10.5px; font-weight: 600;
+  letter-spacing: .03em; color: var(--t2); background: var(--bg-4);
+  border-radius: var(--r-sm); padding: 2px 7px;
+}
+.iq-act-status { font-size: 12px; color: var(--t3); white-space: nowrap; }
+.iq-act-status--bad { color: var(--red); }
+
+/* Base expand panel -- Artist/Date/Venue/.../Path, shared by every caller;
+   the sound-quality pane (Review & Ingest only) renders as a second block
+   beneath this one, not instead of it. */
+.iq-expand-panel {
+  padding: 10px 12px 12px 36px;
+  background: var(--bg-1);
+  border-top: 1px solid var(--bd-0);
+}
+.iq-expand-grid { display: flex; flex-direction: column; gap: 5px; }
+.iq-expand-row { display: flex; gap: 12px; align-items: baseline; }
+.iq-expand-row--wide { align-items: flex-start; }
+.iq-expand-label {
+  font-size: 10px; font-weight: 700; color: var(--t3);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  width: 64px; flex-shrink: 0;
+}
+.iq-expand-val { font-size: 12px; color: var(--t1); }
+.iq-expand-mono { font-family: var(--font-mono); font-size: 10px; color: var(--t3); word-break: break-all; }
+.iq-tracklist { display: flex; flex-direction: column; gap: 2px; }
+.iq-tracklist-row { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
+.iq-tracklist-num { color: var(--t3); width: 18px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.iq-tracklist-title { color: var(--t1); }
 
 /* ── Entity pages (Artist / Venue / Musician / Genre / Collection) ───────────
    .artist-head and .pp-name-row were removed 2026-08-07 when every one of
@@ -1656,6 +1730,18 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   color: var(--t2);
 }
 
+/* Cover art slot (Studio Records spec v1, chunk 5) -- a second, clickable
+   square beside the artist avatar, same size/border treatment. The "+"
+   placeholder (admin, no image yet) reuses .rec-header-photo--initials'
+   centered-glyph layout rather than a new class. */
+.rec-header-cover { cursor: pointer; }
+.rec-cover-empty {
+  font-size: 30px; font-weight: 400; color: var(--t3);
+  border-style: dashed;
+}
+.rec-photos-wrap { margin: 4px 0 0; }
+.rec-photos-wrap.hidden { display: none; }
+
 /* Recording metadata block — Source / Lineage / Quality. Borderless since
    2026-08-18 (Ryan): it was a bordered two-tab panel, but with Fidelity moved
    into the Side Panel there is one pane left, and a box with a tab strip for a
@@ -1679,6 +1765,19 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-sl-item--lineage .hm-val {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* Release item (studio kind, Ryan, 2026-09-27) — the same #rec-release mount
+   renderReleaseBlock() has always targeted, now sitting in the row instead of
+   its own pp-block below the header. Its .pp-mb-* markup is built for a
+   standalone block, so it's shrunk down to row text size and let wrap onto
+   its own line if the candidate picker needs the room. */
+.rec-sl-item--release { flex: 1 1 260px; min-width: 0; }
+.rec-sl-item--release .pp-mb-linked,
+.rec-sl-item--release .pp-mb-empty { gap: 8px; }
+.rec-sl-item--release .pp-mb-name { font-size: 12px; font-weight: 500; }
+.rec-sl-item--release .pp-mb-foot { margin-top: 0; }
+.rec-sl-item--release .pp-mb-cands,
+.rec-sl-item--release .pp-mb-prompt { flex-basis: 100%; }
 /* .hm-tabbed-panel / .hm-tabs / .hm-tab / .hm-pane / .hm-spectrogram / .hm-metric
    / .hm-hint / .hm-warn / .hm-reanalyze-btn were REMOVED 2026-08-18 with the
    Fidelity tab (IO-61). The .hm-row / .hm-label / .hm-val trio below survives —
@@ -1837,6 +1936,9 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-fav-star--sm { font-size: 14px; padding: 0 2px; margin-left: 0; }
 .rec-perf-name.pp-editable { display: inline-block; padding: 1px 6px; margin-left: -6px; border-radius: var(--r-sm); cursor: text; }
 .rec-perf-name.pp-editable:hover { background: var(--bg-1); }
+/* Studio album title (Ryan, 2026-09-27) — slightly larger than the live
+   heading; the live heading itself is unchanged. */
+.rec-perf-name--album { font-size: 28px; }
 .rec-date-line .rec-f { border-radius: 3px; }
 .rec-date-line .pp-editable { cursor: text; padding: 0 3px; margin: 0 -3px; }
 .rec-date-line .pp-editable:hover { background: var(--bg-1); }
@@ -3266,213 +3368,6 @@ input[type="range"].progress-bar {
 .batch-tier-done   { background: var(--bg-3); color: var(--t3); }
 .batch-tier-total  { background: var(--bg-2); color: var(--t2); }
 
-/* Flat list */
-.batch-list {
-  margin-top: 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* Item rows */
-.batch-item-row {
-  border-bottom: 1px solid var(--border);
-}
-.batch-item-row:last-child { border-bottom: none; }
-
-.batch-item-ingested { opacity: 0.5; }
-
-/* Main row line */
-.batch-item-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-}
-.batch-item-main:hover { background: var(--bg-1); }
-
-.batch-expand-btn {
-  flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: none;
-  border: none;
-  color: var(--t2);   /* was --t3: too faint to read as a control (2026-08-02) */
-  cursor: pointer;
-  width: 22px;
-  padding: 0;
-  line-height: 1;
-}
-.batch-expand-btn:hover { color: var(--accent-lit); }
-
-.batch-item-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.batch-item-name {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--t1);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.batch-item-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 2px;
-  align-items: center;
-}
-
-.batch-meta-field { font-size: 11px; color: var(--t2); }
-.batch-meta-sep   { font-size: 11px; color: var(--t3); }
-
-/* Just the number — no badge chrome, no dots, no tier bar. Colored text only,
-   sized to match the rest of the row. It used to double up with a 22px
-   .iq-score rule and lose the cascade, which is why it looked huge before;
-   that rule is gone as of 2026-08-28, but the explicit size stays. */
-.batch-score {
-  flex-shrink: 0;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  min-width: 22px;
-  text-align: right;
-}
-.batch-score--green  { color: var(--green); }
-.batch-score--yellow { color: var(--amber); }
-.batch-score--red    { color: var(--red); }
-
-.batch-issue-error {
-  font-size: 10px;
-  background: rgba(220,60,60,0.12);
-  color: var(--red);
-  border-radius: 3px;
-  padding: 1px 5px;
-}
-
-.batch-issue-warn {
-  font-size: 10px;
-  background: rgba(230,180,50,0.10);
-  color: var(--amber);
-  border-radius: 3px;
-  padding: 1px 5px;
-}
-
-.batch-issue-info {
-  font-size: 10px;
-  background: var(--bg-3);
-  color: var(--t3);
-  border-radius: 3px;
-  padding: 1px 5px;
-}
-
-.batch-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.batch-ingest-status { font-size: 12px; min-width: 14px; text-align: center; }
-
-.batch-done-check {
-  font-size: 11px;
-  color: var(--green);
-  font-weight: 600;
-}
-.batch-rec-link {
-  font-size: 11px;
-  color: var(--accent);
-  text-decoration: none;
-  margin-left: 6px;
-}
-.batch-rec-link:hover { text-decoration: underline; }
-
-/* Expanded detail panel */
-.batch-expand-panel {
-  padding: 10px 12px 12px 36px;
-  background: var(--bg-1);
-  border-top: 1px solid var(--border);
-}
-
-.batch-expand-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.batch-expand-row {
-  display: flex;
-  gap: 12px;
-  align-items: baseline;
-}
-
-.batch-expand-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--t3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  width: 64px;
-  flex-shrink: 0;
-}
-
-.batch-expand-val {
-  font-size: 12px;
-  color: var(--t1);
-}
-
-.batch-val-uncertain {
-  color: var(--amber);
-}
-
-.batch-track-preview {
-  color: var(--t2);
-  font-size: 11px;
-  font-style: italic;
-}
-
-.batch-expand-tracklist { align-items: flex-start; }
-
-.batch-track-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.batch-track-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.batch-track-num {
-  color: var(--t3);
-  width: 18px;
-  flex-shrink: 0;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.batch-track-title { color: var(--t1); }
-
-.batch-track-src {
-  color: var(--t3);
-  font-size: 10px;
-  font-style: italic;
-}
-
-.batch-path-mono {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--t3);
-  word-break: break-all;
-}
 
 /* ── Review top bar (full-width; AI Assist button far top-right) ─────────────── */
 
@@ -4444,6 +4339,12 @@ a.member-chip-name:hover { color: var(--accent); }
 
 /* ── Flat compact recording table (library, catalog, collection) ──────────────── */
 .rec-table { padding: 4px 0 20px; }
+/* Recording-artwork thumbnail column (Studio Records spec v1, chunk 5).
+   Reserved ONLY when at least one row in this rendered list actually has an
+   image (`.has-thumbs`, set by flatRowHtml()/recTableHeadHtml()'s caller) --
+   a live-only library, which is most of them, must not lose 50px of every
+   row and taller rows to a column nothing will ever draw in (S10). Base
+   rule (no thumb column) first, `.has-thumbs` variant beneath it. */
 .rec-row--flat {
   display: grid;
   grid-template-columns: 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
@@ -4457,9 +4358,23 @@ a.member-chip-name:hover { color: var(--accent); }
 .rec-row--flat.with-artist {
   grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
+.rec-row--flat.has-thumbs {
+  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
+}
+.rec-row--flat.has-thumbs.with-artist {
+  grid-template-columns: var(--thumb-sm) 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
+}
 .rec-row--flat:hover { background: var(--bg-1); }
 .rec-artist-cell { color: var(--t0); font-weight: 450; }
 .rec-date-added { text-align: right; color: var(--t3); font-variant-numeric: tabular-nums; }
+/* Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
+   placeholder when a row has no image, so the cell is simply empty, same
+   rule as the artist avatar column above it. */
+.rec-thumb-sm {
+  width: var(--thumb-sm); height: var(--thumb-sm);
+  border-radius: var(--r-md); object-fit: cover;
+  background: var(--bg-2); display: block;
+}
 
 /* Header row paired with .rec-row--flat — same grid, mostly blank; "Added" sorts. */
 .rec-table-head {
@@ -4472,6 +4387,12 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .rec-table-head.with-artist {
   grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
+}
+.rec-table-head.has-thumbs {
+  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
+}
+.rec-table-head.has-thumbs.with-artist {
+  grid-template-columns: var(--thumb-sm) 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
 .rec-th-added {
   background: none; border: none; padding: 0; margin: 0;
@@ -6734,7 +6655,10 @@ a.member-chip-name:hover { color: var(--accent); }
    reason to put a score in a table. */
 .lq-brow {
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 30px;
+  /* fingerprint column removed (2026-09-27, unified ingest queue table) --
+     every caller now supplies .iq-brow / .iq-brow--nosq, which override
+     this; kept in step with them rather than left to go stale. */
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 214px 30px;
   gap: 10px; align-items: center;
   padding: 7px 12px; background: var(--bg-3);
 }
@@ -6748,7 +6672,10 @@ a.member-chip-name:hover { color: var(--accent); }
    columns and cannot drift when the column widths change. */
 .lq-brow-head {
   display: grid;
-  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 26px 214px 30px;
+  /* fingerprint column removed (2026-09-27, unified ingest queue table) --
+     every caller now supplies .iq-brow / .iq-brow--nosq, which override
+     this; kept in step with them rather than left to go stale. */
+  grid-template-columns: 3px minmax(0, 1fr) 92px 62px 214px 30px;
   gap: 10px; padding: 7px 12px; background: var(--bg-2);
   border-bottom: 1px solid var(--bd-1);
   font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
@@ -7258,6 +7185,22 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-act--ingest:hover { border-color: var(--green); color: var(--green); background: rgba(106,184,128,.08); }
 .lq-act--view { color: var(--accent-lit); border-color: var(--accent); }
 .lq-act-done     { font-size: 12px; color: var(--green); padding: 4px 0; white-space: nowrap; }
+/* Ingest queue rows (Ryan, 2026-09-27): the Metadata / Sound Quality chip sits
+   at the Format / Type pill's size, and the three text buttons share one
+   width so Ingest -> Ingested and Review -> View change words, not shape.
+   A finished row keeps the Ingested pill in place, greyed and inert. */
+.iq-brow .lq-verdict { font-size: 10.5px; padding: 2px 7px; letter-spacing: .03em; }
+.lq-act--ingest, .lq-act--review, .lq-act--view { min-width: 76px; }
+.lq-act--ingest:disabled {
+  opacity: 1; color: var(--t3); border-color: var(--bd-1); background: transparent;
+}
+/* The chip sits BESIDE the name, not inside it: .lq-brow-name clips overflow
+   for its ellipsis, which would swallow the hover box. */
+.iq-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.iq-name-row .lq-brow-name { min-width: 0; }
+.iq-reviewchip { color: var(--amber); }
+.iq-reviewchip .lq-errchip-ic { width: 13px; height: 13px; }
+.iq-reviewchip:hover { color: var(--amber); }
 /* .lq-act-failed removed 2026-08-28 — the message is a hover now, not a
    paragraph wedged into the actions column. See .lq-errchip. */
 .lq-errchip {
@@ -7997,6 +7940,10 @@ html.peer-mode .app-header-center { visibility: hidden; }
   white-space: nowrap;
 }
 .search-row-right { flex: none; display: flex; align-items: center; gap: 8px; }
+/* Recording-artwork thumbnail on a search result row (chunk 5) -- the row is
+   baseline-aligned for its text columns, so the thumbnail is centered on its
+   own rather than inheriting that baseline. */
+.search-row .rec-thumb-sm { flex: none; align-self: center; }
 
 .search-more-btn { margin-top: 10px; }
 
@@ -8119,6 +8066,7 @@ body.drive-offline img[src*="/api/venues/images/"] {
 @media (max-width: 1200px) {
   /* Lineage wraps under Source rather than fighting it for a narrow row. */
   .rec-sl-item--lineage { flex-basis: 100%; }
+  .rec-sl-item--release { flex-basis: 100%; }
   .slide-panel.open { width: calc(52% + 28px); }
 }
 

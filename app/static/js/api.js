@@ -420,6 +420,17 @@ const API = (() => {
       // scheme; passed -> a one-click-only override, never persisted.
       renameFiles: (id, { scheme, template } = {}) =>
         post(`/api/recordings/${id}/rename-files`, { scheme, template }),
+
+      // Release lookup (Studio Records spec v1, chunk 3) — studio kind only.
+      releaseCandidates: (id)       => get(`/api/recordings/${id}/release-candidates`),
+      releaseLink:       (id, mbid) => post(`/api/recordings/${id}/release-link`, { mbid }),
+      releaseUnlink:     (id)       => post(`/api/recordings/${id}/release-unlink`, {}),
+
+      // Recording-level artwork (chunk 5) — the same five-route shape every
+      // photographed entity gets (see entityImageApi above). `contextual:
+      // true` because api/share.py DOES expose a proxy route for these
+      // (recordings/images/<id>), unlike venues/musicians/events.
+      ...entityImageApi('recordings', { contextual: true }),
     },
 
     // ── Tracks ───────────────────────────────────────────────────────────────
@@ -554,6 +565,20 @@ const API = (() => {
       convert:       (folder_path) => post('/api/quality/convert', { folder_path }),
       convertStatus: (jobId) => get(`/api/quality/convert/${jobId}`),
       convertCancel: (jobId) => post(`/api/quality/convert/${jobId}/cancel`, {}),
+    },
+
+    // ── Bulk Ingest (spec 1.9/4) ──────────────────────────────────────────
+    bulkIngest: {
+      start:   () => post('/api/bulk-ingest/start', {}),
+      current: () => get('/api/bulk-ingest/current'),
+      pause:   (runId) => post(`/api/bulk-ingest/${runId}/pause`, {}),
+      resume:  (runId) => post(`/api/bulk-ingest/${runId}/resume`, {}),
+      items:   (runId, status, page) => {
+        const params = []
+        if (status) params.push(`status=${encodeURIComponent(status)}`)
+        if (page)   params.push(`page=${encodeURIComponent(page)}`)
+        return get(`/api/bulk-ingest/${runId}/items${params.length ? `?${params.join('&')}` : ''}`)
+      },
     },
   }
 })()

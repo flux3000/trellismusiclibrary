@@ -165,25 +165,56 @@ def peer_visible_recording_ids(peer):
 
 
 def peer_visible_performance_ids(peer):
-    """Performances behind the visible recordings."""
+    """Performances behind the visible recordings.
+
+    Memoized per request (`g`), same reasoning and same key shape as
+    peer_visible_recording_ids: an entity page that asks for both the
+    recording set and the performance set (e.g. the Library payload, which
+    also derives peer_visible_artist_ids from this) used to pay for this
+    query twice over."""
+    if peer is None:
+        return set()
+
+    cache_key = f"_peer_visible_perfs_{peer.id}"
+    if has_request_context() and hasattr(g, cache_key):
+        return getattr(g, cache_key)
+
     from app.models.recording import Recording
     visible = peer_visible_recording_ids(peer)
     if not visible:
-        return set()
-    rows = (db.session.query(Recording.performance_id)
-            .filter(Recording.id.in_(visible)).distinct().all())
-    return {pid for (pid,) in rows if pid is not None}
+        result = set()
+    else:
+        rows = (db.session.query(Recording.performance_id)
+                .filter(Recording.id.in_(visible)).distinct().all())
+        result = {pid for (pid,) in rows if pid is not None}
+
+    if has_request_context():
+        setattr(g, cache_key, result)
+    return result
 
 
 def peer_visible_artist_ids(peer):
-    """Artists (acts) with at least one visible recording."""
+    """Artists (acts) with at least one visible recording. Memoized per
+    request (`g`), same reasoning as peer_visible_recording_ids."""
+    if peer is None:
+        return set()
+
+    cache_key = f"_peer_visible_artists_{peer.id}"
+    if has_request_context() and hasattr(g, cache_key):
+        return getattr(g, cache_key)
+
     from app.models.performance import Performance
     perf_ids = peer_visible_performance_ids(peer)
     if not perf_ids:
-        return set()
-    rows = (db.session.query(Performance.artist_id)
-            .filter(Performance.id.in_(perf_ids)).distinct().all())
-    return {pid for (pid,) in rows if pid is not None}
+        result = set()
+    else:
+        rows = (db.session.query(Performance.artist_id)
+                .filter(Performance.id.in_(perf_ids)).distinct().all())
+        result = {pid for (pid,) in rows if pid is not None}
+
+    if has_request_context():
+        setattr(g, cache_key, result)
+    return result
 
 
 def peer_visible_venue_ids(peer):

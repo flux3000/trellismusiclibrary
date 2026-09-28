@@ -177,9 +177,20 @@ def create_app(config_class=Config):
     # /api/remotes/<id>/<path> proxy.
     app.register_blueprint(remote_favorites_bp, url_prefix="/api/remote-favorites")
     app.register_blueprint(quality_bp,      url_prefix="/api/quality")
+    from app.api.bulk_ingest     import bp as bulk_ingest_bp
     app.register_blueprint(search_bp,       url_prefix="/api/search")
     app.register_blueprint(system_bp,       url_prefix="/api/system")
     app.register_blueprint(naming_bp,       url_prefix="/api/naming")
+    app.register_blueprint(bulk_ingest_bp,     url_prefix="/api/bulk-ingest")
+
+    # ── Bulk Ingest: pick a run left running back up (2026-09-26) ────────
+    # Never in SERVER_MODE (that branch already returned above) -- a share
+    # node has no bulk_ingest surface at all. A run left 'paused' is left
+    # exactly as it was; only a run left 'running' when the process last
+    # stopped gets its worker restarted (see resume_on_boot's docstring for
+    # what happens to its in-progress item).
+    from app.utils.bulk_ingest_run import resume_on_boot
+    resume_on_boot(app)
 
     # ── Auto-login as the owner ───────────────────────────────
     # Two quite different reasons land here:

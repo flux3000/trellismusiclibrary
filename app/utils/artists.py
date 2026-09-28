@@ -143,12 +143,19 @@ def remove_membership_stint(membership_id):
     return True
 
 
-def resolve_or_create_artist(name, member_names=None):
+def resolve_or_create_artist(name, member_names=None, lookup=True):
     """
     Find an Artist by name (case-insensitive) or create it. On create, seed
     members from member_names if provided (otherwise the Artist starts with no
     Musicians). Does NOT change an existing artist's members — use
     set_artist_members.
+
+    lookup=False (Bulk Ingest, chunk 5) skips the synchronous MusicBrainz
+    lookup below on a brand-new artist. The artist is created with mb_status
+    and mb_checked_at both left at their column defaults (NULL) -- the same
+    "never looked up" state try_match_artist() itself uses to mean nobody has
+    checked yet, so a later manual "Look up" on the artist page behaves
+    exactly as it would for any other never-checked artist.
     """
     name = (name or "").strip()
     artist = db.session.query(Artist).filter(
@@ -171,7 +178,8 @@ def resolve_or_create_artist(name, member_names=None):
     # no-op under TESTING, and a process-wide circuit breaker stops retrying
     # once offline (otherwise a 40-show bulk import would spend eight minutes
     # timing out on DNS). See app/utils/musicbrainz.py.
-    from app.utils import musicbrainz as _mb
-    _mb.try_match_artist(artist)
+    if lookup:
+        from app.utils import musicbrainz as _mb
+        _mb.try_match_artist(artist)
 
     return artist

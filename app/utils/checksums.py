@@ -118,8 +118,17 @@ def parse_checksum_file(content):
         # "Track 01 [live].flac" must keep its brackets. The marker's position
         # is what identifies it, not the brackets themselves.
         rest = _LEADING_BRACKET.sub("", rest).strip(" \t*:")
-        filename = os.path.basename(rest) if rest and _AUDIO_EXT.search(rest) else None
-        entries.append({"filename": filename, "checksum": checksum})
+        is_audio_like = bool(rest) and bool(_AUDIO_EXT.search(rest))
+        # R2-4: keep the path as the line actually gave it (normalised to
+        # forward slashes), not just its basename -- a checksum file sitting
+        # at a multi-disc show's root routinely lists per-disc subpaths
+        # ("CD1/01.flac", "CD2/01.flac"), and those collide down to the same
+        # basename once B1 keeps Track.file_path's own subdir prefix.
+        # match_entries_to_tracks tries this against track.file_path first,
+        # before ever falling back to a basename that might not be unique.
+        rel_path = rest.replace("\\", "/").strip("/") if is_audio_like else None
+        filename = os.path.basename(rel_path) if rel_path else None
+        entries.append({"filename": filename, "rel_path": rel_path, "checksum": checksum})
     return entries
 
 
@@ -190,15 +199,44 @@ def match_entries_to_tracks(entries, tracks):
     def _stem(name):
         return os.path.splitext(name)[0].lower() if name else None
 
-    by_basename = {_norm_key(os.path.basename(t.file_path)): t for t in tracks}
-    by_stem     = {_norm_key(_stem(t.file_path)): t for t in tracks}
+    def _path_key(name):
+        return _norm_key(name.replace("\\", "/").strip("/")) if name else None
+
+    # basename/stem are indexed alongside a COUNT of how many candidate
+    # tracks share that key (R2-4): a root-level checksum file considers
+    # every track in the folder, so "01.flac" is not a safe key to guess
+    # from when two discs both have one -- only relpath (an exact match
+    # against the track's own file_path, subdir and all) is trusted when
+    # it's ambiguous.
+    by_relpath      = {_path_key(t.file_path): t for t in tracks}
+    by_basename     = {}
+    basename_counts = {}
+    by_stem         = {}
+    stem_counts     = {}
+    for t in tracks:
+        bk = _norm_key(os.path.basename(t.file_path))
+        basename_counts[bk] = basename_counts.get(bk, 0) + 1
+        by_basename.setdefault(bk, t)
+        sk = _norm_key(_stem(t.file_path))
+        stem_counts[sk] = stem_counts.get(sk, 0) + 1
+        by_stem.setdefault(sk, t)
 
     matched = {}
     named_entries = [e for e in entries if e["filename"]]
 
     for e in named_entries:
-        key = _norm_key(e["filename"])
-        track = by_basename.get(key) or by_stem.get(_norm_key(_stem(e["filename"])))
+        track = None
+        rel = e.get("rel_path")
+        if rel:
+            track = by_relpath.get(_path_key(rel))
+        if track is None:
+            bk = _norm_key(e["filename"])
+            if basename_counts.get(bk, 0) == 1:
+                track = by_basename.get(bk)
+        if track is None:
+            sk = _norm_key(_stem(e["filename"]))
+            if stem_counts.get(sk, 0) == 1:
+                track = by_stem.get(sk)
         if track and track not in matched:
             matched[track] = e["checksum"]
 

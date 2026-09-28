@@ -36,6 +36,7 @@ def test_parse_colon_style():
     content = "01 - Dark Star.flac:d41d8cd98f00b204e9800998ecf8427e\n"
     entries = parse_checksum_file(content)
     assert entries == [{"filename": "01 - Dark Star.flac",
+                         "rel_path": "01 - Dark Star.flac",
                          "checksum": "d41d8cd98f00b204e9800998ecf8427e"}]
 
 
@@ -44,8 +45,8 @@ def test_parse_bare_metaflac_output_no_filenames():
     content = "d41d8cd98f00b204e9800998ecf8427e\n5d41402abc4b2a76b9719d911017c592\n"
     entries = parse_checksum_file(content)
     assert entries == [
-        {"filename": None, "checksum": "d41d8cd98f00b204e9800998ecf8427e"},
-        {"filename": None, "checksum": "5d41402abc4b2a76b9719d911017c592"},
+        {"filename": None, "rel_path": None, "checksum": "d41d8cd98f00b204e9800998ecf8427e"},
+        {"filename": None, "rel_path": None, "checksum": "5d41402abc4b2a76b9719d911017c592"},
     ]
 
 
@@ -110,32 +111,51 @@ def test_no_guessing_when_filenames_present_but_unmatched():
 
 
 def test_nested_basename_collision_requires_caller_side_scoping():
-    """match_entries_to_tracks matches by BASENAME with no directory
-    awareness at all -- two tracks from different discs that both happen to
-    be named "01.flac" (e.g. CD1/01.flac and CD2/01.flac before flattening)
-    collide: the later track in the list simply overwrites the earlier one
-    in its internal basename index, so an unscoped match can silently hand
-    CD1's checksum to CD2's track. The caller (app.api.ingest._do_confirm
-    step 9) avoids this by pre-scoping candidates to one fingerprint file's
-    own directory (spec section 3.1 D6/D7) before ever calling this
-    function -- this test nails down why that scoping has to happen on the
-    caller's side, not inside match_entries_to_tracks."""
+    """R2-4: an ambiguous basename (two tracks that both happen to be named
+    "01.flac", e.g. CD1/01.flac and CD2/01.flac before flattening, presented
+    here without their subdir prefix) is left UNMATCHED rather than handed
+    to whichever track was listed last -- match_entries_to_tracks refuses to
+    guess when a basename could mean more than one track. The caller
+    (app.api.ingest._do_confirm step 9) still pre-scopes candidates to one
+    fingerprint file's own directory (spec section 3.1 D6/D7) before ever
+    calling this function, so a real ingest never reaches this ambiguous
+    path at all -- this test proves the fallback itself is safe even when a
+    caller doesn't scope."""
     cd1_track = _FakeTrack(1, "01.flac")   # originally CD1/01.flac
     cd2_track = _FakeTrack(2, "01.flac")   # originally CD2/01.flac, same basename
     entries = [{"filename": "01.flac", "checksum": "cd1-hash"}]
 
-    # Unscoped: both tracks share a basename, so the SECOND one listed wins
-    # the internal index and gets matched to the FIRST disc's checksum --
-    # exactly the wrong-disc mismatch scoping exists to prevent.
+    # Unscoped: both tracks share a basename with no rel_path on the entry
+    # to disambiguate by -- refused, not guessed.
     matched_unscoped = match_entries_to_tracks(entries, [cd1_track, cd2_track])
-    assert matched_unscoped == {cd2_track: "cd1-hash"}
-    assert cd1_track not in matched_unscoped
+    assert matched_unscoped == {}
 
     # Scoped to CD1's own tracks only (what the caller does when a
     # fingerprint file's rel_path dirname is used to filter candidates
     # before matching) -- unambiguous, and correct.
     matched_scoped = match_entries_to_tracks(entries, [cd1_track])
     assert matched_scoped == {cd1_track: "cd1-hash"}
+
+
+def test_rootlevel_relpath_disambiguates_colliding_basenames():
+    """R2-4: a root-level checksum file that lists per-disc subpaths
+    ("CD1/01.flac", "CD2/01.flac") matches each entry to its own track by
+    relative path, even though both tracks share the basename "01.flac"."""
+    cd1_track = _FakeTrack(1, "CD1/01.flac")
+    cd2_track = _FakeTrack(2, "CD2/01.flac")
+    entries = [
+        {"filename": "01.flac", "rel_path": "CD1/01.flac", "checksum": "cd1-hash"},
+        {"filename": "01.flac", "rel_path": "CD2/01.flac", "checksum": "cd2-hash"},
+    ]
+    matched = match_entries_to_tracks(entries, [cd1_track, cd2_track])
+    assert matched == {cd1_track: "cd1-hash", cd2_track: "cd2-hash"}
+
+
+def test_relpath_match_is_backslash_and_case_tolerant():
+    track = _FakeTrack(1, "CD1/01.flac")
+    entries = [{"filename": "01.FLAC", "rel_path": "cd1\\01.FLAC", "checksum": "aaa"}]
+    matched = match_entries_to_tracks(entries, [track])
+    assert matched == {track: "aaa"}
 
 
 # ── verify_track_checksum ────────────────────────────────────────────────────

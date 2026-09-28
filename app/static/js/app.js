@@ -37,6 +37,12 @@ const App = (() => {
     //     re-dispatch (a reload must never overwrite the real back target).
     navCurrent:      null,
     navBack:         null,
+    // Bulk Ingest (spec 1.9/4, chunk 7c) — just enough of /api/bulk-ingest/
+    // current's own shape to decide the nav item and home routing without
+    // every reader re-fetching it. null until the boot fetch (or a later
+    // refresh from the bulkIngest page itself) resolves; {run: null} once
+    // resolved with nothing active. See refreshBulkIngestStatus().
+    bulkIngest:        null,
   }
 
   // ── Track flag registry — single source of truth ─────────────────────────
@@ -335,11 +341,12 @@ const App = (() => {
   }
 
   function fileHandlingStripHtml(fh) {
-    const modeLabel  = fh.file_handling_mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
-    const filesLabel = fh.rename_files ? 'Rename files' : 'Files not renamed'
-    const tagsLabel  = fh.write_tags_on_ingest ? 'Write tags' : 'Tags not written'
+    // Reduced to the mode label + Change (2026-09-27, unified ingest queue
+    // table): the rename/tag detail this used to spell out in full every
+    // time now lives only in Settings, which keeps its own labels.
+    const modeLabel = fh.file_handling_mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
     return `<span class="fh-strip">
-      <b>${esc(modeLabel)}</b><span class="sep">·</span>${esc(filesLabel)}<span class="sep">·</span>${esc(tagsLabel)}<span class="sep">·</span>
+      <b>${esc(modeLabel)}</b><span class="sep">·</span>
       <a href="#/settings" class="change">Change</a></span>`
   }
 
@@ -897,6 +904,22 @@ const App = (() => {
     // the peer door has no editing endpoints at all, so an affordance here
     // could only ever produce an error.
     return hasEditRole() && getViewMode() === 'admin' && libraryState.activeId == null
+  }
+
+  // Where Home goes -- #/bulk-ingest while a Bulk Ingest run is running or
+  // paused, #/ otherwise. Shared by the sidebar shelf-head link
+  // (renderSidebar) and the wordmark click (wireHeaderNav) so the two never
+  // drift apart.
+  function homeHash() {
+    const active = state.bulkIngest
+                   && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
+    return active ? '#/bulk-ingest' : '#/'
+  }
+
+  // True only for the admin role -- narrower than hasEditRole() (which also
+  // covers archivist).
+  function isAdmin() {
+    return state.user?.role === 'admin'
   }
 
   // ── The viewer's star ─────────────────────────────────────────────────────
@@ -2008,11 +2031,18 @@ const App = (() => {
     const shelfTitle = remote
       ? (active ? active.display_name : 'Shared Library')
       : 'My Library'
+    // Bulk Ingest (spec 1.9/4, chunk 7c) — local only, never in a shared
+    // library (a peer's own machine has whatever bulkIngest status it has;
+    // nothing here is about MY library when I'm looking at theirs).
+    const bulkIngestActive = !remote && state.bulkIngest
+                           && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
+    const homeHashUrl = remote ? '#/' : homeHash()
     nav.innerHTML = `
       <div class="nav-scroll">
         ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings</a>` : ''}
-        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate">${esc(shelfTitle)}</div>
-        <a class="nav-item" data-nav="library" href="#/">${icon('library', 'nav-ic')}Browse</a>
+        ${bulkIngestActive ? `<a class="nav-item" data-nav="bulk-ingest" href="#/bulk-ingest">Adding recordings</a>` : ''}
+        <a class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate" data-nav="library" href="${homeHashUrl}">${esc(shelfTitle)}</a>
+        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('library', 'nav-ic')}Browse</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
         <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
         <!-- Collections was the ONE section with no actions on its header
@@ -2094,14 +2124,22 @@ const App = (() => {
   const loadArtistList = renderSidebar
 
   // ── Shared compact recording row (one line, all show info) ───────────────────
-  function flatRowHtml(r, showArtist) {
+  function flatRowHtml(r, showArtist, hasThumbs) {
     const date    = fmtDate(r.start_year, r.start_month, r.start_day)
     const loc     = fmtLocation(r.city, r.state, r.country)
     const quality = r.quality || ''
     const runtime = fmtRuntime(r.duration_sec)
     const inc     = r.is_complete ? '' : '<span class="rec-inc" title="Incomplete recording">inc</span>'
+    // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
+    // placeholder when the row has no image, matching the rule already
+    // applied above to the artist avatar column. `hasThumbs` (S10) is
+    // whether ANY row in this rendered list has an image -- reserving the
+    // column for a list where none of them do (a live-only library, most of
+    // them) costs every row 50px for nothing.
+    const thumb   = r.image_url ? `<img class="rec-thumb-sm" src="${esc(r.image_url)}" alt="" loading="lazy">` : '<span></span>'
     return `
-      <div class="rec-row rec-row--flat ${showArtist ? 'with-artist' : ''}" data-rec-id="${r.id}">
+      <div class="rec-row rec-row--flat ${showArtist ? 'with-artist' : ''}${hasThumbs ? ' has-thumbs' : ''}" data-rec-id="${r.id}">
+        ${hasThumbs ? thumb : ''}
         ${showArtist ? `<span class="rec-artist-cell truncate">${esc(r.artist || '')}</span>` : ''}
         <span class="rec-date truncate">${esc(date)}</span>
         <span class="rec-venue truncate">${esc(r.venue || '(unknown venue)')}</span>
@@ -2121,9 +2159,10 @@ const App = (() => {
   // Minimal header row paired with flatRowHtml's grid — every cell is blank
   // except "Added", which doubles as a click-to-sort toggle (default: unsorted,
   // i.e. whatever order the page already puts rows in).
-  function recTableHeadHtml(showArtist) {
+  function recTableHeadHtml(showArtist, hasThumbs) {
     return `
-      <div class="rec-table-head ${showArtist ? 'with-artist' : ''}">
+      <div class="rec-table-head ${showArtist ? 'with-artist' : ''}${hasThumbs ? ' has-thumbs' : ''}">
+        ${hasThumbs ? '<span></span>' : ''}
         ${showArtist ? '<span></span>' : ''}
         <!-- One blank cell per data column before "Added": date, venue, location,
              source, quality, runtime, tracks. The rating column was removed
@@ -2144,6 +2183,7 @@ const App = (() => {
     const btn  = head?.querySelector('.rec-th-added')
     const arrow = head?.querySelector('.rec-th-arrow')
     if (!mountEl || !btn) return
+    const hasThumbs = rows.some(r => r.image_url)
     let dir = null   // null = default order; 'asc' | 'desc' once clicked
     btn.addEventListener('click', () => {
       dir = dir === 'desc' ? 'asc' : 'desc'
@@ -2151,7 +2191,7 @@ const App = (() => {
         const av = a.created_at || '', bv = b.created_at || ''
         return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
       })
-      mountEl.innerHTML = sorted.map(r => flatRowHtml(r, showArtist)).join('')
+      mountEl.innerHTML = sorted.map(r => flatRowHtml(r, showArtist, hasThumbs)).join('')
       wireRecordingRows(mountEl)
       arrow.textContent = dir === 'asc' ? '▲' : '▼'
     })
@@ -3240,8 +3280,9 @@ const App = (() => {
     if (!rows.length) {
       return `<div class="empty-state" style="min-height:180px"><div class="empty-title">${esc(empty)}</div></div>`
     }
-    return recTableHeadHtml(showArtist)
-         + `<div class="rec-table" id="${mountId}">${rows.map(r => flatRowHtml(r, showArtist)).join('')}</div>`
+    const hasThumbs = rows.some(r => r.image_url)
+    return recTableHeadHtml(showArtist, hasThumbs)
+         + `<div class="rec-table" id="${mountId}">${rows.map(r => flatRowHtml(r, showArtist, hasThumbs)).join('')}</div>`
   }
 
   async function renderCollectionsIndex() {
@@ -3597,15 +3638,17 @@ const App = (() => {
         (x.start_year || 0) - (y.start_year || 0) ||
         (x.start_month || 0) - (y.start_month || 0) ||
         (x.start_day || 0) - (y.start_day || 0))
-      const rows = ordered.map(p =>
-        p.recordings.map(r => flatRowHtml({
+      const rowObjs = ordered.flatMap(p =>
+        p.recordings.map(r => ({
           id: r.id, artist: p.artist_name,
           start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
           venue: p.venue_name, city: p.city, state: p.state, country: p.country,
           source: r.source, quality: r.quality,
           is_complete: r.is_complete,
-          track_count: r.track_count, duration_sec: r.duration_sec,
-        }, false)).join('')).join('')
+          track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
+        })))
+      const hasThumbs = rowObjs.some(r => r.image_url)
+      const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
       if (!rows) return ''
       return `<div class="pp-group">
         <div class="pp-group-head"><a href="#/artist/${g.artist.id}">${esc(g.artist.name)}</a></div>
@@ -3634,15 +3677,17 @@ const App = (() => {
         (x.start_year || 0) - (y.start_year || 0) ||
         (x.start_month || 0) - (y.start_month || 0) ||
         (x.start_day || 0) - (y.start_day || 0))
-      const rows = ordered.map(ap =>
-        (ap.recordings || []).map(r => flatRowHtml({
+      const rowObjs = ordered.flatMap(ap =>
+        (ap.recordings || []).map(r => ({
           id: r.id, artist: g.artist_name,
           start_year: ap.start_year, start_month: ap.start_month, start_day: ap.start_day,
           venue: ap.venue_name, city: ap.city, state: ap.state, country: ap.country,
           source: r.source, quality: r.quality,
           is_complete: r.is_complete,
-          track_count: r.track_count, duration_sec: r.duration_sec,
-        }, false)).join('')).join('')
+          track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
+        })))
+      const hasThumbs = rowObjs.some(r => r.image_url)
+      const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
       if (!rows) return ''
       // "Guest" tag only when every appearance under this act name is
       // actually is_guest=True (2026-07-23 fix — this section is really "not
@@ -3795,6 +3840,12 @@ const App = (() => {
   // can't settle it but the real entry's releases and relationships can.
   function mbArtistUrl(mbid) {
     return mbid ? `https://musicbrainz.org/artist/${encodeURIComponent(mbid)}` : '#'
+  }
+
+  // Release lookup (Studio Records spec v1, chunk 3) -- same musicbrainz.org
+  // link-out pattern as mbArtistUrl, one path segment down.
+  function mbReleaseUrl(mbid) {
+    return mbid ? `https://musicbrainz.org/release/${encodeURIComponent(mbid)}` : '#'
   }
 
   // Defensive strip of citation markup in stored AI text. The real fix is
@@ -4669,11 +4720,17 @@ const App = (() => {
       return
     }
 
-    if (!allArtists.length) {
+    // Zero recordings: two lines and nothing else (Ryan, testing feedback).
+    // Hidden the instant a recording exists, and never shown while a Bulk
+    // Ingest run is in flight -- that has its own page at #/bulk-ingest, and
+    // showing this underneath it would read as two contradictory states.
+    const bulkIngestInFlight = state.bulkIngest
+      && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
+    if (!allArtists.length && !bulkIngestInFlight) {
       setMainHTML(`
         <div class="empty-state">
-            <div class="empty-title">No recordings yet</div>
-          <div class="empty-sub">Add a recording to get started</div>
+          <div class="empty-title">Click Add Recordings to begin importing music into your library.</div>
+          <div class="empty-sub">Trellis reads FLAC, MP3 and WAV. SHN files are converted to FLAC when you review them.</div>
         </div>`)
       return
     }
@@ -5416,7 +5473,7 @@ const App = (() => {
           </div>`
       } else {
         const msg = mb.status === 'ambiguous'
-          ? 'More than one act goes by this name — pick the right one.'
+          ? 'More than one act goes by this name, please pick the right one.'
           : mb.status === 'none'
             ? 'Nothing found for this name.'
             : 'Not looked up yet.'
@@ -5898,8 +5955,34 @@ const App = (() => {
       return
     }
     el.addEventListener('click', () => {
-      if (el.querySelector('input, textarea')) return   // already editing
+      if (el.querySelector('input, textarea, select')) return   // already editing
       const cur = opts.get()
+      // `options`: [[value, label], ...] -- a fixed-choice field (spec 7e's
+      // Studio/Live kind toggle) instead of free text. Same commit/Escape
+      // contract as the text path below, minus Tab-to-next (nothing in this
+      // codebase chains a select into another field yet).
+      if (opts.options) {
+        const field = document.createElement('select')
+        field.className = 'pp-inline-input'
+        field.innerHTML = opts.options.map(([v, label]) =>
+          `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(label)}</option>`).join('')
+        el.replaceChildren(field)
+        field.focus()
+        let doneSel = false
+        const commitSelect = async (save) => {
+          if (doneSel) return; doneSel = true
+          if (save) await opts.onSave(field.value)
+          else {
+            const shown = (opts.get() || '').trim()
+            el.textContent = shown || (opts.placeholder || '')
+            el.classList.toggle('pp-empty', !shown)
+          }
+        }
+        field.addEventListener('change', () => commitSelect(true))
+        field.addEventListener('blur', () => commitSelect(false))
+        field.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); commitSelect(false) } })
+        return
+      }
       const field = document.createElement(opts.multiline ? 'textarea' : 'input')
       field.className = 'pp-inline-input'
       field.value = cur
@@ -6528,14 +6611,47 @@ const App = (() => {
     //
     // Aligned with the Members/Guests rows above it — same .mg-row-label type
     // treatment and the same left edge, because it is the same kind of content.
-    const sourceLineageRow = (!qEditable && !rec.source && !rec.lineage && !rec.quality
-                              && !rec.source_tag && !rec.etree_shnid) ? '' : `
+    //
+    // Studio kind (Ryan, 2026-09-27): a studio release carries none of the
+    // tape paperwork above (no Source/Source tag/shnid/Lineage — those
+    // describe a taper's transfer chain, which a studio release doesn't
+    // have). It gets Rating plus a Release item instead, holding the same
+    // #rec-release mount renderReleaseBlock() already targets — moved up
+    // from the standalone pp-block below the header into this row so
+    // Release reads as one more fact in the row rather than its own box.
+    const isStudioKind = rec.kind === 'studio'
+    const releaseIsLinked = rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked'
+    // Admin-in-Admin-mode gets the interactive block (renderReleaseBlock, wired
+    // inside the canEdit section below); anyone else sees a linked release as
+    // static facts rendered here, since that wiring never runs for them.
+    const releaseAdmin = isAdmin() && canEdit
+    const showReleaseBlock = isStudioKind && (releaseAdmin || releaseIsLinked)
+    const releaseStaticHtml = (!releaseAdmin && releaseIsLinked) ? `
+            <div class="pp-mb-linked">
+              <a class="pp-mb-name" href="${esc(mbReleaseUrl(rec.mb_release_id))}" target="_blank" rel="noopener">${esc(
+                [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean).join(' · ') || rec.title || 'Release')} ↗</a>
+            </div>` : ''
+    const releaseItemHtml = showReleaseBlock ? `
+        <div class="rec-sl-item rec-sl-item--release">
+          <span class="mg-row-label">Release</span>
+          <div id="rec-release">${releaseStaticHtml}</div>
+        </div>` : ''
+    const discsItemHtml = rec.disc_count > 1 ? `
+        <div class="rec-sl-item">
+          <span class="mg-row-label">Discs</span>
+          <span class="hm-val">${esc(String(rec.disc_count))}</span>
+        </div>` : ''
+    const rowIsEmpty = isStudioKind
+      ? (!qEditable && !rec.quality && !showReleaseBlock)
+      : (!qEditable && !rec.source && !rec.lineage && !rec.quality
+         && !rec.source_tag && !rec.etree_shnid)
+    const sourceLineageRow = rowIsEmpty ? '' : `
       <div class="rec-sl-row">
         <div class="rec-sl-item rec-sl-item--quality">
           <span class="mg-row-label">Rating</span>
           <span class="hm-val hm-val--chip${qc}"${qa('quality')}><span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '\u2014')}</span></span>
         </div>
-        <div class="rec-sl-item">
+        ${!isStudioKind ? `<div class="rec-sl-item">
           <span class="mg-row-label">Source</span>
           <span class="hm-val hm-val--chip${qc}"${qa('source')}>${sourceBadge(rec.source) || '\u2014'}</span>
         </div>
@@ -6546,15 +6662,13 @@ const App = (() => {
         <div class="rec-sl-item">
           <span class="mg-row-label">shnid</span>
           <span class="hm-val mono${qc}"${qa('etree_shnid')}>${esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '\u2014')}</span>
-        </div>
-        ${rec.disc_count > 1 ? `<div class="rec-sl-item">
-          <span class="mg-row-label">Discs</span>
-          <span class="hm-val">${esc(String(rec.disc_count))}</span>
         </div>` : ''}
-        <div class="rec-sl-item rec-sl-item--lineage">
+        ${discsItemHtml}
+        ${!isStudioKind ? `<div class="rec-sl-item rec-sl-item--lineage">
           <span class="mg-row-label">Lineage</span>
           <span class="hm-val${qc}"${qa('lineage')}>${esc(lineageDisplay || rec.lineage || '\u2014')}</span>
-        </div>
+        </div>` : ''}
+        ${releaseItemHtml}
       </div>`
 
     // Re-Analyze Tracks now lives in the Side Panel's tab strip with every
@@ -6606,6 +6720,8 @@ const App = (() => {
             <button class="actions-item" role="menuitem" data-act="reveal">Open in Containing Folder</button>
             <button class="actions-item" role="menuitem" data-act="official">${
               rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>
+            <button class="actions-item" role="menuitem" data-act="kind">${
+              rec.kind === 'studio' ? 'Mark as Live Recording' : 'Mark as Studio Record'}</button>
             <!-- Move to — same two destinations as the triage queue's Move,
                  deliberately: Workshop and Backlog are the two real folders a
                  show goes back to, and having a different vocabulary before
@@ -6623,6 +6739,52 @@ const App = (() => {
           </div>
         </div>` : ''}
       </div>`
+
+    // Cover art (Studio Records spec v1, chunk 5) -- every kind, not
+    // studio-only (S9): step 13 ingests folder and embedded art for a live
+    // recording too, and a live show with taper art deserves the same
+    // header slot a studio release gets. Same slot/size treatment
+    // (.rec-header-avatar / 84px) as the artist avatar it sits beside.
+    function primaryRecordingImage() {
+      const imgs = rec.images || []
+      if (!imgs.length) return null
+      return imgs.find(i => i.is_primary) || imgs[0]
+    }
+    const showCoverSlot = !!(primaryRecordingImage() || (!rec.images && rec.image_url) || canEdit)
+    const coverBlockHtml = showCoverSlot ? `
+      <div class="rec-header-avatar rec-header-cover" id="rec-cover" role="button" tabindex="0"></div>` : ''
+
+    // Studio heading + sub-line (Ryan, 2026-09-27 — owner-approved design).
+    // The album title takes the h2 that a live recording gives the artist;
+    // the artist name drops down into the sub-line that a live recording
+    // spends on date/venue/location/event, none of which a studio release
+    // has. If the ALBUM tag never gave us a title, the heading falls back to
+    // exactly what a live recording shows (artist name, same id/wiring) —
+    // the sub-line still carries artist/year/track-count/length below it,
+    // since that information does not depend on having a title to put above it.
+    const studioTitleHtml = rec.title ? `
+          <div class="rec-name-row">
+            <h2 class="rec-perf-name rec-perf-name--album${canEdit ? ' pp-editable' : ''}" id="rec-title"${canEdit ? ' title="Click to edit"' : ''}>${esc(rec.title)}</h2>
+          </div>` : `
+          <div class="rec-name-row">
+            <h2 class="rec-perf-name${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</h2>
+            ${perfNavLink}
+          </div>`
+    const studioTrackCount = rec.tracks?.length || 0
+    const studioTrackCountStr = studioTrackCount
+      ? `${studioTrackCount} track${studioTrackCount === 1 ? '' : 's'}` : null
+    const studioTotalMinutes = Math.round((rec.tracks || []).reduce((sum, t) => sum + (t.duration || 0), 0) / 60)
+    const studioLengthStr = studioTotalMinutes > 0 ? `${studioTotalMinutes} min` : null
+    const studioYearStr = perf?.start_year ? String(perf.start_year) : null
+    const studioArtistHtml = rec.title
+      ? `<span class="rec-f rec-f-artist${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</span>${perfNavLink}`
+      : null
+    const studioSubParts = [studioArtistHtml, studioYearStr ? esc(studioYearStr) : null,
+      studioTrackCountStr ? esc(studioTrackCountStr) : null, studioLengthStr ? esc(studioLengthStr) : null].filter(Boolean)
+    const studioSubLineHtml = `
+          <div class="rec-date-line" id="rec-date-line">
+            ${studioSubParts.join('<span class="rec-dot">·</span>')}
+          </div>`
 
     setMainHTML(`
       <div class="rec-view-shell">
@@ -6654,14 +6816,17 @@ const App = (() => {
                is the NORMAL appearance rather than an error state (62 of 173
                artists are photographed). Ringed in the artist's genre
                colour, matching the card treatment. -->
-          <div class="rec-header-avatar" style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}">
+          ${coverBlockHtml}
+          ${!isStudioKind ? `<div class="rec-header-avatar" style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}">
             ${perfPhotoHtml({ image_id: perf?.artist_image_id, artist: perfName }, 'rec-header-photo')}
-          </div>
+          </div>` : ''}
           <div class="rec-header-lines">
+          ${isStudioKind ? studioTitleHtml : `
           <div class="rec-name-row">
             <h2 class="rec-perf-name${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</h2>
             ${perfNavLink}
-          </div>
+          </div>`}
+          ${isStudioKind ? studioSubLineHtml : `
           <div class="rec-date-line" id="rec-date-line">
             <span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>
             <span class="rec-dot">·</span>
@@ -6672,7 +6837,7 @@ const App = (() => {
             ${canEdit
               ? `<span class="rec-dot">·</span><span class="rec-f rec-f-event pp-editable${eventStr ? '' : ' pp-empty'}" id="rec-f-event" title="Click to set the festival/event this show is part of">${eventStr ? esc(eventStr) : 'Add event'}</span>`
               : (eventStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(eventStr)}</span>` : '')}
-          </div>
+          </div>`}
           <div class="rec-musicians-row" id="rec-musicians"></div>
           ${sourceLineageRow}
           ${(rec.is_official || rec.is_published === false) ? `<div class="badge-row">
@@ -6694,14 +6859,15 @@ const App = (() => {
         </div>
         </div>
       </div>
+      <div class="rec-photos-wrap hidden" id="rec-photos-wrap"><div id="rec-photos"></div></div>
       <div class="action-bar">
         <!-- Playback actions only — editing/admin actions live at the bottom -->
         <button class="btn btn-ghost btn-sm" id="btn-play-all">Play All</button>
-        <label class="skip-toggle skip-toggle--action" title="Skip announcements, banter &amp; tuning from queue">
+        ${!isStudioKind ? `<label class="skip-toggle skip-toggle--action" title="Skip announcements, banter &amp; tuning from queue">
           <input type="checkbox" class="skip-filter-cb" id="skip-filter-action" ${state.skipNonMusic ? 'checked' : ''} />
           <span class="skip-toggle-track"></span>
           <span class="skip-toggle-label">Skip Non-Music</span>
-        </label>
+        </label>` : ''}
       </div>
       <div class="detail-panels" id="detail-panels">
         <div class="track-panel" id="track-panel">
@@ -7338,6 +7504,196 @@ const App = (() => {
         },
       })
 
+      // Album title (studio kind, Ryan, 2026-09-27) — no-ops when #rec-title
+      // isn't on the page (live, or a studio recording with no title yet).
+      // Reloads on save rather than patching in place: clearing the title
+      // out swaps the whole heading/sub-line back to the live-style fallback,
+      // which is a different element (id and all), not a text swap.
+      makeInlineEditable(document.getElementById('rec-title'), {
+        get: () => rec.title || '',
+        onSave: async v => {
+          v = v.trim()
+          try { await API.recordings.update(recordingId, { title: v, change_note: 'Quick edit' }) }
+          catch (e) { alert('Failed: ' + e.message) }
+          rec.title = v
+          renderRecordingView(recordingId)
+        },
+      })
+
+      // ── Cover art (Studio Records spec v1, chunk 5) ─────────────────────
+      // Same size/slot as the artist avatar beside it (.rec-header-avatar,
+      // 84px). Clicking it opens the shared gallery in a collapsible panel
+      // beneath the header rather than a tab, since this page has no tab
+      // strip of its own. "Cover" (S7) is used only as the <img>'s alt text.
+      let recGallery = null
+      function renderCoverSlot() {
+        const el = document.getElementById('rec-cover')
+        if (!el) return
+        const primary = primaryRecordingImage()
+        if (primary) {
+          el.innerHTML = `<img class="rec-header-photo" src="${esc(API.recordings.imageUrl(primary.id))}" alt="Cover">`
+        } else if (!rec.images && rec.image_url) {
+          // Peer context (S9): the share door's recording_detail payload
+          // carries image_url but not the id-keyed images array ("artwork
+          // follows the recording"), so render straight from that url
+          // rather than needing an id renderCoverSlot has no way to get.
+          el.innerHTML = `<img class="rec-header-photo" src="${esc(rec.image_url)}" alt="Cover">`
+        } else if (canEdit) {
+          el.innerHTML = `<div class="rec-header-photo rec-header-photo--initials rec-cover-empty">+</div>`
+        }
+      }
+      renderCoverSlot()
+      document.getElementById('rec-cover')?.addEventListener('click', () => {
+        const wrap = document.getElementById('rec-photos-wrap')
+        if (!wrap) return
+        const opening = wrap.classList.contains('hidden')
+        wrap.classList.toggle('hidden')
+        if (opening && !recGallery) {
+          recGallery = createPhotoGallery({
+            mountId: 'rec-photos', api: API.recordings, entityId: recordingId,
+            images: rec.images || [],
+            onChange: imgs => { rec.images = imgs; renderCoverSlot() },
+          })
+        }
+      })
+      document.getElementById('rec-cover')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click() }
+      })
+
+      // ── Release block (Studio Records spec v1, chunk 3) ─────────────────
+      // Same .pp-mb-* styling and state machine as the Artist page's
+      // MusicBrainz block: matched (confidence gate chose it, no human
+      // involved), linked (a human picked it), ambiguous/none/null (nothing
+      // to show yet). "Matched automatically" / "Linked by you" are the
+      // exact strings that block already renders — reused verbatim (S2/S3).
+      function releaseFactsLine() {
+        // Label, catalog number, country only (Ryan, 2026-09-27) — title and
+        // year are the header's job now, one row up, so this stopped
+        // repeating them. Falls back to the title only when none of the
+        // three release-specific facts are known.
+        const facts = [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean)
+        return facts.length ? facts.join(' · ') : (rec.title || '')
+      }
+      function renderReleaseBlock() {
+        const box = document.getElementById('rec-release')
+        if (!box) return
+        // canEditLibrary() on every mutating control (S7) -- an admin in
+        // Playback mode, or on a remote library, must not see Unlink/Find
+        // release any more than any other edit control on this page.
+        const admin = isAdmin() && canEdit
+        if (rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked') {
+          const how = rec.mb_release_status === 'matched' ? 'Matched automatically' : 'Linked by you'
+          box.innerHTML = `
+            <div class="pp-mb-linked">
+              <a class="pp-mb-name" href="${esc(mbReleaseUrl(rec.mb_release_id))}"
+                 target="_blank" rel="noopener"
+                 title="View this release on musicbrainz.org">${esc(releaseFactsLine() || rec.title || 'Release')} ↗</a>
+            </div>
+            <div class="pp-mb-foot">
+              <span class="pp-mb-dot"></span>${how}
+              ${admin ? `<button type="button" class="btn btn-ghost btn-xs" id="rec-release-unlink">Unlink</button>` : ''}
+            </div>`
+        } else if (admin) {
+          // 'unlinked' (a human explicitly removed a link) is not "never
+          // looked up" -- rendering it that way claims something that never
+          // happened (N1). No status text for it at all, just the action.
+          const msg = rec.mb_release_status === 'ambiguous'
+            ? 'More than one release matches this recording, please pick the right one.'
+            : rec.mb_release_status === 'none'
+              ? 'Nothing found for this recording.'
+              : (rec.mb_release_status === 'unlinked' || rec.mb_release_status === 'error')
+                ? ''
+                : 'Not looked up yet.'
+          box.innerHTML = `
+            ${msg ? `<div class="pp-mb-empty">${msg}</div>` : ''}
+            <button type="button" class="btn btn-primary btn-xs" id="rec-release-find">Find release</button>`
+        } else {
+          box.innerHTML = ''
+        }
+        document.getElementById('rec-release-unlink')?.addEventListener('click', async () => {
+          try {
+            await API.recordings.releaseUnlink(recordingId)
+            rec.mb_release_status    = 'unlinked'
+            rec.mb_release_id        = null
+            rec.mb_release_group_id  = null
+            rec.mb_release_type      = null
+            rec.mb_label             = null
+            rec.mb_catalog_number    = null
+            rec.mb_release_country   = null
+            renderReleaseBlock()
+          } catch (e) { alert('Failed: ' + e.message) }
+        })
+        document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
+      }
+
+      async function openReleasePicker() {
+        const box = document.getElementById('rec-release')
+        if (!box) return
+        box.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
+        let res
+        try { res = await API.recordings.releaseCandidates(recordingId) }
+        catch (e) {
+          box.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message)}
+            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-find">Try again</button></div>`
+          document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
+          return
+        }
+        renderReleaseCandidates(res.candidates || [])
+      }
+
+      function renderReleaseCandidates(cands) {
+        const box = document.getElementById('rec-release')
+        if (!box) return
+        if (!cands.length) {
+          box.innerHTML = `
+            <div class="pp-mb-empty">Nothing found for “${esc(rec.title || '')}”.</div>
+            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-find">Try again</button>`
+          document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
+          return
+        }
+        box.innerHTML = `
+          <div class="pp-mb-prompt">Click the right release to link it${
+            cands.length === 1 ? '' : ' — more than one matches'}.</div>
+          <div class="pp-mb-cands">
+            ${cands.map(c => `
+              <div class="pp-mb-cand" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
+                <span class="pp-mb-cand-name">${esc(c.title || '')}</span>
+                <span class="pp-mb-cand-meta">${[
+                  c.label, c.catalog_number, c.country, c.date,
+                ].filter(Boolean).map(esc).join(' · ')}</span>
+                <span class="pp-mb-cand-score" title="MusicBrainz match score">${c.score ?? ''}</span>
+                <a class="pp-mb-cand-view" href="${esc(mbReleaseUrl(c.mbid))}"
+                   target="_blank" rel="noopener" title="Open on musicbrainz.org">View ↗</a>
+              </div>`).join('')}
+          </div>
+          <div class="pp-mb-foot">
+            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-cancel">Cancel</button>
+          </div>`
+        box.querySelectorAll('.pp-mb-cand').forEach(btn => {
+          btn.addEventListener('click', async e => {
+            if (e.target.closest('.pp-mb-cand-view')) return
+            box.innerHTML = `<div class="pp-mb-empty">Fetching…</div>`
+            try {
+              const res = await API.recordings.releaseLink(recordingId, btn.dataset.mbid)
+              rec.mb_release_status   = res.status
+              rec.mb_release_id       = res.mb_release_id
+              rec.mb_release_group_id = res.mb_release_group_id
+              rec.mb_release_type     = res.mb_release_type
+              rec.mb_label            = res.mb_label
+              rec.mb_catalog_number   = res.mb_catalog_number
+              rec.mb_release_country  = res.mb_release_country
+              renderReleaseBlock()
+            } catch (e) { alert('Failed: ' + e.message); renderReleaseBlock() }
+          })
+          btn.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click() }
+          })
+        })
+        document.getElementById('rec-release-cancel').addEventListener('click', renderReleaseBlock)
+      }
+
+      if (showReleaseBlock) renderReleaseBlock()
+
       // ── Info File: locked → Edit File → Save to File ────────────────────
       // Replaces the old always-hot textarea that autosaved on blur (see the
       // infoContent comment for why). Three states:
@@ -7912,6 +8268,13 @@ const App = (() => {
         // place, the other is a step towards a second choice. The rest either
         // navigate or open a dialog, so there is nothing left to look at.
         if (act === 'official') return actToggleOfficial(item)
+        if (act === 'kind') {
+          setOpen(false)
+          const nextKind = rec.kind === 'studio' ? 'live' : 'studio'
+          try { await API.recordings.update(recordingId, { kind: nextKind, change_note: 'Quick edit' }) }
+          catch (e) { alert('Failed: ' + e.message) }
+          return renderRecordingView(recordingId)
+        }
         if (act === 'move-toggle') {
           const sub = document.getElementById('rec-move-sub')
           if (!sub) return
@@ -8213,6 +8576,7 @@ const App = (() => {
                          // through Listening Quality first).
     ingestedIds: new Map(), // path → recording_id for items ingested this session
     expandedPaths: new Set(), // expanded row paths
+    reviewFilter: false,      // header "Needs Review"/"Show all" toggle (2026-09-27)
   }
 
   async function renderBatchImportView() {
@@ -8268,103 +8632,59 @@ const App = (() => {
   }
 
   // Render a single compact row — score-driven only; no tier dots/border.
-  function _batchRow(item) {
-    const e       = item.extracted
-    const conf    = item.confidence
-    const health  = item.health || { score: 0, band: 'red' }
+  // Normalizes one Bulk Import scan item into the shared ingest-queue-table
+  // row shape (see the component doc comment near ingestQueueTable/_iqRow).
+  function _batchBuildIqRow(item) {
+    const e = item.extracted
+    const health = item.health || { score: 0, band: 'red' }
     const ingestedId = batch.ingestedIds.get(item.path)
-    const ingested   = ingestedId != null
-    const expanded = batch.expandedPaths.has(item.path)
-    const dateStr  = _batchDateStr(e)
-    const loc      = [e.city, e.state].filter(Boolean).join(', ')
+    const ingested = ingestedId != null
+    const dateStr = _batchDateStr(e)
+    const loc = [e.city, e.state].filter(Boolean).join(', ')
+    const metaParts = [e.artist, dateStr, e.venue || loc].filter(Boolean).map(esc)
+    const meta = metaParts.length ? metaParts.join('<span class="sep">·</span>') : ''
 
-    // Issue chips
-    const issueChips = item.issues.map(iss =>
-      `<span class="batch-issue-${iss.severity}">${esc(iss.msg)}</span>`
-    ).join('')
+    const reviewIssues = []
+    if (!e.artist) reviewIssues.push('No artist found')
+    if (!dateStr) reviewIssues.push('No date found')
+    const reviewReason = reviewIssues[0] || null
+    const needsReview = !!reviewReason
 
-    // Action buttons — every uningested row gets both: Auto-Ingest (trust the
-    // bot) or Review (open the full wizard, pre-scanned), regardless of score.
-    let actionBtn = ''
-    if (ingested) {
-      actionBtn = `<span class="batch-done-check">Ingested</span>
-                   <a class="batch-rec-link" href="#/recording/${ingestedId}">View →</a>`
-    } else {
-      actionBtn = `<button class="btn btn-primary btn-sm batch-ingest-btn" data-path="${esc(item.path)}">Auto-Ingest</button>
-                   <button class="btn btn-ghost btn-sm batch-review-btn" data-path="${esc(item.path)}">Review →</button>`
-    }
-
-    // Full inferred per-track listing — exactly what Auto-Ingest would write,
-    // so a person can eyeball the setlist before deciding Review vs Auto-Ingest.
     const trackRows = (e.tracks || []).map(t => `
-      <div class="batch-track-row">
-        <span class="batch-track-num">${t.number}</span>
-        <span class="batch-track-title ${!t.title ? 'batch-val-uncertain' : ''}">${esc(t.title || '(no title)')}</span>
-        <span class="batch-track-src">${t.source ? (t.source === 'tags' ? 'tag' : 'info file') : ''}</span>
+      <div class="iq-tracklist-row">
+        <span class="iq-tracklist-num">${t.number}</span>
+        <span class="iq-tracklist-title">${esc(t.title || '(no title)')}</span>
       </div>`).join('')
+    const issuesHtml = (item.issues || []).length
+      ? item.issues.map(iss => `<span class="batch-issue-${esc(iss.severity)}">${esc(iss.msg)}</span>`).join(' ') : ''
 
-    // Expanded detail panel — the full inferred data for every field, so a
-    // person can decide whether to trust Auto-Ingest or hand-review.
-    const detail = expanded ? `
-      <div class="batch-expand-panel">
-        <div class="batch-expand-grid">
-          <div class="batch-expand-row"><span class="batch-expand-label">Artist</span><span class="batch-expand-val ${conf.artist !== 'high' ? 'batch-val-uncertain' : ''}">${esc(e.artist || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Date</span><span class="batch-expand-val ${conf.date !== 'high' ? 'batch-val-uncertain' : ''}">${esc(dateStr || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Venue</span><span class="batch-expand-val">${esc(e.venue || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Location</span><span class="batch-expand-val">${esc(loc || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Country</span><span class="batch-expand-val">${esc(e.country || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Source</span><span class="batch-expand-val">${esc(e.source || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Lineage</span><span class="batch-expand-val">${esc(e.lineage || '—')}</span></div>
-          <div class="batch-expand-row"><span class="batch-expand-label">Tracks</span><span class="batch-expand-val">${(() => {
-            const audio = e.track_count
-            const tagged = e.tracks_titled
-            const infoCount = e.info_track_count || 0
-            const tagLine = tagged > 0 ? `${tagged}/${audio} titled in tags` : `0 titled in tags`
-            if (infoCount > 0) {
-              const match = infoCount === audio
-                            const matchCls  = match ? '' : 'batch-val-uncertain'
-              return `${audio} audio · ${tagLine} · <span class="${matchCls}">${infoCount} in info file${match ? '' : ', count mismatch'}</span>`
-            }
-            return `${audio} audio · ${tagLine} · no info file track list`
-          })()}</span></div>
-          ${trackRows ? `
-          <div class="batch-expand-row batch-expand-tracklist"><span class="batch-expand-label">Listing</span><div class="batch-track-list">${trackRows}</div></div>` : ''}
-          ${issueChips ? `
-          <div class="batch-expand-row"><span class="batch-expand-label">Issues</span><span class="batch-expand-val">${issueChips}</span></div>` : ''}
-          <div class="batch-expand-row"><span class="batch-expand-label">Path</span><span class="batch-expand-val batch-path-mono">${esc(item.path)}</span></div>
-        </div>
-      </div>` : ''
-
-    // Summary line for collapsed state
-    const summaryParts = [e.artist || '?', dateStr || '?']
-    if (e.venue) summaryParts.push(e.venue)
-    else if (loc) summaryParts.push(loc)
-    summaryParts.push(`${item.audio_count} tracks`)
-
-    return `
-      <div class="batch-item-row ${ingested ? 'batch-item-ingested' : ''}"
-           data-path="${esc(item.path)}">
-        <div class="batch-item-main">
-          <button class="batch-expand-btn" data-path="${esc(item.path)}" title="${expanded ? 'Collapse' : 'Expand'}">
-            ${chevronIcon(expanded ? 'caret-ic--open' : '')}
-          </button>
-          <div class="batch-item-info">
-            <div class="batch-item-name">${esc(item.name)}</div>
-            <div class="batch-item-summary">
-              ${summaryParts.map(p => `<span class="batch-meta-field">${esc(p)}</span>`).join('<span class="batch-meta-sep">·</span>')}
-            </div>
-          </div>
-          <span class="batch-score batch-score--${health.band}" title="Metadata Completeness">${esc(_metaRating(health))}</span>
-          <div class="batch-item-actions">
-            <span class="batch-ingest-status" id="batch-status-${item.path.replace(/[^a-zA-Z0-9]/g,'_')}"></span>
-            ${actionBtn}
-          </div>
-        </div>
-        ${detail}
-      </div>`
+    return {
+      id: item.path,
+      name: item.name,
+      meta,
+      format: e.format || null,
+      kind: e.kind || null,
+      sound_band: null,
+      meta_band: health.band || null,
+      needs_review: needsReview,
+      review_reason: reviewReason,
+      review_issues: reviewIssues,
+      status: ingested ? 'ingested' : 'review',
+      recording_id: ingested ? ingestedId : null,
+      status_text: null,
+      detail: {
+        artist: e.artist || null, date: dateStr || null, venue: e.venue || null,
+        location: loc || e.country || null,
+        source: e.source || null, lineage: e.lineage || null,
+        tracksText: item.audio_count != null ? `${item.audio_count} track${item.audio_count === 1 ? '' : 's'}` : null,
+        trackListing: trackRows || null, issuesHtml,
+        path: item.path,
+      },
+    }
   }
 
   async function renderBatchResultsView() {
+
     setNavCurrent('Batch Import')
     const r = batch.results
     if (!r) { window.location.hash = '#/ingest'; return }
@@ -8388,7 +8708,7 @@ const App = (() => {
     const tierPill = (label, count, cls) => count > 0
       ? `<span class="batch-tier-pill batch-tier-${cls}">${count} ${label}</span>` : ''
 
-    const allRows = items.map(item => _batchRow(item)).join('')
+    const iqRows = items.map(item => _batchBuildIqRow(item))
 
     // Auto-Ingest All covers green + yellow — yellows are frequently good
     // enough to trust (Ryan, 2026-07-16: "the user may be just fine with
@@ -8397,6 +8717,16 @@ const App = (() => {
     // library.
     const autoIngestPending = items.filter(i =>
       (i.tier === 'green' || i.tier === 'yellow') && !batch.ingestedIds.has(i.path))
+
+    const tableBody = ingestQueueTable({
+      rows: iqRows,
+      soundQuality: false,
+      canIngest: true,
+      moveTargets: [],
+      filterReview: batch.reviewFilter,
+      isOpen: row => batch.expandedPaths.has(row.id),
+    })
+    const nReview = iqRows.filter(r => r.needs_review && r.status !== 'ingested').length
 
     setMainHTML(`
       <div class="batch-shell">
@@ -8418,12 +8748,15 @@ const App = (() => {
                  </button>`
               : ''}
             <span class="batch-tier-pill batch-tier-total">${items.length} total</span>
+            ${nReview > 0 || batch.reviewFilter
+              ? `<button class="btn btn-sm${batch.reviewFilter ? ' btn-ghost' : ' btn-primary'}" id="batch-review-toggle" style="margin-left:8px">${
+                  batch.reviewFilter ? 'Show all' : 'Needs Review'}</button>` : ''}
           </div>
           <div class="setbar" style="margin-top:10px">
             <span id="batch-fh-strip"></span>
           </div>
         </div>
-        <div class="batch-list">${allRows}</div>
+        <div class="lq-cards lq-cards--compact" id="batch-table">${tableBody}</div>
         ${items.length === 0 ? `<div class="empty-state">No accepted recordings to review. <a href="#/ingest">Back to Listening Quality</a></div>` : ''}
       </div>`)
 
@@ -8441,6 +8774,10 @@ const App = (() => {
     _wireFhStrip('batch-fh-strip')
 
     // Ingest All Green + Yellow — red stays manual (missing artist/date entirely).
+    document.getElementById('batch-review-toggle')?.addEventListener('click', () => {
+      batch.reviewFilter = !batch.reviewFilter
+      renderBatchResultsView()
+    })
     document.getElementById('batch-ingest-all-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('batch-ingest-all-btn')
       const pending = items.filter(i =>
@@ -8456,7 +8793,7 @@ const App = (() => {
         const sid = 'batch-status-' + item.path.replace(/[^a-zA-Z0-9]/g,'_')
         const statusEl = document.getElementById(sid)
         if (statusEl) statusEl.textContent = '⏳'
-        const rowBtn = mainContent.querySelector(`.batch-ingest-btn[data-path="${CSS.escape(item.path)}"]`)
+        const rowBtn = mainContent.querySelector(`.lq-act--ingest[data-path="${CSS.escape(item.path)}"]`)
         if (rowBtn) { rowBtn.disabled = true; rowBtn.textContent = '⏳' }
 
         try {
@@ -8477,52 +8814,31 @@ const App = (() => {
       loadArtistList()  // refresh sidebar — new artists/counts from this run
     })
 
-    // Expand/collapse
-    mainContent.querySelectorAll('.batch-expand-btn').forEach(btn => {
-      btn.addEventListener('click', (ev) => {
-        ev.stopPropagation()
-        const path = btn.dataset.path
-        if (batch.expandedPaths.has(path)) batch.expandedPaths.delete(path)
-        else batch.expandedPaths.add(path)
-        renderBatchResultsView()
-      })
-    })
-
-    // Auto-Ingest — available on every row now, regardless of score
-    mainContent.querySelectorAll('.batch-ingest-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const path = btn.dataset.path
-        const item = r.items.find(i => i.path === path)
+    // Ingest / Review / expand, through the shared table's delegated wiring
+    // -- Auto-Ingest and Review are still the only two actions a batch row
+    // offers (no Move: Bulk Import never had a Backlog/Working destination).
+    wireIngestQueueTable(document.getElementById('batch-table'), id => r.items.find(i => i.path === id), {
+      onIngest: async row => {
+        const item = r.items.find(i => i.path === row.id)
         if (!item) return
-        btn.disabled = true
-        btn.textContent = '⏳ Ingesting…'
         try {
           const recId = await _batchIngestOne(item)
-          batch.ingestedIds.set(path, recId)
-          renderBatchResultsView()  // re-render only on success (shows ✓ Ingested + View →)
-          loadArtistList()          // refresh sidebar — may be a new artist
+          batch.ingestedIds.set(row.id, recId)
+          renderBatchResultsView()
+          loadArtistList()
         } catch (err) {
-          btn.disabled = false
-          btn.textContent = 'Auto-Ingest'
-          const msg = err.message || 'Unknown error'
-          // Show inline (ID now uses raw path — no esc() mismatch)
-          const sid = 'batch-status-' + path.replace(/[^a-zA-Z0-9]/g,'_')
-          const el  = document.getElementById(sid)
-          if (el) el.textContent = msg
-          // Always alert as fallback so errors are never silently swallowed
-          else alert('Ingest failed: ' + msg)
-          console.error('Ingest failed:', err)
+          alert('Ingest failed: ' + (err.message || 'Unknown error'))
         }
-      })
-    })
-
-    // Review (any tier): open the same wizard used by Add Recording, pre-scanned
-    mainContent.querySelectorAll('.batch-review-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const path = btn.dataset.path
-        const item = r.items.find(i => i.path === path)
+      },
+      onReview: row => {
+        const item = r.items.find(i => i.path === row.id)
         if (item) _batchOpenReview(item)
-      })
+      },
+      onToggleExpand: row => {
+        if (batch.expandedPaths.has(row.id)) batch.expandedPaths.delete(row.id)
+        else batch.expandedPaths.add(row.id)
+        renderBatchResultsView()
+      },
     })
   }
 
@@ -8567,7 +8883,7 @@ const App = (() => {
   // sees step='review' + non-null scan and doesn't wipe everything.
   async function _batchOpenReview(item) {
     // Show loading on the button while we scan
-    const btn = mainContent.querySelector(`.batch-review-btn[data-path="${CSS.escape(item.path)}"]`)
+    const btn = mainContent.querySelector(`.lq-act--review[data-path="${CSS.escape(item.path)}"]`)
     if (btn) { btn.disabled = true; btn.textContent = '⏳' }
 
     try {
@@ -8689,6 +9005,7 @@ const App = (() => {
     // about whether a row is open. Replaced the old `expanded` Map when the
     // card and the row became one thing (2026-08-28).
     compactOpen: new Map(),
+    reviewFilter: false,  // header "Review"/"Show all" toggle (2026-09-27)
     // Per-row bulk-run state (Ryan, 2026-08-28). Until now the ONLY per-row
     // feedback during a queue run was the row vanishing when it finished, and
     // a run-note sentence above the list naming one show — so seventeen rows
@@ -9118,6 +9435,7 @@ const App = (() => {
                   title="${atRoot ? 'This is the top of your download folder'
                                   : 'Up one folder'}">${icon('arrow-left', 'lq-browse-ic')} Up</button>
           <span class="lq-nav-here" title="${esc(j.path)}">${esc(shown)}</span>
+          ${canEditLibrary() ? '<button class="btn btn-ghost btn-sm" data-ingest>My library folder</button>' : ''}
         </div>
         <div class="lq-dirs-head">
           <span class="lq-dirs-head-sp"></span>
@@ -9170,6 +9488,17 @@ const App = (() => {
 
     pickerEl.addEventListener('click', e => {
       if (e.target.closest('#lq-browse')) { browseNative(); return }
+      // S15 "My library folder" (spec 7c) — a third source alongside the
+      // folder navigator and native Browse: start (or rejoin) Bulk Ingest
+      // over LIBRARY_ROOT and hand off to its own page. bulkIngest.start()
+      // returns the already-active run untouched when one exists, so this
+      // is exactly as safe to click mid-run as it is on a fresh library.
+      if (e.target.closest('[data-ingest]')) {
+        API.bulkIngest.start().catch(() => {}).finally(() => {
+          window.location.hash = '#/bulk-ingest'
+        })
+        return
+      }
       const expand = e.target.closest('[data-expand]')
       if (expand) { toggleExpand(expand); return }
       const go  = e.target.closest('[data-go]')
@@ -9306,7 +9635,7 @@ const App = (() => {
   //     successfully but returned no rows left the whole page on "Analysing…"
   //     forever. That is reachable whenever the scanned directory isn't the one
   //     the rows were first recorded under (fixed server-side in
-  //     _adopt_into_scan) and whenever a folder is already an ingested
+  //     _reuse_into_scan) and whenever a folder is already an ingested
   //     Recording (reported separately as `ingested`).
   function _mergeAnalysisRows(results, ingested) {
     const byPath = new Map(results.map(r => [r.folder_path, r]))
@@ -9550,170 +9879,6 @@ const App = (() => {
             e.day ? String(e.day).padStart(2, '0') : null].filter(Boolean).join('-')
   }
 
-  // ── Metadata Completeness panel ───────────────────────────────────────────
-  // The Metadata Completeness tab body: the values the scan CONFIDENTLY infers,
-  // one row per field the completeness score actually counts. Showing all nine
-  // scored fields (Ryan, 2026-08-02) rather than a curated subset — a panel
-  // that omitted a scored field could not explain its own number, and City /
-  // State / Country stay separate rows because that is how they are scored.
-  //
-  // The question this panel answers at a glance is "will I have to type?", so
-  // every row is either a value or an explicit "Missing", never a blank.
-  // Artist and Date lead but are rendered separately below — Artist
-  // because it heads the list, Date because it is graded by precision rather
-  // than presence. Everything after them is a plain presence check.
-  const _META_FIELDS = [
-    ['venue',   'Venue'],
-    ['city',    'City'],
-    ['state',   'State'],
-    ['country', 'Country'],
-    ['source',  'Source'],
-    ['lineage', 'Lineage'],
-  ]
-
-  function _metaRow(label, value, state, note) {
-    // state: 'ok' | 'part' | 'missing' — drives the dot and the value colour.
-    const cls = state === 'ok' ? 'ok' : state === 'part' ? 'part' : 'missing'
-    return `<div class="lq-meta-row lq-meta-row--${cls}">
-      <span class="lq-meta-dot"></span>
-      <span class="lq-meta-k">${esc(label)}</span>
-      <span class="lq-meta-v">${value ? esc(value) : 'Missing'}</span>
-      <span class="lq-meta-n">${esc(note || '')}</span>
-    </div>`
-  }
-
-  function _lqMetaPanel(row) {
-    const x = row.extracted, h = row.health
-    if (!x) {
-      return `<div class="lq-meta">
-        <div class="lq-meta-note">No metadata could be read from this folder.</div>
-      </div>`
-    }
-
-    // Date is graded by PRECISION, not mere presence — same as the score. A
-    // year-only date is real information but still costs a field, and the panel
-    // has to say so or the number looks wrong.
-    const prec = h?.date_precision
-    const dateStr = _lqDateStr(x) || ''
-    const dateState = prec === 3 ? 'ok' : prec > 0 ? 'part' : 'missing'
-    const dateNote  = prec === 3 ? '' : prec === 2 ? 'no day' : prec === 1 ? 'year only' : ''
-
-    const fields = _META_FIELDS.map(([k, label]) =>
-      _metaRow(label, x[k], x[k] ? 'ok' : 'missing')).join('')
-
-    // Track titles: N fields, one per audio file. "Real" excludes placeholders
-    // ("Track 01", "d1t02", bare numbers) — see app/utils/health.py.
-    const named = h?.tracks_named, tot = h?.tracks_total
-    const trkState = !tot ? 'missing' : named === tot ? 'ok' : named ? 'part' : 'missing'
-    const trkVal = tot ? `${named} of ${tot} named` : 'No audio tracks'
-    const trkNote = tot && named < tot
-      ? `${tot - named} placeholder${tot - named === 1 ? '' : 's'}` : ''
-
-    // The actual titles, not just the count (Ryan, 2026-08-02). "16 of 16"
-    // says the fields are populated; it says nothing about whether they are
-    // populated WELL. "Jam >" and "Unknown > Truckin'" both count as real
-    // titles and both want a human look, which a ratio can never show.
-    // Placeholders are flagged individually so the eye goes straight to them.
-    const titles = (x.track_titles || [])
-    const titleList = titles.length ? `
-      <div class="lq-titles">
-        <div class="lq-titles-head">Inferred track titles</div>
-        <ol class="lq-titles-list">
-          ${titles.map(t => `<li class="${t.real ? '' : 'ph'}">${
-            esc(t.title || '—')}${t.real ? '' : '<span class="lq-ph-tag">placeholder</span>'}</li>`).join('')}
-        </ol>
-      </div>` : ''
-
-    const factors = (h?.factors || []).length
-      ? `<div class="lq-meta-gaps">${h.factors.map(f =>
-          `<span>${esc(f.msg)}</span>`).join('')}</div>` : ''
-
-    return `<div class="lq-meta">
-      <div class="lq-meta-note">Values the scan proposes from the FLAC tags and the
-        info file. Anything marked Missing is metadata you will need to supply.</div>
-      <div class="lq-meta-grid">
-        ${_metaRow('Artist', x.artist, x.artist ? 'ok' : 'missing')}
-        ${_metaRow('Date', dateStr, dateState, dateNote)}
-        ${fields}
-        ${_metaRow('Track Titles', trkVal, trkState, trkNote)}
-      </div>
-      ${titleList}
-      ${factors}
-    </div>`
-  }
-
-  // ── Fingerprints panel ─────────────────────────────────────────────────────
-  // Third tab (Ryan, 2026-08-02). A checksum is the only hard evidence on this
-  // card — every other reading is an estimate, this one either matches or it
-  // does not. Worth knowing BEFORE ingest, which is when a damaged tape is
-  // cheapest to reject.
-  //
-  // FFP/ST5 verify against the FLAC's own STREAMINFO signature (a header read,
-  // free) and are done during triage. MD5 hashes whole files, so it waits for
-  // an explicit click — see CHEAP_FP_TYPES in app/utils/checksums.py.
-  const _FP_VERDICT = {
-    verified:   { text: 'Verified',    cls: 'green'  },
-    partial:    { text: 'Partial',     cls: 'yellow' },
-    unverified: { text: 'Unverified',  cls: 'yellow' },
-    mismatch:   { text: 'Failed',      cls: 'red'    },
-    none:       { text: 'None',        cls: 'unknown' },
-  }
-  const _FP_STATUS_CLS = { match: 'ok', mismatch: 'bad', pending: 'pend',
-                           unmatched: 'pend', unverified: 'pend' }
-  const _FP_STATUS_TXT = { match: 'verified', mismatch: 'MISMATCH',
-                           pending: 'awaiting deep check', unmatched: 'no checksum listed',
-                           unverified: 'could not verify' }
-
-  function _lqFpPanel(row) {
-    const fp = row.fingerprints
-    if (!fp) return `<div class="lq-fp"><div class="lq-meta-note">
-      Fingerprint files were not examined for this folder.</div></div>`
-    if (!fp.files.length) return `<div class="lq-fp"><div class="lq-meta-note">
-      No fingerprint files found. Nothing here can be verified against —
-      the audio may still be perfect, but there is no independent proof of it.
-    </div></div>`
-
-    const s = fp.summary
-    const needsDeep = s.pending_deep > 0
-
-    const files = fp.files.map(f => {
-      if (f.error) return `<div class="lq-fpfile">
-        <div class="lq-fpfile-head"><span class="nm">${esc(f.filename)}</span>
-          <span class="lq-fp-bad">${esc(f.error)}</span></div></div>`
-      const rows = f.tracks.map(t => `
-        <div class="lq-fptrk lq-fptrk--${_FP_STATUS_CLS[t.status] || 'pend'}">
-          <span class="nm">${esc(t.filename)}</span>
-          <span class="st">${esc(_FP_STATUS_TXT[t.status] || t.status)}</span>
-        </div>`).join('')
-      return `
-      <div class="lq-fpfile">
-        <div class="lq-fpfile-head">
-          <span class="nm">${esc(f.filename)}</span>
-          <span class="ty">${esc((f.type || '').toUpperCase())}</span>
-          <span class="ct">${f.matched_count} of ${f.entry_count} entries matched${
-            f.orphan_entries ? ` · ${f.orphan_entries} listed file${
-              f.orphan_entries === 1 ? '' : 's'} not present` : ''}</span>
-        </div>
-        <div class="lq-fptrks">${rows}</div>
-      </div>`
-    }).join('')
-
-    return `<div class="lq-fp">
-      <div class="lq-fp-sum">
-        ${s.match ? `<span class="lq-fp-ok">${s.match} verified</span>` : ''}
-        ${s.mismatch ? `<span class="lq-fp-bad">${s.mismatch} FAILED</span>` : ''}
-        ${s.unmatched ? `<span class="lq-fp-pend">${s.unmatched} without a listed checksum</span>` : ''}
-        ${s.pending_deep ? `<span class="lq-fp-pend">${s.pending_deep} awaiting deep check</span>` : ''}
-      </div>
-      ${needsDeep ? `<div class="lq-fp-deep">
-        <button class="btn btn-ghost btn-sm lq-fp-verify" data-path="${esc(row.folder_path)}">
-          Verify MD5 now</button>
-        <span>MD5 hashes the whole file, so this reads every track off disk.
-          seconds to minutes depending on the show. FFP and ST5 are already done.</span>
-      </div>` : ''}
-      ${files}
-    </div>`
-  }
 
   // ── Concerns — the major-issue line under the card title ───────────────────
   // Replaces the prose sound description (Ryan, 2026-08-02), which restated
@@ -9753,176 +9918,272 @@ const App = (() => {
     return parts.length <= 2 ? (p || '—') : '…/' + parts.slice(-2).join('/')
   }
 
-  // Every non-scored state must still emit all THREE right-hand cells. The row
-  // is a fixed grid: one missing cell shifts the actions and caret a column to
-  // the left and the table stops lining up exactly where an error row is.
-  const _lqBrowBlank = () =>
-    `<span class="lq-brow-band"></span><span class="lq-brow-meta">—</span>` +
-    `<span class="lq-brow-fp"></span>`
+  // ════════════════════════════════════════════════════════════════════════
+  // ── Shared ingest queue table ("The Belt", unified 2026-09-27) ───────────
+  // ONE table component for every batch-style ingest surface: Review &
+  // Ingest, Bulk Ingest, and #/batch Bulk Import. Each caller normalizes its
+  // own rows into the shape below and calls ingestQueueTable(); the caret,
+  // the column layout, the base expand panel and the default action group
+  // are shared, so a change to any of them cannot drift between the three
+  // surfaces the way the pre-2026-09-27 forks did.
+  //
+  // Row shape: { id, name, meta, format, kind, sound_band, meta_band,
+  //   needs_review, review_reason, status ('pending'|'ingesting'|'ingested'|
+  //   'review'|'skipped'|'failed'), recording_id, status_text, detail: {
+  //     artist, date, venue, location, source, lineage, tracksText,
+  //     trackListing, issuesHtml, path } }
+  // `status` other than the five named terminal/in-flight ones (i.e.
+  // 'review') is the default "awaiting a decision" row -- it gets the full
+  // Ingest / Review / Move action group whether or not `needs_review` is
+  // set; `needs_review` only changes the meta line and forces the metadata
+  // pill to Low.
+  // ════════════════════════════════════════════════════════════════════════
 
-  // Column header for the compact table (Ryan, 2026-08-28). Three unlabelled
-  // readings in a row is a puzzle, not a table — and the first version had a
-  // third number (the 0-100 Sound Quality score) sitting beside the very word
-  // that already says the same thing, which is the reason the header was
-  // asked for. The number is gone; the word and the metadata score are the
-  // only two metrics, and the fingerprint verdict is an icon rather than a
-  // third column of text.
-  const _lqBrowHead = () => `
-    <div class="lq-brow-head">
-      <span></span>
-      <span>Recording</span>
-      <span class="lq-tip">Sound Quality
-        <span class="lq-tipbox"><div class="tt">Sound Quality (estimated)</div>
-          <div class="ab">Read from the audio itself: three tracks, two windows each.
-            Validated at r = 0.55 against 113 graded recordings — informative, not
-            definitive. Open a row for the measurements behind it.</div></span></span>
-      <span class="lq-tip">Metadata
-        <span class="lq-tipbox"><div class="tt">Metadata Completeness, out of 100</div>
-          <div class="ab">How much of the show is actually described by its file tags
-            and info file: artist, date, venue, track titles, lineage.</div></span></span>
-      <span class="lq-tip" aria-label="Fingerprints"
-        ><span class="lq-tipbox"><div class="tt">Fingerprints</div>
-          <div class="ab">Whether the folder's own checksums (ffp / md5 / st5) match
-            the audio that is here. The glyph below carries the verdict.</div></span></span>
-      <span></span>
-      <span></span>
+  // "<N> folders · <N> added · ..." -- zero-count parts dropped, joined with
+  // a middot. One tiny builder so the three callers' header subtitles cannot
+  // drift into three different separators or orders.
+  function iqCountsLine(parts) {
+    return parts.filter(p => p && p.n).map(p => `${p.n} ${p.label}`).join(' · ')
+  }
+
+  // Header block shared by all three surfaces: title, one subtitle line
+  // (plus an optional second small line while scoring/reasons continue),
+  // the source-folder chip (+ optional mode select for Review & Ingest),
+  // the file-handling strip, and the progress bar -- everything above the
+  // table itself. `actionsHtml` is the caller's primary action (Ingest all /
+  // Pause-Resume / Auto-Ingest All), always top right.
+  function ingestQueueHeader(opts) {
+    const {
+      title, subtitle = '', scoringLine = '', actionsHtml = '',
+      sourcePath = '', sourceDisabled = false, onSourceId = '',
+      modeHtml = '', fhStripId = '', progressHtml = '', extraHtml = '',
+    } = opts
+    return `
+      <div class="lq-header">
+        <div style="min-width:0">
+          <h2>${esc(title)}</h2>
+          <p class="batch-subtitle">${subtitle}</p>
+          ${scoringLine ? `<p class="batch-subtitle">${scoringLine}</p>` : ''}
+        </div>
+        <div class="lq-header-actions">${actionsHtml}</div>
+      </div>
+      <div class="lq-setbar">
+        <span class="bfilter">Source folder
+          <button class="lq-setbar-path" id="${esc(onSourceId)}" ${sourceDisabled ? 'disabled' : ''}
+                  title="${esc(sourcePath)}">
+            ${icon('folder-open', 'lq-setbar-ic')}<span>${esc(_lqShortPath(sourcePath))}</span></button>
+        </span>
+        ${modeHtml}
+        <span id="${esc(fhStripId)}"></span>
+      </div>
+      ${progressHtml}
+      ${extraHtml}`
+  }
+
+  function _iqBandPill(band, concern) {
+    if (!band) return ''
+    // `concern` (2026-09-27) adds the same amber treatment the triage
+    // page's concern chips use (.lq-concern--warn) on top of the normal
+    // band colour, WITHOUT touching the High/Medium/Low text -- a concern
+    // (possible duplicate, failed checksum, ...) is a flag on the reading,
+    // not a different reading.
+    return `<span class="lq-verdict lq-verdict--${band}${concern ? ' lq-concern--warn' : ''}">${esc(_LQ_BAND_TEXT[band] || band)}</span>`
+  }
+
+  // The default action group: Ingest / Review / Move(caret) / chevron. A
+  // caller with richer per-row states (Review & Ingest's convert-to-FLAC
+  // offer, retry-on-error, a live copy in progress) passes its own
+  // `actionsHtml(row)` instead -- the column, the layout and everything else
+  // in the row stays shared either way.
+  function _iqDefaultActions(row, opts) {
+    if (row.status === 'ingested') {
+      return `<button type="button" class="lq-act lq-act--ingest" disabled>Ingested</button>
+        <a class="lq-act lq-act--view" href="#/recording/${row.recording_id}">View</a>`
+    }
+    if (row.status === 'pending' || row.status === 'ingesting') return ''
+    if (row.status === 'skipped') {
+      return `<span class="iq-act-status">${esc(row.status_text || 'Skipped')}</span>`
+    }
+    if (row.status === 'failed') {
+      return `<span class="iq-act-status iq-act-status--bad">${esc(row.status_text || 'Could not be read')}</span>`
+    }
+    if (!canEditLibrary()) return ''
+    const btns = []
+    if (opts.canIngest) {
+      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${esc(row.id)}">Ingest</button>`)
+    }
+    btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${esc(row.id)}">Review</button>`)
+    if (opts.moveTargets && opts.moveTargets.length) {
+      btns.push(`<div class="lq-move-wrap">
+        <button type="button" class="lq-act lq-act--move" data-path="${esc(row.id)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
+        <div class="lq-move-menu" hidden>${opts.moveTargets.map(t =>
+          `<button type="button" class="lq-move-opt" data-path="${esc(row.id)}" data-dest="${esc(t.key)}">${esc(t.label)}</button>`).join('')}</div>
+      </div>`)
+    }
+    return btns.join('')
+  }
+
+  // Base expand panel: Artist / Date / Venue / Location / Source / Lineage /
+  // Format / Type / Tracks / Issues / Path, the same fields whichever
+  // caller built the row from. When `soundQuality`, the triage sound-quality
+  // pane (track preview, groups, technical issues) renders BENEATH it --
+  // never instead of it, and never a fingerprint row or tab anywhere here.
+  function _iqExpandHtml(row, opts) {
+    const d = row.detail || {}
+    const baseRows = [
+      ['Artist', d.artist], ['Date', d.date], ['Venue', d.venue],
+      ['Location', d.location], ['Source', d.source], ['Lineage', d.lineage],
+      ['Format', row.format], ['Type', row.kind === 'studio' ? 'Studio' : (row.kind ? 'Live' : null)],
+      ['Tracks', d.tracksText],
+    ]
+    const listingRow = d.trackListing ? `
+      <div class="iq-expand-row iq-expand-row--wide">
+        <span class="iq-expand-label">Listing</span>
+        <div class="iq-tracklist">${d.trackListing}</div>
+      </div>` : ''
+    const issuesRow = d.issuesHtml ? `
+      <div class="iq-expand-row"><span class="iq-expand-label">Issues</span>
+        <span class="iq-expand-val">${d.issuesHtml}</span></div>` : ''
+    const base = `
+      <div class="iq-expand-panel">
+        <div class="iq-expand-grid">
+          ${baseRows.map(([label, val]) => `
+          <div class="iq-expand-row"><span class="iq-expand-label">${esc(label)}</span>
+            <span class="iq-expand-val">${esc(val || '—')}</span></div>`).join('')}
+          ${listingRow}
+          ${issuesRow}
+          <div class="iq-expand-row"><span class="iq-expand-label">Path</span>
+            <span class="iq-expand-val iq-expand-mono">${esc(d.path || '—')}</span></div>
+        </div>
+      </div>`
+    const sq = opts.soundQuality && row._triageRow ? _lqSoundQualityPane(row._triageRow) : ''
+    return base + sq
+  }
+
+  // Returns the header row + body rows only (no outer `.lq-cards` wrapper) --
+  // every caller already owns that wrapper (an id'd container it polls or
+  // patches), so this only ever fills it.
+  function ingestQueueTable(opts) {
+    const { rows, soundQuality, filterReview } = opts
+    const visible = filterReview ? rows.filter(r => r.needs_review) : rows
+    const cls = soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq'
+    const head = `<div class="lq-brow-head ${cls}">
+      <span></span><span>Recording</span>
+      <span>Format</span><span>Type</span>
+      ${soundQuality ? '<span>Sound Quality</span>' : ''}
+      <span>Metadata</span><span></span><span></span>
     </div>`
+    if (!visible.length) {
+      return `${head}
+        <div class="empty-state" style="padding:20px">
+          <div class="empty-sub">${filterReview ? 'Nothing needs review.' : 'Nothing here yet.'}</div>
+        </div>`
+    }
+    const body = visible.map(row => _iqRow(row, opts)).join('')
+    return `${head}${body}`
+  }
 
-  // ── Compact row — Direction A, "The Belt" (Ryan, 2026-08-28) ──────────────
-  //
-  // One grid row per recording: coloured spine, name, a mono facts line, the
-  // band pill, the metadata score, a fingerprint glyph, and the SAME action
-  // buttons as the card. Reusing `_lqActions()` verbatim is the point — the
-  // compact row is a different presentation of a recording, not a second
-  // feature with its own subset of things you can do to it, and every handler
-  // in _wireTriage() binds by class so nothing needs re-wiring.
-  //
-  // The caret does NOT open a panel inside the row. It swaps that one row back
-  // to its full card, because the card is already the thing that answers "why
-  // this score" and a second, thinner version of it would be two places to fix
-  // every future change to the metrics panel.
-  function _lqCompactRow(row) {
-    const done = lq.log.find(l => l.folder_path === row.folder_path)
+  // Needs-review marker (Ryan, 2026-09-27): the reason no longer displaces
+  // the Artist / date / venue line. It is the same `alert` glyph and hover
+  // box the failed-ingest chip uses, listing every issue the row carries.
+  function _iqReviewChip(row) {
+    if (!row.needs_review) return ''
+    const issues = (row.review_issues && row.review_issues.length)
+      ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
+    return `<span class="lq-errchip iq-reviewchip lq-tip" role="img"
+                  aria-label="Needs review: ${esc(issues.join(', '))}">
+      ${icon('alert', 'lq-errchip-ic')}
+      <span class="lq-tipbox">
+        <div class="tt">Needs review</div>
+        ${issues.map(i => `<div class="ab">${esc(i)}</div>`).join('')}
+      </span></span>`
+  }
 
-    // Non-scoreable states get the same row shape so the list stays a table —
-    // an error or a pending folder that reverted to a full-width card would
-    // break the alignment exactly where the eye is scanning fastest.
+  function _iqRow(row, opts) {
+    const open = !!(opts.isOpen && opts.isOpen(row))
+    const cls = opts.soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq'
     const spineColour =
-      row.error ? 'var(--red)'
-      : row._pending || row._ingestedElsewhere ? 'var(--bd-2)'
-      : ({ green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)' }[row.verdict_band]
+      row.status === 'failed' ? 'var(--red)'
+      : (row.status === 'pending' || row.status === 'ingesting') ? 'var(--bd-2)'
+      : ({ green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)' }[row.sound_band]
          || 'var(--bd-2)')
 
-    let sub, right
-    if (row.error) {
-      // Same treatment as a failed ingest: a marker plus a hover, not a
-      // paragraph inside a table row. The analyser's messages run long
-      // ("Analysis finished without returning a result for this folder") and
-      // wrapped one row to three lines.
-      sub   = `${_lqErrorChip(row.error, 'Could not analyze this recording')}
-               <span class="lq-brow-err">Analysis failed</span>`
-      right = _lqBrowBlank()
-    } else if (row._ingestedElsewhere) {
-      sub   = 'Already in your library, nothing to triage.'
-      right = _lqBrowBlank()
-    } else if (row._pending) {
-      const base   = (row.folder_path || '').split('/').pop()
-      // `_reanalyzing` is a single-row Retry, which has no lq.progress behind
-      // it — without this the row would read "Queued" for the whole run.
-      const active = row._reanalyzing
-                  || (!!lq.progress && lq.progress.current === base)
-      sub = active
-        ? `<span class="lq-spin"></span><span>Analyzing now…</span>`
-        : 'Queued'
-      right = _lqBrowBlank()
-    } else {
-      // Same facts, same order, same source as the card's quick-glance line
-      // (_lqCard) — tracks, format, bitrate, cutoff. Not re-derived: a compact
-      // row that disagreed with the card it expands into would be worse than
-      // no compact row at all.
-      const q = row.interp?.quick || {}, cut = row.interp?.cutoff || {}
-      const n = row.extracted?.track_count
-      sub = [
-        [q.format, q.bit_depth ? `${q.bit_depth}-bit` : null,
-         q.sample_rate_hz ? `${(q.sample_rate_hz / 1000).toFixed(1)} kHz` : null]
-          .filter(Boolean).join(' ') || null,
-        q.bitrate_kbps ? `${q.bitrate_kbps} kbps` : null,
-        cut.khz != null ? `${cut.khz} kHz cutoff` : null,
-        n != null ? `${n} track${n === 1 ? '' : 's'}` : null,
-      ].filter(Boolean).map(esc).join('<span class="sep">|</span>')
+    let metaLine
+    if (row.status === 'pending') metaLine = 'Queued'
+    else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Ingesting</span>`
+    else if (row.status === 'failed') metaLine = esc(row.status_text || 'Could not be read')
+    else metaLine = row.meta || '—'
 
-      // Exactly two metrics plus the fingerprint glyph. Metadata Completeness
-      // is here because Ryan uses it as his actual review trigger (2026-08-02),
-      // so it may not disappear just because the row got shorter.
-      const h = row.health
-      // Sound Quality and Metadata now share ONE pill shape (Ryan, 2026-08-31)
-      // — Metadata used to be plain coloured text (.batch-score), which read
-      // as a different kind of thing next to the Sound Quality pill even
-      // though both are the same three-band read. Both are also buttons now:
-      // clicking either opens this row's drill-in straight to that tab
-      // (wired below via .lq-brow-pill), the same jump the Tab Strip inside
-      // the open panel already does — see lq-dtab.
-      right = `
-        <span class="lq-brow-band">${row.verdict_band
-          ? `<button type="button" class="lq-verdict lq-verdict--${row.verdict_band} lq-brow-pill"
-                     data-path="${esc(row.folder_path)}" data-tab="lq"
-                     title="Sound Quality — click for the full report">${
-              _LQ_BAND_TEXT[row.verdict_band]}</button>` : ''}</span>
-        <span class="lq-brow-meta">
-          <button type="button" class="lq-verdict lq-verdict--${h?.band || 'red'} lq-brow-pill"
-                  data-path="${esc(row.folder_path)}" data-tab="meta"
-                  title="Metadata Completeness — click for the full report">${
-            esc(_metaRating(h))}</button>
-        </span>
-        ${_lqBrowFp(row)}`
-    }
+    const actions = opts.actionsHtml ? opts.actionsHtml(row) : _iqDefaultActions(row, opts)
+    const canExpand = row.status !== 'pending' && row.status !== 'ingesting'
 
-    // Which pane this row has open, if any: 'lq' | 'meta' | 'fp' | undefined.
-    //
-    // ⚠ This line went missing in an edit and `open` silently resolved to
-    // `window.open` instead — truthy, so the panel rendered, but never equal to
-    // any pane key, so every pane came out empty with no tab active (Ryan,
-    // 2026-08-28). `node --check` cannot see this: the identifier IS defined,
-    // just not by us. Same family as tests/test_no_undefined_names.py on the
-    // Python side.
-    const open = lq.compactOpen.get(row.folder_path)
-
-    return `<div class="lq-row lq-row--compact${open ? ' is-open' : ''}">
-      <div class="lq-brow${row._pending ? ' lq-brow--pending' : ''}${
-           lq.activePath === row.folder_path ? ' lq-brow--running' : ''}"
-           data-path="${esc(row.folder_path)}">
+    return `<div class="lq-row iq-row${open ? ' is-open' : ''}" data-id="${esc(row.id)}">
+      <div class="lq-brow ${cls}${row.status === 'pending' ? ' lq-brow--pending' : ''}${
+           row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}">
         <span class="lq-brow-spine" style="background:${spineColour}"></span>
         <div class="lq-brow-main">
-          <div class="lq-brow-name" title="${esc(row.folder_path)}">${esc(row.name)}</div>
-          <div class="lq-brow-sub">${sub}</div>
-          ${_lqConcerns(row)}
-          ${_lqCopyBar(row)}
+          <div class="iq-name-row">
+            <div class="lq-brow-name" title="${esc((row.detail && row.detail.path) || row.name)}">${esc(row.name)}</div>
+            ${_iqReviewChip(row)}
+          </div>
+          <div class="lq-brow-sub">${metaLine}</div>
         </div>
-        ${right}
-        ${row._pending || row._ingestedElsewhere ? '<span class="lq-actions"></span>' : _lqActions(row, done)}
-        ${row._pending || row._ingestedElsewhere || row.error
-          ? '<span class="lq-brow-caret lq-brow-caret--spacer"></span>'
-          : `<button type="button" class="lq-brow-caret" data-expand="${esc(row.folder_path)}"
+        <span class="iq-col-format">${row.format ? `<span class="iq-pill">${esc(row.format)}</span>` : ''}</span>
+        <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Studio' : 'Live'}</span>` : ''}</span>
+        ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
+        <span class="lq-brow-meta">${_iqBandPill(row.needs_review ? 'red' : (row.meta_band || 'red'), !!(row.concerns && row.concerns.length))}</span>
+        <span class="lq-actions iq-actions">${actions}</span>
+        ${canExpand
+          ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
                 title="${open ? 'Hide the detail' : 'Show the detail for this recording'}"
-                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`}
+                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`
+          : '<span class="lq-brow-caret lq-brow-caret--spacer"></span>'}
       </div>
-      ${open ? _lqDetail(row, open) : ''}
+      ${open ? _iqExpandHtml(row, opts) : ''}
     </div>`
   }
 
-  // Fingerprint verdict as one glyph. The card gives it a whole tab with a
-  // subtitle; a row has space for a colour and a tooltip, and that is enough to
-  // answer the only question asked at triage speed — did the checksums match.
-  function _lqBrowFp(row) {
-    const v = _FP_VERDICT[row.fingerprints?.verdict || 'none']
-    const colour = { green: 'var(--green)', yellow: 'var(--amber)',
-                     red: 'var(--red)', unknown: 'var(--t3)' }[v.cls]
-    return `<span class="lq-brow-fp lq-tip" style="color:${colour}">
-      ${icon('fingerprint', 'lq-fp-ic')}
-      <span class="lq-tipbox">
-        <div class="tt">Fingerprints: ${esc(v.text)}</div>
-        <div class="ab">${esc(_fpSub(row))}</div>
-      </span></span>`
+  // Delegated wiring for the two plain callers (Bulk Ingest, #/batch) whose
+  // rows use the default action group above -- Review & Ingest keeps its own
+  // richer `_wireTriage()` (its `actionsHtml` reuses `_lqActions()` verbatim,
+  // whose classes `_wireTriage()` already binds by). `container` is the
+  // element the table was painted into; `getRow(id)` looks a normalized row
+  // back up by the `id` a data-path attribute carries.
+  function wireIngestQueueTable(container, getRow, opts) {
+    if (!container) return
+    container.querySelectorAll('.lq-act--ingest').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = getRow(btn.dataset.path)
+        if (row && opts.onIngest) opts.onIngest(row)
+      })
+    })
+    container.querySelectorAll('.lq-act--review').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = getRow(btn.dataset.path)
+        if (row && opts.onReview) opts.onReview(row)
+      })
+    })
+    container.querySelectorAll('.lq-act--move').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation()
+        const menu = btn.nextElementSibling
+        const wasHidden = menu.hidden
+        container.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
+        menu.hidden = !wasHidden
+      })
+    })
+    container.querySelectorAll('.lq-move-opt').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = getRow(btn.dataset.path)
+        if (row && opts.onMove) opts.onMove(row, btn.dataset.dest)
+      })
+    })
+    container.querySelectorAll('.lq-brow-caret[data-expand]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = getRow(btn.dataset.expand)
+        if (row && opts.onToggleExpand) opts.onToggleExpand(row)
+      })
+    })
   }
 
   // One triage row = the CARD (a faithful port of the standalone app's card)
@@ -9939,7 +10200,7 @@ const App = (() => {
   // changes: this is only what appears underneath it, so nothing above moves.
   //
   // `open` is which pane is showing: 'lq' | 'meta' | 'fp'.
-  function _lqDetail(row, open) {
+  function _lqSoundQualityPane(row) {
 
     const it  = row.interp || {}
     const lqs = row.listening_quality
@@ -10099,63 +10360,26 @@ const App = (() => {
     const flags = (row.flags || []).length
       ? `<div class="lq-flags">${row.flags.map(x => `<span>${esc(x)}</span>`).join('')}</div>` : ''
 
-    return `<div class="lq-detailwrap" data-path="${esc(row.folder_path)}">
-      ${_lqTabs(row, open)}
+    return `<div class="lq-detailwrap lq-detailwrap--sq" data-path="${esc(row.folder_path)}">
       <div class="lq-pane">
-        ${open === 'lq' ? `
-          <div class="lq-samp lq-samp--lead">
-            <div class="lq-samp-head">
-              <h4>Track Preview</h4>
-              <!-- Two hints said the same thing (Ryan, 2026-09-02). This one
-                   ("Timestamps mark where each sample was taken") is gone; the
-                   surviving line is .lq-trk-player's own ::before placeholder,
-                   "Play a track, or click a timestamp to hear the analyzed
-                   moment", which says it AND names the two ways to start. -->
-              <div class="lq-trk-player" data-slot-for="${esc(row.folder_path)}"></div>
-            </div>
-            ${tracks}
+        <div class="lq-samp lq-samp--lead">
+          <div class="lq-samp-head">
+            <h4>Track Preview</h4>
+            <!-- Two hints said the same thing (Ryan, 2026-09-02). This one
+                 ("Timestamps mark where each sample was taken") is gone; the
+                 surviving line is .lq-trk-player's own ::before placeholder,
+                 "Play a track, or click a timestamp to hear the analyzed
+                 moment", which says it AND names the two ways to start. -->
+            <div class="lq-trk-player" data-slot-for="${esc(row.folder_path)}"></div>
           </div>
-          ${issues}
-          ${groups}
-          ${otherMetrics}
-          ${flags}` : ''}
-        ${open === 'meta' ? _lqMetaPanel(row) : ''}
-        ${open === 'fp'   ? _lqFpPanel(row)   : ''}
+          ${tracks}
+        </div>
+        ${issues}
+        ${groups}
+        ${otherMetrics}
+        ${flags}
       </div>
     </div>`
-  }
-
-  // Tab Strip for the drill-in (rebuilt 2026-08-28).
-  //
-  // Was three full-width buttons, each carrying its own label, a subtitle AND
-  // its value. Two problems, both Ryan's: the buttons looked nothing like any
-  // other control in the app, and every value on them is now ALREADY on the row
-  // directly above — so a third of the panel was spent repeating what the user
-  // had just read.
-  //
-  // These are tabs in the sense the rest of the app uses the word (see the UI
-  // lexicon's Tab Strip): navigation only, no values, one active at a time.
-  function _lqTabs(row, open) {
-    const tab = (key, label) => `
-      <button class="lq-dtab${open === key ? ' on' : ''}" type="button"
-              data-path="${esc(row.folder_path)}" data-tab="${key}"
-              aria-selected="${open === key}" role="tab">${label}</button>`
-    return `<div class="lq-dtabs" role="tablist">
-      ${tab('lq', 'Sound Quality')}
-      ${tab('meta', 'Metadata')}
-      ${tab('fp', 'Fingerprints')}
-    </div>`
-  }
-
-  // Subtitle states WHY a verdict is provisional, so "Unverified" never reads
-  // as "we looked and found nothing" when it actually means "we have not run
-  // the expensive check yet".
-  function _fpSub(row) {
-    const fp = row.fingerprints
-    if (!fp || !fp.files.length) return 'no checksum files found'
-    if (fp.summary.pending_deep) return 'MD5 needs a deep check'
-    const n = fp.files.length
-    return `${n} checksum file${n === 1 ? '' : 's'}`
   }
 
   // Actions, now INSIDE the card at top-right (Ryan, 2026-08-02), in the slot
@@ -10228,7 +10452,7 @@ const App = (() => {
       // it is the third state of a progression the user is watching; after it,
       // it is a durable fact about the row.
       return `<div class="lq-actions">
-        <span class="lq-act-done">${lq.running ? 'Complete' : 'Ingested'}</span>
+        <button type="button" class="lq-act lq-act--ingest" disabled>${lq.running ? 'Complete' : 'Ingested'}</button>
         <a class="lq-act lq-act--view" href="#/recording/${recId}">View</a>
       </div>`
     }
@@ -10403,6 +10627,85 @@ const App = (() => {
     }
   }
 
+  // Normalizes one staging row into the shared ingest-queue-table row shape
+  // (see the component doc comment above). Kept next to renderTriageView()
+  // since it reads `lq` state directly (activePath/queued/log) the same way
+  // the render function always has.
+  function _lqBuildIqRow(row) {
+    const x = row.extracted || {}
+    const h = row.health
+    const done = lq.log.find(l => l.folder_path === row.folder_path)
+    const recId = done?.status === 'done' ? done.recording_id : row.recording_id
+
+    let status
+    if (recId) status = 'ingested'
+    else if (row._ingestedElsewhere) status = 'skipped'
+    else if (lq.activePath === row.folder_path) status = 'ingesting'
+    else if (row._pending || (lq.running && lq.queued.has(row.folder_path))) status = 'pending'
+    else if (row.error) status = 'failed'
+    else status = 'review'
+
+    const dateStr = _lqDateStr(x) || null
+    const venueOrLoc = x.venue || [x.city, x.state].filter(Boolean).join(', ')
+    const metaParts = [x.artist, dateStr, venueOrLoc].filter(Boolean).map(esc)
+    const meta = metaParts.length ? metaParts.join('<span class="sep">·</span>') : ''
+
+    // needs_review / review_reason are tied to the METADATA reasons only
+    // (no artist, no date, unsupported format) -- concerns (possible
+    // duplicate, failed checksum, no audio, a technical fault) are a
+    // separate signal and must keep their own text and, for a duplicate,
+    // its View link, rather than being folded into this one line and losing
+    // everything but the first concern's words (Ryan, 2026-09-27). They
+    // still show, in the expand panel's Issues row and as an amber flag on
+    // the Metadata pill below.
+    const artistMissing = !x.artist
+    const dateMissing = !((h && h.date_precision >= 2) || x.year)
+    const unsupported = !!row.convertible
+    const reviewIssues = []
+    if (artistMissing) reviewIssues.push('No artist found')
+    if (dateMissing) reviewIssues.push('No date found')
+    if (unsupported) reviewIssues.push('Unsupported format')
+    const reviewReason = reviewIssues[0] || null
+    const needsReview = !!reviewReason
+
+    const format = x.format || null
+    const nTracks = x.track_count
+    const tracksText = nTracks != null ? `${nTracks} track${nTracks === 1 ? '' : 's'}` : null
+    const technicalIssuesHtml = (row.interp?.issues || []).length
+      ? row.interp.issues.map(i => `<span>${esc(i.issue)}</span>`).join(' ') : ''
+    // Concerns reuse _lqConcerns()'s exact markup (level colour, text, and
+    // the duplicate concern's View link) rather than a second, thinner
+    // rendering of the same data.
+    const issuesHtml = technicalIssuesHtml + _lqConcerns(row)
+
+    return {
+      id: row.folder_path,
+      name: row.name,
+      meta,
+      format,
+      kind: x.kind || null,
+      sound_band: row.verdict_band || null,
+      meta_band: (h && h.band) || null,
+      needs_review: needsReview,
+      review_reason: reviewReason,
+      review_issues: reviewIssues,
+      concerns: row.concerns || [],
+      status,
+      recording_id: recId,
+      status_text: row.error ? (typeof row.error === 'string' ? row.error : 'Could not be read')
+        : row._ingestedElsewhere ? 'Already in your library' : null,
+      detail: {
+        artist: x.artist || null, date: dateStr, venue: x.venue || null,
+        location: [x.city, x.state, x.country].filter(Boolean).join(', ') || null,
+        source: x.source || null, lineage: x.lineage || null,
+        tracksText, issuesHtml,
+        path: row.folder_path,
+      },
+      _triageRow: row,
+      _done: done,
+    }
+  }
+
   function renderTriageView({ preserveScroll = false } = {}) {
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
@@ -10477,7 +10780,15 @@ const App = (() => {
                  <a class="btn btn-ghost btn-sm" href="#/">Browse Library</a>
                </div>
              </div>`)
-      : _lqBrowHead() + visibleRows.map(_lqCompactRow).join('')
+      : ingestQueueTable({
+          rows: visibleRows.map(_lqBuildIqRow),
+          soundQuality: true,
+          canIngest: true,
+          moveTargets: triageDests().map(d => ({ key: d, label: TRIAGE_LABELS[d] || d })),
+          filterReview: lq.reviewFilter,
+          isOpen: r => lq.compactOpen.has(r.id),
+          actionsHtml: r => _lqActions(r._triageRow, r._done),
+        })
 
     // ── Settings bar ─────────────────────────────────────────────────────
     // Horizontal, across the top, matching `.browse-filters` in the Browse
@@ -10659,7 +10970,12 @@ const App = (() => {
                centralize in the header the same way View Recording's do in
                .rec-header-actions, rather than sitting in their own bar
                beneath the settings/apply-all rows below. -->
-          <div class="lq-header-actions">${runBar}</div>
+          <div class="lq-header-actions">
+            ${!lq.running && visibleRows.some(r => _lqBuildIqRow(r).needs_review) ? `
+              <button type="button" class="btn btn-ghost btn-sm${lq.reviewFilter ? ' btn-primary' : ''}" id="lq-review-toggle">${
+                lq.reviewFilter ? 'Show all' : 'Needs Review'}</button>` : ''}
+            ${runBar}
+          </div>
         </div>
 
         ${settingsBar}
@@ -10994,6 +11310,10 @@ const App = (() => {
       _lqReset()
       ingest.step = 'source'
       renderIngestSource()
+    })
+    document.getElementById('lq-review-toggle')?.addEventListener('click', () => {
+      lq.reviewFilter = !lq.reviewFilter
+      renderTriageView({ preserveScroll: true })
     })
     document.getElementById('lq-reprocess-btn')?.addEventListener('click', () => {
       // `lq.scanDir` is what the user PICKED; `lq.sourceDir` is what the server
@@ -11440,6 +11760,7 @@ const App = (() => {
     lq.expanded.clear()
     lq.features.clear()
     lq.compactOpen.clear()
+    lq.reviewFilter = false
     lq.queued.clear()
     lq.copyProgress.clear()
     lq.converting.clear()
@@ -14785,14 +15106,17 @@ const App = (() => {
     const descText = g.description && g.description.trim()
     const artists = g.artists || []
 
-    const perfSectionsHtml = artists.map(p => `
+    const perfSectionsHtml = artists.map(p => {
+      const hasThumbs = (p.recordings || []).some(r => r.image_url)
+      return `
       <div class="genre-artist-section">
         <div class="genre-artist-head">
           <a class="genre-artist-name" href="#/artist/${p.id}">${esc(p.name)}</a>
           <span class="genre-artist-count">${p.recording_count} recording${p.recording_count !== 1 ? 's' : ''}</span>
         </div>
-        <div class="rec-table">${p.recordings.map(r => flatRowHtml(r, false)).join('')}</div>
-      </div>`).join('')
+        <div class="rec-table">${p.recordings.map(r => flatRowHtml(r, false, hasThumbs)).join('')}</div>
+      </div>`
+    }).join('')
 
     setMainHTML(entityShellHtml({
       navBack,
@@ -15345,6 +15669,7 @@ const App = (() => {
     '#/peers',           // Sharing
     '#/venue/new', '#/artist/new', '#/musician/new',
     '#/genre/new', '#/event/new',
+    '#/bulk-ingest',        // Bulk Ingest
   ]
   const isAdminOnlyHash = h => ADMIN_ONLY_HASHES.includes((h || '').split('?')[0])
 
@@ -15413,6 +15738,14 @@ const App = (() => {
     document.getElementById('nav-back')?.addEventListener('click', () => _navGo(-1))
     document.getElementById('nav-fwd')?.addEventListener('click', () => _navGo(1))
 
+    // Wordmark (spec 7c): the other home control, alongside the sidebar's
+    // My Library link (renderSidebar) -- both go to #/bulk-ingest while a Bulk
+    // Ingest run is running or paused, and to Library otherwise. This is
+    // the single place that decision is made for a plain click.
+    document.querySelector('.app-wordmark')?.addEventListener('click', () => {
+      window.location.hash = homeHash()
+    })
+
     // "Add Recordings" is a same-hash link whenever the user is already on
     // #/ingest — mid-triage, sitting on "All done", or looking at a filled
     // review form. A same-hash click fires no hashchange, so route() never
@@ -15442,6 +15775,592 @@ const App = (() => {
     })
   }
 
+  // ── Bulk Ingest (spec 1.9/4, chunk 7b) ─────────────────────────────────────────────
+  //
+  // One run at a time over LIBRARY_ROOT (app/utils/bulk_ingest_run.py). This is
+  // the only page for it, at #/bulk-ingest; renderSidebar's nav item and the
+  // wordmark/My Library home routing (wireHeaderNav) both read state.bulkIngest
+  // rather than fetching their own copy.
+
+  // docs site root — the-data-model page lives at
+  // trellismusiclibrary/src/content/docs/the-data-model.md and publishes at
+  // this path (N8: an earlier comment here said this URL was invented).
+  const BULK_INGEST_DOCS_URL = 'https://trellismusiclibrary.com/docs/the-data-model'
+
+  let _bulkIngestPollTimer = null
+  function _stopBulkIngestPoll() {
+    if (_bulkIngestPollTimer) { clearInterval(_bulkIngestPollTimer); _bulkIngestPollTimer = null }
+  }
+
+  // /api/bulk-ingest/current's shape: {run: null} when nothing has ever been
+  // ingested, or the run's own fields directly (no wrapper) when one exists.
+  function _bulkIngestRun(data) {
+    return (data && data.run === undefined) ? data : null
+  }
+
+  async function _fetchBulkIngestStatus() {
+    try { state.bulkIngest = _bulkIngestRun(await API.bulkIngest.current()) }
+    catch (e) { state.bulkIngest = null }
+  }
+
+  // Called after an action on the bulkIngest page itself might have changed run
+  // status (pause/resume/scan again) so the nav item and home routing follow
+  // without a full reload. Boot uses _fetchBulkIngestStatus directly (see
+  // init()) since loadArtistList() right after it already repaints the
+  // sidebar once.
+  async function refreshBulkIngestStatus() {
+    await _fetchBulkIngestStatus()
+    renderSidebar()
+  }
+
+  function _bulkIngestElapsedStr(startedAt, finishedAt) {
+    const start = new Date(startedAt).getTime()
+    const end   = finishedAt ? new Date(finishedAt).getTime() : Date.now()
+    const total = Math.max(0, Math.round((end - start) / 1000))
+    const h = Math.floor(total / 3600)
+    const m = Math.floor((total % 3600) / 60)
+    const sec = total % 60
+    const ss = String(sec).padStart(2, '0')
+    return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+  }
+
+  async function renderBulkIngestView() {
+    setActiveNav('bulk-ingest')
+    setActiveArtist(null)
+    setNavCurrent('Adding recordings')
+    _stopBulkIngestPoll()
+    _biResetProgressState()
+
+    let data
+    try {
+      data = await API.bulkIngest.current()
+    } catch (e) {
+      setMainHTML(`
+        <div class="empty-state">
+          <div class="empty-title">Could not open this page</div>
+          <div class="empty-sub" style="color:var(--red)">${esc((e && e.message) || String(e))}</div>
+        </div>`)
+      return
+    }
+    state.bulkIngest = _bulkIngestRun(data)
+    renderSidebar()
+    if (!state.bulkIngest) { window.location.hash = '#/'; return }
+
+    await _paintBulkIngestPage(state.bulkIngest)
+
+    if (state.bulkIngest.status === 'running') {
+      _bulkIngestPollTimer = setInterval(async () => {
+        let d
+        try { d = await API.bulkIngest.current() } catch (e) { return }
+        const run = _bulkIngestRun(d)
+        state.bulkIngest = run
+        if (!run) { _stopBulkIngestPoll(); return }
+        await _paintBulkIngestPage(run)
+        if (run.status !== 'running') {
+          _stopBulkIngestPoll(); renderSidebar(); _maybeStartScoringPoll(run)
+        }
+      }, 3000)
+    } else {
+      _maybeStartScoringPoll(state.bulkIngest)
+    }
+  }
+
+  // Listening Quality keeps scoring in the background after a run finishes
+  // (the follow-up queue in app/api/ingest.py) -- a slower, separate poll
+  // than the 3s one above, only while there is still something to wait for.
+  function _maybeStartScoringPoll(run) {
+    const scorable = (run && run.scorable) || 0
+    const scored   = (run && run.scored)   || 0
+    if (!(run && run.status === 'done' && scorable > 0 && scored < scorable)) return
+    _bulkIngestPollTimer = setInterval(async () => {
+      let d
+      try { d = await API.bulkIngest.current() } catch (e) { return }
+      const r = _bulkIngestRun(d)
+      state.bulkIngest = r
+      if (!r) { _stopBulkIngestPoll(); return }
+      await _paintBulkIngestPage(r)
+      if ((r.scored || 0) >= (r.scorable || 0)) _stopBulkIngestPoll()
+    }, 5000)
+  }
+
+  // ── Progress table (2026-09-27 redesign) ─────────────────────────────────
+  // Rebuilt onto Review & Ingest's own shell (renderTriageView / _lqCompactRow)
+  // rather than Batch Import's -- same header shape (title, subtitle, source
+  // chip, mode strip, progress bar, primary action top-right), same table
+  // shape (.lq-brow-head / .lq-brow, coloured spine, triage spinner and
+  // caret). What is new lives under `.bi-*`: the FORMAT/TYPE/STATUS columns
+  // this table needs that Review & Ingest's Sound-Quality/Metadata/
+  // fingerprint columns do not.
+  //
+  // The item table is paged 100-at-a-time (GET .../items?status=all, id
+  // ascending -- discovery order, so a running list reads like the triage
+  // queue) and, once loaded, is never rebuilt by a poll: _biTableRefresh
+  // patches only the rows whose status changed and appends rows discovered
+  // since the last check, both by id, in place.
+  let _biRowsCache = new Map()   // id -> item, every row loaded so far
+  let _biLoadedCount = 0
+  let _biTableExhausted = false
+  let _biTableLoading = false
+  let _biTableIO = null
+  let _biTableRunId = null
+  let _biOpenRows = new Set()    // ids whose expand panel is open
+  let _biReviewFilter = false    // header "Review"/"Show all" toggle (2026-09-27)
+
+  // Rolling rate/ETA window -- unrelated to the table above, kept across
+  // polls the same way.
+  let _biRateSamples = []     // [{t, processed}], rolling 5-minute window
+  let _biLastPaintedKey = null   // run.id + ':' + (done ? 'done' : 'active')
+
+  function _biResetProgressState() {
+    _biRateSamples = []
+    _biLastPaintedKey = null
+    _biRowsCache = new Map()
+    _biLoadedCount = 0
+    _biTableExhausted = false
+    _biTableLoading = false
+    _biTableIO?.disconnect()
+    _biTableIO = null
+    _biTableRunId = null
+    _biOpenRows = new Set()
+    _biReviewFilter = false
+  }
+
+  // Integers, largest unit, minimum "1 minute" (spec).
+  function _biFmtDuration(minutes) {
+    const m = Math.max(1, Math.round(minutes))
+    if (m < 60) return `${m} minute${m === 1 ? '' : 's'}`
+    const h = Math.round(m / 60)
+    if (h < 24) return `${h} hour${h === 1 ? '' : 's'}`
+    const d = Math.max(1, Math.round(h / 24))
+    return `${d} day${d === 1 ? '' : 's'}`
+  }
+
+  // Records one (timestamp, processed) sample, trims the window to the last
+  // five minutes, and returns {rateText, etaText} computed from it -- or
+  // null until there are at least two samples to compare. The ETA half is
+  // withheld until the window itself spans at least two minutes (spec);
+  // the rate can show sooner off whatever samples exist so far.
+  function _biRateAndEta(processed, found) {
+    const now = Date.now()
+    _biRateSamples.push({ t: now, processed })
+    const cutoff = now - 5 * 60 * 1000
+    _biRateSamples = _biRateSamples.filter(s => s.t >= cutoff)
+    if (_biRateSamples.length < 2) return null
+    const oldest = _biRateSamples[0]
+    const spanMs = now - oldest.t
+    const delta = processed - oldest.processed
+    if (spanMs <= 0 || delta <= 0) return null
+    const perMinute = delta / (spanMs / 60000)
+    const rateText = `${Math.round(perMinute)} per minute`
+    let etaText = null
+    if (spanMs >= 2 * 60 * 1000 && perMinute > 0) {
+      const minutesLeft = Math.max(0, found - processed) / perMinute
+      etaText = `about ${_biFmtDuration(minutesLeft)} left`
+    }
+    return { rateText, etaText }
+  }
+
+  const _BI_REVIEW_REASON_PHRASE = {
+    needs_artist:       'without an artist',
+    needs_date:         'without a date',
+    unsupported_format: 'unsupported format',
+  }
+  // Hover-box labels for the row's needs-review chip; the same three strings
+  // Review & Ingest and Batch Import already use for the same conditions.
+  const _BI_REVIEW_REASON_LABEL = {
+    needs_artist:       'No artist found',
+    needs_date:         'No date found',
+    unsupported_format: 'Unsupported format',
+  }
+  const _BI_SKIPPED_REASON_PHRASE = {
+    already_in_library: 'already in your library',
+    rejected:           'rejected earlier',
+  }
+
+  // "<N> without an artist, <N> without a date, ..." -- inline, after a
+  // colon, only the reasons that actually have a count (spec chunk 5e).
+  function _biReasonInline(reasons, phraseMap) {
+    const parts = Object.entries(phraseMap)
+      .map(([key, phrase]) => reasons[key] ? `${reasons[key]} ${phrase}` : null)
+      .filter(Boolean)
+    return parts.length ? `: ${parts.join(', ')}` : ''
+  }
+
+  // Meta line for a finished bulk-ingest row: Artist · date · venue, or
+  // Artist · title for a studio record. Same separator markup as the
+  // Review & Ingest row builder (_lqBuildIqRow).
+  function _biMetaLine(it) {
+    const second = it.kind === 'studio' ? (it.title || it.date_text) : it.date_text
+    const third  = it.kind === 'studio' ? '' : (it.venue || it.location)
+    const parts = [it.artist, second, third].filter(Boolean).map(esc)
+    return parts.length ? parts.join('<span class="sep">·</span>') : ''
+  }
+
+  function _biKindLabel(it) {
+    return it.kind === 'studio' ? 'Studio' : (it.kind === 'live' ? 'Live' : '')
+  }
+
+  // Normalizes one GET .../items row into the shared ingest-queue-table row
+  // shape (see the component doc comment near ingestQueueTable/_iqRow).
+  function _biBuildIqRow(it) {
+    const pending    = it.status === 'pending'
+    const inProgress = it.status === 'in_progress'
+    const status = pending ? 'pending' : inProgress ? 'ingesting' : it.status // ingested|review|skipped|failed
+    const needsReview = it.status === 'review'
+    const reviewLabel = needsReview ? (_BI_REVIEW_REASON_LABEL[it.reason] || 'Needs review') : null
+    const statusText = it.status === 'skipped'
+      ? `Skipped${_BI_SKIPPED_REASON_PHRASE[it.reason] ? ' ' + _BI_SKIPPED_REASON_PHRASE[it.reason] : ''}`
+      : it.status === 'failed' ? (it.detail || 'Could not be read') : null
+    const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
+      ? '' : _biMetaLine(it)
+    const basename = (it.rel_path || '').split('/').pop()
+    return {
+      id: it.id,
+      name: basename,
+      meta,
+      format: it.format || null,
+      kind: it.kind || null,
+      sound_band: null,
+      meta_band: it.meta_band || null,
+      needs_review: needsReview,
+      review_reason: reviewLabel,
+      review_issues: reviewLabel ? [reviewLabel] : [],
+      status,
+      recording_id: it.recording_id,
+      status_text: statusText,
+      detail: {
+        artist: it.artist, date: it.date_text, venue: it.venue,
+        location: it.location, source: it.source, lineage: it.lineage,
+        tracksText: null, issuesHtml: '',
+        path: it.rel_path,
+      },
+    }
+  }
+
+  function _biRowHtml(it) {
+    return _iqRow(_biBuildIqRow(it), {
+      soundQuality: false,
+      canIngest: true,
+      moveTargets: [],
+      isOpen: r => _biOpenRows.has(r.id),
+    })
+  }
+
+  function _biSetupTableSentinel() {
+    const sentinel = document.getElementById('bi-sentinel')
+    if (!sentinel) return
+    _biTableIO?.disconnect()
+    if (_biTableExhausted) { sentinel.innerHTML = ''; _biTableIO = null; return }
+    _biTableIO = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) _biTableLoadMore()
+    }, { root: mainContent, rootMargin: '400px' })
+    _biTableIO.observe(sentinel)
+  }
+
+  // Next 100-row page, appended at the end -- infinite scroll, same shape as
+  // Review & Ingest's own log used before this redesign.
+  async function _biTableLoadMore() {
+    if (_biTableLoading || _biTableExhausted || !_biTableRunId) return
+    _biTableLoading = true
+    const page = Math.floor(_biLoadedCount / 100) + 1
+    let body
+    try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', page) }
+    catch (e) { _biTableLoading = false; return }
+    const items = body.items || []
+    for (const it of items) _biRowsCache.set(it.id, it)
+    const listEl = document.getElementById('bi-rows')
+    if (listEl) listEl.insertAdjacentHTML('beforeend', items.map(_biRowHtml).join(''))
+    _biLoadedCount += items.length
+    _biTableExhausted = items.length < 100 || _biLoadedCount >= (body.total || 0)
+    _biTableLoading = false
+    _biSetupTableSentinel()
+  }
+
+  // Routine 3s poll while running: patch only the rows whose status changed
+  // (never rebuild the table -- spec), then append any rows discovered since
+  // the last check, at the end, once every already-loaded page has been
+  // re-checked.
+  async function _biTableRefresh() {
+    if (!_biTableRunId) return
+    const pages = Math.max(1, Math.ceil(_biLoadedCount / 100))
+    let lastTotal = 0
+    for (let p = 1; p <= pages; p++) {
+      let body
+      try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', p) }
+      catch (e) { continue }
+      lastTotal = body.total || lastTotal
+      for (const it of (body.items || [])) {
+        const prev = _biRowsCache.get(it.id)
+        if (prev && prev.status === it.status) continue
+        _biRowsCache.set(it.id, it)
+        const rowEl = document.querySelector(`.iq-row[data-id="${it.id}"]`)
+        if (rowEl) rowEl.outerHTML = _biRowHtml(it)
+      }
+    }
+    if (!_biTableExhausted || _biLoadedCount >= lastTotal) return
+    let body
+    try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', pages + 1) }
+    catch (e) { return }
+    const items = body.items || []
+    if (!items.length) return
+    for (const it of items) _biRowsCache.set(it.id, it)
+    const listEl = document.getElementById('bi-rows')
+    if (listEl) listEl.insertAdjacentHTML('beforeend', items.map(_biRowHtml).join(''))
+    _biLoadedCount += items.length
+    _biTableExhausted = items.length < 100 || _biLoadedCount >= (body.total || 0)
+    _biSetupTableSentinel()
+  }
+
+  async function _biTableInit(runId) {
+    _biTableRunId = runId
+    _biRowsCache = new Map()
+    _biLoadedCount = 0
+    _biTableExhausted = false
+    _biTableLoading = false
+    _biOpenRows = new Set()
+    const listEl = document.getElementById('bi-rows')
+    if (listEl) listEl.innerHTML = ''
+    await _biTableLoadMore()
+  }
+
+  // Toggle a done row's expand panel -- delegated on the table container so
+  // it keeps working across every poll's patches and appends without being
+  // rewired.
+  // A review-status item's folder, opened pre-scanned in the Add Recording
+  // wizard -- both the Ingest and the Review button call this ("the
+  // existing confirm path for that folder, in place", spec chunk 7d): a
+  // bulk item flagged needs_artist/needs_date/unsupported_format cannot be
+  // safely one-click auto-ingested, so both buttons land on the same form a
+  // human finishes.
+  async function _biOpenReviewFor(it, btn) {
+    const root = (state.bulkIngest && state.bulkIngest.root) || ''
+    const abs = root.replace(/\/+$/, '') + '/' + it.rel_path
+    if (btn) { btn.disabled = true; btn.textContent = '…' }
+    try {
+      const scan = await API.recordings.scan(abs)
+      ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = abs
+      ingest.form = {}; ingest.tracks = []
+      ingest.fromBatch = false; ingest.fromTriage = true; ingest._resume = true
+      window.location.hash = '#/ingest'
+      renderIngestStep()
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Review' }
+      alert(`Scan failed: ${e.message}`)
+    }
+  }
+
+  function _biOnTableClick(ev) {
+    const moveBtn = ev.target.closest('.lq-act--move')
+    if (moveBtn) {
+      ev.stopPropagation()
+      const menu = moveBtn.nextElementSibling
+      const wasHidden = menu.hidden
+      mainContent.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
+      menu.hidden = !wasHidden
+      return
+    }
+    const ingestBtn = ev.target.closest('.lq-act--ingest, .lq-act--review')
+    if (ingestBtn) {
+      const it = _biRowsCache.get(Number(ingestBtn.dataset.path))
+      if (it) _biOpenReviewFor(it, ingestBtn)
+      return
+    }
+    const caret = ev.target.closest('[data-expand]')
+    if (!caret) return
+    const id = Number(caret.dataset.expand)
+    if (_biOpenRows.has(id)) _biOpenRows.delete(id); else _biOpenRows.add(id)
+    const it = _biRowsCache.get(id)
+    const rowEl = caret.closest('.iq-row')
+    if (it && rowEl) rowEl.outerHTML = _biRowHtml(it)
+  }
+
+  // Primary action, top-right of the header -- Pause/Resume while running or
+  // paused; Review (primary) + Scan again + Go to library once done.
+  function _biHeaderActionsHtml(run) {
+    if (run.status !== 'done') {
+      const btns = []
+      if (canEditLibrary()) {
+        if (run.status === 'running') btns.push('<button class="btn btn-ghost btn-sm" id="bi-pause">Pause</button>')
+        if (run.status === 'paused')  btns.push('<button class="btn btn-ghost btn-sm" id="bi-resume">Resume</button>')
+      }
+      return btns.join('')
+    }
+    const review = (run.counts && run.counts.review) || 0
+    const btns = []
+    if (review > 0) btns.push(
+      `<button type="button" class="btn btn-sm${_biReviewFilter ? ' btn-ghost' : ' btn-primary'}" id="bi-review">${
+        _biReviewFilter ? 'Show all' : 'Needs Review'}</button>`)
+    if (canEditLibrary()) btns.push('<button class="btn btn-ghost btn-sm" id="bi-again">Scan again</button>')
+    btns.push('<a class="btn btn-ghost btn-sm" href="#/" id="bi-golibrary">Go to library</a>')
+    return btns.join('')
+  }
+
+  // Subtitle area -- "<N> folders found" while running/paused; once done,
+  // the summary, one small line each (spec chunk 5e).
+  function _biSubtitleHtml(run) {
+    const c = run.counts || {}
+    const found    = Object.values(c).reduce((a, b) => a + b, 0)
+
+    if (run.status !== 'done') {
+      return `<p class="batch-subtitle">${found} folder${found === 1 ? '' : 's'} found</p>`
+    }
+
+    const added    = c.ingested || 0
+    const review   = c.review || 0
+    const skipped  = c.skipped || 0
+    const failed   = run.failed || 0
+    const studio   = run.studio || 0
+    const reasons        = run.reasons || {}
+    const skippedReasons = run.skipped_reasons || {}
+    const scorable = run.scorable || 0
+    const scored   = run.scored   || 0
+    const scoring  = scorable > 0 && scored < scorable
+    const elapsedStr = _bulkIngestElapsedStr(run.started_at, run.finished_at)
+
+    const dupes = run.duplicates || []
+    const dupesHtml = dupes.length ? `
+      <div class="bi-dupes">
+        <h2>Possible duplicates</h2>
+        <ul>
+          ${dupes.map(d => `<li>
+            <a href="#/recording/${d.recording_id}">${esc(d.rel_path_basename)}</a>
+            <a href="#/recording/${d.duplicate_of}">${esc(d.duplicate_basename || String(d.duplicate_of))}</a>
+          </li>`).join('')}
+        </ul>
+      </div>` : ''
+
+    // One subtitle line, middle-dot joined, zero-count parts dropped;
+    // the scoring sentence is a second small line only while scoring runs.
+    const parts = [
+      `${found} folder${found === 1 ? '' : 's'}`,
+      added   > 0 ? `${added} added` : null,
+      studio  > 0 ? `${studio} studio` : null,
+      review  > 0 ? `${review} need review${_biReasonInline(reasons, _BI_REVIEW_REASON_PHRASE)}` : null,
+      skipped > 0 ? `${skipped} skipped${_biReasonInline(skippedReasons, _BI_SKIPPED_REASON_PHRASE)}` : null,
+      failed  > 0 ? `${failed} could not be read` : null,
+      elapsedStr ? esc(elapsedStr) : null,
+    ].filter(Boolean)
+
+    return `
+      <p class="batch-subtitle" style="margin-bottom:0">${parts.join(' · ')}</p>
+      ${scoring ? `<p class="batch-subtitle" id="bi-scoring-line" style="margin-top:4px">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''}
+      ${dupesHtml}`
+  }
+
+  // Progress bar -- same markup as Review & Ingest's own (.lq-progress),
+  // processed/found plus the in-progress folder name, then rate and ETA in
+  // the same muted style once they are available. Hidden once done.
+  function _biProgressHtml(run) {
+    if (run.status === 'done') return ''
+    const c = run.counts || {}
+    const found    = Object.values(c).reduce((a, b) => a + b, 0)
+    const added    = c.ingested || 0
+    const review   = c.review || 0
+    const skipped  = c.skipped || 0
+    const failed   = run.failed || 0
+    const processed = added + review + skipped + failed
+    const rate = _biRateAndEta(processed, found)
+    return `
+      <div class="lq-progress">
+        <div class="lq-progress-bar"><i style="width:${
+          Math.round(100 * processed / Math.max(1, found))}%"></i></div>
+        <span class="lq-progress-count">${processed}/${found}</span>
+        ${run.now ? `<span class="lq-progress-current">${esc(run.now)}</span>` : ''}
+        ${rate ? `<span class="lq-progress-current">${esc(rate.rateText)}</span>` : ''}
+        ${rate && rate.etaText ? `<span class="lq-progress-current">${esc(rate.etaText)}</span>` : ''}
+      </div>`
+  }
+
+  function _biWireHeaderActions(run) {
+    document.getElementById('bi-pause')?.addEventListener('click', async () => {
+      try { await API.bulkIngest.pause(run.id) } catch (e) {}
+      await refreshBulkIngestStatus()
+      renderBulkIngestView()
+    })
+    document.getElementById('bi-resume')?.addEventListener('click', async () => {
+      try { await API.bulkIngest.resume(run.id) } catch (e) {}
+      await refreshBulkIngestStatus()
+      renderBulkIngestView()
+    })
+    // In place (2026-09-27 unified table), not a navigation to Review &
+    // Ingest any more: toggles the SAME table down to just its needs-review
+    // rows, re-fetched filtered so the toggle acts on the whole run, not
+    // only the rows already loaded on screen.
+    document.getElementById('bi-review')?.addEventListener('click', async () => {
+      _biReviewFilter = !_biReviewFilter
+      const actionsEl = document.getElementById('bi-header-actions')
+      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
+      await _biTableInit(run.id)
+    })
+    document.getElementById('bi-again')?.addEventListener('click', async () => {
+      try { await API.bulkIngest.start() } catch (e) {}
+      await refreshBulkIngestStatus()
+      renderBulkIngestView()
+    })
+  }
+
+  async function _paintBulkIngestPage(run) {
+    const done = run.status === 'done'
+    const key = run.id + ':' + (done ? 'done' : 'active')
+    const isFreshBuild = _biLastPaintedKey !== key
+    _biLastPaintedKey = key
+
+    // Incremental path: same run, same done/active bucket as last paint (a
+    // routine 3s poll while running, or a scoring poll while done). Only the
+    // header body and the progress bar are repainted wholesale; the table
+    // itself is patched by id, never rebuilt (spec).
+    if (!isFreshBuild) {
+      const actionsEl = document.getElementById('bi-header-actions')
+      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
+      const subEl = document.getElementById('bi-subtitle')
+      if (subEl) subEl.innerHTML = _biSubtitleHtml(run)
+      const progEl = document.getElementById('bi-progress-wrap')
+      if (progEl) progEl.innerHTML = _biProgressHtml(run)
+      if (!done) await _biTableRefresh()
+      return
+    }
+
+    // Full (re)build: first paint of this view, or a status bucket change
+    // (running/paused -> done).
+    setMainHTML(`
+      <div class="batch-shell lq-shell">
+        <div class="lq-header">
+          <div style="min-width:0">
+            <h2>Adding your recordings</h2>
+            <div id="bi-subtitle">${_biSubtitleHtml(run)}</div>
+          </div>
+          <div class="lq-header-actions" id="bi-header-actions">${_biHeaderActionsHtml(run)}</div>
+        </div>
+
+        <div class="lq-setbar">
+          <span class="bfilter">Source folder
+            <button class="lq-setbar-path" disabled title="${esc(run.root || '')}">
+              ${icon('folder-open', 'lq-setbar-ic')}<span>${esc(_lqShortPath(run.root))}</span></button>
+          </span>
+          <span id="bi-fh-strip"></span>
+        </div>
+
+        <div id="bi-progress-wrap">${_biProgressHtml(run)}</div>
+
+        <div class="lq-cards lq-cards--compact" id="bi-table">
+          <div class="lq-brow-head iq-brow iq-brow--nosq">
+            <span></span><span>Recording</span>
+            <span>Format</span><span>Type</span>
+            <span>Metadata</span><span></span><span></span>
+          </div>
+          <div id="bi-rows"></div>
+          <div id="bi-sentinel"></div>
+        </div>
+      </div>`)
+
+    _biWireHeaderActions(run)
+    _wireFhStrip('bi-fh-strip')
+    document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
+    await _biTableInit(run.id)
+  }
+
+
+
   function route() {
     const hash = window.location.hash || '#/'
 
@@ -15468,6 +16387,11 @@ const App = (() => {
     // don't.
     setInPageBack(null)
     paintNavButtons()
+    // The bulkIngest page's own poll (renderBulkIngestView) is a setInterval, not
+    // a generation-stamped loop like pollAnalysis — it has no other way to
+    // know it has been navigated away from, so every route dispatch clears it
+    // unconditionally. Harmless when nothing is running.
+    _stopBulkIngestPoll()
 
     // Snapshot "where we're coming from" for the destination page's Back
     // link (state.navCurrent/navBack) — but only on a genuine navigation.
@@ -15518,6 +16442,9 @@ const App = (() => {
 
     } else if (hash === '#/ingest') {
       renderIngestView()
+
+    } else if (hash === '#/bulk-ingest') {
+      renderBulkIngestView()
 
     } else if (hash === '#/venues') {
       renderVenuesPage()
@@ -16125,7 +17052,7 @@ const App = (() => {
       })
     })
 
-    // Working folders of an adopted library (2026-09-26). First run no longer
+    // Working folders of an ingested library (2026-09-26). First run no longer
     // asks for them, so they are set here. Desktop only: the folder dialog
     // is PyWebView's, and a created library's working folders are fixed, so
     // the block renders only when run.py says they are editable.
@@ -16445,8 +17372,12 @@ const App = (() => {
   function searchRowHtml(item) {
     if (item.type === 'recording') {
       const where = [item.venue, item.city, item.state].filter(Boolean).join(' · ')
+      // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
+      // placeholder when the recording has no image.
+      const thumb = item.image_url ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">` : ''
       return `<div class="search-row" data-hash="${esc(item.hash)}">
                 <span class="search-row-date">${esc(item.date || '—')}</span>
+                ${thumb}
                 <div class="search-row-main">
                   <div class="search-row-name">${esc(item.artist || 'Unknown')}</div>
                   <div class="search-row-meta">${esc(where || 'No venue recorded')}</div>
@@ -16835,8 +17766,18 @@ const App = (() => {
       // libraryState.remotes, and a selector that appears as a plain label and
       // then sprouts a dropdown a moment later reads as a glitch.
       await loadRemotes()
+      // Bulk Ingest (spec 7a/7c) — fetched once here, before the sidebar,
+      // so its nav item (renderSidebar) is right on the very first paint
+      // rather than popping in a moment later.
+      await _fetchBulkIngestStatus()
       await loadArtistList()
-      route()
+      const bulkIngestActive = state.bulkIngest
+        && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
+      if (bulkIngestActive && (window.location.hash || '#/') === '#/') {
+        window.location.hash = '#/bulk-ingest'   // hashchange re-enters route()
+      } else {
+        route()
+      }
     } catch (e) {
       // Authenticated, but the app failed to come up. Say THAT.
       bootFailure(e, 'The app failed to start')

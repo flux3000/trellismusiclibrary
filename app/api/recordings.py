@@ -36,15 +36,20 @@ from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recordin
 from app.utils.folder_naming import rename_recording_folder, unique_file_name
 from app.utils import node_settings
 from app.utils.file_naming import rename_plan, TemplateError
+from app.api.system import require_library
 from app.utils.analysis import analyse_recording
 from app.utils.pruning import prune_after_recording_delete
-from app.utils.serialize import recording_row, derive_set_track_numbers
+from app.utils.serialize import (recording_row, derive_set_track_numbers,
+                                 _primary_recording_image_url)
 from app.utils.paula import compute_paula_score
 from app.utils.checksums import (
     discover_fingerprint_files, parse_checksum_file,
     match_entries_to_tracks, verify_track_checksum, FINGERPRINT_TYPE_PRIORITY,
     ChecksumMatchProxy,
 )
+from app.utils import musicbrainz
+from app.models.recording_image import RecordingImage
+from app.utils import entity_images as ei
 
 bp = Blueprint("recordings", __name__)
 
@@ -75,6 +80,11 @@ def _card_eager(query):
         selectinload(Recording.performance)
         .selectinload(Performance.artist)
         .selectinload(Artist.genre),
+        # Recording-level artwork (Studio Records spec v1, chunk 5) --
+        # image_url on every row is now unconditional (not gated behind
+        # card=True), so this eager-load has to ride along with every
+        # card-bearing query too, same N+1 reasoning as the two above.
+        selectinload(Recording.images),
     )
 
 
@@ -93,7 +103,7 @@ def recent_recordings():
     # row cards. Opt-in for the same reason as waveform: this endpoint also
     # backs the List view's flat table, which needs none of it.
     card = request.args.get("card", "").lower() in ("1", "true", "yes")
-    query = Recording.query
+    query = Recording.query.options(selectinload(Recording.images))
     if waveform:
         query = query.options(selectinload(Recording.tracks).selectinload(Track.analysis))
     if card:
@@ -307,6 +317,7 @@ def on_this_day():
         month, day = today.month, today.day
     recs = (
         Recording.query
+        .options(selectinload(Recording.images))
         .join(Performance, Recording.performance_id == Performance.id)
         .filter(Performance.start_month == month,
                 Performance.start_day == day)
@@ -394,6 +405,19 @@ def get_recording(recording_id):
         "is_favorite":          bool(rec.is_favorite),
         "is_complete":          rec.is_complete,
         "is_official":          bool(rec.is_official),
+        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        "kind":                 rec.kind,
+        # MusicBrainz release lookup (Studio Records spec v1, section 2) -- the
+        # eight columns, so the Release block on View Recording (chunk 3) can
+        # render them without a second endpoint.
+        "mb_release_id":         rec.mb_release_id,
+        "mb_release_group_id":   rec.mb_release_group_id,
+        "mb_release_status":     rec.mb_release_status,
+        "mb_release_type":       rec.mb_release_type,
+        "mb_label":              rec.mb_label,
+        "mb_catalog_number":     rec.mb_catalog_number,
+        "mb_release_country":    rec.mb_release_country,
+        "mb_release_checked_at": rec.mb_release_checked_at.isoformat() if rec.mb_release_checked_at else None,
         # Exposed so the page can SAY the show is out at the workbench. A
         # recording whose folder has been moved would otherwise look completely
         # normal and simply fail to play — the "empty state that is really a
@@ -456,6 +480,12 @@ def get_recording(recording_id):
             }
             for e in rec.events
         ],
+        # Recording-level artwork (Studio Records spec v1, chunk 5) -- the
+        # full gallery (for the header portrait + createPhotoGallery()) plus
+        # a bare image_url matching every list row's field, so the header can
+        # render before the gallery component itself has loaded.
+        "images":     [ei.image_payload(i, _RECORDING_IMG_URL) for i in rec.images],
+        "image_url":  _primary_recording_image_url(rec),
     })
 
 
@@ -602,6 +632,14 @@ def update_recording(recording_id):
         if field in data:
             setattr(rec, field, data[field])
 
+    # kind -- live show vs studio release (Bulk Ingest spec chunk 2). Its own
+    # branch rather than the blind setattr loop above: it needs validation, the
+    # updatable fields above never do.
+    if "kind" in data:
+        if data["kind"] not in ("live", "studio"):
+            return jsonify({"error": "kind must be 'live' or 'studio'"}), 400
+        rec.kind = data["kind"]
+
     # etree_shnid is an Integer column; makeInlineEditable() sends a plain
     # string (or an empty one to clear it), so it needs its own coercion
     # rather than the blind setattr the string fields above get.
@@ -652,6 +690,108 @@ def update_recording(recording_id):
     if rename_error:
         resp["folder_rename_error"] = rename_error
     return jsonify(resp)
+
+
+# ── MusicBrainz release lookup (Studio Records spec v1, section 2/chunk 3) ──
+# Mirrors app/api/artists.py's musicbrainz_lookup/candidates/resolve trio
+# exactly -- automatic matching either lands outright (via try_match_release()
+# in the background worker) or defers to a human, and these three endpoints
+# are how a human finishes the job for a studio recording. Admin-gated: this
+# writes Performance dates and Track titles, not just a status flag.
+
+def _require_admin_for_release():
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"error": "Admin only"}), 403
+    return None
+
+
+@bp.route("/<int:recording_id>/release-candidates")
+@login_required
+def release_candidates(recording_id):
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.kind != "studio":
+        return jsonify({"error": "Only studio recordings have a release lookup"}), 400
+    forbidden = _require_admin_for_release()
+    if forbidden:
+        return forbidden
+    if not musicbrainz.enabled():
+        return jsonify({"error": "MusicBrainz lookups are disabled"}), 503
+
+    artist_name = rec.performance.artist.name if rec.performance and rec.performance.artist else None
+    musicbrainz.reset_breaker()
+    candidates = musicbrainz.search_release(artist_name, rec.title)
+    _status, _best, ranked = musicbrainz.classify_release(candidates, len(rec.tracks or []))
+    return jsonify({"candidates": ranked})
+
+
+@bp.route("/<int:recording_id>/release-link", methods=["POST"])
+@login_required
+def release_link(recording_id):
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.kind != "studio":
+        return jsonify({"error": "Only studio recordings can be linked to a release"}), 400
+    forbidden = _require_admin_for_release()
+    if forbidden:
+        return forbidden
+    if not musicbrainz.enabled():
+        return jsonify({"error": "MusicBrainz lookups are disabled"}), 503
+
+    data = request.get_json() or {}
+    mbid = (data.get("mbid") or "").strip()
+    if not mbid:
+        return jsonify({"error": "mbid is required"}), 400
+
+    musicbrainz.reset_breaker()
+    details = musicbrainz.link_release(rec, mbid)
+    if not details:
+        return jsonify({"error": "Could not fetch that MusicBrainz release"}), 502
+    db.session.commit()
+    return jsonify({"status": "linked", "mb_release_id": rec.mb_release_id,
+                    "mb_release_group_id": rec.mb_release_group_id,
+                    "mb_release_type": rec.mb_release_type,
+                    "mb_label": rec.mb_label, "mb_catalog_number": rec.mb_catalog_number,
+                    "mb_release_country": rec.mb_release_country})
+
+
+@bp.route("/<int:recording_id>/release-unlink", methods=["POST"])
+@login_required
+def release_unlink(recording_id):
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.kind != "studio":
+        return jsonify({"error": "Only studio recordings can be unlinked"}), 400
+    forbidden = _require_admin_for_release()
+    if forbidden:
+        return forbidden
+
+    musicbrainz.unlink_release(rec)
+    db.session.commit()
+    return jsonify({"status": "unlinked"})
+
+
+# ── Recording-level artwork (Studio Records spec v1, chunk 5) ────────────────
+# Five standard photo routes, generated exactly as venues/musicians/events
+# get them -- see app/utils/entity_images.py::register_image_routes(). The
+# only wrinkle: images_dir_for keys on the recording's numeric id (image_dir()
+# asserts on that for the 'recordings' kind), not a sanitized name.
+
+_RECORDING_IMG_URL = "/api/recordings/images"
+
+
+def _recording_images_dir(rec):
+    return ei.image_dir("recordings", str(rec.id))
+
+
+ei.register_image_routes(
+    bp, parent_model=Recording, image_model=RecordingImage, url_prefix=_RECORDING_IMG_URL,
+    images_dir_for=_recording_images_dir,
+    login_required=login_required, require_library=require_library,
+)
 
 
 # ── DELETE /api/recordings/<id> ──────────────────────────────────────────────
@@ -746,6 +886,18 @@ def delete_recording(recording_id):
         synchronize_session=False)
     db.session.query(Recording).filter_by(id=recording_id).delete(synchronize_session=False)
     db.session.flush()
+
+    # The recording_image ROWS cascade with the recording, but the files they
+    # point at live under DATA_DIR, not in any table -- nothing removes those
+    # on its own (N5). Best-effort and swallowed like the audio rmtree above:
+    # a leftover images folder for an id that no longer exists is clutter,
+    # never a reason to fail a delete the user asked for.
+    try:
+        images_dir = ei.image_dir("recordings", str(recording_id))
+        if images_dir.is_dir():
+            shutil.rmtree(images_dir)
+    except OSError:
+        pass
 
     # Prune the now-empty chain above the recording.
     pruned = prune_after_recording_delete(performance_id)

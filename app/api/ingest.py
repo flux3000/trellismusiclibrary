@@ -452,6 +452,12 @@ PHASES = {
 # it off the critical path of the next copy, and — because the queue is now a
 # real object — makes it reportable, which is what the debug pane needs.
 _ANALYSIS_Q = queue.Queue()
+# N9: guards the check-and-start of the single follow-up worker thread below
+# (_ANALYSIS_STATE["worker"]) -- _enqueue() used to read-then-set that flag
+# with no lock, so two calls racing (e.g. two bulk_ingest items' follow-ups
+# enqueued from different request threads at once) could both see it False
+# and start a second worker thread.
+_WORKER_START_LOCK = threading.Lock()
 _ANALYSIS_STATE = {
     "current": None,      # {recording_id, name, started, tracks_done, tracks_total}
     "worker":  False,     # has the worker thread been started
@@ -460,48 +466,322 @@ _ANALYSIS_STATE = {
     "skipped": 0,         # recordings ingested in Quick Add, never enqueued
 }
 
+# Follow-up queue kinds (Bulk Ingest spec chunk 6): the single worker below
+# now drains (kind, id) tuples rather than bare recording ids.
+#   "analysis"   the Librosa pass above -- unchanged behaviour, unchanged UI.
+#   "score"      Listening Quality + non-music signal for one
+#                already-ingested recording that never went through triage.
+#   "mb_artist"  a MusicBrainz lookup for one artist still at "never looked
+#                up", deferred off the interactive ingest path.
+#   "mb_release" a MusicBrainz release lookup for one studio recording
+#                still at "never looked up" (mb_release_status IS NULL).
+#                Never enqueued for a live recording.
+#
+# _QUEUED_KEYS / _PENDING_BY_KIND exist purely to answer "what's in the queue
+# right now" without draining it -- queue.Queue has no peek -- and to dedupe a
+# repeat enqueue_followups() call against work that is already sitting there.
+_QUEUED_KEYS = set()
+_PENDING_BY_KIND = {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+
+
+def _enqueue(app, kind, item_id):
+    """
+    Put one (kind, item_id) item on the follow-up queue, starting the single
+    worker thread on first use. Deduped against whatever is already queued
+    (popped items clear their key in the worker below), so a repeat
+    enqueue_followups() call never double-queues the same piece of work.
+
+    Returns True if the item was newly queued, False if it was already there.
+    """
+    key = (kind, item_id)
+    if key in _QUEUED_KEYS:
+        return False
+    _QUEUED_KEYS.add(key)
+    _PENDING_BY_KIND[kind] = _PENDING_BY_KIND.get(kind, 0) + 1
+    with _WORKER_START_LOCK:
+        if not _ANALYSIS_STATE["worker"]:
+            _ANALYSIS_STATE["worker"] = True
+            threading.Thread(target=_analysis_worker, args=(app,), daemon=True).start()
+    _ANALYSIS_Q.put(key)
+    return True
+
+
+def _handle_analysis(recording_id):
+    """The Librosa analysis pass -- body unchanged from before chunk 6."""
+    import traceback as _tb
+    try:
+        from app.models.recording import Recording
+        from app.utils.analysis import analyse_recording
+        rec = db.session.get(Recording, recording_id)
+        if not rec:
+            return
+        _ANALYSIS_STATE["current"] = {
+            "recording_id": recording_id,
+            "name": os.path.basename(rec.folder_path or "") or str(recording_id),
+            "started": time.time(),
+            "tracks_total": len(rec.tracks or []),
+        }
+        log_step(f"analysis:{recording_id}", "analyzing",
+                 f"{len(rec.tracks or [])} tracks", force=True)
+        library_root = current_app.config.get("LIBRARY_ROOT", "")
+        n_ok, errors = analyse_recording(rec, library_root, db.session)
+        _ANALYSIS_STATE["done"] += 1
+        if errors:
+            _ANALYSIS_STATE["failed"] += len(errors)
+        print("[ingest] auto-analysis for recording %s: %d ok, %d error(s)"
+              % (recording_id, n_ok, len(errors)), flush=True)
+    except Exception:
+        _ANALYSIS_STATE["failed"] += 1
+        _tb.print_exc()
+    finally:
+        _ANALYSIS_STATE["current"] = None
+
+
+def _handle_score(recording_id):
+    """
+    Listening Quality + non-music signal for one recording that
+    was bulk-ingested (so it never went through the interactive triage/ingest
+    passes that normally produce these).
+
+    Reuses the SAME scorer chain as manual triage (_analyse_one in
+    app/api/quality.py): extract_recording_features() then score_recording(),
+    written straight onto the permanent RecordingQuality row since there is
+    no staging row to promote from. If the folder's audio cannot be read
+    (moved, deleted, on an unmounted volume), extract_recording_features()
+    returns an {"error": ...} dict and no row is written -- the recording
+    stays "unscored" and a later enqueue_followups() run will retry it.
+    """
+    from app.models.recording import Recording
+    from app.utils.quality_store import get_for_recording, upsert_for_recording
+
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return
+    if rec.kind == "studio":
+        return  # studio recordings are never scored (2026-09-27)
+    if get_for_recording(recording_id) is not None:
+        return  # already scored by something else in the meantime
+
+    from app.utils.quality import (extract_recording_features, score_recording,
+                                   guess_source_from_name)
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    folder_path = rec.folder_path or ""
+    folder_abs = os.path.join(library_root, folder_path)
+    name = os.path.basename(folder_path.rstrip("/"))
+
+    features = extract_recording_features(folder_abs)
+    if "error" not in features:
+        scored = score_recording(features, source=guess_source_from_name(name))
+        upsert_for_recording(recording_id, scored, features)
+
+    # Non-music signal -- same measurement an interactive ingest runs inline;
+    # bulk ingest skips it there (chunk 5) and picks it up here instead.
+    try:
+        _store_non_music_signal(rec.tracks, library_root, folder_path)
+    except Exception:
+        import traceback as _tb
+        _tb.print_exc()
+
+    # MD5 verification is NEVER run here (Ryan, 2026-09-27: "MD5 never
+    # automatic" -- it runs only from the manual Re-validate / verify-
+    # checksums action on View Recording). This follow-up only ever did the
+    # score and the non-music signal; the automatic checksum re-verify that
+    # used to sit here has been removed entirely.
+
+
+def _handle_mb_artist(artist_id):
+    """
+    MusicBrainz lookup for one artist, only if nobody has looked it up since
+    it was enqueued. Uses try_match_artist() exactly as resolve_or_create_artist
+    does at ingest time -- same gate, same circuit breaker, same "never under
+    TESTING" switch -- so this is never a second code path to keep in sync.
+    """
+    from app.models.artist import Artist
+    from app.utils import musicbrainz as _mb
+
+    artist = db.session.get(Artist, artist_id)
+    if not artist or artist.mb_status is not None:
+        return
+    _mb.try_match_artist(artist)
+    db.session.commit()
+
+
+def _handle_mb_release(recording_id):
+    """
+    MusicBrainz release lookup for one studio recording, only if nobody has
+    looked it up since it was enqueued. Uses try_match_release() exactly as
+    the automatic pass does -- same gate, same circuit breaker, same
+    "never under TESTING" switch -- so this is never a second code path to
+    keep in sync.
+    """
+    from app.models.recording import Recording
+    from app.utils import musicbrainz as _mb
+
+    rec = db.session.get(Recording, recording_id)
+    if not rec or rec.mb_release_status is not None:
+        return
+    _mb.try_match_release(rec)
+    db.session.commit()
+
+
+def _handle_images(recording_id):
+    """
+    Artwork backfill for one recording that has never been scanned for it
+    (S8, independent review v1). Only on-demand path before this was manual
+    upload -- a recording ingested before recording-level artwork existed,
+    or whose folder gained a cover afterward, never got its folder or
+    embedded art without a full re-ingest.
+
+    Always stamps `images_checked_at`, whether or not anything was found,
+    same "always set the status column" contract as _handle_mb_release --
+    otherwise enqueue_followups()'s null-check re-queues it forever.
+    Skipped (checked_at still stamped) when the recording's folder is
+    missing entirely: nothing to scan, and retrying it every boot would
+    just repeat the same no-op.
+    """
+    from datetime import datetime, timezone
+    from app.models.recording import Recording
+    from app.utils.recording_images import ingest_recording_images
+
+    rec = db.session.get(Recording, recording_id)
+    if not rec or rec.images_checked_at is not None:
+        return
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    folder_abs = os.path.join(str(library_root), rec.folder_path or "")
+    if rec.folder_path and os.path.isdir(folder_abs):
+        ingest_recording_images(rec, library_root)
+    rec.images_checked_at = datetime.now(timezone.utc)
+    db.session.commit()
+
+
+_HANDLERS = {
+    "analysis":   _handle_analysis,
+    "score":      _handle_score,
+    "mb_artist":  _handle_mb_artist,
+    "mb_release": _handle_mb_release,
+    "images":     _handle_images,
+}
+
+
+def _handle_item(kind, item_id):
+    """
+    One follow-up item, dispatched by kind. Factored out of the worker loop
+    so tests can drain the queue synchronously with no thread involved.
+
+    Each kind's own failure is logged and swallowed here -- one bad recording
+    or artist must never take the worker thread down, the same guarantee the
+    analysis pass already had.
+    """
+    import traceback as _tb
+    handler = _HANDLERS.get(kind)
+    if handler is None:
+        print(f"[ingest] unknown follow-up kind {kind!r}", flush=True)
+        return
+    try:
+        handler(item_id)
+    except Exception:
+        _tb.print_exc()
+
 
 def _analysis_worker(app):
-    """Drain the analysis queue forever, one recording at a time."""
-    import traceback as _tb
+    """Drain the follow-up queue forever, one item at a time."""
     while True:
-        recording_id = _ANALYSIS_Q.get()
+        kind, item_id = _ANALYSIS_Q.get()
+        _QUEUED_KEYS.discard((kind, item_id))
+        _PENDING_BY_KIND[kind] = max(0, _PENDING_BY_KIND.get(kind, 0) - 1)
         try:
             with app.app_context():
-                from app.models.recording import Recording
-                from app.utils.analysis import analyse_recording
-                rec = db.session.get(Recording, recording_id)
-                if not rec:
-                    continue
-                _ANALYSIS_STATE["current"] = {
-                    "recording_id": recording_id,
-                    "name": os.path.basename(rec.folder_path or "") or str(recording_id),
-                    "started": time.time(),
-                    "tracks_total": len(rec.tracks or []),
-                }
-                log_step(f"analysis:{recording_id}", "analyzing",
-                         f"{len(rec.tracks or [])} tracks", force=True)
-                library_root = app.config.get("LIBRARY_ROOT", "")
-                n_ok, errors = analyse_recording(rec, library_root, db.session)
-                _ANALYSIS_STATE["done"] += 1
-                if errors:
-                    _ANALYSIS_STATE["failed"] += len(errors)
-                print("[ingest] auto-analysis for recording %s: %d ok, %d error(s)"
-                      % (recording_id, n_ok, len(errors)), flush=True)
-        except Exception:
-            _ANALYSIS_STATE["failed"] += 1
-            _tb.print_exc()
+                _handle_item(kind, item_id)
         finally:
-            _ANALYSIS_STATE["current"] = None
             _ANALYSIS_Q.task_done()
 
 
 def _enqueue_analysis(app, recording_id):
-    """Hand a freshly ingested recording to the single analysis worker."""
-    if not _ANALYSIS_STATE["worker"]:
-        _ANALYSIS_STATE["worker"] = True
-        threading.Thread(target=_analysis_worker, args=(app,), daemon=True).start()
-    _ANALYSIS_Q.put(recording_id)
+    """Hand a freshly ingested recording to the single follow-up worker."""
+    _enqueue(app, "analysis", recording_id)
+
+
+def enqueue_followups():
+    """
+    Queue the two kinds of derived-from-state follow-up work (Bulk Ingest
+    spec section 1.6, chunk 6):
+
+      (a) every LIVE recording with no RecordingQuality row yet -- covers a
+          bulk-ingested recording, which never went through triage; studio
+          recordings are never scored (2026-09-27) and are excluded here;
+      (b) every artist whose MusicBrainz status is still "never looked up"
+          (mb_status IS NULL) -- covers an artist created with lookup=False
+          during bulk ingest;
+      (c) every STUDIO recording whose release status is still "never
+          looked up" (mb_release_status IS NULL) -- Studio Records spec v1
+          section 2. Never for a live recording.
+
+    Never "analysis" -- a whole-library bulk_ingest run must never schedule the
+    Librosa pass (spec chunk 5/6). Deduped against whatever is already
+    queued via _enqueue(), so calling this twice in a row (e.g. once at run
+    completion and once at the next boot) enqueues nothing new.
+
+      (d) every recording (any kind) with zero recording_image rows and
+          `images_checked_at` still null -- the artwork backfill (S8,
+          independent review v1). Never re-enqueued once checked, whether
+          or not it found anything, so this never re-scans a library that
+          already has been.
+
+    Returns {"score": n, "mb_artist": n, "mb_release": n, "images": n} --
+    the counts newly enqueued.
+    """
+    from app.models.recording import Recording
+    from app.models.recording_image import RecordingImage
+    from app.models.artist import Artist
+    from app.models.quality import RecordingQuality
+
+    app = current_app._get_current_object()
+
+    # Studio recordings are never scored (2026-09-27) -- excluded here so
+    # nothing ever lands on the queue for one; _handle_score's own guard is
+    # the backstop for anything that got queued before this existed.
+    unscored_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .outerjoin(RecordingQuality, RecordingQuality.recording_id == Recording.id)
+        .filter(RecordingQuality.id.is_(None), Recording.kind == "live")
+        .order_by(Recording.id)
+        .all())]
+    scored_n = sum(1 for rid in unscored_ids if _enqueue(app, "score", rid))
+
+    never_looked_up_ids = [aid for (aid,) in (
+        db.session.query(Artist.id)
+        .filter(Artist.mb_status.is_(None))
+        .order_by(Artist.id)
+        .all())]
+    mb_n = sum(1 for aid in never_looked_up_ids if _enqueue(app, "mb_artist", aid))
+
+    # (c) studio recordings never looked up for a release. Excluded from
+    # the query outright rather than relying only on _handle_mb_release's
+    # own guard, same reasoning as the studio exclusion in (a) above.
+    never_looked_up_release_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .filter(Recording.kind == "studio", Recording.mb_release_status.is_(None))
+        .order_by(Recording.id)
+        .all())]
+    mb_release_n = sum(1 for rid in never_looked_up_release_ids
+                      if _enqueue(app, "mb_release", rid))
+
+    # (d) artwork backfill -- any kind, unlike (a)/(c) above. Excluded
+    # outright the same way: a recording already carrying at least one
+    # RecordingImage row is scanned, checked_at or not (an upload before the
+    # column existed), and a recording already stamped checked has nothing
+    # left to do.
+    never_scanned_for_images_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .outerjoin(RecordingImage, RecordingImage.recording_id == Recording.id)
+        .filter(RecordingImage.id.is_(None), Recording.images_checked_at.is_(None))
+        .order_by(Recording.id)
+        .all())]
+    images_n = sum(1 for rid in never_scanned_for_images_ids
+                  if _enqueue(app, "images", rid))
+
+    return {"score": scored_n, "mb_artist": mb_n, "mb_release": mb_release_n,
+            "images": images_n}
 
 
 def analysis_snapshot():
@@ -509,6 +789,7 @@ def analysis_snapshot():
     cur = _ANALYSIS_STATE.get("current")
     return {
         "pending": _ANALYSIS_Q.qsize(),
+        "pending_by_kind": dict(_PENDING_BY_KIND),
         "current": (dict(cur, elapsed=round(time.time() - cur["started"], 1))
                     if cur else None),
         "done":    _ANALYSIS_STATE["done"],
@@ -810,7 +1091,7 @@ def _store_non_music_signal(tracks, library_root, folder_path):
              force=True)
 
 
-def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
+def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, bulk=False):
     """
     Resolve or create the full object chain, then ingest the recording.
     Runs inside an app context (background thread). Returns a result dict;
@@ -842,6 +1123,28 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         {"track_number":1,"title":"Dark Star","set_number":"Set 1","duration":1200,"filename":"t01.flac"}
       ]
     }
+
+    bulk=True (Bulk Ingest, chunk 5): the same object-creation chain runs,
+    with three things skipped because a whole-library pass cannot afford them
+    per show —
+      - the synchronous MusicBrainz lookup on a brand-new artist
+        (resolve_or_create_artist(..., lookup=False))
+      - the non-music (chatter/tuning) signal pass
+      - the ingest tag write (step 12), regardless of write_tags_on_ingest.
+    The tag write (step 12) is also skipped whenever the source is in-root
+    (R2-N7) -- not only under bulk=True -- since an in-root source's files
+    are the collector's own, wherever the confirm call came from.
+
+    MD5 checksum verification (a full re-hash per file) is NEVER run here,
+    bulk or interactive alike (Ryan, 2026-09-27: "MD5 never automatic" --
+    it runs only from the manual Re-validate / verify-checksums action on
+    View Recording). FFP/ST5 header verification still runs at confirm, and
+    every fingerprint file is still parsed, matched and stored regardless
+    of type; only the MD5 recompute-and-compare step is skipped, leaving
+    those entries `unverified`.
+
+    Everything else -- the move, the Recording/Track rows, tag reads --
+    is identical to an interactive confirm.
     """
     # No-op when nobody is listening, so every call site below stays unguarded.
     def _phase(key, detail=None):
@@ -879,6 +1182,17 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     end_month   = data.get("end_month")
     end_day     = data.get("end_day")
 
+    # title/kind (Bulk Ingest chunk 5): Recording has carried both columns
+    # since before this function existed. kind defaults to "live" and is
+    # validated against the column's two known values so a bad payload fails
+    # loudly here rather than writing a third, silently-unrecognised kind.
+    # Resolved this early (rather than just before Recording() below) because
+    # step 4's Performance lookup also needs to know it (B1, immediately
+    # below).
+    rec_kind = data.get("kind") or "live"
+    if rec_kind not in ("live", "studio"):
+        raise ValueError(f"kind must be 'live' or 'studio': {rec_kind!r}")
+
     # ── 1. Find or create Artist (the act) ─────────────────────────────────
     # `members`/`guests` are the Add Recording form's two personnel rows — see
     # app/utils/personnel.py::sync_performance_personnel for what they mean at
@@ -914,7 +1228,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     guest_names_sync  = data.get("guests")
     member_names = member_names_sync or []
     guest_names  = guest_names_sync  or []
-    artist = resolve_or_create_artist(artist_name, member_names)
+    artist = resolve_or_create_artist(artist_name, member_names, lookup=not bulk)
 
     # ── 2. Genre, on the ARTIST (2026-09-01) ───────────────────────────────
     _apply_artist_genre(artist, data)
@@ -970,16 +1284,27 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             db.session.flush()
 
     # ── 4. Find or create Performance ─────────────────────────────────────────
-    perf_q = db.session.query(Performance).filter(
-        Performance.artist_id == artist.id,
-        Performance.start_year  == start_year,
-        Performance.start_month == start_month,
-        Performance.start_day   == start_day,
-    )
-    if venue:
-        perf_q = perf_q.filter(Performance.venue_id == venue.id)
+    # A studio recording always gets its OWN Performance (Ryan, 2026-09-27):
+    # never reuse one found by artist/date, unlike a live show, where sharing
+    # a Performance across recordings of the same night is the whole point.
+    # Reusing one here is exactly how B1 happened -- two studio albums by one
+    # artist tagged the same year, no month, share a Performance whose date
+    # fields then get filled from whichever album's release lookup runs
+    # first, so the second album silently inherits the first one's release
+    # day. scripts/migrate_studio_records.py splits apart any Performance an
+    # earlier build already shared this way.
+    performance = None
+    if rec_kind != "studio":
+        perf_q = db.session.query(Performance).filter(
+            Performance.artist_id == artist.id,
+            Performance.start_year  == start_year,
+            Performance.start_month == start_month,
+            Performance.start_day   == start_day,
+        )
+        if venue:
+            perf_q = perf_q.filter(Performance.venue_id == venue.id)
+        performance = perf_q.first()
 
-    performance = perf_q.first()
     if not performance:
         performance = Performance(
             artist_id = artist.id,
@@ -1045,8 +1370,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # Trellis at a library they built themselves.
     under_artist = node_settings.file_under_artist_folder()
 
-    # Bulk Adoption spec section 1.1, chunk 1 (2026-09-26): a source whose
-    # realpath is already inside LIBRARY_ROOT is adopted exactly as it sits
+    # Bulk Ingest spec section 1.1, chunk 1 (2026-09-26): a source whose
+    # realpath is already inside LIBRARY_ROOT is ingested exactly as it sits
     # on disk -- never moved, renamed, flattened or deduped, in either
     # file_handling mode or placement. move_to_library() enforces the
     # move/rename/dedupe half of that; this flag makes the Track.file_path
@@ -1132,6 +1457,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     ai_result = data.get("ai_result")
     # etree_shnid was already validated/coerced to int-or-None at the top of
     # this function (R3, review 2026-09-25) -- reads straight through here.
+    # rec_kind was resolved and validated earlier (step 4 needs it too).
     rec = Recording(
         performance_id       = performance.id,
         source               = data.get("source"),
@@ -1145,6 +1471,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         original_folder_name = os.path.basename(source_folder),
         info_file_content    = data.get("info_file_content"),
         notes                = data.get("notes"),
+        title                = data.get("title") or None,
+        kind                 = rec_kind,
         ai_research_json     = json.dumps(ai_result) if ai_result else None,
     )
     db.session.add(rec)
@@ -1260,7 +1588,22 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
                 track_abs_path = os.path.join(library_root, new_folder_path, track.file_path)
                 track.checksum_type        = fp_type
                 track.expected_checksum    = expected
-                track.checksum_status      = verify_track_checksum(track_abs_path, fp_type, expected)
+                # MD5 is NEVER computed automatically at confirm, bulk or
+                # interactive alike (Ryan, 2026-09-27: "MD5 never automatic"
+                # -- it runs only from the manual Re-validate / verify-
+                # checksums action on View Recording). A full re-hash of
+                # every byte of every file is minutes rather than seconds
+                # across a whole-library pass, and even for one interactive
+                # ingest it is unasked-for work the confirm click never
+                # promised. FFP/ST5 still verify here -- both only read a
+                # FLAC header and cost nothing extra. The fingerprint file
+                # itself is still parsed, matched and stored above
+                # regardless of type -- only the recompute-and-compare step
+                # is conditional.
+                if fp_type == "md5":
+                    track.checksum_status = "unverified"
+                else:
+                    track.checksum_status = verify_track_checksum(track_abs_path, fp_type, expected)
                 track.checksum_verified_at = now
 
     # ── 10. Irrevocable ingest event ──────────────────────────────────────────
@@ -1291,20 +1634,30 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # reads the copy it will be describing, not the source that may be gone.
     #
     # Never fatal: an ingest must not fail over a suggestion.
-    _phase("signals", f"{len(created_tracks)} tracks")
-    try:
-        _store_non_music_signal(created_tracks, library_root, new_folder_path)
-    except Exception:  # noqa: BLE001
-        import traceback as _tb3
-        _tb3.print_exc()
+    # bulk=True skips this pass entirely (spec chunk 5): a whole-library run
+    # cannot afford a librosa-adjacent measurement per track across thousands
+    # of shows the way one interactive ingest can. No signal row is written
+    # for a bulk-ingested recording; Re-Analyze can add one later same as any
+    # other recording that was Quick-Added.
+    if not bulk:
+        _phase("signals", f"{len(created_tracks)} tracks")
+        try:
+            _store_non_music_signal(created_tracks, library_root, new_folder_path)
+        except Exception:  # noqa: BLE001
+            import traceback as _tb3
+            _tb3.print_exc()
 
     _phase("saving")
-    try:
-        from app.utils.quality_store import promote_to_recording
-        promote_to_recording(source_folder, rec.id, commit=False)
-    except Exception:  # noqa: BLE001
-        import traceback as _tb2
-        _tb2.print_exc()
+    # N5: promote_to_recording's own flush can raise (e.g. no admin user for
+    # RecordingEvent.user_id) -- that used to be swallowed here and printed,
+    # after which the very next line's db.session.commit() raised a SEPARATE,
+    # unrelated PendingRollbackError from the dirty session, and THAT is what
+    # every caller (including process()'s per-item except) reported as the
+    # failure. Let the real exception propagate instead: the caller's own
+    # rollback + failure handling is exactly what an ingest error already
+    # goes through, so nothing is lost by not catching it a second time here.
+    from app.utils.quality_store import promote_to_recording
+    promote_to_recording(source_folder, rec.id, commit=False)
 
     db.session.commit()
 
@@ -1319,7 +1672,17 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # rolled back; the ingest itself already succeeded. Step 9's stored
     # checksum status is not recomputed.
     tag_errors = []
-    if file_handling["write_tags_on_ingest"]:
+    # R2-N7: any in-root source skips the ingest tag write, not only a bulk
+    # (bulk=True) bulk_ingest run. in_root_source already means "this folder
+    # sits inside the collector's own library, exactly where discover()
+    # found it" (spec section 1.1) -- Review & Ingest's Accept action reaches
+    # here with bulk=False for an in-root show too (it is a deliberate click,
+    # not an unattended pass), but the page it's clicked from says "Your
+    # files are not moved or changed," and step 12 writing tags into the
+    # collector's own file directly contradicts that. A source arriving from
+    # OUTSIDE the root still follows the write_tags_on_ingest switch exactly
+    # as before, whether bulk or not.
+    if file_handling["write_tags_on_ingest"] and not bulk and not in_root_source:
         _phase("tags", f"{len(created_tracks)} tracks")
         n_written, tag_errors = write_flac_tags(rec, library_root)
         if n_written > 0:
@@ -1334,6 +1697,28 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             ))
             db.session.commit()
 
+    # ── 13. Recording artwork (Studio Records spec v1, chunk 4) ─────────────
+    # After the recording/tracks are committed and after step 12's (skipped
+    # or not) tag write, so it reads the tracks' FINAL on-disk names exactly
+    # like step 12 does. Runs for both doors -- bulk_ingest_run.process()
+    # calls this same _do_confirm(bulk=True), so a step in here covers both
+    # without a separate bulk path. Never fatal: a bad or unreadable image
+    # must not fail an otherwise-successful ingest, so any exception here is
+    # caught and reported on the job result rather than raised. (The helper
+    # itself already swallows every per-image error; this is a second, wider
+    # net for anything unexpected -- e.g. the folder having vanished.)
+    image_errors = []
+    _phase("images")
+    try:
+        from app.utils.recording_images import ingest_recording_images
+        ingest_recording_images(rec, library_root)
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        import traceback as _tb4
+        _tb4.print_exc()
+        image_errors.append(str(e))
+
     return {
         "recording_id":        rec.id,
         "artist_id":        artist.id,
@@ -1341,6 +1726,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         "event_id":            event.id if event else None,
         "checksum_mismatches": checksum_mismatches,
         "tag_errors":          tag_errors,
+        "image_errors":        image_errors,
     }
 
 
@@ -1484,16 +1870,20 @@ def batch_scan():
                     used for the "uncertain" styling on individual fields in
                     the expanded row detail (unrelated to tier now).
       - extracted: { artist, year, month, day, venue, city, state, country,
-                     source, lineage, track_count, tracks_titled }
+                     source, lineage, track_count, tracks_titled, format, kind }
+                     format/kind computed the same way bulk_ingest.py's
+                     extract()/classify() do (2026-09-27), so this table's
+                     FORMAT/TYPE pills match the other two ingest surfaces.
       - paula: compute_paula_score() result, or None (empty/unreadable folder).
                Purple-border source-of-truth in Add Recording's field-level
                confidence highlighting — no longer rendered as its own
                narrative/avatar anywhere in the UI (removed 2026-07-16).
       - already_ingested: bool  (folder path already in DB)
     """
-    from app.utils.ingest import build_scan_payload
+    from app.utils.ingest import build_scan_payload, scan_folder
     from app.models.recording import Recording
     from app.utils.paula import compute_paula_score
+    from app.utils.bulk_ingest import folder_format, classify_kind, _consistent_tag, _resolve_venue
 
     data       = request.get_json() or {}
     source_dir = (data.get("source_dir") or "").strip()
@@ -1567,6 +1957,24 @@ def batch_scan():
         from_tags = ((scan or {}).get("suggestions") or {}).get("from_tags") or {}
         from_info = ((scan or {}).get("suggestions") or {}).get("from_info_file") or {}
         health    = (scan or {}).get("health") or {"score": 0, "band": "red"}
+
+        # Format + Type (2026-09-27) -- same pure functions bulk_ingest.py's
+        # extract()/classify() use, so this table's FORMAT/TYPE pills match
+        # Bulk Ingest's and Review & Ingest's for the same folder. format
+        # needs scan_folder()'s unsupported_audio list (SHN) that
+        # build_scan_payload() does not forward -- a second scan_folder()
+        # call is a directory walk, not a tag open, so this costs no extra
+        # file read beyond what build_scan_payload() already did above.
+        folder_format_str = None
+        kind = None
+        if scan:
+            try:
+                folder_format_str = folder_format(scan_folder(folder_path))
+            except Exception:
+                folder_format_str = None
+            kind_album = _consistent_tag(from_tags.get("tracks", []), "album")
+            kind_venue, _kind_venue_source = _resolve_venue(scan)
+            kind = classify_kind(scan, kind_album, kind_venue)
 
         # Paula's per-item confidence read — same engine as the interactive
         # scan endpoint (app/api/recordings.py). Frontend aggregates these
@@ -1723,6 +2131,8 @@ def batch_scan():
                 "tracks_titled":    titled_count,
                 "info_track_count": len(info_tracks),  # total from info file (not capped)
                 "tracks":           merged_tracks,
+                "format":           folder_format_str,
+                "kind":             kind,
             },
             "already_ingested": already_ingested,
         })

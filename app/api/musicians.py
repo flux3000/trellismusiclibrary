@@ -36,11 +36,10 @@ _IMG_URL = "/api/musicians/images"
 
 
 def _musician_images_dir(musician):
-    # LIBRARY_ROOT/_musicians/<sanitized person name>/_images. The bucket matters:
-    # a person and an act share a name constantly (Bill Evans, Doc Watson), and
-    # artist photos live at the library root with no prefix at all.
-    return ei.entity_images_dir(current_app.config["LIBRARY_ROOT"],
-                                "_musicians", musician.name, _sanitize_path)
+    # DATA_DIR/images/musicians/<sanitized person name> -- see
+    # app/utils/entity_images.py::image_dir. The bucket matters: a person and
+    # an act share a name constantly (Bill Evans, Doc Watson).
+    return ei.image_dir("musicians", musician.name)
 
 
 ei.register_image_routes(

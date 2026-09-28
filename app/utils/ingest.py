@@ -13,10 +13,13 @@ import os
 import re
 import shutil
 import datetime
+import unicodedata
 from difflib import get_close_matches
 from pathlib import Path
 from mutagen.flac import FLAC
 from mutagen import MutagenError
+from mutagen.mp3 import MP3
+from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX
 from dateutil import parser as _dateutil_parser
 from dateutil.parser import ParserError as _ParserError
 import geonamescache as _geonamescache
@@ -169,30 +172,42 @@ def _root_audio_count(path):
         return 0
 
 
-def _audio_subdirs(path):
+def _audio_subdirs(path, unreadable=None):
     """
     Immediate subdirs of `path` that contain audio at any depth.
 
     Excluded directories (see _is_excluded_dir) are skipped outright, so an
     `_originals/` folder left by an SHN/WAV -> FLAC conversion can never be
     mistaken for a disc subdir or for a grouping child of its own show.
+
+    `unreadable`, when given a list, collects (path, message) for any
+    directory os.walk could not even scandir while descending through `path`
+    -- a show folder nested below a perfectly readable artist/year folder
+    (R2-1). Without this, os.walk's default onerror=None means a subdir
+    that is itself unreadable (or that became so mid-walk) simply yields no
+    files and looks identical to one that is genuinely empty of audio.
     """
     result = []
     try:
         for sub in os.scandir(path):
             if not sub.is_dir() or _is_excluded_dir(sub.name):
                 continue
-            for _, _, files in os.walk(sub.path):
+            def _onerror(exc, _sub=sub):
+                if unreadable is not None:
+                    unreadable.append((exc.filename or _sub.path, str(exc)))
+
+            for _, _, files in os.walk(sub.path, onerror=_onerror):
                 if any(os.path.splitext(f)[1].lower() in RESOLVE_AUDIO_EXTS
                        for f in files):
                     result.append(sub)
                     break
-    except OSError:
-        pass
+    except OSError as e:
+        if unreadable is not None:
+            unreadable.append((path, str(e)))
     return result
 
 
-def resolve_shows(path, include_empty=True):
+def resolve_shows(path, include_empty=True, unreadable=None):
     """
     Recursively resolve a directory to its actual show-level paths.
 
@@ -211,14 +226,19 @@ def resolve_shows(path, include_empty=True):
         folder the USER named is reported (the scanner grades it red)
         rather than vanishing. A directory being WALKED during a scan
         passes include_empty=False instead — see resolve_shows_in_dir.
+
+    `unreadable`, when given a list, is threaded down into every recursive
+    call and into _audio_subdirs() so a show-shaped folder that is itself
+    unreadable, however many readable ancestors sit above it, is collected
+    rather than silently read as "no audio here" (R2-1).
     """
     if _root_audio_count(path) > 0:
         return [path]
-    subs = _audio_subdirs(path)
+    subs = _audio_subdirs(path, unreadable=unreadable)
     if not subs:
         return [path] if include_empty else []
     if len(subs) == 1:
-        return resolve_shows(subs[0].path, include_empty)
+        return resolve_shows(subs[0].path, include_empty, unreadable=unreadable)
 
     # A multi-disc show is ONE show, not a grouping folder. When 2+ of the
     # audio-bearing subdirs are named for a disc/set, the parent is the show
@@ -237,11 +257,11 @@ def resolve_shows(path, include_empty=True):
 
     result = []
     for sub in sorted(subs, key=lambda e: e.name.lower()):
-        result.extend(resolve_shows(sub.path, include_empty))
+        result.extend(resolve_shows(sub.path, include_empty, unreadable=unreadable))
     return result
 
 
-def resolve_shows_in_dir(source_dir, skipped=None):
+def resolve_shows_in_dir(source_dir, skipped=None, unreadable=None):
     """
     Every show folder under one scanned directory.
 
@@ -268,16 +288,31 @@ def resolve_shows_in_dir(source_dir, skipped=None):
     walking has not been asked about and is simply not a show.
 
     `skipped`, when given a list, collects the audio-less paths that were
-    dropped, so an adoption summary can say where the folders went instead
+    dropped, so a bulk-ingest summary can say where the folders went instead
     of leaving a collector to wonder why 100 folders produced 40 shows.
     Excluded names are NOT collected — those are Trellis's own furniture,
     not the collector's missing material.
+
+    `unreadable`, when given a list, collects (path, message) for a
+    top-level entry that raised an OSError just being scanned (a chmod 000
+    folder, an NFS mount that dropped mid-walk). S8: resolve_shows() itself
+    swallows that same OSError deep inside _root_audio_count/_audio_subdirs
+    and comes back looking exactly like "no audio here", so without this the
+    folder silently vanishes -- a folder the app genuinely cannot read must
+    be reported as failed, never dropped like an empty one.
     """
     show_paths = []
     for entry in sorted(os.scandir(source_dir), key=lambda e: e.name.lower()):
         if not entry.is_dir() or _is_excluded_dir(entry.name):
             continue
-        resolved = resolve_shows(entry.path, include_empty=False)
+        if unreadable is not None:
+            try:
+                with os.scandir(entry.path) as it:
+                    next(iter(it), None)
+            except OSError as e:
+                unreadable.append((entry.path, str(e)))
+                continue
+        resolved = resolve_shows(entry.path, include_empty=False, unreadable=unreadable)
         if not resolved and skipped is not None:
             skipped.append(entry.path)
         show_paths.extend(resolved)
@@ -386,6 +421,89 @@ def _apply_filename_sets(result):
     result["sets_detected"] = True
 
 
+def _int_tag(value):
+    """Parse a tag value ("3", "03", or the leading side of "3/12") to an
+    int, or None. Shared by the DISCNUMBER tag-carrier check below."""
+    if value is None:
+        return None
+    part = str(value).strip().split("/")[0].strip()
+    try:
+        return int(part)
+    except ValueError:
+        return None
+
+
+def _read_disc_tags(path):
+    """
+    (disc_number, track_number, disc_total) parsed from one audio file's
+    DISCNUMBER/TRACKNUMBER/DISCTOTAL tags via open_tags(), or (None, None,
+    None) when the file has no tags interface or no parseable DISCNUMBER.
+    Scan-time only -- unrelated to read_flac_tags's own per-track reading.
+    """
+    try:
+        audio = open_tags(path)
+        if audio is None:
+            return None, None, None
+        disc = _int_tag(_first_tag(audio, ("DISCNUMBER",)))
+        if disc is None:
+            return None, None, None
+        track = _int_tag(_first_tag(audio, ("TRACKNUMBER",)))
+        total = _int_tag(_first_tag(audio, ("DISCTOTAL",)))
+        return disc, track, total
+    except (MutagenError, Exception):
+        # Unreadable/corrupt file — same as "no DISCNUMBER tag" for this check.
+        return None, None, None
+
+
+def _apply_tag_disc_carrier(result):
+    """
+    DISCNUMBER tag as a disc carrier, last in line after subdir and filename
+    carriers so it can override them.
+
+    Precedence: the tag wins only when EVERY audio file in the scanned
+    folder carries a parseable integer DISCNUMBER -- one untagged file
+    leaves the existing subdir/filename carrier result (if any) completely
+    unchanged. When the tag wins, each file's disc_number becomes its own
+    DISCNUMBER and disc_track_number becomes its own integer TRACKNUMBER, or
+    failing that, 1-based order within that disc as currently sorted. A
+    folder where every file agrees on DISCNUMBER=1 is treated as multi-disc
+    (disc_number=1, not null) only if a DISCTOTAL > 1 is present somewhere;
+    otherwise it is a lone "1/1", not a multi-disc set, and disc fields are
+    left exactly as the earlier carriers (or lack of one) left them.
+    Continuous index/track_number is never touched here.
+    """
+    audio_files = result["audio_files"]
+    if not audio_files:
+        return
+
+    tag_info = [_read_disc_tags(a["path"]) for a in audio_files]
+    if any(disc is None for disc, _track, _total in tag_info):
+        return   # not every file tagged -> tag ignored, carriers stand
+
+    discs = {disc for disc, _track, _total in tag_info}
+    if discs == {1}:
+        totals = [total for _disc, _track, total in tag_info if total is not None]
+        if not totals or max(totals) <= 1:
+            return   # a lone "1/1" isn't a multi-disc set
+
+    counters = {}
+    for a, (disc, track, _total) in zip(audio_files, tag_info):
+        a["disc_number"] = disc
+        if track is not None:
+            a["disc_track_number"] = track
+        else:
+            counters[disc] = counters.get(disc, 0) + 1
+            a["disc_track_number"] = counters[disc]
+
+    # This carrier just stamped every file with a disc_number the subdir/
+    # filename carriers never set (or overrode), which is exactly what
+    # sets_detected exists to report -- toTracks() in app.js and every other
+    # multi-set reader trust this flag, not the presence of disc_number
+    # alone, to decide index vs tag (see the other setter above, at the
+    # subdir carrier).
+    result["sets_detected"] = True
+
+
 def _score_text_file(filename):
     """
     Return a preference score for a text file.  Higher → more likely to be
@@ -403,6 +521,23 @@ def _score_text_file(filename):
     if re.search(r"\d{4}[-_.]\d{2}[-_.]\d{2}", filename):
         score += 5
     return score
+
+
+def _natural_key(name):
+    """
+    Sort key that splits digit runs out as numbers rather than characters,
+    so an unpadded, hand-ripped folder ('t1.flac' .. 't10.flac') orders
+    1, 2, ..., 10 instead of the lexical 1, 10, 2, ... 9 a bare sorted()
+    gives it (R2-5). A zero-padded folder ('t01'..'t10') already sorted
+    correctly either way and is unaffected. Used for every audio-file
+    ordering scan_folder() produces, so a folder's track order is the same
+    whichever door (interactive Add Recording or Bulk Ingest) it comes
+    through -- and for the CD1/CD10-style subdir case, disc ordering
+    already sorts on the parsed disc NUMBER (see set_dirs.sort below), not
+    a name string, so it was never affected by this in the first place.
+    """
+    return [int(part) if part.isdigit() else part.casefold()
+            for part in re.split(r"(\d+)", name)]
 
 
 def scan_folder(folder_path):
@@ -562,13 +697,13 @@ def scan_folder(folder_path):
         # a final sweep for anything else (e.g. "Art/") so other_files and
         # fingerprints located outside the set folders still get picked up —
         # skipping the set dirs themselves so nothing is double-counted.
-        for fname in sorted(top_entries):
+        for fname in sorted(top_entries, key=_natural_key):
             full = os.path.join(folder_path, fname)
             if os.path.isfile(full):
                 _classify(fname, folder_path)
         for dpath, label, num, kind in set_dirs:
             try:
-                listing = sorted(os.listdir(dpath))
+                listing = sorted(os.listdir(dpath), key=_natural_key)
                 if kind == "disc":
                     # disc_track_number: the filename's own leading number
                     # when EVERY audio file in this disc folder carries one
@@ -610,7 +745,7 @@ def scan_folder(folder_path):
                 dirnames[:] = [d for d in dirnames
                                if os.path.join(dirpath, d) not in set_dir_paths]
                 continue   # root files already classified above
-            for fname in sorted(filenames):
+            for fname in sorted(filenames, key=_natural_key):
                 _classify(fname, dirpath)
     elif scan_dirs is not None:
         # Structured walk: visit each (dir, set_label) pair, non-recursive
@@ -620,7 +755,7 @@ def scan_folder(folder_path):
                 continue
             seen_dirs.add(dir_path)
             try:
-                for fname in sorted(os.listdir(dir_path)):
+                for fname in sorted(os.listdir(dir_path), key=_natural_key):
                     full = os.path.join(dir_path, fname)
                     if os.path.isfile(full):
                         _classify(fname, dir_path)
@@ -629,7 +764,7 @@ def scan_folder(folder_path):
     else:
         # Flat walk
         for dirpath, _, filenames in os.walk(folder_path):
-            for fname in sorted(filenames):
+            for fname in sorted(filenames, key=_natural_key):
                 _classify(fname, dirpath)
 
     # ── Filename-encoded sets ─────────────────────────────────────────────────
@@ -638,6 +773,12 @@ def scan_folder(folder_path):
     # audio list rather than restructure the traversal.
     if not sets_detected:
         _apply_filename_sets(result)
+
+    # ── DISCNUMBER tag carrier ──────────────────────────────────────────────
+    # Runs last so a fully-tagged source can override subdir/filename
+    # carriers (or supply disc info where neither fired). See
+    # _apply_tag_disc_carrier's docstring for the exact precedence.
+    _apply_tag_disc_carrier(result)
 
     # ── Score and sort text files ──────────────────────────────────────────────
     for tf in all_text:
@@ -820,6 +961,144 @@ def _container_from_tags(tags):
     return out
 
 
+# ── One tag opener for FLAC and MP3 ────────────────────────────────────────
+
+# ID3 frame classes with a direct one-to-one Vorbis-key equivalent, both
+# directions (frame.FrameID == the class name, e.g. TPE1.FrameID == "TPE1").
+# TRCK/TPOS are ID3's own "n/total" pair frames, split across two of our
+# keys. Anything else -- VENUE, LOCATION, SOURCE, LINEAGE, CONCERTDATE,
+# CONCERTVENUE, CONCERTLOCATION, RECORDINGSOURCE, and any future key -- rides
+# in a TXXX frame keyed by description, so a new DB field never needs a new
+# entry here.
+_ID3_SIMPLE = {"ARTIST": TPE1, "ALBUMARTIST": TPE2, "ALBUM": TALB,
+               "DATE": TDRC, "TITLE": TIT2}
+_ID3_PAIR   = {"TRACKNUMBER": ("TRCK", 0), "TRACKTOTAL": ("TRCK", 1),
+               "DISCNUMBER":  ("TPOS", 0), "DISCTOTAL":  ("TPOS", 1)}
+_ID3_PAIR_CLASS = {"TRCK": TRCK, "TPOS": TPOS}
+
+# Every non-simple, non-pair key Trellis ever writes into a TXXX frame (see
+# every "container_tags[...] =" / "audio[...] =" assignment in this module).
+# clear() only removes TXXX frames whose desc is one of these -- a foreign
+# TXXX (someone else's tagger, e.g. "MY_CUSTOM") is left alone, matching
+# FLAC.clear()'s blast radius (Vorbis block only, pictures untouched).
+_TXXX_KEYS_WE_OWN = {"VENUE", "LOCATION", "SOURCE", "LINEAGE", "GENRE",
+                     "PERFORMER", "COMPOSER", "COMMENT"}
+
+
+class _MP3TagAdapter:
+    """
+    Makes an MP3's ID3 tag look like the FLAC object the rest of ingest.py
+    already knows how to drive: get/__getitem__/__setitem__/__contains__/
+    keys()/items()/clear()/save(), plus .info (duration), via the map above.
+    Values are always lists of strings, matching mutagen's own Vorbis-comment
+    shape, so read_flac_tags/read_recording_tags/write_flac_tags don't need
+    to know which format they are looking at.
+    """
+
+    def __init__(self, path):
+        self._mp3 = MP3(path)
+        if self._mp3.tags is None:
+            self._mp3.add_tags()
+        self._id3 = self._mp3.tags
+        self.info = self._mp3.info
+
+    def _pair_parts(self, frame_id):
+        frame = self._id3.get(frame_id)
+        text = str(frame.text[0]) if frame and frame.text else ""
+        parts = text.split("/")
+        return (parts[0] or None, parts[1] if len(parts) > 1 and parts[1] else None)
+
+    def _pair_set(self, frame_id, index, value):
+        parts = list(self._pair_parts(frame_id))
+        parts[index] = value
+        num, total = parts
+        cls = _ID3_PAIR_CLASS[frame_id]
+        if not num and not total:
+            self._id3.delall(frame_id)
+            return
+        text = num or ""
+        if total:
+            text = f"{text}/{total}"
+        self._id3.setall(frame_id, [cls(encoding=3, text=[text])])
+
+    def get(self, key, default=None):
+        if key in _ID3_SIMPLE:
+            frame = self._id3.get(_ID3_SIMPLE[key].__name__)
+            return [str(frame.text[0])] if frame and frame.text else default
+        if key in _ID3_PAIR:
+            frame_id, idx = _ID3_PAIR[key]
+            val = self._pair_parts(frame_id)[idx]
+            return [val] if val else default
+        for frame in self._id3.getall("TXXX"):
+            if frame.desc == key:
+                return [str(v) for v in frame.text] if frame.text else default
+        return default
+
+    def __getitem__(self, key):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key, value):
+        values = value if isinstance(value, list) else [value]
+        values = [str(v) for v in values]
+        if key in _ID3_SIMPLE:
+            cls = _ID3_SIMPLE[key]
+            self._id3.setall(cls.__name__, [cls(encoding=3, text=values)])
+        elif key in _ID3_PAIR:
+            frame_id, idx = _ID3_PAIR[key]
+            self._pair_set(frame_id, idx, values[0] if values else None)
+        else:
+            self._id3.delall(f"TXXX:{key}")
+            self._id3.add(TXXX(encoding=3, desc=key, text=values))
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+    def keys(self):
+        out = [k for k in _ID3_SIMPLE if k in self]
+        out += [k for k in _ID3_PAIR if k in self]
+        out += [frame.desc for frame in self._id3.getall("TXXX")]
+        return out
+
+    def items(self):
+        return [(k, self.get(k)) for k in self.keys()]
+
+    def clear(self):
+        # ID3.clear() removes EVERYTHING -- APIC (cover art), USLT and any
+        # foreign TXXX frame along with the frames we actually own. Only
+        # remove what write_flac_tags() is about to rewrite: the simple and
+        # pair frames, plus TXXX frames whose desc is one of our own keys.
+        # Matches FLAC.clear(), which removes only the Vorbis comment block
+        # and keeps pictures.
+        for cls in _ID3_SIMPLE.values():
+            self._id3.delall(cls.__name__)
+        for frame_id in _ID3_PAIR_CLASS:
+            self._id3.delall(frame_id)
+        for key in _TXXX_KEYS_WE_OWN:
+            self._id3.delall(f"TXXX:{key}")
+
+    def save(self):
+        self._mp3.save()
+
+
+def open_tags(path):
+    """
+    Open path's tags through one door regardless of format. FLAC files
+    return mutagen's native FLAC object, unchanged from before. MP3s return
+    _MP3TagAdapter, an ID3-backed stand-in presenting the identical
+    dict-like shape via the map above. Anything else (.wav, unrecognised)
+    returns None -- callers skip files with no tags.
+    """
+    ext = Path(path).suffix.lower()
+    if ext == ".flac":
+        return FLAC(path)
+    if ext == ".mp3":
+        return _MP3TagAdapter(path)
+    return None
+
+
 def read_flac_tags(audio_files):
     """
     Read FLAC tags from all audio files.
@@ -837,15 +1116,19 @@ def read_flac_tags(audio_files):
     for f in audio_files:
         path = f["path"]
         try:
-            audio = FLAC(path)
-            tags  = audio.tags or {}
+            audio = open_tags(path)
+            if audio is None:
+                # No tags interface for this format (e.g. .wav) — placeholder
+                # so index stays consistent (same path as an unreadable file).
+                raise MutagenError("no tags interface for this format")
+            tags = audio
 
             # Capture container-level tags from first file that has them
             if not container:
                 container = _container_from_tags(tags)
 
-            # Full raw Vorbis comments (lowercased keys, single values unwrapped)
-            # so the UI can show the same JSON as the recording view's File Tags.
+            # Full raw tags (lowercased keys, single values unwrapped) so the
+            # UI can show the same JSON as the recording view's File Tags.
             raw = {k.lower(): (v[0] if isinstance(v, list) and len(v) == 1 else v)
                    for k, v in tags.items()}
 
@@ -861,8 +1144,12 @@ def read_flac_tags(audio_files):
             }
             tracks.append(track_entry)
 
-        except (MutagenError, Exception):
-            # Unreadable file — add placeholder so index stays consistent
+        except (MutagenError, Exception) as e:
+            # Unreadable file — add placeholder so index stays consistent.
+            # "raw": None (never {}) marks a file that could not even be
+            # opened (R2-N3) -- bulk_ingest.py's extract() reads this instead
+            # of opening every readable file a second time itself just to
+            # find out the same thing.
             tracks.append({
                 "index":        f["index"],
                 "filename":     f["filename"],
@@ -870,6 +1157,8 @@ def read_flac_tags(audio_files):
                 "title":        None,
                 "track_number": None,
                 "duration":     None,
+                "raw":          None,
+                "open_error":   str(e),
             })
 
     return {"container": container, "tracks": tracks}
@@ -955,9 +1244,16 @@ def read_recording_tags(recording, library_root):
         entry = {"track_number": track.track_number, "title": track.title,
                  "tags": None, "error": None}
         try:
-            audio = FLAC(abs_path)
-            entry["tags"] = {k: (v[0] if len(v) == 1 else v)
-                             for k, v in (audio.tags or {}).items()}
+            audio = open_tags(abs_path)
+            if audio is None:
+                entry["error"] = "Unsupported audio format"
+            else:
+                # N6: mutagen's native FLAC dict yields lowercase Vorbis-comment
+                # keys ("venue") while _MP3TagAdapter always yields uppercase
+                # ("VENUE") -- normalise to uppercase here so the tags pane
+                # does not differ by format.
+                entry["tags"] = {k.upper(): (v[0] if len(v) == 1 else v)
+                                 for k, v in audio.items()}
         except FileNotFoundError:
             entry["error"] = "File not found"
         except MutagenError as e:
@@ -999,9 +1295,11 @@ def write_flac_tags(recording, library_root):
     for track in tracks:
         abs_path = os.path.join(library_root, recording.folder_path, track.file_path)
         try:
-            audio = FLAC(abs_path)
+            audio = open_tags(abs_path)
+            if audio is None:
+                raise MutagenError("Unsupported audio format")
 
-            # Clear all existing Vorbis comments
+            # Clear all existing tags
             audio.clear()
 
             # Container tags
@@ -1363,7 +1661,7 @@ def detect_source_from_name(folder_name):
 # in it: "gd1977-05-08.aud.schoeps.nak700.t01". detect_source_from_name()
 # already harvests the SBD/AUD/MTX/FM half; this harvests the gear, which is
 # lineage information and nowhere else in the metadata when the folder has no
-# info file — the exact case a collector adopting an existing library is in.
+# info file — the exact case a collector ingesting an existing library is in.
 #
 # Two tiers, because the false-positive problem here is not theoretical. A
 # folder name is short and adversarial: it is made of act names, venue names,
@@ -2114,7 +2412,14 @@ def build_scan_payload(folder_path, info_override=None):
                         "track_number": t["track_number"],
                         "title":        t["title"],
                         "duration":     t["duration"],
-                        "raw":          t.get("raw", {}),
+                        # None (not {}) means read_flac_tags could not open
+                        # this file at all -- distinct from an opened file
+                        # with no tags, which is {} (R2-N3). Do not default
+                        # this away; bulk_ingest.py's extract() relies on the
+                        # distinction to spot an all-corrupt folder without
+                        # opening every file a second time.
+                        "raw":          t.get("raw"),
+                        "open_error":   t.get("open_error"),
                     }
                     for t in from_tags["tracks"]
                 ],
@@ -2157,7 +2462,7 @@ def build_scan_payload(folder_path, info_override=None):
     # Lineage, same last-resort rule and the same reason (2026-09-17). A taper
     # who writes "gd1977-05-08.aud.schoeps.nak700" has named their rig, and for
     # a folder with no info file that is the ONLY place the rig is recorded —
-    # which is exactly the folder a collector adopting an existing library is
+    # which is exactly the folder a collector ingesting an existing library is
     # looking at.
     #
     # Joined with ", " and never ">": the folder named some gear, it did not
@@ -2319,11 +2624,11 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
                               original subdir prefix (False). See
                               resolve_ingest_file_path().
 
-    In-root adoption (spec section 1.1, Bulk Adoption chunk 1, 2026-09-26,
+    In-root bulk_ingest (spec section 1.1, Bulk Ingest chunk 1, 2026-09-26,
     supersedes the 2026-09-25 S1/R2 notes above): a source folder whose
     realpath already sits inside LIBRARY_ROOT is never moved, renamed,
     flattened or deduped, in either file_handling mode or placement -- it is
-    adopted exactly where it is, however deeply nested (e.g.
+    ingested exactly where it is, however deeply nested (e.g.
     "Grateful Dead/1977/gd77-05-08"), and its stored folder_path is simply
     that path relative to LIBRARY_ROOT. Placement (under_artist_folder) only
     governs where a source arriving from OUTSIDE the root gets filed.
@@ -2345,7 +2650,13 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         except ValueError:
             in_root = False
     if in_root:
-        return str(src.resolve().relative_to(Path(library_root).resolve())).replace(os.sep, "/")
+        # R2-2: the on-disk relative path can be NFD bytes (an rsync from an
+        # HFS+-era source, or a byte-exact Linux filesystem) even though
+        # every other identity key for this folder (BulkIngestItem.rel_path,
+        # the QualityAnalysis staging row) is NFC -- Recording.folder_path
+        # must match those, not the raw bytes os.walk happened to see.
+        rel = str(src.resolve().relative_to(Path(library_root).resolve())).replace(os.sep, "/")
+        return unicodedata.normalize("NFC", rel)
 
     # The artist directory is a CONVENTION, not a law (2026-09-17). When it is
     # off, the show lands directly at the library root and dedupe happens

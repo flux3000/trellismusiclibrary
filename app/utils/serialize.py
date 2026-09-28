@@ -8,10 +8,30 @@ between endpoints.
 
 import json
 
+# Sentinel distinguishing "the caller didn't pass image_url at all" (fall
+# back to reading rec.images directly) from "the caller batched, and this
+# recording has no image" (image_url IS None, and that null is final). Both
+# recording_summary() and recording_row() used to take `image_url=None` for
+# both meanings, so a batching caller's genuine "no image" answer looked
+# identical to "not batched" and every image-less row (nearly all of them)
+# fell through to a per-row query anyway -- regressing the 2026-08-24 Browse
+# load fix (S1). A plain module-level object is enough; nothing else needs
+# to construct or compare it.
+_UNSET = object()
 
-def recording_summary(rec):
+
+def recording_summary(rec, image_url=_UNSET):
     """
     Compact recording dict for list/catalog contexts (not the full detail view).
+
+    `image_url` lets a LIST caller pass in a pre-batched url (see
+    batch_recording_image_urls()) instead of letting every row lazy-load
+    rec.images -- the same reason artists.all_recordings() batches
+    ArtistImage with one grouped query rather than selectinload(). Pass the
+    batch's `.get(rec.id)` result straight through, including None for an
+    image-less recording -- only truly OMITTING the argument (the
+    single-recording case) falls back to reading rec.images directly, which
+    is fine there: exactly one extra query, not one per row.
     """
     return {
         "id":              rec.id,
@@ -34,16 +54,21 @@ def recording_summary(rec):
         "is_favorite":     bool(rec.is_favorite),
         "is_complete":     rec.is_complete,
         "is_official":     rec.is_official,
+        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        "kind":            rec.kind,
         "track_count":     len(rec.tracks),
         # Total runtime in seconds (None-safe); powers the catalog length column.
         "duration_sec":    sum(t.duration or 0 for t in rec.tracks) or None,
         # When this recording was ingested (distinct from the show date) — powers
         # the sortable "Date Added" catalog column.
         "created_at":      rec.created_at.isoformat() if rec.created_at else None,
+        # Recording-level artwork (Studio Records spec v1, chunk 5) — primary
+        # image serve url, or null. See the `image_url` param note above.
+        "image_url":       image_url if image_url is not _UNSET else _primary_recording_image_url(rec),
     }
 
 
-def recording_row(rec, waveform=False, card=False):
+def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
     """
     Self-contained recording row for flat catalog/collection displays — includes
     the artist, date, and venue so a single row fully describes the show.
@@ -62,6 +87,9 @@ def recording_row(rec, waveform=False, card=False):
     544-row flat List that is three extra joins per row to benefit a 3-card and
     a 12-card module. Callers passing card=True MUST eager-load those
     relationships or they buy an N+1 — see api/recordings.py.
+
+    `image_url` (Studio Records spec v1, chunk 5): same pre-batched-url
+    parameter recording_summary() takes, for the identical reason.
     """
     from app.utils.format import format_partial_date
     p = rec.performance
@@ -96,11 +124,14 @@ def recording_row(rec, waveform=False, card=False):
         # comment on Recording.is_favorite.
         "is_favorite":     bool(rec.is_favorite),
         "is_complete":     rec.is_complete,
+        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        "kind":            rec.kind,
         "track_count":     len(rec.tracks),
         "duration_sec":    sum(t.duration or 0 for t in rec.tracks) or None,
         # When this recording was ingested (distinct from the show date) — powers
         # the sortable "Date Added" catalog column.
         "created_at":      rec.created_at.isoformat() if rec.created_at else None,
+        "image_url":       image_url if image_url is not _UNSET else _primary_recording_image_url(rec),
     }
     if waveform:
         row["waveform"] = _card_waveform(rec)
@@ -114,6 +145,53 @@ def recording_row(rec, waveform=False, card=False):
         row["genre_color"] = g.color if g else None
         row["image_id"]    = _primary_image_id(artist)
     return row
+
+
+_RECORDING_IMG_URL = "/api/recordings/images"
+
+
+def _primary_recording_image_url(rec, url_prefix=_RECORDING_IMG_URL):
+    """
+    Url of rec's primary image (or its oldest, same fallback primary_for()
+    uses), or None. Reads rec.images directly -- fine for a single-object
+    caller (one extra query), but a LIST caller should batch instead (see
+    batch_recording_image_urls()) and pass the result in as recording_row/
+    recording_summary's `image_url` param, so this never runs per row.
+    """
+    imgs = rec.images
+    if not imgs:
+        return None
+    primary = next((i for i in imgs if i.is_primary), imgs[0])
+    return f"{url_prefix}/{primary.id}"
+
+
+def batch_recording_image_urls(recording_ids, url_prefix=_RECORDING_IMG_URL):
+    """
+    {recording_id: image_url} for every id in recording_ids that has at
+    least one image, via ONE grouped query -- primary first, then oldest,
+    same ordering primary_for() and _primary_recording_image_url() use.
+
+    Mirrors artists.py::all_recordings()'s ArtistImage batching (one grouped
+    query read for a whole catalog dump, rather than selectinload()ing every
+    image row to read one id off each) -- copy that pattern here rather than
+    letting a big list of recording rows lazy-load rec.images one at a time.
+    """
+    from app.extensions import db
+    from app.models.recording_image import RecordingImage
+    recording_ids = list(recording_ids)
+    if not recording_ids:
+        return {}
+    winners = {}
+    for rid, iid, _is_primary in (
+        db.session.query(RecordingImage.recording_id, RecordingImage.id,
+                         RecordingImage.is_primary)
+        .filter(RecordingImage.recording_id.in_(recording_ids))
+        .order_by(RecordingImage.recording_id, RecordingImage.is_primary.desc(),
+                  RecordingImage.sort_order, RecordingImage.id)
+        .all()
+    ):
+        winners.setdefault(rid, iid)
+    return {rid: f"{url_prefix}/{iid}" for rid, iid in winners.items()}
 
 
 def _primary_image_id(artist):

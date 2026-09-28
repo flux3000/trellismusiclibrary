@@ -379,7 +379,7 @@ def test_resolve_skips_buckets_photo_dirs_and_audioless_folders(tmp_path):
     assert got == ["Bill Evans 1968-11-02 Ronnie Scotts.sbd",
                    "Grateful Dead 1977-05-08 Barton Hall"]
 
-    # Audio-less folders are REPORTABLE, so an adoption summary can say where
+    # Audio-less folders are REPORTABLE, so a bulk-ingest summary can say where
     # they went. Trellis's own buckets are not — they are furniture, not the
     # collector's missing material.
     assert sorted(Path(p).relative_to(tmp_path).as_posix() for p in skipped) \
@@ -551,16 +551,16 @@ def test_flatten_false_still_applies_a_rename_map_to_the_basename(tmp_path):
     assert not (dest / "CD1" / "01.flac").exists()
 
 
-# ── In-root adoption (Bulk Adoption spec section 1.1, chunk 1, 2026-09-26) ────
+# ── In-root bulk_ingest (Bulk Ingest spec section 1.1, chunk 1, 2026-09-26) ────
 #
 # A source folder whose realpath is already inside LIBRARY_ROOT is never
-# moved, renamed, flattened or deduped -- it is adopted exactly where it
+# moved, renamed, flattened or deduped -- it is ingested exactly where it
 # sits, whatever placement/flatten/audio_rename_map the caller passes in.
 # This supersedes the 2026-09-25 S1/R2 in-place branch, which still applied
 # the rename map/flatten pair in place; that behavior no longer exists.
 
 def test_in_root_nested_source_stays_exactly_where_it_is(tmp_path):
-    """A show several levels deep under LIBRARY_ROOT (e.g. an adopted
+    """A show several levels deep under LIBRARY_ROOT (e.g. an ingested
     collector library's own Artist/Year/Show tree) is left alone, and the
     returned path is the full nested path relative to the root -- not a
     two-level Artist/Show path invented from artist_name/folder_name."""
@@ -582,7 +582,7 @@ def test_in_root_nested_source_stays_exactly_where_it_is(tmp_path):
 def test_in_root_nested_source_stays_put_in_organize_mode_too(tmp_path):
     """The same nested source, but with an audio_rename_map/flatten pair a
     real organize-mode caller would pass (compute_audio_rename_map +
-    flattens()) -- in-root adoption overrides both; nothing renames or
+    flattens()) -- in-root bulk_ingest overrides both; nothing renames or
     flattens."""
     lib = tmp_path / "Library"; lib.mkdir()
     src = lib / "Grateful Dead" / "1977" / "gd77-05-08"
@@ -604,7 +604,7 @@ def test_in_root_nested_source_stays_put_in_organize_mode_too(tmp_path):
 
 def test_in_root_flat_source_under_placement_artist_stays_flat(tmp_path):
     """A flat <root>/show source (placement `artist`, under_artist_folder
-    True) is not filed under a new <Artist>/ directory -- in-root adoption
+    True) is not filed under a new <Artist>/ directory -- in-root bulk_ingest
     outranks placement."""
     lib = tmp_path / "Library"; lib.mkdir()
     src = lib / "gd77-05-08"

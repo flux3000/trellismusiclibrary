@@ -13,6 +13,7 @@ from .event_image import EventImage
 from .performance import Performance
 from .performance_personnel import PerformancePersonnel
 from .recording import Recording, RecordingFingerprint
+from .recording_image import RecordingImage
 from .collection import Collection, CollectionRecording
 from .peer import Peer, CollectionGrant, PeerInvite, PeerToken, PeerAccessLog
 from .remote_node import RemoteNode
@@ -22,3 +23,4 @@ from .track import Track
 from .play_log import PlayLog
 from .quality import QualityAnalysis, RecordingQuality
 from .node_setting import NodeSetting
+from .bulk_ingest import BulkIngestRun, BulkIngestItem

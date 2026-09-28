@@ -154,3 +154,74 @@ def test_ingest_tag_write_reports_a_read_only_file_error_without_failing(app, db
     events = db.session.query(RecordingEvent).filter_by(
         recording_id=rec.id, event_type="tags_written").all()
     assert events == []
+
+
+
+def test_in_root_source_never_gets_the_tag_write_even_when_bulk_is_false(app, db, tmp_path):
+    """R2-N7: an in-root source (found already sitting inside LIBRARY_ROOT --
+    e.g. a Review & Ingest Accept on a Bulk Ingest review row) must skip
+    step 12 regardless of write_tags_on_ingest, even though that call goes
+    through _do_confirm with bulk=False (Accept is a deliberate click, not
+    an unattended pass, so bulk alone can't be the gate -- see
+    [[project_bring_your_own_library]])."""
+    from app.api.ingest import _do_confirm
+
+    node_settings.apply_mode("organize")
+    assert node_settings.get_file_handling()["write_tags_on_ingest"] is True
+
+    lib = tmp_path / "lib"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    show = lib / "Phish" / "ph1997-11-22"
+    _silent_flac(show / "01.flac")
+    audio = FLAC(str(show / "01.flac")); audio["TITLE"] = "Original Title"; audio.save()
+    uid = db.session.query(User).first().id
+
+    data = {
+        "source_folder_path": str(show),
+        "artist_name": "Phish",
+        "start_year": 1997, "start_month": 11, "start_day": 22,
+        "venue_name": "Hampton Coliseum",
+        "tracks": [{"track_number": 1, "title": "Mike's Song",
+                    "filename": "01.flac"}],
+        "is_complete": True,
+    }
+    result = _do_confirm(data, uid, None)  # bulk defaults to False
+
+    rec = _db.session.get(Recording, result["recording_id"])
+    events = db.session.query(RecordingEvent).filter_by(
+        recording_id=rec.id, event_type="tags_written").all()
+    assert events == [], "in-root source must never get the ingest tag write"
+
+    abs_path = os.path.join(str(lib), rec.folder_path, rec.tracks[0].file_path)
+    assert FLAC(abs_path)["TITLE"][0] == "Original Title"
+
+
+def test_outside_root_source_still_gets_the_tag_write_in_organize(app, db, tmp_path):
+    """R2-N7 (guard rail): the fix is scoped to in-root sources only -- a
+    source arriving from OUTSIDE LIBRARY_ROOT still follows
+    write_tags_on_ingest exactly as before, bulk or not."""
+    from app.api.ingest import _do_confirm
+
+    node_settings.apply_mode("organize")
+
+    lib = tmp_path / "lib_out"; lib.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    src = tmp_path / "outside_src"; src.mkdir()
+    _silent_flac(src / "01.flac")
+    uid = db.session.query(User).first().id
+
+    data = {
+        "source_folder_path": str(src),
+        "artist_name": "Grateful Dead",
+        "start_year": 1977, "start_month": 5, "start_day": 8,
+        "venue_name": "Barton Hall",
+        "tracks": [{"track_number": 1, "title": "Scarlet Begonias",
+                    "filename": "01.flac"}],
+        "is_complete": True,
+    }
+    result = _do_confirm(data, uid, None)
+
+    rec = _db.session.get(Recording, result["recording_id"])
+    events = db.session.query(RecordingEvent).filter_by(
+        recording_id=rec.id, event_type="tags_written").all()
+    assert len(events) == 1

@@ -370,3 +370,407 @@ def try_match_artist(artist):
         # inside ingest and must not be able to fail it under any circumstance.
         log.warning("musicbrainz match failed for %r: %s", artist.name, e)
         return "none"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Release lookup (Studio Records spec v1, section 2)
+#
+# A studio recording's ALBUM tag (Recording.title) plus its artist name is
+# searched against MusicBrainz's release/ endpoint, the SAME confidence gate
+# as the artist lookup above decides confidence, and a track-count check
+# narrows further -- a release whose total track count is more than one off
+# from the recording's own track count is dropped as a candidate before the
+# gate ever sees it. Everything this section fills is fill-if-null: a value
+# the collector's own tags or a human already set is never touched.
+# ─────────────────────────────────────────────────────────────────────────
+
+# release-group primary types MusicBrainz returns, kept verbatim (Album,
+# Live, Compilation, EP, Single, Other, ...) -- see section 2's "Release
+# type and the live/studio call": a Live release type does NOT flip
+# Recording.kind. That is a human decision for a later pass.
+
+
+def _summarise_release(release):
+    """Flatten one MusicBrainz release object into our stored shape."""
+    rg = release.get("release-group") or {}
+    media = release.get("media") or []
+
+    track_count = release.get("track-count")
+    if track_count is None and media:
+        track_count = sum(m.get("track-count") or 0 for m in media)
+
+    label_info = (release.get("label-info") or [{}])[0] or {}
+    label = (label_info.get("label") or {}).get("name")
+
+    return {
+        "mbid":             release.get("id"),
+        "title":            release.get("title"),
+        "release_group_id": rg.get("id"),
+        "release_type":     rg.get("primary-type"),
+        "label":            label,
+        "catalog_number":   label_info.get("catalog-number"),
+        "date":             release.get("date") or None,
+        "country":          release.get("country") or None,
+        "track_count":      track_count,
+        "score":            release.get("score"),
+    }
+
+
+def search_release(artist_name, title, limit=8):
+    """
+    Candidate release matches for an artist name + album title, best first.
+
+    Returns a list of summary dicts (possibly empty). `inc` asks for exactly
+    what classify_release()/apply_to_recording() need: release-group (for
+    the primary type) and label-info (label name + catalog number); date,
+    country and track-count/media come back on a release search by default.
+    Same `_throttle`/`_get` plumbing as search_artist() -- one shared
+    breaker and rate limiter for every MusicBrainz call this app makes.
+    """
+    if not artist_name or not artist_name.strip() or not title or not title.strip():
+        return []
+    # Lucene special characters `"` and `\` inside a quoted phrase must be
+    # escaped, or a title like Say "Hi" produces a malformed query and a 400
+    # from MusicBrainz that the breaker counts as a failure (N3).
+    def _escape(s):
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+    query = 'artist:"%s" AND release:"%s"' % (
+        _escape(artist_name.strip()), _escape(title.strip()))
+    data = _get("release/", {"query": query, "limit": limit,
+                             "inc": "labels+release-groups"})
+    if not data:
+        return []
+    return [_summarise_release(r) for r in data.get("releases", [])]
+
+
+def classify_release(candidates, track_count=None):
+    """
+    Decide whether a release candidate list is a confident match.
+
+    Returns (status, winner_or_None, ranked) where `ranked` is the candidate
+    list actually considered (after the track-count filter below), for the
+    human picker to show. `ranked` keeps MusicBrainz's original order so the
+    picker still shows every edition, best first.
+
+    MusicBrainz scores are relative to the SEARCH's own top hit, and a
+    release search returns every edition of an album (US CD, UK LP,
+    remaster) as separate candidates each scoring near the top score. Gating
+    on releases directly means an album with several editions always reads
+    as ambiguous (each edition suppresses the others' margin) while an album
+    with exactly one edition can pass on a single unrelated hit. So the gate
+    runs on RELEASE GROUPS: each group's best-scoring release stands in for
+    the group, the score gate (_MIN_SCORE, _MARGIN) runs across groups, and
+    only once a winning group is chosen do we pick a release inside it --
+    preferring the one whose track count matches the recording, else the
+    earliest-dated release (S6).
+
+    The track-count filter still runs first, same as before: a candidate
+    whose track_count differs from the recording's by more than one is
+    dropped before grouping ever sees it.
+    """
+    if not candidates:
+        return "none", None, []
+
+    ranked = candidates
+    if track_count:
+        ranked = [c for c in candidates
+                 if c.get("track_count") is None
+                 or abs(c["track_count"] - track_count) <= 1]
+        if not ranked:
+            return "none", None, []
+
+    groups = {}
+    group_order = []
+    for c in ranked:
+        key = c.get("release_group_id") or ("_ungrouped", c.get("mbid"))
+        if key not in groups:
+            groups[key] = []
+            group_order.append(key)
+        groups[key].append(c)
+
+    group_best = [(key, max(groups[key], key=lambda c: c.get("score") or 0))
+                  for key in group_order]
+    group_best.sort(key=lambda kb: kb[1].get("score") or 0, reverse=True)
+
+    top_key, top_best = group_best[0]
+    if (top_best.get("score") or 0) < _MIN_SCORE:
+        return "ambiguous", None, ranked
+    if len(group_best) > 1:
+        runner_up = group_best[1][1].get("score") or 0
+        if (top_best["score"] - runner_up) < _MARGIN:
+            return "ambiguous", None, ranked
+
+    winning_group = groups[top_key]
+    exact = [c for c in winning_group if c.get("track_count") == track_count] \
+        if track_count else []
+    if exact:
+        winner = exact[0]
+    else:
+        dated = [c for c in winning_group if c.get("date")]
+        winner = min(dated, key=lambda c: c["date"]) if dated else top_best
+    return "matched", winner, ranked
+
+
+def lookup_release(mbid):
+    """
+    Full detail for a known release MBID -- track titles and positions, so
+    apply_to_recording() can fill untitled tracks.
+
+    `inc=recordings+media+labels+release-groups` pulls the medium/track
+    structure (recordings gives each track's title), label-info and the
+    release-group's primary type in one call. Track position is
+    renumbered CONTINUOUSLY across media in the order MusicBrainz returns
+    them, matching Recording.tracks' own continuous track_number (a
+    disc lives in a subfolder or a filename here, never a separate
+    numbering scheme -- see project_multi_disc_detection.md).
+    """
+    if not mbid:
+        return None
+    data = _get("release/%s" % mbid,
+               {"inc": "recordings+media+labels+release-groups"})
+    if not data:
+        return None
+
+    summary = _summarise_release(data)
+    tracks = []
+    position = 0
+    for medium in data.get("media") or []:
+        for t in medium.get("tracks") or []:
+            position += 1
+            rec_title = (t.get("recording") or {}).get("title")
+            tracks.append({"position": position, "title": rec_title or t.get("title")})
+    summary["tracks"] = tracks
+    return summary
+
+
+def _parse_partial_date(date_str):
+    """'1977', '1977-05', '1977-05-08' -> (year, month, day), each or None.
+
+    MusicBrainz does emit zero-padded and malformed partial dates
+    ('1977-00-00', '1977-13-40'). '00' and any out-of-range part are
+    invalid; if EITHER month or day is invalid, both come back None (a
+    date whose month or day cannot be trusted is not a date we can trust
+    the other half of either) -- year is unaffected either way (B3).
+    """
+    if not date_str:
+        return None, None, None
+    parts = date_str.split("-")
+
+    def _year_or_none(s):
+        return int(s) if s and s.isdigit() else None
+
+    def _bounded(s, lo, hi):
+        """(value_or_None, was_present_and_valid)."""
+        if not s or not s.isdigit():
+            return None, s is None or s == ""
+        n = int(s)
+        return (n, True) if lo <= n <= hi else (None, False)
+
+    year = _year_or_none(parts[0]) if len(parts) > 0 else None
+
+    month, month_ok = (_bounded(parts[1], 1, 12) if len(parts) > 1
+                       else (None, True))
+    day, day_ok = (_bounded(parts[2], 1, 31) if len(parts) > 2
+                   else (None, True))
+    if not month_ok or not day_ok:
+        month, day = None, None
+    return year, month, day
+
+
+def apply_to_recording(rec, release, status="matched"):
+    """
+    Copy a resolved MusicBrainz release onto a Recording, fill-if-null only.
+
+    Never overwrites a value the collector's tags or a person already
+    supplied:
+      - Performance.start_year/month/day from the release date, one field
+        at a time, only where that field is still null. A year-only
+        release date fills the year and leaves month/day untouched.
+      - Track.title, only for a track whose title is null or empty, matched
+        by CONTINUOUS position across media, and only when the release's
+        total track count equals the recording's own track count -- a
+        mismatch means the position mapping cannot be trusted.
+      - The eight mb_release_* columns and `mb_release_status = status`,
+        always (this is Trellis's own bookkeeping, not the collector's
+        data).
+
+    Writes one RecordingEvent 'mb_release_matched' naming every field
+    actually filled -- omitted when nothing was (e.g. every field was
+    already set). Does NOT commit -- the caller owns the transaction, same
+    as apply_to_artist().
+    """
+    from datetime import datetime, timezone
+
+    filled = []
+
+    perf = rec.performance
+    if perf is not None:
+        year, month, day = _parse_partial_date(release.get("date"))
+        # A studio ingest always creates its own Performance (Ryan,
+        # 2026-09-27) -- but apply_to_recording() is also called from
+        # scripts and tests against older data, so guard against a
+        # Performance that is still shared by more than one studio
+        # recording: writing this release's date onto it would leak onto
+        # every other recording that shares the row (B1). scripts/
+        # migrate_studio_records.py splits these apart for existing data.
+        studio_siblings = [r for r in (perf.recordings or []) if r.kind == "studio"]
+        shared = len(studio_siblings) > 1
+        if shared:
+            if year is not None or month is not None or day is not None:
+                filled.append("skipped: shared performance")
+        else:
+            year_was_null = perf.start_year is None
+            if year_was_null and year is not None:
+                perf.start_year = year
+                filled.append("start_year")
+            # Month/day describe THIS release's date, not a year the
+            # collector's own tags already set. Filling them beneath a year
+            # we did not just fill ourselves fabricates a full date out of an
+            # unrelated edition's release day (B2) -- e.g. a 1990 reissue's
+            # month/day landing under a collector-tagged 1977. Only fill
+            # when the year is null (and we are filling it now) or the
+            # release's own year matches the year already on the
+            # Performance.
+            year_matches = year is not None and perf.start_year == year
+            if year_was_null or year_matches:
+                if perf.start_month is None and month is not None:
+                    perf.start_month = month
+                    filled.append("start_month")
+                if perf.start_day is None and day is not None:
+                    perf.start_day = day
+                    filled.append("start_day")
+
+    release_tracks = release.get("tracks") or []
+    rec_tracks = sorted(rec.tracks or [], key=lambda t: t.track_number)
+    if release_tracks and len(release_tracks) == len(rec_tracks):
+        titles_by_position = {t["position"]: t.get("title") for t in release_tracks}
+        for position, track in enumerate(rec_tracks, start=1):
+            if track.title and track.title.strip():
+                continue
+            new_title = titles_by_position.get(position)
+            if new_title:
+                track.title = new_title
+                filled.append("track_%d_title" % position)
+
+    rec.mb_release_id         = release.get("mbid")
+    rec.mb_release_group_id   = release.get("release_group_id")
+    rec.mb_release_status     = status
+    rec.mb_release_type       = release.get("release_type")
+    rec.mb_label              = release.get("label")
+    rec.mb_catalog_number     = release.get("catalog_number")
+    rec.mb_release_country    = release.get("country")
+    rec.mb_release_checked_at = datetime.now(timezone.utc)
+
+    if filled:
+        from app.extensions import db
+        from app.models.recording_event import RecordingEvent
+        from app.models.user import User
+        # No browser session in the background worker to take a user_id
+        # from -- same "the install's owner" query bulk_ingest_run.py's
+        # _owner_user_id() uses for exactly the same reason.
+        owner = db.session.query(User).filter_by(role="admin", is_active=True).first()
+        if owner is not None:
+            db.session.add(RecordingEvent(
+                recording_id = rec.id,
+                user_id      = owner.id,
+                event_type   = "mb_release_matched",
+                note         = "filled: " + ", ".join(filled),
+            ))
+    return rec
+
+
+def try_match_release(rec):
+    """
+    The automatic pass for one studio recording: search, gate, and record
+    the outcome. Mirrors try_match_artist() exactly -- same enabled()/
+    tripped() guards, same "always set the status column" contract, same
+    never-raises promise.
+
+    A no-op (returns None, mb_release_status untouched) for anything that
+    is not kind == 'studio' -- live recordings are never looked up (section
+    2, "Never for live recordings").
+    """
+    from datetime import datetime, timezone
+    if rec.kind != "studio":
+        return None
+    if not enabled() or tripped():
+        return None
+    try:
+        artist_name = rec.performance.artist.name if rec.performance and rec.performance.artist else None
+        track_count = len(rec.tracks or [])
+        candidates = search_release(artist_name, rec.title)
+        status, best, _ranked = classify_release(candidates, track_count)
+        if status == "matched":
+            details = lookup_release(best["mbid"]) or best
+            apply_to_recording(rec, details, status="matched")
+            return "matched"
+        rec.mb_release_status     = status
+        rec.mb_release_checked_at = datetime.now(timezone.utc)
+        return status
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("musicbrainz release match failed for recording %r: %s",
+                   getattr(rec, "id", None), e)
+        # Must set the status column even on the exception path (same
+        # contract as the happy path above) -- otherwise enqueue_followups()'s
+        # "mb_release_status IS NULL" query re-selects this recording and
+        # retries it, forever, on every boot (S5).
+        # "error", not "none": "none" means MusicBrainz answered with no
+        # candidates; an exception means we never got an answer. The Release
+        # block treats both as "not linked" and offers Find release.
+        rec.mb_release_status     = "error"
+        rec.mb_release_checked_at = datetime.now(timezone.utc)
+        return "error"
+
+
+def link_release(rec, mbid):
+    """
+    The human path: a person picked a candidate from the picker (S5). Looks
+    up full detail and applies it with status 'linked' -- the page tells
+    'Matched automatically' from 'Linked by you' apart precisely on this
+    column, so it must stay honest.
+
+    Returns the release detail dict on success, None if the lookup failed
+    (offline, bad mbid) -- rec is left untouched in that case.
+    """
+    details = lookup_release(mbid)
+    if not details:
+        return None
+    apply_to_recording(rec, details, status="linked")
+    return details
+
+
+def unlink_release(rec):
+    """
+    A human explicitly removing a release link (S6). Clears the eight
+    mb_release_* columns and sets mb_release_status = 'unlinked' rather
+    than NULL, so the follow-up pass's "mb_release_status IS NULL" query
+    never re-queues this recording -- an explicit unlink must stick, not
+    silently get looked up again on the next enqueue_followups() run.
+
+    Filled Performance dates and Track titles are NOT reverted: once
+    applied they are the collector's own data to edit, same as any other
+    field a human can change on View Recording.
+    """
+    from datetime import datetime, timezone
+    from app.extensions import db
+    from app.models.recording_event import RecordingEvent
+    from app.models.user import User
+
+    rec.mb_release_id         = None
+    rec.mb_release_group_id   = None
+    rec.mb_release_type       = None
+    rec.mb_label               = None
+    rec.mb_catalog_number      = None
+    rec.mb_release_country     = None
+    rec.mb_release_status      = "unlinked"
+    rec.mb_release_checked_at  = datetime.now(timezone.utc)
+
+    owner = db.session.query(User).filter_by(role="admin", is_active=True).first()
+    if owner is not None:
+        db.session.add(RecordingEvent(
+            recording_id = rec.id,
+            user_id      = owner.id,
+            event_type   = "mb_release_unlinked",
+            note         = None,
+        ))
+    return rec

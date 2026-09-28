@@ -59,6 +59,7 @@ def event(app):
 
 def test_musician_upload_list_serve_delete(api, app, person, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    app.config["DATA_DIR"] = str(tmp_path / "data")
 
     assert api.get(f"/api/musicians/{person.id}").get_json()["has_image"] is False
     assert api.get(f"/api/musicians/{person.id}/images").get_json() == []
@@ -71,12 +72,13 @@ def test_musician_upload_list_serve_delete(api, app, person, tmp_path):
     assert img["is_primary"] is True                    # first one, automatically
     assert img["url"] == f"/api/musicians/images/{img['id']}"
 
-    # The `_musicians` bucket is the point: a PERSON and an ACT share a name
-    # constantly in this corpus, and artist photos live at the library root
-    # with no prefix at all, so without it they would write to one folder.
-    images_dir = tmp_path / "_musicians" / "Danny Gatton" / "_images"
+    # The `musicians` bucket is the point: a PERSON and an ACT share a name
+    # constantly in this corpus. Files live under DATA_DIR/images/, not
+    # LIBRARY_ROOT (Bulk Ingest spec chunk 2), and musicians/artists are
+    # separate buckets so without it they would write to one folder.
+    images_dir = tmp_path / "data" / "images" / "musicians" / "Danny Gatton"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
-    assert not (tmp_path / "Danny Gatton" / "_images").exists()
+    assert not (tmp_path / "data" / "images" / "artists" / "Danny Gatton").exists()
 
     assert api.get(f"/api/musicians/{person.id}").get_json()["has_image"] is True
     assert api.get(f"/api/musicians/images/{img['id']}").mimetype == "image/jpeg"
@@ -138,6 +140,7 @@ def test_deleting_musician_cascades_to_images(api, app, person, tmp_path):
 
 def test_event_upload_list_serve_delete(api, app, event, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    app.config["DATA_DIR"] = str(tmp_path / "data")
 
     assert api.get(f"/api/events/{event.id}").get_json()["has_image"] is False
 
@@ -149,7 +152,9 @@ def test_event_upload_list_serve_delete(api, app, event, tmp_path):
     assert img["is_primary"] is True
     assert img["url"] == f"/api/events/images/{img['id']}"
 
-    images_dir = tmp_path / "_events" / "Bonnaroo 2009" / "_images"
+    # Files live under DATA_DIR/images/events/, not LIBRARY_ROOT (Bulk
+    # BulkIngest spec chunk 2 -- image store moved out of the library).
+    images_dir = tmp_path / "data" / "images" / "events" / "Bonnaroo 2009"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
 
     assert api.get(f"/api/events/images/{img['id']}").mimetype == "image/jpeg"

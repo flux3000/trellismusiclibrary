@@ -26,7 +26,7 @@ from app.models.genre import Genre
 from app.models.musician import Musician, Membership
 from app.models.performance import Performance
 from app.models.recording import Recording
-from app.utils.serialize import recording_summary
+from app.utils.serialize import recording_summary, batch_recording_image_urls
 from app.utils.ingest import _sanitize_path
 from app.utils.artists import (
     set_artist_members, add_membership_stint,
@@ -48,15 +48,14 @@ _ALLOWED_IMAGE_EXTS = ei.ALLOWED_IMAGE_EXTS
 
 def _artist_images_dir(artist):
     """
-    LIBRARY_ROOT/<sanitized name>/_images — the leading underscore sorts it
-    first alongside/before recording folders in a Finder listing (Ryan,
-    2026-07-22). NOTE: derived from the Artist's CURRENT name at request
-    time, not a stored path — see Artist.image_ext's docstring for the
-    rename-orphan caveat this carries (matches how existing recording
-    folders already behave on a rename: nothing moves those either).
+    DATA_DIR/images/artists/<sanitized name> (Bulk Ingest spec chunk 2 --
+    moved out of the library; see app/utils/entity_images.py::image_dir).
+    NOTE: derived from the Artist's CURRENT name at request time, not a
+    stored path — see Artist.image_ext's docstring for the rename-orphan
+    caveat this carries (matches how existing recording folders already
+    behave on a rename: nothing moves those either).
     """
-    library_root = current_app.config["LIBRARY_ROOT"]
-    return Path(library_root) / _sanitize_path(artist.name) / "_images"
+    return ei.image_dir("artists", artist.name)
 
 
 def _serialize_roster(artist):
@@ -202,6 +201,14 @@ def all_recordings():
         .all()
     )
 
+    # Recording-level artwork (Studio Records spec v1, chunk 5) -- one
+    # grouped query for the whole catalog dump, same reasoning as image_ids
+    # above (ArtistImage): eager-loading every RecordingImage row to read one
+    # url off each would be the same waste this endpoint's 2026-08-24 rewrite
+    # already removed once for tracks/quality_score.
+    all_rec_ids = [r.id for pf in artists for p in pf.performances for r in p.recordings]
+    rec_image_urls = batch_recording_image_urls(all_rec_ids)
+
     # nullslast-ascending, same ordering the old per-artist SQL query
     # produced — a None sorts as "not less than any number", i.e. last.
     def _perf_sort_key(p):
@@ -233,7 +240,7 @@ def all_recordings():
                 "city":           v.city    if v else p.city,
                 "state":          v.state   if v else p.state,
                 "country":        v.country if v else p.country,
-                "recordings":     [recording_summary(r) for r in p.recordings],
+                "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id)) for r in p.recordings],
             })
         # Genre rides along per ARTIST, not per recording — the model is
         # one genre per act (see the Genre dimension work, 2026-08-02). Added
@@ -332,6 +339,12 @@ def get_artist_recordings(artist_id):
             Performance.start_day.desc().nullsfirst(),
         ).all()
     )
+    # One image-url query for every recording on this artist, not one per
+    # row (S1) -- this route was measured at 500 recording_image queries for
+    # 500 image-less recordings.
+    all_recs = [r for perf in performances for r in perf.recordings]
+    rec_image_urls = batch_recording_image_urls([r.id for r in all_recs])
+
     out = []
     for perf in performances:
         v = perf.venue
@@ -350,7 +363,8 @@ def get_artist_recordings(artist_id):
             "city":           v.city    if v else perf.city,
             "state":          v.state   if v else perf.state,
             "country":        v.country if v else perf.country,
-            "recordings":     [recording_summary(r) for r in perf.recordings],
+            "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id))
+                              for r in perf.recordings],
         })
     return jsonify(out)
 

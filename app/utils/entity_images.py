@@ -21,7 +21,9 @@ transaction IS the constraint. It is the only sanctioned way to set the flag.
 import os
 import secrets
 
-from flask import jsonify, request, send_file
+from pathlib import Path
+
+from flask import current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from app.extensions import db
@@ -283,15 +285,36 @@ def register_image_routes(bp, *, parent_model, image_model, url_prefix,
         return handle_delete(img, images_dir_for(getattr(img, kind)))
 
 
-def entity_images_dir(library_root, bucket, name, sanitize):
+def image_dir(kind, name):
     """
-    LIBRARY_ROOT/<bucket>/<sanitized name>/_images.
+    DATA_DIR/images/<kind>/<sanitized name>.
 
-    `bucket` is '_venues' / '_musicians' / '_events' — an underscore-prefixed
-    namespace so an entity and an ACT sharing a name ("Fillmore", "Bill Evans")
-    cannot write into one folder. Artists deliberately have no bucket: their
-    photos have lived beside their recording folders since 2026-07-22 and
-    moving them would orphan every existing file.
+    Image files live under DATA_DIR (app-writable storage), never under
+    LIBRARY_ROOT (Bulk Ingest spec chunk 2) -- a bring-your-own-library
+    point at someone else's read-only collection must not need to write photo
+    folders into it, and DATA_DIR always exists whether or not the library
+    volume is mounted.
+
+    `kind` is 'artists' / 'venues' / 'musicians' / 'events' / 'recordings'.
+    Artists used to have no bucket at all (photos lived beside the recording
+    folders); they get one now like every other entity, since none of them
+    share a filesystem with recordings any more.
+
+    'recordings' is keyed by the recording's numeric id, not a sanitized
+    name -- a recording has no unique human name the way an artist or venue
+    does (title is optional and often blank), and the id is already the
+    stable, collision-free handle the rest of the app uses for it. No
+    sanitizer is applied; the id is asserted to be all-digits instead, so a
+    caller passing something else fails loudly rather than silently
+    sanitizing a name that was never meant to be one.
     """
-    from pathlib import Path
-    return Path(library_root) / bucket / sanitize(name) / "_images"
+    data_dir = current_app.config.get("DATA_DIR")
+    if data_dir is None:
+        from config import Config
+        data_dir = Config.DATA_DIR
+    if kind == "recordings":
+        assert str(name).isdigit(), \
+            f"image_dir('recordings', ...) expects a numeric id, got {name!r}"
+        return Path(data_dir) / "images" / kind / str(name)
+    from app.utils.ingest import _sanitize_path
+    return Path(data_dir) / "images" / kind / _sanitize_path(name)

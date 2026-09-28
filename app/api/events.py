@@ -47,8 +47,7 @@ _IMG_URL = "/api/events/images"
 
 
 def _event_images_dir(event):
-    return ei.entity_images_dir(current_app.config["LIBRARY_ROOT"],
-                                "_events", event.name, _sanitize_path)
+    return ei.image_dir("events", event.name)
 
 
 ei.register_image_routes(

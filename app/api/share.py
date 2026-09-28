@@ -57,7 +57,10 @@ from app.utils.peer_access import (
     peer_can_access_artist, peer_can_access_venue,
     peer_can_access_musician,
 )
-from app.utils.serialize import recording_row, recording_summary
+from app.utils.serialize import (
+    recording_row, recording_summary, _primary_recording_image_url,
+    batch_recording_image_urls, _UNSET as _serialize_UNSET,
+)
 from app.utils.rate_limit import rate_limited
 from app.utils.format import format_partial_date
 from app.api.stream import _serve_file
@@ -241,14 +244,15 @@ def collection_detail(collection_id):
     # card=True (2026-08-08): adds genre, genre_color and image_id, which the
     # handbill Browse cards need. Without it a peer's collection renders as
     # colourless cards with initials where every photo should be.
+    recs = [r for r in collection.recordings if r.id in visible]
+    img_urls = _peer_image_urls(recs)
     return jsonify({
         "id":          collection.id,
         "name":        collection.name,
         "description": collection.description,
         # Contents filtered to the visible set — the collection may legitimately
         # hold more than this peer may see once selective sharing returns.
-        "recordings":  [_peer_row(r, card=True)
-                        for r in collection.recordings if r.id in visible],
+        "recordings":  [_peer_row(r, card=True, image_url=img_urls.get(r.id)) for r in recs],
     })
 
 
@@ -331,6 +335,12 @@ def recording_detail(recording_id):
         "is_official":      bool(rec.is_official),
         "info_file_content": rec.info_file_content,
         "notes":            rec.notes,
+        # Recording-level artwork (Studio Records spec v1, chunk 5) --
+        # reachable here at all only for a recording peer_can_access_recording()
+        # already approved above, so "visible" is already the only case this
+        # payload gets built for. See _peer_row/_peer_summary for the list
+        # payloads (they reuse recording_row/recording_summary unchanged).
+        "image_url":        _primary_recording_image_url(rec, url_prefix="/api/share/recordings/images"),
         "tracks": [
             {
                 "id":           t.id,
@@ -422,7 +432,19 @@ def stream(track_id):
 _SHARE_IMG_URL = "/api/share/artists/images"
 
 
-def _peer_row(rec, card=False):
+_SHARE_RECORDING_IMG_URL = "/api/share/recordings/images"
+
+
+def _peer_image_urls(recs):
+    """Pre-batched {recording_id: SHARE-prefixed image url} for a list of
+    recordings, one grouped query total (S1) -- pass the result's `.get(id)`
+    into _peer_row()/_peer_summary() for every recording in a LIST response.
+    Mirrors batch_recording_image_urls(), just with the share-door prefix."""
+    return batch_recording_image_urls([r.id for r in recs],
+                                      url_prefix=_SHARE_RECORDING_IMG_URL)
+
+
+def _peer_row(rec, card=False, image_url=_serialize_UNSET):
     """recording_row, with the owner's star removed.
 
     `is_favorite` means "the VIEWER starred this" everywhere in the UI — it
@@ -436,15 +458,29 @@ def _peer_row(rec, card=False):
     False is the honest answer here, not a redaction — a peer genuinely has no
     favourites yet. When peer-side favourites are built, this is where the
     viewer's own value gets filled in.
+
+    image_url must be computed with the SHARE-prefixed url (chunk 5), not
+    recording_row()'s local default -- app/api/remotes.py's proxy only
+    rewrites strings that start with "/api/share/" into the consumer's
+    "/api/remotes/<id>/" shape, so an unprefixed local path here would
+    silently resolve against the consumer's OWN library instead. A LIST
+    caller passes `_peer_image_urls(recs).get(rec.id)` (one query for the
+    whole list, S1); omitted (a single-recording caller), this falls back to
+    the per-row lookup with the share prefix -- still correct, just not
+    batched, exactly like recording_row()'s own local default.
     """
-    row = recording_row(rec, card=card)
+    if image_url is _serialize_UNSET:
+        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL)
+    row = recording_row(rec, card=card, image_url=image_url)
     row["is_favorite"] = False
     return row
 
 
-def _peer_summary(rec):
+def _peer_summary(rec, image_url=_serialize_UNSET):
     """recording_summary, same reasoning as _peer_row."""
-    row = recording_summary(rec)
+    if image_url is _serialize_UNSET:
+        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL)
+    row = recording_summary(rec, image_url=image_url)
     if "is_favorite" in row:
         row["is_favorite"] = False
     return row
@@ -555,10 +591,17 @@ def artist_recordings(artist_id):
         ).all()
     )
 
+    # One image-url query for every recording across every performance here
+    # (S1), rather than one per row -- the recs-per-performance loop below
+    # would otherwise do exactly the per-row lazy load S1 is about.
+    perf_recs = {perf.id: _visible_recordings(peer, perf.recordings) for perf in performances}
+    all_recs = [r for recs in perf_recs.values() for r in recs]
+    img_urls = _peer_image_urls(all_recs)
+
     out = []
     for perf in performances:
         v = perf.venue
-        recs = _visible_recordings(peer, perf.recordings)
+        recs = perf_recs[perf.id]
         if not recs:
             continue
         out.append({
@@ -576,7 +619,7 @@ def artist_recordings(artist_id):
             "city":           v.city    if v else perf.city,
             "state":          v.state   if v else perf.state,
             "country":        v.country if v else perf.country,
-            "recordings":     [_peer_summary(r) for r in recs],
+            "recordings":     [_peer_summary(r, image_url=img_urls.get(r.id)) for r in recs],
         })
     return jsonify(out)
 
@@ -602,6 +645,28 @@ def artist_image(image_id):
     return ei.handle_serve(img, _artist_images_dir(img.artist))
 
 
+# ── GET /api/share/recordings/images/<image_id> ────────────────────────────
+# The recording-artwork photo route (Studio Records spec v1, chunk 5). Access
+# is checked against the image's OWNING recording via peer_can_access_recording
+# -- the same visibility rule as recording_detail()/stream() above: the image
+# row can only be reached through a recording id, and that id is access-checked
+# here exactly like every other recording-scoped route in this file.
+
+@bp.route("/recordings/images/<int:image_id>", strict_slashes=False)
+@peer_required
+def recording_image(image_id):
+    from app.models.recording_image import RecordingImage
+    from app.utils import entity_images as ei
+
+    peer = current_peer()
+    img = db.session.get(RecordingImage, image_id)
+    if not img:
+        abort(404)
+    if not peer_can_access_recording(peer, img.recording):
+        abort(404)
+    return ei.handle_serve(img, ei.image_dir("recordings", str(img.recording_id)))
+
+
 # ── GET /api/share/venues/<id> ────────────────────────────────────────────────
 # The count-leak endpoint. Local `get_venue` returns performance_count and
 # recording_count over the venue's ENTIRE history; served unfiltered to a peer
@@ -625,8 +690,10 @@ def venue_detail(venue_id):
         _visible_performances(peer, v.performances),
         key=lambda p: (p.start_year or 0, p.start_month or 0, p.start_day or 0),
     )
-    recordings = [_peer_row(r, card=True)
-                  for p in perfs for r in _visible_recordings(peer, p.recordings)]
+    _venue_recs = [r for p in perfs for r in _visible_recordings(peer, p.recordings)]
+    _venue_img_urls = _peer_image_urls(_venue_recs)
+    recordings = [_peer_row(r, card=True, image_url=_venue_img_urls.get(r.id))
+                  for r in _venue_recs]
 
     return jsonify({
         "id":                v.id,
@@ -672,7 +739,7 @@ def musician_detail(musician_id):
     member_artist_ids = {p.id for p in artists}
 
     visible_perf_ids = peer_visible_performance_ids(peer)
-    guest_appearances = []
+    _pending_appearances = []
     for pp in db.session.query(PerformancePersonnel).filter_by(musician_id=musician_id).all():
         perf = pp.performance
         if not perf or perf.id not in visible_perf_ids:
@@ -682,6 +749,12 @@ def musician_detail(musician_id):
         recs = _visible_recordings(peer, perf.recordings)
         if not recs:
             continue
+        _pending_appearances.append((pp, perf, recs))
+    _guest_img_urls = _peer_image_urls(
+        [r for _pp, _perf, recs in _pending_appearances for r in recs])
+
+    guest_appearances = []
+    for pp, perf, recs in _pending_appearances:
         v = perf.venue
         guest_appearances.append({
             "performance_id": perf.id,
@@ -697,7 +770,7 @@ def musician_detail(musician_id):
             "instrument": pp.instrument,
             "is_guest":   pp.is_guest,
             "note":       pp.note,
-            "recordings": [_peer_summary(r) for r in recs],
+            "recordings": [_peer_summary(r, image_url=_guest_img_urls.get(r.id)) for r in recs],
         })
     guest_appearances.sort(
         key=lambda g: (g["start_year"] or 0, g["start_month"] or 0, g["start_day"] or 0))
@@ -798,8 +871,10 @@ def genre_detail(genre_id):
     if not artists:
         abort(403)
 
-    perf_rows = []
-    total_recordings = 0
+    # Gather every artist's performances first so the image-url lookup below
+    # is ONE query for the whole genre page, not one per recording (S1).
+    _artist_performances = {}
+    _all_genre_recs = []
     for p in artists:
         performances = (
             db.session.query(Performance)
@@ -811,11 +886,21 @@ def genre_detail(genre_id):
                 Performance.start_day.desc().nullsfirst(),
             ).all()
         )
+        _artist_performances[p.id] = [
+            (perf, _visible_recordings(peer, perf.recordings)) for perf in performances
+        ]
+        _all_genre_recs.extend(
+            r for _perf, recs in _artist_performances[p.id] for r in recs)
+    _genre_img_urls = _peer_image_urls(_all_genre_recs)
+
+    perf_rows = []
+    total_recordings = 0
+    for p in artists:
         recordings = []
-        for perf in performances:
+        for perf, recs in _artist_performances[p.id]:
             v = perf.venue
-            for r in _visible_recordings(peer, perf.recordings):
-                row = _peer_summary(r)
+            for r in recs:
+                row = _peer_summary(r, image_url=_genre_img_urls.get(r.id))
                 row.update({
                     "artist":   p.name,
                     "start_year":  perf.start_year,
@@ -873,6 +958,8 @@ def performance_detail(performance_id):
 
     v = p.venue
     resolved = resolve_performance_personnel(p)
+    _perf_recs = _visible_recordings(peer, p.recordings)
+    _perf_img_urls = _peer_image_urls(_perf_recs)
     return jsonify({
         "id":             p.id,
         "artist_id":   p.artist_id,
@@ -898,7 +985,7 @@ def performance_detail(performance_id):
         "notes":        p.notes,
         # Only the recordings of this show that the peer was actually granted —
         # two tapers of one night can sit in different collections.
-        "recordings":   [_peer_summary(r) for r in _visible_recordings(peer, p.recordings)],
+        "recordings":   [_peer_summary(r, image_url=_perf_img_urls.get(r.id)) for r in _perf_recs],
     })
 
 
@@ -938,7 +1025,8 @@ def recent_recordings():
     if card:
         query = _card_eager(query)
     recs = query.order_by(Recording.created_at.desc()).limit(limit).all()
-    return jsonify([_peer_row(r, card=card) for r in recs])
+    img_urls = _peer_image_urls(recs)
+    return jsonify([_peer_row(r, card=card, image_url=img_urls.get(r.id)) for r in recs])
 
 
 @bp.route("/recordings/recommended", strict_slashes=False)
@@ -979,7 +1067,8 @@ def recommended_recordings():
     rnd.shuffle(ordered)
 
     picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_artist)
-    return jsonify([_peer_row(r, card=True) for r in picks])
+    img_urls = _peer_image_urls(picks)
+    return jsonify([_peer_row(r, card=True, image_url=img_urls.get(r.id)) for r in picks])
 
 
 @bp.route("/recordings/on-this-day", strict_slashes=False)
@@ -1000,7 +1089,8 @@ def on_this_day():
                     Performance.start_day == today.day)
             .order_by(Performance.start_year.asc().nullslast())
             .all())
-    return jsonify([_peer_row(r) for r in recs])
+    img_urls = _peer_image_urls(recs)
+    return jsonify([_peer_row(r, image_url=img_urls.get(r.id)) for r in recs])
 
 
 @bp.route("/recordings/by-ids", strict_slashes=False)
@@ -1047,7 +1137,8 @@ def recordings_by_ids():
     if card:
         query = _card_eager(query)
     recs = query.all()
-    return jsonify([_peer_row(r, card=card) for r in recs])
+    img_urls = _peer_image_urls(recs)
+    return jsonify([_peer_row(r, card=card, image_url=img_urls.get(r.id)) for r in recs])
 
 
 @bp.route("/venues/", strict_slashes=False)
@@ -1148,7 +1239,19 @@ def search():
     visible_venues = peer_visible_venue_ids(peer)
 
     raw = local_search.build_search_index()
-    recordings = [r for r in raw["recordings"] if r["id"] in visible_recs]
+    # build_search_index() computes image_url with the LOCAL recording-image
+    # prefix (it is also the local search route's own index). Every other
+    # peer payload uses the share-door prefix so app/api/remotes.py's proxy
+    # rewrites it into the consumer's own "/api/remotes/<id>/..." shape; an
+    # unrewritten local path here 404s on the consumer's OWN library instead,
+    # or collides with one of their own image ids (S2).
+    _local_img_prefix = "/api/recordings/images/"
+    def _rewrite_image_url(r):
+        u = r.get("image_url")
+        if u and u.startswith(_local_img_prefix):
+            r = {**r, "image_url": _SHARE_RECORDING_IMG_URL + u[len(_local_img_prefix) - 1:]}
+        return r
+    recordings = [_rewrite_image_url(r) for r in raw["recordings"] if r["id"] in visible_recs]
     artists = [p for p in raw["artists"] if p["id"] in visible_artists]
     venues = [v for v in raw["venues"] if v["id"] in visible_venues]
     musicians = [
@@ -1217,7 +1320,9 @@ def all_recordings():
     `performance_count` and `recording_count` below are lengths of the FILTERED
     lists, never of the artist's real holdings.
     """
+    from collections import defaultdict
     from sqlalchemy import func as _func
+    from sqlalchemy.orm import selectinload
     from app.models.performance import Performance
     from app.models.artist import Artist
 
@@ -1238,24 +1343,57 @@ def all_recordings():
         .all()
     )
 
+    # ONE query for every visible performance across every artist, with
+    # selectinload chains for everything the loop below and _peer_summary()
+    # touch -- venue, recordings, and each recording's tracks/quality_score
+    # (recording_summary() reads rec.tracks and rec.quality_score). Mirrors
+    # the 2026-08-24 fix in app/api/artists.py all_recordings(): this route
+    # used to run a query per artist for performances, then lazy-load each
+    # performance's venue and recordings, and each recording's tracks and
+    # quality_score -- one grouped query per relationship level now, instead
+    # of one per row, regardless of library size.
+    performances = (
+        db.session.query(Performance)
+        .filter(Performance.artist_id.in_(visible_artists),
+                Performance.id.in_(visible_perfs))
+        .options(
+            selectinload(Performance.venue),
+            selectinload(Performance.recordings).selectinload(Recording.tracks),
+            selectinload(Performance.recordings).selectinload(Recording.quality_score),
+        )
+        .order_by(
+            Performance.start_year.asc().nullslast(),
+            Performance.start_month.asc().nullslast(),
+            Performance.start_day.asc().nullslast(),
+        ).all()
+    )
+    _perfs_by_artist = defaultdict(list)
+    for p in performances:
+        _perfs_by_artist[p.artist_id].append(p)
+
+    # Two passes: gather every artist's performances/recordings first so the
+    # image-url lookup is ONE query for the whole payload (S1) rather than
+    # one per row -- this is the exact endpoint the review measured at 501
+    # queries for 500 image-less recordings.
+    _artist_performances = {}
+    _all_recs = []
+    for pf in artists:
+        _artist_performances[pf.id] = [
+            (p, [r for r in p.recordings if r.id in visible_recs])
+            for p in _perfs_by_artist.get(pf.id, [])
+        ]
+        _all_recs.extend(
+            r for _p, recs in _artist_performances[pf.id] for r in recs)
+    _img_urls = _peer_image_urls(_all_recs)
+
     result = []
     for pf in artists:
-        performances = (
-            db.session.query(Performance)
-            .filter(Performance.artist_id == pf.id,
-                    Performance.id.in_(visible_perfs))
-            .order_by(
-                Performance.start_year.asc().nullslast(),
-                Performance.start_month.asc().nullslast(),
-                Performance.start_day.asc().nullslast(),
-            ).all()
-        )
-        if not performances:
+        perf_recs = _artist_performances[pf.id]
+        if not perf_recs:
             continue
 
         perf_list = []
-        for p in performances:
-            recs = [r for r in p.recordings if r.id in visible_recs]
+        for p, recs in perf_recs:
             if not recs:
                 # A performance whose every recording is filtered out must not
                 # appear as an empty row — that publishes the existence of a
@@ -1273,7 +1411,7 @@ def all_recordings():
                 "city":           v.city    if v else p.city,
                 "state":          v.state   if v else p.state,
                 "country":        v.country if v else p.country,
-                "recordings":     [_peer_summary(r) for r in recs],
+                "recordings":     [_peer_summary(r, image_url=_img_urls.get(r.id)) for r in recs],
             })
         if not perf_list:
             continue

@@ -269,6 +269,19 @@ def promote_to_recording(folder_path, recording_id, *, commit=True):
     if staging is None:
         return None
 
+    if staging.listening_quality is None:
+        # Never actually scored (e.g. bulk-ingested through Review & Ingest
+        # with skip_analysis) -- back-link the staging row so a re-scan
+        # still says "already ingested", but do NOT create a null-score
+        # RecordingQuality row. enqueue_followups()'s "no RecordingQuality
+        # row yet" outer join is how an unscored bulk-ingested recording
+        # gets picked up for scoring; a null-score row would look scored
+        # and the recording would never be queued (S4a).
+        staging.recording_id = recording_id
+        if commit:
+            db.session.commit()
+        return None
+
     row = (db.session.query(RecordingQuality)
            .filter(RecordingQuality.recording_id == recording_id)
            .first())
@@ -303,6 +316,28 @@ def get_for_recording(recording_id):
     return (db.session.query(RecordingQuality)
             .filter(RecordingQuality.recording_id == recording_id)
             .first())
+
+
+def upsert_for_recording(recording_id, scored, features):
+    """
+    Create or update the permanent row for an already-ingested recording,
+    scored directly with no staging row to promote from.
+
+    Bulk Ingest follow-up path (chunk 6): a bulk-ingested recording never
+    went through triage, so there is no QualityAnalysis row for
+    promote_to_recording() to copy -- this writes the same score columns
+    straight onto the permanent row via the same _apply_scores() helper, so
+    the two write paths can never populate a different subset of columns.
+    """
+    row = (db.session.query(RecordingQuality)
+           .filter(RecordingQuality.recording_id == recording_id)
+           .first())
+    if row is None:
+        row = RecordingQuality(recording_id=recording_id)
+        db.session.add(row)
+    _apply_scores(row, scored, features)
+    db.session.commit()
+    return row
 
 
 # ═════════════════════════════════════════════════════════════════════════════

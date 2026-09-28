@@ -47,10 +47,15 @@ def test_recording_summary_shape(app, seeded_ids):
     # "rating" left this set 2026-08-18 — the 0-100 manual score is retired from
     # every payload (the DB column survives unread). Three quality signals is the
     # design: the letter grade, the automated score, and the favourite flag.
+    # "image_url" joined this set 2026-09-27 (chunk 5) -- recording-level
+    # artwork's primary image, or null. "share_override" briefly joined it
+    # the same day (Studio Records spec v1) and was reversed later that day:
+    # a studio recording shares like any other, no per-recording switch.
     assert set(s.keys()) == {"id", "source", "quality", "listening_quality",
                              "is_favorite", "is_complete",
-                             "is_official", "track_count", "duration_sec",
-                             "created_at"}
+                             "is_official", "kind",
+                             "track_count", "duration_sec",
+                             "created_at", "image_url"}
 
 
 def test_build_recording_tags(app, seeded_ids):
@@ -500,10 +505,11 @@ def test_check_existing_excludes_performance_with_no_recordings(db, api):
     assert body["performances"] == []
 
 
-def test_do_confirm_verifies_checksums_end_to_end(app, db, tmp_path):
-    """A .md5 fingerprint file sitting alongside the audio gets archived,
-    parsed, matched to the track by filename, and auto-verified as part of
-    confirm — 2026-07-13 checksum feature."""
+def test_do_confirm_parses_and_stores_md5_but_leaves_unverified(app, db, tmp_path):
+    """A .md5 fingerprint file sitting alongside the audio gets archived and
+    matched to the track by filename, but MD5 is never automatically
+    recomputed-and-compared at confirm (Ryan, 2026-09-27: "MD5 never
+    automatic") -- the entry is stored `unverified`, not `match`."""
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
@@ -534,17 +540,22 @@ def test_do_confirm_verifies_checksums_end_to_end(app, db, tmp_path):
     assert rec.fingerprints[0].content == f"{real_md5} *t01.flac\n"
     assert track.checksum_type == "md5"
     assert track.expected_checksum == real_md5
-    assert track.checksum_status == "match"
+    assert track.checksum_status == "unverified"
     assert track.checksum_verified_at is not None
 
 
-def test_do_confirm_flags_checksum_mismatch(app, db, tmp_path):
+def test_do_confirm_md5_content_stored_but_not_recomputed(app, db, tmp_path):
+    """An md5 fingerprint file is still parsed, matched and stored at
+    confirm even when its hash would not match the real audio -- but since
+    MD5 is never automatically recomputed-and-compared at confirm, that
+    mismatch is never actually checked; the track is left `unverified`,
+    same as a correct one would be."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
     src = tmp_path / "src_show3"; src.mkdir()
     (src / "t01.flac").write_bytes(b"some audio bytes")
-    (src / "checksum.md5").write_text("0" * 32 + " *t01.flac\n")  # deliberately wrong
+    (src / "checksum.md5").write_text("0" * 32 + " *t01.flac\n")  # would mismatch if recomputed
     lib = tmp_path / "lib3"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
     uid = db.session.query(User).first().id
@@ -560,7 +571,8 @@ def test_do_confirm_flags_checksum_mismatch(app, db, tmp_path):
     }
     result = _do_confirm(data, uid, None)
     rec = _db.session.get(Recording, result["recording_id"])
-    assert rec.tracks[0].checksum_status == "mismatch"
+    assert rec.tracks[0].checksum_status == "unverified"
+    assert rec.tracks[0].expected_checksum == "0" * 32
 
 
 def test_verify_checksums_discovers_and_verifies_backfill(app, db, api, tmp_path):
@@ -1018,7 +1030,7 @@ def test_do_confirm_flattens_and_renames_multi_disc_with_checksums(app, db, tmp_
     # fingerprint file listed, scoped so CD2's "01.flac" never gets matched
     # to CD1's track of the same original name, and verified against the
     # real (renamed) audio bytes.
-    assert [t.checksum_status for t in tracks] == ["match", "match", "match"]
+    assert [t.checksum_status for t in tracks] == ["unverified", "unverified", "unverified"]
     assert tracks[0].expected_checksum == md5_1   # CD1/01.flac → Track 1
     assert tracks[1].expected_checksum == md5_2   # CD1/02.flac → Track 2
     assert tracks[2].expected_checksum == md5_3   # CD2/01.flac → Track 3 (not CD1's md5_1)
@@ -1094,23 +1106,24 @@ def test_do_confirm_keeps_names_and_nesting_in_keep_mode(app, db, tmp_path):
     for t in tracks:
         assert (lib / rec.folder_path / t.file_path).exists()
 
-    # Checksums still matched and verified per disc despite the shared
+    # Checksums still matched (and stored) per disc despite the shared
     # "01.flac" basename across CD1/CD2 -- scoping is unaffected by mode.
-    assert [t.checksum_status for t in tracks] == ["match", "match", "match"]
+    # Never recomputed-and-compared at confirm, so left unverified.
+    assert [t.checksum_status for t in tracks] == ["unverified", "unverified", "unverified"]
     assert tracks[0].expected_checksum == md5_1
     assert tracks[1].expected_checksum == md5_2
     assert tracks[2].expected_checksum == md5_3
 
 
 
-# ── Bulk Adoption, in-root sources (spec section 1.1, chunk 1, 2026-09-26) ────
+# ── Bulk Ingest, in-root sources (spec section 1.1, chunk 1, 2026-09-26) ────
 #
-# A source folder whose realpath is already inside LIBRARY_ROOT is adopted
+# A source folder whose realpath is already inside LIBRARY_ROOT is ingested
 # exactly where it sits -- folder_path becomes its path relative to
 # LIBRARY_ROOT (however deeply nested), and every Track.file_path matches
 # the file's real on-disk name, whatever file_handling mode is active.
 
-def test_do_confirm_adopts_nested_in_root_source_in_keep_mode(app, db, tmp_path):
+def test_do_confirm_ingests_nested_in_root_source_in_keep_mode(app, db, tmp_path):
     """A collector's own Artist/Year/Show tree, already inside LIBRARY_ROOT,
     ingested under the default 'keep' mode: nothing moves, folder_path is
     the full nested relative path, and every file is untouched at its
@@ -1118,7 +1131,7 @@ def test_do_confirm_adopts_nested_in_root_source_in_keep_mode(app, db, tmp_path)
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
-    lib = tmp_path / "lib_adopt_keep"; lib.mkdir()
+    lib = tmp_path / "lib_ingest_keep"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
     uid = db.session.query(User).first().id
 
@@ -1152,16 +1165,16 @@ def test_do_confirm_adopts_nested_in_root_source_in_keep_mode(app, db, tmp_path)
     assert not (lib / "Grateful Dead" / "gd77-05-08").exists()
 
 
-def test_do_confirm_adopts_nested_in_root_source_in_organize_mode(app, db, tmp_path):
+def test_do_confirm_ingests_nested_in_root_source_in_organize_mode(app, db, tmp_path):
     """The same nested source, but with 'organize' mode active (renaming
-    scheme-driven) -- in-root adoption still overrides renaming; the files
+    scheme-driven) -- in-root bulk_ingest still overrides renaming; the files
     keep their original names and nesting."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils import node_settings
 
     node_settings.apply_mode("organize")
-    lib = tmp_path / "lib_adopt_organize"; lib.mkdir()
+    lib = tmp_path / "lib_ingest_organize"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
     uid = db.session.query(User).first().id
 
@@ -1188,7 +1201,7 @@ def test_do_confirm_adopts_nested_in_root_source_in_organize_mode(app, db, tmp_p
     tracks = sorted(rec.tracks, key=lambda t: t.track_number)
 
     assert rec.folder_path == "Grateful Dead/1977/gd77-05-08"
-    # Not renamed to organize's "01 - One.flac" scheme -- in-root adoption
+    # Not renamed to organize's "01 - One.flac" scheme -- in-root bulk_ingest
     # forces the identity map regardless of mode.
     assert [t.file_path for t in tracks] == ["01.flac", "02.flac"]
     assert (src / "01.flac").is_file()
@@ -1197,13 +1210,13 @@ def test_do_confirm_adopts_nested_in_root_source_in_organize_mode(app, db, tmp_p
 
 def test_do_confirm_flat_in_root_source_stays_flat_under_placement_artist(app, db, tmp_path):
     """A flat <root>/show source, placement 'artist' (under_artist_folder
-    True): in-root adoption means no <Artist>/ directory gets created."""
+    True): in-root bulk_ingest means no <Artist>/ directory gets created."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils import node_settings
 
     node_settings.set_file_handling(placement="artist")
-    lib = tmp_path / "lib_adopt_flat"; lib.mkdir()
+    lib = tmp_path / "lib_ingest_flat"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
     uid = db.session.query(User).first().id
 
@@ -1232,14 +1245,15 @@ def test_do_confirm_in_root_cd1_cd2_source_organize_mode(app, db, tmp_path):
     """An in-root CD1/CD2 source in organize mode: track_number is still
     continuous across discs (disc detection is independent of file
     handling), file_path keeps each disc's own subdir prefix unrenamed, and
-    checksums still match despite no rename happening."""
+    checksums are still parsed and stored (left unverified -- MD5 is never
+    recomputed at confirm) despite no rename happening."""
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils import node_settings
 
     node_settings.apply_mode("organize")
-    lib = tmp_path / "lib_adopt_multidisc"; lib.mkdir()
+    lib = tmp_path / "lib_ingest_multidisc"; lib.mkdir()
     app.config["LIBRARY_ROOT"] = str(lib)
     uid = db.session.query(User).first().id
 
@@ -1282,7 +1296,7 @@ def test_do_confirm_in_root_cd1_cd2_source_organize_mode(app, db, tmp_path):
     assert [t.file_path for t in tracks] == ["CD1/01.flac", "CD2/01.flac"]
     for t in tracks:
         assert (lib / rec.folder_path / t.file_path).is_file()
-    assert [t.checksum_status for t in tracks] == ["match", "match"]
+    assert [t.checksum_status for t in tracks] == ["unverified", "unverified"]
     assert tracks[0].expected_checksum == md5_1
     assert tracks[1].expected_checksum == md5_2
 

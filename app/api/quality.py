@@ -139,7 +139,7 @@ def _run_quality_job(job_id, app, source_dir, folders, reanalyze):
                 # unless explicitly asked to redo them — re-decoding audio is
                 # the only genuinely slow thing here.
                 if not reanalyze and _is_current(folder):
-                    row = _adopt_into_scan(folder, source_dir)
+                    row = _reuse_into_scan(folder, source_dir)
                     # `list_staging` deliberately excludes rows already promoted
                     # to a Recording, so the client gets no row for these and
                     # cannot tell "already in your library" from "something
@@ -157,7 +157,7 @@ def _run_quality_job(job_id, app, source_dir, folders, reanalyze):
         job["status"] = "error"
 
 
-def _adopt_into_scan(folder_path, source_dir):
+def _reuse_into_scan(folder_path, source_dir):
     """
     Repoint an already-analysed row at the directory being scanned NOW.
 
@@ -422,7 +422,8 @@ def _scan_metadata(folder_path):
     only exist on the full payload. Feeding it a bare `scan_folder()` result
     silently produces a score of 0 for every folder.
     """
-    from app.utils.ingest import build_scan_payload
+    from app.utils.ingest import build_scan_payload, scan_folder
+    from app.utils.bulk_ingest import folder_format, classify_kind, _consistent_tag, _resolve_venue
 
     try:
         mtime = os.path.getmtime(folder_path)
@@ -451,6 +452,10 @@ def _scan_metadata(folder_path):
         # correctly in Review). _tag_date_parts() mirrors the wizard's split so
         # both read the same date the same way.
         tag_year, tag_month, tag_day = _tag_date_parts(tags.get("concert_date"))
+        try:
+            folder_format_str = folder_format(scan_folder(folder_path))
+        except Exception:
+            folder_format_str = None
         payload = {
             # build_scan_payload already computed this; recomputing would just
             # risk the two disagreeing.
@@ -471,6 +476,17 @@ def _scan_metadata(folder_path):
                 # (2026-08-02). A ratio says the fields are filled; it cannot
                 # show that they are filled with "Jam >" and "Unknown".
                 "track_titles": _proposed_track_titles(scan, tags, sug),
+                # Format + Type (2026-09-27) -- same pure functions
+                # bulk_ingest.py's extract()/classify() use, so Review &
+                # Ingest's FORMAT/TYPE pills match Bulk Ingest's and Bulk
+                # Import's for the same folder. format needs scan_folder()'s
+                # unsupported_audio (SHN) that build_scan_payload() does not
+                # forward -- a second scan_folder() call is a directory walk,
+                # not a tag open, so no file is read twice.
+                "format": folder_format_str,
+                "kind": classify_kind(scan,
+                                       _consistent_tag(tags.get("tracks", []), "album"),
+                                       _resolve_venue(scan)[0]),
             },
         }
 
@@ -611,6 +627,12 @@ def _attach_concerns(results):
     from app.models.performance import Performance
     from app.utils.format import format_partial_date
 
+    # S7: one query for every folder_path in this result set, not one per
+    # card -- _bulk_ingest_review_reasons() used to be called inside the loop
+    # below, so a page of N cards ran the same across-every-run BulkIngestItem
+    # query N times.
+    bulk_ingest_review_reasons = _bulk_ingest_review_reasons()
+
     for r in results:
         concerns = []
         x = r.get("extracted") or {}
@@ -700,7 +722,45 @@ def _attach_concerns(results):
             except Exception:  # noqa: BLE001
                 _tb.print_exc()   # never let a duplicate check break a card
 
+        # Bulk Ingest review rows (spec chunk 7d): a folder classify()
+        # (app/utils/bulk_ingest.py) sent to review for missing artist/date, or
+        # an unsupported container format, staged itself here with
+        # listening_quality left null (bulk_ingest_run.py's _write_review_
+        # staging) rather than a scored one. Surface WHY it needs a look by
+        # matching this row's folder_path back to that BulkIngestItem.
+        # unsupported_format gets no concern line here at all -- the existing
+        # convert affordance (_attach_convertible) already covers it, and spec
+        # chunk 7d is explicit that this card must not say anything extra
+        # about it.
+        reason = bulk_ingest_review_reasons.get(qs.norm_path(r.get("folder_path") or ""))
+        if reason == "needs_artist":
+            concerns.append({"level": "warn", "kind": "needs_artist", "text": "No artist found"})
+        elif reason == "needs_date":
+            concerns.append({"level": "warn", "kind": "needs_date", "text": "No date found"})
+
         r["concerns"] = concerns
+
+
+def _bulk_ingest_review_reasons():
+    """
+    {folder_path: reason} for every 'review'-status BulkIngestItem across every
+    run, keyed by the folder's own absolute path (BulkIngestItem stores only
+    root-relative rel_path; the run it belongs to holds the root). Small and
+    cheap enough to rebuild per request -- Bulk Ingest review queues are not
+    a large fraction of a library, and this mirrors _build_dedup_map's
+    per-call approach in bulk_ingest_run.py rather than caching state that could
+    drift from a run's own progress.
+    """
+    from app.models.bulk_ingest import BulkIngestItem, BulkIngestRun
+
+    out = {}
+    rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestItem.reason, BulkIngestRun.root)
+            .join(BulkIngestRun, BulkIngestItem.run_id == BulkIngestRun.id)
+            .filter(BulkIngestItem.status == "review")
+            .all())
+    for rel_path, reason, root in rows:
+        out[qs.norm_path(os.path.join(root, rel_path))] = reason
+    return out
 
 
 def _attach_convertible(results):
@@ -882,7 +942,7 @@ def convert_status(job_id):
         _CONVERT_JOBS.pop(job_id, None)
         # The staging row was written against files that no longer exist under
         # those names. Dropping it means the re-scan the client runs next
-        # analyses the FLACs fresh instead of adopting a row whose analysis
+        # analyses the FLACs fresh instead of ingesting a row whose analysis
         # describes the Shorten set — and, for the SHN case, whose `error`
         # would otherwise still be sitting on the card after a successful
         # conversion.

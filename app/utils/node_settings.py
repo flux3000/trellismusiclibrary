@@ -63,7 +63,7 @@ def file_under_artist_folder():
     False files it flat at the library root. That is for the collector who
     pointed Trellis at a library they built themselves, where the artist is
     already in the folder name and every show sits at one level -- see
-    move_to_library(). Adopted recordings are unaffected either way: they keep
+    move_to_library(). Ingested recordings are unaffected either way: they keep
     whatever path they were found at, and rename_recording_folder() renames
     the leaf under its existing parent rather than relocating anything.
     """

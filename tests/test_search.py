@@ -399,6 +399,7 @@ def test_recording_item_shape(client, seeded_ids):
         "source": "AUD",
         "quality": "B+",
         "listening_quality": None,
+        "image_url": None,
         "hash": f"#/recording/{seeded_ids['recording_id']}",
     }
 

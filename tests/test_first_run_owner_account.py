@@ -149,54 +149,54 @@ def test_an_unrecognized_choice_falls_back_to_the_safe_default(api, app):
     assert fh["placement"] == "artist"
 
 
-# ── Bulk Adoption on first run (spec 1.9/4, chunk 7a) ─────────────────────────
+# ── Bulk Ingest on first run (spec 1.9/4, chunk 7a) ─────────────────────────
 
-def test_marker_with_adopt_existing_starts_one_running_run(api, app, tmp_path, monkeypatch):
+def test_marker_with_ingest_existing_starts_one_running_run(api, app, tmp_path, monkeypatch):
     """confirm_existing_library()'s "Use a folder I already have" answer
-    writes adopt_existing into the marker; first_run_setup()'s own boot-time
+    writes ingest_existing into the marker; first_run_setup()'s own boot-time
     check (exercised here directly, the same call it makes) must turn that
-    into exactly one running AdoptionRun."""
+    into exactly one running BulkIngestRun."""
     import run
-    from app.models.adoption import AdoptionRun
+    from app.models.bulk_ingest import BulkIngestRun
 
     root = tmp_path / "existing-library"
     root.mkdir()
     app.config["LIBRARY_ROOT"] = str(root)
     monkeypatch.setattr(run, "_read_trellis_root_marker",
                         lambda: {"mode": "imported", "library_root": str(root),
-                                 "adopt_existing": True})
+                                 "ingest_existing": True})
 
-    run._maybe_start_adoption_from_marker()
+    run._maybe_start_bulk_ingest_from_marker()
 
-    runs = _db.session.query(AdoptionRun).all()
+    runs = _db.session.query(BulkIngestRun).all()
     assert len(runs) == 1
     assert runs[0].status == "running"
     assert runs[0].root == str(root)
 
 
-def test_marker_without_adopt_existing_starts_no_run(api, app, tmp_path, monkeypatch):
+def test_marker_without_ingest_existing_starts_no_run(api, app, tmp_path, monkeypatch):
     import run
-    from app.models.adoption import AdoptionRun
+    from app.models.bulk_ingest import BulkIngestRun
 
     root = tmp_path / "created-library"
     root.mkdir()
     monkeypatch.setattr(run, "_read_trellis_root_marker",
                         lambda: {"mode": "created", "trellis_root": str(root)})
 
-    run._maybe_start_adoption_from_marker()
+    run._maybe_start_bulk_ingest_from_marker()
 
-    assert _db.session.query(AdoptionRun).count() == 0
+    assert _db.session.query(BulkIngestRun).count() == 0
 
 
 def test_no_marker_at_all_starts_no_run(api, app, monkeypatch):
     import run
-    from app.models.adoption import AdoptionRun
+    from app.models.bulk_ingest import BulkIngestRun
 
     monkeypatch.setattr(run, "_read_trellis_root_marker", lambda: None)
 
-    run._maybe_start_adoption_from_marker()
+    run._maybe_start_bulk_ingest_from_marker()
 
-    assert _db.session.query(AdoptionRun).count() == 0
+    assert _db.session.query(BulkIngestRun).count() == 0
 
 
 def test_a_reachable_default_root_no_longer_skips_first_run(api, app, tmp_path, monkeypatch):

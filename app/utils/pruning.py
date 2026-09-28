@@ -151,8 +151,8 @@ def prune_venue_if_orphaned(venue_id):
     deleted_id = venue.id
     image_paths = []
     if venue.images:
-        library_root = current_app.config.get("LIBRARY_ROOT", "")
-        images_dir = Path(library_root) / "_venues" / _sanitize_path(venue.name) / "_images"
+        from app.utils import entity_images as ei
+        images_dir = ei.image_dir("venues", venue.name)
         image_paths = [images_dir / img.filename for img in venue.images]
 
     db.session.delete(venue)   # VenueImage rows cascade-delete here

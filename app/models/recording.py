@@ -44,8 +44,11 @@ class Recording(db.Model):
     # (restricts streaming to other users in future multi-user builds)
     is_official    = db.Column(db.Boolean, nullable=False, default=False)
 
-    # Path to recording folder, relative to LIBRARY_ROOT — never sent to frontend
-    folder_path    = db.Column(db.String(512), nullable=False)
+    # Path to recording folder, relative to LIBRARY_ROOT — never sent to frontend.
+    # Indexed (N4): process() and _reconcile_review_items() both look a
+    # recording up by folder_path per item, and that query was a full table
+    # scan that grows with the library.
+    folder_path    = db.Column(db.String(512), nullable=False, index=True)
 
     # In the library, or back out at the workbench? (2026-08-21)
     #
@@ -113,6 +116,32 @@ class Recording(db.Model):
     source_tag  = db.Column(db.String(64), nullable=True)
     etree_shnid = db.Column(db.Integer,    nullable=True)
 
+    # Live show vs studio release (Bulk Ingest spec chunk 2). Studio
+    # recordings may attach to a venue-less, possibly dateless Performance.
+    kind = db.Column(db.String(16), nullable=False, default="live", server_default="live")
+
+# MusicBrainz release lookup (Studio Records spec v1, section 2). Filled
+    # fill-if-null only by try_match_release()/link_release() -- never
+    # written for a live recording. mb_release_status mirrors the artist
+    # mb_status values (None = never looked up) plus 'linked' (a human
+    # picked it) and 'unlinked' (a human explicitly removed the link, so
+    # the follow-up pass must never re-run it).
+    mb_release_id         = db.Column(db.String(36),  nullable=True)
+    mb_release_group_id   = db.Column(db.String(36),  nullable=True)
+    mb_release_status     = db.Column(db.String(16),  nullable=True)
+    mb_release_type       = db.Column(db.String(32),  nullable=True)
+    mb_label              = db.Column(db.String(120), nullable=True)
+    mb_catalog_number     = db.Column(db.String(64),  nullable=True)
+    mb_release_country    = db.Column(db.String(2),   nullable=True)
+    mb_release_checked_at = db.Column(db.DateTime,    nullable=True)
+
+    # Artwork backfill follow-up (S8, independent review v1). NULL until the
+    # "images" follow-up kind has scanned this recording's folder/embedded
+    # art, whether or not it found anything -- same never-looked-up-yet
+    # contract as mb_release_checked_at above. Any kind, not studio-only:
+    # a live recording can carry taper art too.
+    images_checked_at = db.Column(db.DateTime, nullable=True)
+
     # Latest AI Assist research result (JSON blob: thinking, proposals,
     # track_titles, verify_items, provenance_notes, sources). Overwritten on
     # each re-run — no history kept. Persisted so a research pass isn't lost
@@ -132,6 +161,12 @@ class Recording(db.Model):
                                     order_by="Track.track_number")
     events        = db.relationship("RecordingEvent",       back_populates="recording",
                                     order_by="RecordingEvent.created_at")
+    # Studio Records spec v1 chunk 4 -- recording-level artwork, one flagged
+    # primary. Sort mirrors artist/venue images (primary first, then
+    # sort_order/id) via app/utils/entity_images.py's primary_for()/set_primary().
+    images        = db.relationship("RecordingImage",       back_populates="recording",
+                                    cascade="all, delete-orphan",
+                                    order_by="RecordingImage.sort_order, RecordingImage.id")
 
     def __repr__(self):
         return f"<Recording {self.id} [{self.source}] performance={self.performance_id}>"

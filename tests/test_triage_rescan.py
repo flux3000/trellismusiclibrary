@@ -108,7 +108,7 @@ def test_rescan_at_a_shallower_level_still_returns_the_rows(qapp):
 def test_rescanning_the_same_directory_writes_nothing(qapp):
     """
     The common case — re-opening the same folder — must not cost a commit per
-    show. Guarded because _adopt_into_scan runs on EVERY skipped folder.
+    show. Guarded because _reuse_into_scan runs on EVERY skipped folder.
     """
     row = _seed(SHOW, PARENT)
     before = row.updated_at

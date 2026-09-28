@@ -3,7 +3,7 @@ tests/test_folder_name_inference.py — what a folder name alone can tell us.
 
 The folder name is a third witness alongside the FLAC tags and the info file,
 and for a folder with no info file it is the ONLY one — which is the exact
-case a collector adopting an existing library is in.
+case a collector ingesting an existing library is in.
 
 Source detection (detect_source_from_name) has been in the codebase since
 2026-08 and was never covered by a test; gear detection
@@ -12,7 +12,7 @@ DB or app context needed.
 
 The negative controls are the point of this file. A folder name is short and
 adversarial — act names, venue names, city names, taper surnames — and a
-wrong value written unattended across a few thousand adopted folders is worse
+wrong value written unattended across a few thousand ingested folders is worse
 than no value at all. Every NEGATIVE case below is a real-world shape that a
 naive matcher gets wrong.
 """
@@ -164,7 +164,7 @@ def test_shnid_ignores_a_glued_digit_run():
 # ── Negative control: names that carry neither (spec section 7) ─────────────
 # Eight real-world folder-name shapes with no equipment token and no digit
 # run outside a date/year — a wrong source_tag or shnid written unattended
-# across a few thousand adopted folders is worse than no value at all.
+# across a few thousand ingested folders is worse than no value at all.
 
 @pytest.mark.parametrize("folder", [
     "Grateful Dead - 1977-05-08 - Barton Hall, Ithaca, NY",

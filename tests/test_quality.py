@@ -322,6 +322,26 @@ def test_promote_unanalysed_folder_is_a_noop(app, recording):
     assert qs.promote_to_recording("/src/never-analysed", recording.id) is None
 
 
+def test_promote_never_creates_a_null_score_recordingquality(app, recording):
+    """S4a: a staging row with skip_analysis (bulk-ingested through Review &
+    Ingest) has listening_quality left null. Promoting it must not create a
+    null-score RecordingQuality row -- enqueue_followups()'s outer join on
+    "no RecordingQuality row" is how an unscored recording gets queued for
+    scoring, and a null-score row would look already-scored and hide it."""
+    from app.models.quality import RecordingQuality
+
+    qs.upsert_staging("/src/unscored", source_dir="/src",
+                      scored={}, features={})
+    row = qs.get_staging("/src/unscored")
+    assert row.listening_quality is None
+
+    result = qs.promote_to_recording("/src/unscored", recording.id)
+    assert result is None
+    assert qs.get_staging("/src/unscored").recording_id == recording.id
+    assert (_db.session.query(RecordingQuality)
+            .filter_by(recording_id=recording.id).first()) is None
+
+
 def test_promote_is_idempotent(app, recording):
     _stage()
     qs.promote_to_recording("/src/show-a", recording.id)
@@ -429,6 +449,39 @@ def test_deleting_recording_cascades_score_but_keeps_triage(app, recording):
 # ═════════════════════════════════════════════════════════════════════════════
 # Serialisation
 # ═════════════════════════════════════════════════════════════════════════════
+def test_attach_concerns_hoists_bulk_ingest_reasons_query(app, monkeypatch):
+    """S7: _bulk_ingest_review_reasons() must be called once per _attach_
+    concerns() call, not once per card -- it used to run the same
+    across-every-run BulkIngestItem query inside the per-card loop."""
+    from app.api import quality as quality_api
+    from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
+
+    root = "/tmp/bulk_ingest_lib"
+    run = BulkIngestRun(root=root, status="done")
+    _db.session.add(run)
+    _db.session.flush()
+    _db.session.add(BulkIngestItem(run_id=run.id, rel_path="Show1",
+                                 status="review", reason="needs_artist"))
+    _db.session.commit()
+
+    calls = {"n": 0}
+    real = quality_api._bulk_ingest_review_reasons
+    def counting():
+        calls["n"] += 1
+        return real()
+    monkeypatch.setattr(quality_api, "_bulk_ingest_review_reasons", counting)
+
+    folder_path = qs.norm_path(root + "/Show1")
+    results = [{"folder_path": folder_path, "extracted": {}, "health": {},
+               "fingerprints": {}} for _ in range(5)]
+    quality_api._attach_concerns(results)
+
+    assert calls["n"] == 1
+    for r in results:
+        kinds = {c["kind"] for c in r["concerns"]}
+        assert "needs_artist" in kinds
+
+
 def test_serialize_omits_features_unless_asked(app):
     _stage()
     row = qs.get_staging("/src/show-a")

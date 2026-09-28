@@ -189,14 +189,16 @@ def test_real_ingest_path_carries_disc_source_tag_shnid_and_fp_rel_path(app, cli
     assert t1.set_number is None and t2.set_number is None
 
     # Fingerprint rows: rel_path preserved, and scoped-matching (S2) actually
-    # verified each disc's own track against its own checksum.md5.
+    # matched each disc's own track against its own checksum.md5 -- stored,
+    # never recomputed-and-compared at confirm (MD5 never automatic,
+    # Ryan 2026-09-27), so both are left unverified.
     fps = {fp.rel_path: fp for fp in rec.fingerprints}
     assert set(fps) == {"CD1/checksum.md5", "CD2/checksum.md5"}
     for fp in fps.values():
         assert fp.content   # not None -- the confirm-time re-read found it
 
     for t in (t1, t2):
-        assert t.checksum_status == "match", (t.original_file_path, t.checksum_status)
+        assert t.checksum_status == "unverified", (t.original_file_path, t.checksum_status)
 
     # Keep mode (default): file_path == the original rel_path, nesting kept,
     # and the bytes at that path inside the library are byte-identical to
@@ -333,13 +335,13 @@ def test_original_scheme_on_nested_keep_recording_keeps_each_discs_own_path():
     assert proposed == ["CD1/01.flac", "CD2/01.flac"], proposed
 
 
-# ── R2 (re-review, 2026-09-25), superseded 2026-09-26 by the Bulk Adoption
+# ── R2 (re-review, 2026-09-25), superseded 2026-09-26 by the Bulk Ingest
 # in-root fix (spec section 1.1, chunk 1): move_to_library's same-place
 # branch used to still apply the rename map/flatten in place under organize
 # mode. That branch is gone -- an in-root source (which this re-add case
 # always is, since its "own canonical destination" sits under LIBRARY_ROOT)
-# is now adopted with no renaming at all, in every mode. See
-# tests/test_db_logic.py's test_do_confirm_adopts_nested_in_root_source_in_organize_mode
+# is now ingested with no renaming at all, in every mode. See
+# tests/test_db_logic.py's test_do_confirm_ingests_nested_in_root_source_in_organize_mode
 # for the current behavior this test used to check the opposite of.
 
 def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path):
@@ -360,8 +362,8 @@ def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path)
     )
     # The source ALREADY sits at its own canonical destination -- the S1 case
     # (a show re-added from the library picker that lands exactly where it
-    # already is). It is therefore an in-root source, and the Bulk Adoption
-    # fix (2026-09-26) means it is adopted with no rename at all, organize
+    # already is). It is therefore an in-root source, and the Bulk Ingest
+    # fix (2026-09-26) means it is ingested with no rename at all, organize
     # mode notwithstanding.
     src = lib / artist_name / folder_name
     src.mkdir(parents=True)
@@ -384,7 +386,7 @@ def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path)
     for t in rec.tracks:
         assert (lib_folder / t.file_path).is_file(), (
             "Track.file_path {0!r} not on disk -- dir has {1}".format(t.file_path, on_disk))
-    # In-root adoption overrides organize's rename scheme -- the files keep
+    # In-root bulk_ingest overrides organize's rename scheme -- the files keep
     # their original bare names, never "01 - One.flac"/"02 - Two.flac".
     assert sorted(t.file_path for t in rec.tracks) == ["01.flac", "02.flac"]
 

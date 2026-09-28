@@ -38,6 +38,7 @@ from app.models.performance import Performance
 from app.models.artist import Artist
 from app.models.quality import RecordingQuality
 from app.models.recording import Recording
+from app.models.recording_image import RecordingImage
 from app.models.venue import Venue
 from app.utils import search as se
 from app.utils.format import format_partial_date
@@ -121,6 +122,22 @@ def build_search_index():
         .all()
     )
 
+    # Recording-level artwork (Studio Records spec v1, chunk 5) -- one grouped
+    # query for a primary-image-id per recording, same batching pattern as
+    # artists.py::all_recordings(). This function already reads every
+    # searchable row as columns rather than ORM objects specifically to avoid
+    # a per-row query (see the docstring above), so a thumbnail here has to
+    # follow the same rule.
+    rec_image_ids = {}
+    for rid, iid, _is_primary in (
+        db.session.query(RecordingImage.recording_id, RecordingImage.id,
+                         RecordingImage.is_primary)
+        .order_by(RecordingImage.recording_id, RecordingImage.is_primary.desc(),
+                  RecordingImage.sort_order, RecordingImage.id)
+        .all()
+    ):
+        rec_image_ids.setdefault(rid, iid)
+
     recordings = [
         {
             "id":                  r.id,
@@ -140,6 +157,8 @@ def build_search_index():
             "source":              r.source,
             "quality":             r.quality,
             "listening_quality":   r.listening_quality,
+            "image_url": (f"/api/recordings/images/{rec_image_ids[r.id]}"
+                          if r.id in rec_image_ids else None),
         }
         for r in rows
     ]
@@ -192,6 +211,7 @@ def _recording_item(row):
         "source": row.get("source"),
         "quality": row.get("quality"),
         "listening_quality": row.get("listening_quality"),
+        "image_url": row.get("image_url"),
         "hash": f"#/recording/{row['id']}",
     }
 

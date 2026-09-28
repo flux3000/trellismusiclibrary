@@ -31,6 +31,7 @@ def venue(app):
 
 def test_upload_list_serve_delete(api, app, venue, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    app.config["DATA_DIR"] = str(tmp_path / "data")
 
     assert api.get(f"/api/venues/{venue.id}").get_json()["has_image"] is False
     assert api.get(f"/api/venues/{venue.id}/images").get_json() == []
@@ -46,9 +47,11 @@ def test_upload_list_serve_delete(api, app, venue, tmp_path):
     assert img["origin"] == "upload"
     assert img["url"] == f"/api/venues/images/{img['id']}"
 
-    # Files land under _venues/, NOT alongside artist photos — a venue and
-    # an act can share a name ("Fillmore") and must not collide.
-    images_dir = tmp_path / "_venues" / "The Fillmore" / "_images"
+    # Files land under DATA_DIR/images/venues/, NOT under LIBRARY_ROOT and NOT
+    # alongside artist photos — a venue and an act can share a name
+    # ("Fillmore") and must not collide (Bulk Ingest spec chunk 2 -- image
+    # store moved out of the library).
+    images_dir = tmp_path / "data" / "images" / "venues" / "The Fillmore"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
 
     assert api.get(f"/api/venues/{venue.id}").get_json()["has_image"] is True

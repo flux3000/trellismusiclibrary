@@ -203,7 +203,7 @@ const Player = (() => {
   // ── AirPlay ────────────────────────────────────────────────────────────
   // webkitShowPlaybackTargetPicker is a WebKit-only extension on the media
   // element itself — Safari and any WKWebView (the packaged desktop app on
-  // macOS) get it; Chrome and Firefox never adopted AirPlay, and there is no
+  // macOS) get it; Chrome and Firefox never supported AirPlay, and there is no
   // polyfill for that, so the button just never appears there. WebKit owns
   // discovery, the picker UI and the actual routing — this is the entire
   // integration.

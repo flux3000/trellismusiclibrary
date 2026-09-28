@@ -54,6 +54,7 @@ def test_migrate_add_performer_image_dossier_idempotent(tmp_path):
 
 def test_upload_get_delete_artist_image(api, app, seeded_ids, tmp_path):
     app.config["LIBRARY_ROOT"] = str(tmp_path)
+    app.config["DATA_DIR"] = str(tmp_path / "data")
     pid = seeded_ids["artist_id"]   # "Bill Evans", per conftest._seed()
 
     # No image yet.
@@ -70,7 +71,9 @@ def test_upload_get_delete_artist_image(api, app, seeded_ids, tmp_path):
     assert img["is_primary"] is True
     assert img["origin"] == "upload"
 
-    images_dir = tmp_path / "Bill Evans" / "_images"
+    # Files live under DATA_DIR/images/artists/, not under LIBRARY_ROOT
+    # (Bulk Ingest spec chunk 2 -- image store moved out of the library).
+    images_dir = tmp_path / "data" / "images" / "artists" / "Bill Evans"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
     assert api.get(f"/api/artists/{pid}").get_json()["has_image"] is True
 
