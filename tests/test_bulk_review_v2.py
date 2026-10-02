@@ -139,9 +139,9 @@ def test_resume_during_worker_exit_does_not_strand_the_run(app, tmp_path):
     from app.api import ingest as ing
     orig_confirm = ing._do_confirm
 
-    def slow_confirm(data, uid, **kw):
+    def slow_confirm(data, uid, *a, **kw):
         time.sleep(0.3)
-        return orig_confirm(data, uid, **kw)
+        return orig_confirm(data, uid, *a, **kw)
 
     with mock.patch.object(bulk_ingest_run, "process", wrapped_process), \
          mock.patch.object(scoped_session, "remove", slow_remove), \

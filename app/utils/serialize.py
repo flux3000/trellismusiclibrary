@@ -56,6 +56,13 @@ def recording_summary(rec, image_url=_UNSET):
         "is_official":     rec.is_official,
         # Live show vs studio release (Bulk Ingest spec chunk 2).
         "kind":            rec.kind,
+        # Album title for a studio record (Studio Records spec v1, chunk 5).
+        # None for a live show -- the date/venue carry its identity instead.
+        "title":           rec.title,
+        # Release facts for the Albums list (2026-10-01). Only ever filled for
+        # a studio record (MusicBrainz release lookup, fill-if-null).
+        "mb_label":          rec.mb_label,
+        "mb_catalog_number": rec.mb_catalog_number,
         "track_count":     len(rec.tracks),
         # Total runtime in seconds (None-safe); powers the catalog length column.
         "duration_sec":    sum(t.duration or 0 for t in rec.tracks) or None,
@@ -126,6 +133,12 @@ def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
         "is_complete":     rec.is_complete,
         # Live show vs studio release (Bulk Ingest spec chunk 2).
         "kind":            rec.kind,
+        # Album title for a studio record (Studio Records spec v1, chunk 5).
+        # None for a live show -- the date/venue carry its identity instead.
+        "title":           rec.title,
+        # Release facts (2026-10-01): Recently Added's album rows.
+        "mb_label":          rec.mb_label,
+        "mb_catalog_number": rec.mb_catalog_number,
         "track_count":     len(rec.tracks),
         "duration_sec":    sum(t.duration or 0 for t in rec.tracks) or None,
         # When this recording was ingested (distinct from the show date) — powers

@@ -39,7 +39,9 @@ from app.models.recording_event import RecordingEvent
 from app.models.track import Track
 from app.utils.ingest import (move_to_library, compute_audio_rename_map,
                               resolve_ingest_file_path, write_flac_tags,
-                              IngestCancelled)
+                              IngestCancelled, scan_folder, build_scan_payload)
+from app.utils.bulk_ingest import folder_format, _READABLE_AUDIO_EXTS
+from app.utils.resolve import resolve, find_duplicates, verdict
 from app.utils.file_naming import flattens
 from app.utils.folder_naming import build_folder_name
 from app.utils.ai_assist import run_ai_assist, AiAssistError
@@ -104,71 +106,13 @@ def _run_ai_job(job_id, folder_path, current, api_key, model, *, recording_id=No
         _AI_JOBS[job_id] = {"status": "error", "error": "Unexpected error: %s" % e}
 
 
-# How close two act names must read before they count as the same act. 0.85 is
-# the threshold parse_info_file() already uses for fuzzy artist/venue matching
-# — deliberately the same number, so the ingest form and the duplicate check
-# never disagree about whether two names are "the same".
-_ARTIST_SIMILARITY = 0.85
-
-# Words that decorate an act name without changing who it is. "Aoife O'Donovan"
-# and "Aoife O'Donovan Band" are one act to a collector and two rows in the DB,
-# which is exactly the variant Ryan asked this to catch (2026-08-02).
-_ACT_NOISE_WORDS = {"band", "trio", "quartet", "quintet", "group", "ensemble",
-                    "orchestra", "the", "and", "with", "featuring", "feat"}
-
-
-def _act_key(name):
-    """Normalise an act name down to the words that identify it."""
-    words = re.sub(r"[^\w\s]", " ", (name or "").lower()).split()
-    core  = [w for w in words if w not in _ACT_NOISE_WORDS]
-    return " ".join(core or words)
-
-
-def resolve_similar_artist_ids(artist_name):
-    """
-    Every Artist that plausibly IS the act named `artist_name`.
-
-    Three widening passes, because a duplicate that goes unnoticed costs an
-    accidental re-ingest and a duplicate flagged wrongly costs one glance:
-
-      1. exact, case-insensitive — what resolve_or_create_artist() does, so
-         this can never disagree with what Confirm would actually resolve to
-      2. same normalised core after stripping act-noise words, so
-         "Aoife O'Donovan" finds "Aoife O'Donovan Band"
-      3. difflib ratio >= 0.85 on the core, catching spelling and punctuation
-         drift ("Bela Fleck" / "Béla Fleck")
-
-    Then the ARTIST (person) side: if a person of that name exists, every
-    Artist they are a member of counts too — Ryan asked for "artist or
-    musician, or a similar variant of either", and the 07-11 remodel makes those
-    genuinely different tables.
-    """
-    from difflib import SequenceMatcher
-
-    name = (artist_name or "").strip()
-    if not name:
-        return []
-
-    ids  = set()
-    key  = _act_key(name)
-    rows = db.session.query(Artist.id, Artist.name).all()
-
-    for pid, pname in rows:
-        if pname and pname.lower() == name.lower():
-            ids.add(pid)
-            continue
-        pkey = _act_key(pname)
-        if not pkey or not key:
-            continue
-        if pkey == key or SequenceMatcher(None, pkey, key).ratio() >= _ARTIST_SIMILARITY:
-            ids.add(pid)
-
-    person = db.session.query(Musician).filter(
-        func.lower(Musician.name) == name.lower()).first()
-    if person:
-        ids.update(m.artist_id for m in person.memberships)
-
-    return sorted(ids)
+# resolve_similar_artist_ids / _act_key / _ARTIST_SIMILARITY / _ACT_NOISE_WORDS
+# moved to app/utils/artists.py (Ingest Field Resolver spec v1 section 6 --
+# the route layer imports utils, not the other way round). Re-imported here
+# so every existing call site in this file (and `from app.api.ingest import
+# resolve_similar_artist_ids` elsewhere) keeps working unchanged.
+from app.utils.artists import (resolve_similar_artist_ids, _act_key,
+                               _ARTIST_SIMILARITY, _ACT_NOISE_WORDS)
 
 
 @bp.route("/check-existing", methods=["GET"])
@@ -481,7 +425,8 @@ _ANALYSIS_STATE = {
 # right now" without draining it -- queue.Queue has no peek -- and to dedupe a
 # repeat enqueue_followups() call against work that is already sitting there.
 _QUEUED_KEYS = set()
-_PENDING_BY_KIND = {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+_PENDING_BY_KIND = {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0,
+                    "images": 0, "signals": 0}
 
 
 def _enqueue(app, kind, item_id):
@@ -574,13 +519,12 @@ def _handle_score(recording_id):
         scored = score_recording(features, source=guess_source_from_name(name))
         upsert_for_recording(recording_id, scored, features)
 
-    # Non-music signal -- same measurement an interactive ingest runs inline;
-    # bulk ingest skips it there (chunk 5) and picks it up here instead.
-    try:
-        _store_non_music_signal(rec.tracks, library_root, folder_path)
-    except Exception:
-        import traceback as _tb
-        _tb.print_exc()
+    # Non-music signal -- decoupled into its OWN follow-up kind, "signals"
+    # (spec section 8): it's the one audio-bound addition (~0.15s/track), so
+    # it runs after the catalog pass, not bundled into "score" -- a
+    # recording that already had a Listening Quality row from somewhere
+    # else (and so is never enqueued here) can still be missing its signal
+    # row, and enqueue_followups() catches that case directly now.
 
     # MD5 verification is NEVER run here (Ryan, 2026-09-27: "MD5 never
     # automatic" -- it runs only from the manual Re-validate / verify-
@@ -651,7 +595,45 @@ def _handle_images(recording_id):
     if rec.folder_path and os.path.isdir(folder_abs):
         ingest_recording_images(rec, library_root)
     rec.images_checked_at = datetime.now(timezone.utc)
+    # Release already matched before this scan ran: fetch the cover now if
+    # the folder had none (2026-10-01). No-op without a release or with art.
+    if rec.mb_release_id:
+        from app.utils.recording_images import add_cover_art_if_missing
+        add_cover_art_if_missing(rec)
     db.session.commit()
+
+
+def _handle_signals(recording_id):
+    """
+    The non-music (chatter/tuning) signal for one recording that has no
+    signal row yet. Split out of "score" into its own follow-up kind (spec
+    section 8) -- the one audio-bound addition the resolver's extra rigor
+    brought in (~0.15s/track), so it runs after the cheap catalog pass, not
+    bundled with it. Also covers a recording that got its Listening Quality
+    row some other way (so "score" never enqueued it) but still has no
+    signal measurement -- this checks the signal itself, not the score.
+    """
+    from app.models.recording import Recording
+    from app.models.track_analysis import TrackAnalysis
+
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return
+    if rec.kind == "studio":
+        return  # studio recordings are never scored (2026-09-27)
+    has_signal = (db.session.query(TrackAnalysis.id)
+                 .join(Track, Track.id == TrackAnalysis.track_id)
+                 .filter(Track.recording_id == recording_id,
+                         TrackAnalysis.non_music_score.isnot(None))
+                 .first())
+    if has_signal:
+        return
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    try:
+        _store_non_music_signal(rec.tracks, library_root, rec.folder_path or "")
+    except Exception:  # noqa: BLE001 -- a suggestion must never break the worker
+        import traceback as _tb
+        _tb.print_exc()
 
 
 _HANDLERS = {
@@ -660,6 +642,7 @@ _HANDLERS = {
     "mb_artist":  _handle_mb_artist,
     "mb_release": _handle_mb_release,
     "images":     _handle_images,
+    "signals":    _handle_signals,
 }
 
 
@@ -726,14 +709,22 @@ def enqueue_followups():
           independent review v1). Never re-enqueued once checked, whether
           or not it found anything, so this never re-scans a library that
           already has been.
+      (e) every LIVE recording with no track carrying a non_music_score yet
+          -- the "signals" follow-up (Ingest Field Resolver spec v1,
+          section 8). Independent of (a): a recording that already has a
+          RecordingQuality row from somewhere else is not in `unscored_ids`
+          above and so never gets "score" enqueued, but can still be
+          missing its signal measurement -- this is what catches that.
 
-    Returns {"score": n, "mb_artist": n, "mb_release": n, "images": n} --
-    the counts newly enqueued.
+    Returns {"score": n, "mb_artist": n, "mb_release": n, "images": n,
+    "signals": n} -- the counts newly enqueued.
     """
     from app.models.recording import Recording
     from app.models.recording_image import RecordingImage
     from app.models.artist import Artist
     from app.models.quality import RecordingQuality
+    from app.models.track_analysis import TrackAnalysis
+    from app.models.track import Track as _Track
 
     app = current_app._get_current_object()
 
@@ -780,8 +771,23 @@ def enqueue_followups():
     images_n = sum(1 for rid in never_scanned_for_images_ids
                   if _enqueue(app, "images", rid))
 
+    # (e) live recordings with no signal row on any track yet.
+    signalled_recording_ids = (
+        db.session.query(_Track.recording_id)
+        .join(TrackAnalysis, TrackAnalysis.track_id == _Track.id)
+        .filter(TrackAnalysis.non_music_score.isnot(None))
+        .distinct()
+    )
+    never_signalled_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .filter(Recording.kind == "live",
+               ~Recording.id.in_(signalled_recording_ids))
+        .order_by(Recording.id)
+        .all())]
+    signals_n = sum(1 for rid in never_signalled_ids if _enqueue(app, "signals", rid))
+
     return {"score": scored_n, "mb_artist": mb_n, "mb_release": mb_release_n,
-            "images": images_n}
+            "images": images_n, "signals": signals_n}
 
 
 def analysis_snapshot():
@@ -912,6 +918,241 @@ def _apply_artist_genre(artist, data):
 
     if genre and artist.genre_id != genre.id:
         artist.genre_id = genre.id
+
+
+def _confirm_payload_from_resolved(resolved, scan):
+    """
+    Build the body _do_confirm() expects, straight out of a Resolved --
+    replaces bulk_ingest.confirm_payload() (spec section 4). Whether this
+    came from Bulk Ingest or the auto-confirm endpoint, the payload -- and
+    therefore the ingested recording -- is identical.
+    """
+    date = resolved.date.value or {}
+    return {
+        "source_folder_path": scan.get("folder_path"),
+        "artist_name":        resolved.artist.value,
+        "start_year":         date.get("year"),
+        "start_month":        date.get("month"),
+        "start_day":          date.get("day"),
+        "venue_name":         resolved.venue.value,
+        "city":               resolved.city.value,
+        "state":              resolved.state.value,
+        "country":            resolved.country.value,
+        "source":             resolved.source.value,
+        "lineage":            resolved.lineage.value,
+        "source_tag":         resolved.source_tag.value,
+        "etree_shnid":        resolved.shnid.value,
+        "info_file_content":  scan.get("info_file_content"),
+        "fingerprints":       scan.get("fingerprints"),
+        "is_complete":        True,
+        "skip_analysis":      True,
+        "tracks":             resolved.tracks,
+        "title":              resolved.album.value,
+        "kind":               resolved.kind,
+    }
+
+
+def resolver_json_for_storage(resolver_result):
+    """
+    The one place a resolver result becomes the string stored in
+    recording.resolver_json. Takes Resolved.to_dict() (auto_confirm) or the
+    scan's already-serialised `resolved` dict (Add Recording), and drops
+    `tracks` -- large, and the recording's own tracks are the truth. Returns
+    None for anything that is not a non-empty dict.
+    """
+    if not isinstance(resolver_result, dict) or not resolver_result:
+        return None
+    return json.dumps({k: v for k, v in resolver_result.items() if k != "tracks"})
+
+
+def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
+                  progress_cb=None, cancel_cb=None, phase_cb=None):
+    """
+    The one server function that turns a folder into an ingested (or
+    reviewed, or skipped) recording via the resolver -- spec section 4.
+    Bulk Ingest's worker and POST /api/ingest/auto-confirm (Batch Import)
+    both call this, so an auto-ingest is identical whichever door it came
+    through.
+
+    progress_cb/cancel_cb/phase_cb are passed straight through to _do_confirm
+    (same signature as /api/ingest/confirm's background job) -- only used
+    when status ends up "ingested", since that's the only outcome that
+    copies/moves any files. bulk=True (the worker's own direct call) never
+    passes these; it is already on its own thread with nothing polling it.
+
+    Returns a dict:
+      status       "ingested" | "review" | "skipped" | "failed"
+      reasons      list of reason codes (see app.utils.resolve.verdict)
+      format       folder_format() string, or None
+      detail       human-readable detail for a "failed" status
+      resolved     the Resolved this folder produced, or None (no_audio /
+                   all files unreadable -- nothing to resolve)
+      result       _do_confirm()'s result dict, only when status=="ingested"
+      duplicate_of a recording_id, only when status=="skipped"
+
+    The has_audio / unsupported-format / all-unreadable gate that used to
+    live in bulk_ingest.extract() runs here first, same as before -- a
+    folder that fails it is never handed to the resolver at all.
+    """
+    from pathlib import Path as _Path
+
+    library_root = current_app.config.get("LIBRARY_ROOT", "")
+    placement = node_settings.get_file_handling().get("placement")
+
+    scan_raw = scan_folder(folder_abs)
+    readable_files = [f for f in scan_raw["audio_files"]
+                      if _Path(f["filename"]).suffix.lower() in _READABLE_AUDIO_EXTS]
+    any_audio = bool(scan_raw["audio_files"]) or bool(scan_raw["unsupported_audio"])
+    fmt = folder_format(scan_raw)
+
+    if not any_audio:
+        return {"status": "failed", "reasons": ["no_audio"], "format": fmt,
+                "detail": "no_audio", "resolved": None, "result": None,
+                "duplicate_of": None}
+    if not readable_files:
+        return {"status": "review", "reasons": ["unsupported_format"], "format": fmt,
+                "detail": None, "resolved": None, "result": None, "duplicate_of": None}
+
+    scan = build_scan_payload(folder_abs)
+    if scan is None:
+        return {"status": "failed", "reasons": ["no_audio"], "format": fmt,
+                "detail": "no_audio", "resolved": None, "result": None,
+                "duplicate_of": None}
+
+    from_tags = scan["suggestions"]["from_tags"]
+    readable_tags = [t for t in from_tags["tracks"]
+                      if _Path(t.get("filename") or "").suffix.lower() in _READABLE_AUDIO_EXTS]
+    unopenable = [t for t in readable_tags if t.get("raw") is None]
+    if readable_tags and len(unopenable) == len(readable_tags):
+        detail = next((t.get("open_error") for t in unopenable if t.get("open_error")), None)
+        return {"status": "failed", "reasons": ["unreadable"], "format": fmt,
+                "detail": detail or "unreadable", "resolved": None, "result": None,
+                "duplicate_of": None}
+
+    resolved = resolve(scan, library_root=library_root, placement=placement)
+    resolved.duplicates = find_duplicates(resolved, library_root=library_root,
+                                          hash_cache=hash_cache)
+    status, reasons = verdict(resolved)
+    resolved.status, resolved.reasons = status, reasons
+
+    if status == "skipped":
+        dup = next((d for d in resolved.duplicates if d.kind == "content"), None)
+        return {"status": "skipped", "reasons": reasons, "format": fmt, "detail": None,
+                "resolved": resolved, "result": None,
+                "duplicate_of": dup.recording_id if dup else None}
+
+    if status == "review":
+        return {"status": "review", "reasons": reasons, "format": fmt, "detail": None,
+                "resolved": resolved, "result": None, "duplicate_of": None}
+
+    payload = _confirm_payload_from_resolved(resolved, scan)
+    payload["resolver_result"] = resolved.to_dict()
+    result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
+                         phase_cb=phase_cb, bulk=bulk)
+    return {"status": "ingested", "reasons": reasons, "format": fmt, "detail": None,
+            "resolved": resolved, "result": result, "duplicate_of": None}
+
+
+def _run_auto_confirm_job(job_id, app, folder_abs, user_id):
+    """
+    Background worker for /api/ingest/auto-confirm -- the same job shape as
+    _run_ingest_job above, just wrapping auto_confirm() instead of
+    _do_confirm() directly, because auto_confirm() has FOUR terminal
+    outcomes (ingested/review/skipped/failed) where a plain confirm job only
+    ever has one (done, with an error/cancelled path for exceptions). Rather
+    than invent a second status vocabulary for the poller, auto_confirm()'s
+    whole result dict is stashed on job["result"] and handed back verbatim
+    by the existing confirm_status "done" branch -- review/skipped/failed
+    are just as readable to the poller as ingested is, they simply carry a
+    different result["status"].
+    """
+    import traceback as _tb
+    job = _INGEST_JOBS[job_id]
+    try:
+        with app.app_context():
+            def prog(copied, total):
+                job["copied"] = copied
+                job["total"]  = total
+
+            def phase(key, detail=None):
+                job["phase"] = key
+                job["phase_label"] = PHASES.get(key, key)
+                job["phase_at"] = time.time()
+                job["phase_detail"] = detail
+                log_step(f"ingest:{job_id}", key, detail or PHASES.get(key, key),
+                         force=True)
+
+            def cancelled():
+                return bool(job.get("cancel"))
+
+            phase("resolving")
+            result = auto_confirm(folder_abs, user_id, bulk=False,
+                                  progress_cb=prog, cancel_cb=cancelled,
+                                  phase_cb=phase)
+            # `resolved` is a Resolved dataclass -- not JSON-serialisable and
+            # not something the poller needs (Batch Import's UI reads
+            # status/reasons/format/detail/result/duplicate_of, same as the
+            # old synchronous response did); drop it before it lands on the
+            # job dict.
+            result = {k: v for k, v in result.items() if k != "resolved"}
+            job["result"] = result
+            job["status"] = "done"
+            job["phase"] = "done"
+            job["phase_label"] = PHASES["done"]
+        rec_id = ((result.get("result") or {}) or {}).get("recording_id")
+        if rec_id:
+            _enqueue_analysis(app, rec_id)
+    except Exception as e:  # noqa: BLE001
+        _tb.print_exc()
+        job["error"]  = str(e)
+        job["status"] = "error"
+
+
+@bp.route("/auto-confirm", methods=["POST"])
+@login_required
+def auto_confirm_route():
+    """
+    POST /api/ingest/auto-confirm {"path": "/absolute/source/folder"}
+    -> 202 {"job_id": "..."}
+
+    Batch Import's one-POST auto-ingest (spec section 4) -- _batchIngestOne
+    used to build the confirm body itself; now it just posts a path and
+    polls for a verdict. Background job, NOT synchronous: Batch Import's
+    sources live under IMPORT_DIR (config.py), outside LIBRARY_ROOT, so an
+    "ingested" verdict here still runs _do_confirm's full copy/move of the
+    source folder into the library -- the exact same file-copy work
+    /api/ingest/confirm does, and just as able to outrun the webview's fetch
+    timeout on a large show or a slow (NAS/USB) import source.
+
+    Runs the *same* job/poll pattern /api/ingest/confirm uses, not a second
+    one: this reuses _INGEST_JOBS, the same PHASES labels (auto_confirm()'s
+    resolve/find_duplicates/verdict step reports itself as "resolving", same
+    as confirm's job does before its own copy phase), and the existing
+    GET /api/ingest/confirm/<job_id> to poll -- there is no separate
+    auto-confirm poll route. See _run_auto_confirm_job for how a
+    review/skipped/failed verdict (not just ingested) reaches that poller.
+    """
+    import uuid
+    data = request.get_json() or {}
+    path = (data.get("path") or "").strip()
+    if not path or not os.path.isdir(path):
+        return jsonify({"error": f"Folder not found: {path!r}"}), 400
+
+    job_id = uuid.uuid4().hex
+    _INGEST_JOBS[job_id] = {
+        "status": "running", "copied": 0, "total": 0,
+        "phase": "resolving", "phase_label": PHASES["resolving"],
+        "started": time.time(), "phase_at": time.time(),
+        "folder": os.path.basename(path.rstrip("/")),
+        "artist": None,
+        "quick": False,
+    }
+    threading.Thread(
+        target=_run_auto_confirm_job,
+        args=(job_id, current_app._get_current_object(), path, current_user.id),
+        daemon=True,
+    ).start()
+    return jsonify({"job_id": job_id}), 202
 
 
 @bp.route("/confirm", methods=["POST"])
@@ -1116,6 +1357,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
       "info_file_content":  "...",
       "event_name":         "Bonnaroo 2009",  # optional — name-resolved to Event record
       "event_id":           null,             # optional — use existing Event ID directly
+      "resolver_result":    {...},  # optional -- the scan's `resolved` dict, stored
+                                     # (minus tracks) on recording.resolver_json
       "ai_result":          {...},  # optional — raw AI Assist result if run pre-confirm,
                                      # saved as-is to ai_research_json (see run_ai_assist)
       "fingerprints":       [{"type":"ffp","filename":"...","content":"..."}],
@@ -1125,11 +1368,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     }
 
     bulk=True (Bulk Ingest, chunk 5): the same object-creation chain runs,
-    with three things skipped because a whole-library pass cannot afford them
-    per show —
+    with three things deferred rather than done inline, because a
+    whole-library pass cannot afford them per show —
       - the synchronous MusicBrainz lookup on a brand-new artist
-        (resolve_or_create_artist(..., lookup=False))
-      - the non-music (chatter/tuning) signal pass
+        (resolve_or_create_artist(..., lookup=False)) -- picked up later by
+        the "mb_artist" follow-up
+      - the non-music (chatter/tuning) signal pass -- picked up later by the
+        "signals" follow-up (spec section 8), not skipped altogether
       - the ingest tag write (step 12), regardless of write_tags_on_ingest.
     The tag write (step 12) is also skipped whenever the source is in-root
     (R2-N7) -- not only under bulk=True -- since an in-root source's files
@@ -1474,6 +1719,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
         title                = data.get("title") or None,
         kind                 = rec_kind,
         ai_research_json     = json.dumps(ai_result) if ai_result else None,
+        resolver_json        = resolver_json_for_storage(data.get("resolver_result")),
     )
     db.session.add(rec)
     db.session.flush()
@@ -1634,11 +1880,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     # reads the copy it will be describing, not the source that may be gone.
     #
     # Never fatal: an ingest must not fail over a suggestion.
-    # bulk=True skips this pass entirely (spec chunk 5): a whole-library run
-    # cannot afford a librosa-adjacent measurement per track across thousands
-    # of shows the way one interactive ingest can. No signal row is written
-    # for a bulk-ingested recording; Re-Analyze can add one later same as any
-    # other recording that was Quick-Added.
+    # bulk=True skips this pass HERE (spec chunk 5): a whole-library run
+    # cannot afford a librosa-adjacent measurement per track across
+    # thousands of shows the way one interactive ingest can. It is not
+    # skipped altogether -- the "signals" follow-up (spec section 8) picks
+    # up every bulk-ingested recording afterward, off the interactive path
+    # entirely, so the catalog pass finishes first and the measurement
+    # still happens.
     if not bulk:
         _phase("signals", f"{len(created_tracks)} tracks")
         try:
@@ -1736,7 +1984,10 @@ from collections import Counter as _Counter
 _TEXT_EXTS   = {'.txt', '.nfo', '.md', '.text', '.log'}
 _LOSSY_EXTS  = {'.mp3', '.aac', '.ogg', '.m4a'}
 _LOSSLESS_EXTS = {'.flac', '.wav', '.aiff', '.aif', '.ape', '.wv'}
-_DATE_RE     = _re.compile(r'\b(19|20)\d{2}[-._](0[1-9]|1[0-2])[-._](0[1-9]|[12]\d|3[01])\b')
+# Canonical home is app/utils/ingest.py (FOLDER_DATE_RE) -- Ingest Field
+# Resolver spec v1 section 10. Aliased here so _audit_incoming_folder and
+# batch_scan's date fallback below keep their existing spelling.
+from app.utils.ingest import FOLDER_DATE_RE as _DATE_RE
 _TRACK_NUM_RE = _re.compile(r'^(?:track\s*)?(\d{1,3})[.\s\-_]', _re.IGNORECASE)
 
 
@@ -1883,7 +2134,8 @@ def batch_scan():
     from app.utils.ingest import build_scan_payload, scan_folder
     from app.models.recording import Recording
     from app.utils.paula import compute_paula_score
-    from app.utils.bulk_ingest import folder_format, classify_kind, _consistent_tag, _resolve_venue
+    from app.utils.bulk_ingest import folder_format
+    from app.utils.resolve import resolve, verdict
 
     data       = request.get_json() or {}
     source_dir = (data.get("source_dir") or "").strip()
@@ -1958,23 +2210,29 @@ def batch_scan():
         from_info = ((scan or {}).get("suggestions") or {}).get("from_info_file") or {}
         health    = (scan or {}).get("health") or {"score": 0, "band": "red"}
 
-        # Format + Type (2026-09-27) -- same pure functions bulk_ingest.py's
-        # extract()/classify() use, so this table's FORMAT/TYPE pills match
-        # Bulk Ingest's and Review & Ingest's for the same folder. format
-        # needs scan_folder()'s unsupported_audio list (SHN) that
-        # build_scan_payload() does not forward -- a second scan_folder()
-        # call is a directory walk, not a tag open, so this costs no extra
-        # file read beyond what build_scan_payload() already did above.
+        # Field resolution + Format/Type/verdict all come from the resolver
+        # now (spec section 4: "batch_scan reads resolved; tier = verdict") --
+        # no separate hand-rolled merge here to drift out of sync with Bulk
+        # Ingest's or the wizard's.
         folder_format_str = None
         kind = None
+        resolved = None
+        reasons = []
+        status = None
         if scan:
             try:
                 folder_format_str = folder_format(scan_folder(folder_path))
             except Exception:
                 folder_format_str = None
-            kind_album = _consistent_tag(from_tags.get("tracks", []), "album")
-            kind_venue, _kind_venue_source = _resolve_venue(scan)
-            kind = classify_kind(scan, kind_album, kind_venue)
+            try:
+                from app.utils import node_settings as _node_settings
+                placement = _node_settings.get_file_handling().get("placement")
+                resolved = resolve(scan, library_root=current_app.config.get("LIBRARY_ROOT"),
+                                   placement=placement)
+                kind = resolved.kind
+                status, reasons = verdict(resolved)
+            except Exception:
+                resolved = None
 
         # Paula's per-item confidence read — same engine as the interactive
         # scan endpoint (app/api/recordings.py). Frontend aggregates these
@@ -1987,70 +2245,44 @@ def batch_scan():
             except Exception:
                 paula_result = None
 
-        # ── Field resolution: tags win, info file fills gaps ──────────────────
-        # Artist
-        artist = (from_tags.get("artist") or from_info.get("artist") or "").strip()
+        # ── Field resolution: read straight off the resolver's Resolved ───────
+        artist = resolved.artist.value if resolved else None
         artist_in_db = bool(
-            artist and any(
-                artist.lower() == p.lower() for p in known_artists
-            )
+            artist and any(artist.lower() == p.lower() for p in known_artists)
         )
         artist_fuzzy = bool(from_info.get("artist_match"))
 
-        # Date — prefer the tag date (DATE, or retired CONCERTDATE), then individual fields from info file
-        concert_date_tag = from_tags.get("concert_date") or ""
-        year = month = day = None
-        if concert_date_tag:
-            # Parse "YYYY-MM-DD" or "YYYY-MM" or "YYYY"
-            import re as _re2
-            m = _re2.match(r"(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?", concert_date_tag)
-            if m:
-                year  = int(m.group(1))
-                month = int(m.group(2)) if m.group(2) else None
-                day   = int(m.group(3)) if m.group(3) else None
-        if not year:
-            year  = from_info.get("year")
-            month = from_info.get("month")
-            day   = from_info.get("day")
-        # Also try folder name if still no date
-        if not year:
-            m = _DATE_RE.search(os.path.basename(folder_path))
-            if m:
-                year  = int(m.group(0)[:4])
-                month = int(m.group(0)[5:7])
-                day   = int(m.group(0)[8:10])
+        date_val = (resolved.date.value if resolved else None) or {}
+        year, month, day = date_val.get("year"), date_val.get("month"), date_val.get("day")
 
-        # Tracks
+        # Tracks -- resolved.tracks is already the resolver's own merged list
+        # (title-cased, flagged, songwriter attached); reshaped here to the
+        # {number, title, source} preview shape this endpoint has always sent.
         tag_trks = from_tags.get("tracks", [])
         titled_count = sum(
             1 for t in tag_trks if t.get("title") and t["title"].strip()
         )
         info_tracks  = from_info.get("tracks", [])
 
-        # Merged per-track inferred title (tag wins, info file fills gap) —
-        # the exact same resolution _batchIngestOne() uses when it actually
-        # writes tracks, so what's previewed here is what Auto-Ingest would do.
         merged_tracks = []
-        for idx in range(audio_count):
-            tag_t  = tag_trks[idx]    if idx < len(tag_trks)    else {}
-            info_t = info_tracks[idx] if idx < len(info_tracks) else {}
-            tag_title  = (tag_t.get("title") or "").strip()
-            info_title = (info_t.get("title") or "").strip()
-            merged_tracks.append({
-                "number": idx + 1,
-                "title":  tag_title or info_title or None,
-                "source": "tags" if tag_title else ("info" if info_title else None),
-            })
+        if resolved:
+            for t in resolved.tracks:
+                merged_tracks.append({
+                    "number": t["track_number"],
+                    "title":  t["title"],
+                    "source": "tags" if any(
+                        (tt.get("rel_path") or tt.get("filename")) == t["filename"]
+                        and (tt.get("title") or "").strip()
+                        for tt in tag_trks
+                    ) else ("info" if info_tracks else None),
+                })
 
-        # Venue / location — build_scan_payload already parses the tag's
-        # LOCATION into city/state/country via the shared parser.
-        venue   = (from_tags.get("venue")   or from_info.get("venue")   or "").strip() or None
-        city    = (from_tags.get("city")    or from_info.get("city")    or "").strip() or None
-        state   = (from_tags.get("state")   or from_info.get("state")   or "").strip() or None
-        country = (from_tags.get("country") or from_info.get("country") or "").strip() or None
-
-        source  = (from_tags.get("source")  or from_info.get("source")  or "").strip() or None
-        lineage = (from_tags.get("lineage") or from_info.get("lineage") or "").strip() or None
+        venue   = resolved.venue.value if resolved else None
+        city    = resolved.city.value if resolved else None
+        state   = resolved.state.value if resolved else None
+        country = resolved.country.value if resolved else None
+        source  = resolved.source.value if resolved else None
+        lineage = resolved.lineage.value if resolved else None
 
         # ── Confidence scoring ────────────────────────────────────────────────
         # Each dimension: "high" | "medium" | "low"
@@ -2090,16 +2322,17 @@ def batch_scan():
         conf_venue = "high" if venue else "low"
 
         # ── Tier assignment ───────────────────────────────────────────────────
-        # Tier is just the completeness-score band (health.band, computed above
-        # from the same compute_health() shown as the row's score badge). Used
-        # to be a second, independently-derived heuristic off conf_artist/
-        # conf_date/conf_tracks — that produced a real inconsistency Ryan hit
-        # 2026-07-16: a row could show "94" (health/completeness score, green
-        # band) while still being bucketed under the yellow pill count/filter,
-        # because the two scorers didn't always agree. One score, one band, no
-        # more double bookkeeping. conf_* values are kept as-is — they still
-        # drive the per-field "uncertain" styling in the expanded row detail.
-        tier = health["band"]
+        # Tier = the resolver's verdict (spec section 4): "ingested" reads
+        # green, "review"/"skipped" yellow, anything else (no scan, or a
+        # hard "failed" gate) red. This replaces health["band"] as the tier
+        # source -- health is still returned as its own field for the score
+        # badge, just no longer doubling as the tier.
+        if status == "ingested":
+            tier = "green"
+        elif status in ("review", "skipped"):
+            tier = "yellow"
+        else:
+            tier = "red"
 
         results.append({
             "name":        os.path.basename(folder_path),
@@ -2133,6 +2366,7 @@ def batch_scan():
                 "tracks":           merged_tracks,
                 "format":           folder_format_str,
                 "kind":             kind,
+                "reasons":          reasons,
             },
             "already_ingested": already_ingested,
         })

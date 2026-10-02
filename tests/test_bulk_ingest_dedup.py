@@ -80,7 +80,13 @@ def test_rerun_skips_already_ingested_and_reoffers_review(app, tmp_path):
     assert run2_rels == {"ShowReview", "ShowB"}
 
 
-def test_ffp_hash_match_sets_duplicate_of_and_still_ingests(app, tmp_path):
+def test_ffp_hash_match_skips_exact_duplicate(app, tmp_path):
+    """
+    Ingest Field Resolver spec v1, section 9 (resolved question 1): an EXACT
+    content duplicate -- every track's FFP/ST5 hash already belongs to one
+    existing recording -- is skipped before ingest, not ingested a second
+    time and flagged after the fact the way it used to be.
+    """
     root = tmp_path / "Library"
     root.mkdir()
     _flac(root / "ShowA" / "01.flac", ARTIST="Grateful Dead", DATE="1977-05-08",
@@ -105,12 +111,14 @@ def test_ffp_hash_match_sets_duplicate_of_and_still_ingests(app, tmp_path):
     item_a2 = (_db.session.query(BulkIngestItem)
               .filter_by(run_id=run.id, rel_path="ShowA (2)").first())
 
-    # Both still get ingested (dedup flags, it does not block) -- and the
-    # second one in file order points at the first.
     assert item_a.status == "ingested"
-    assert item_a2.status == "ingested"
-    assert item_a.recording_id != item_a2.recording_id
     assert item_a.duplicate_of is None
+
+    assert item_a2.status == "skipped"
+    assert item_a2.reason == "duplicate_content"
+    assert item_a2.recording_id is None
     assert item_a2.duplicate_of == item_a.recording_id
 
-    assert _db.session.query(Recording).count() == 1 + 2  # seed + these two
+    # Only ONE recording exists for the two folders -- the duplicate was
+    # never ingested a second time.
+    assert _db.session.query(Recording).count() == 1 + 1  # seed + ShowA

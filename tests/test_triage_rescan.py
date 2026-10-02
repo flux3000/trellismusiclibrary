@@ -26,7 +26,7 @@ from app.utils import quality_store as qs
 from app.utils.quality import QUALITY_ANALYSIS_VERSION
 
 
-PARENT = "/Volumes/music/Trellis/Download"
+PARENT = "/Volumes/music/Trellis/Downloads"
 ACT    = PARENT + "/Danny Gatton"
 SHOW   = ACT + "/Danny Gatton - 1979-01-25 - Cellar Door - Washington, DC"
 SHOW2  = ACT + "/Danny Gatton - 1988-12-03 - Hunter College - New York, NY"

@@ -292,7 +292,44 @@ def test_unmatched_query_returns_zero_not_everything():
 
 def test_group_order_is_fixed():
     """A dropdown whose groups reshuffle between keystrokes cannot be aimed at."""
-    assert se.GROUP_ORDER == ("artists", "recordings", "venues", "musicians")
+    assert se.GROUP_ORDER == ("artists", "recordings", "albums", "venues", "musicians")
+
+
+def _album_index():
+    """A tiny corpus with one live show and one studio album by the same
+    act -- `kind` is what routes each row to its own group (Studio Records
+    spec v1, contract item 4)."""
+    artists = [{"id": 1, "name": "Grateful Dead", "sort_name": None}]
+    recordings = [
+        {"id": 300, "performance_id": 400, "artist_id": 1, "kind": "live",
+         "artist_name": "Grateful Dead", "artist_sort_name": None,
+         "musician_names": [], "venue_id": 50, "venue_name": "Winterland",
+         "city": "San Francisco", "state": "CA", "country": "US",
+         "year": 1978, "month": 12, "day": 31, "source": "SBD",
+         "listening_quality": 80.0},
+        {"id": 301, "performance_id": None, "artist_id": 1, "kind": "studio",
+         "title": "American Beauty", "artist_name": "Grateful Dead",
+         "artist_sort_name": None, "year": 1970, "month": None, "day": None},
+    ]
+    return se.build_index(artists, [], [], recordings)
+
+
+def test_studio_title_is_found_only_in_albums():
+    r = se.run_search(_album_index(), "american beauty", today_year=2026)
+    assert _ids(r, "albums") == [301]
+    assert r["groups"]["recordings"]["total"] == 0
+
+
+def test_live_show_is_never_in_albums():
+    r = se.run_search(_album_index(), "winterland", today_year=2026)
+    assert _ids(r, "recordings") == [300]
+    assert r["groups"]["albums"]["total"] == 0
+
+
+def test_albums_matched_on_artist_too():
+    r = se.run_search(_album_index(), "grateful dead", today_year=2026)
+    assert _ids(r, "albums") == [301]
+    assert _ids(r, "recordings") == [300]
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -402,6 +439,56 @@ def test_recording_item_shape(client, seeded_ids):
         "image_url": None,
         "hash": f"#/recording/{seeded_ids['recording_id']}",
     }
+
+
+def test_album_item_shape(app, client, seeded_ids):
+    from app.models.recording import Recording
+    from app.models.performance import Performance
+    artist = _db.session.query(Artist).filter_by(name="Bill Evans").first()
+    perf = Performance(artist_id=artist.id, start_year=1970)
+    _db.session.add(perf)
+    _db.session.flush()
+    album = Recording(performance_id=perf.id, is_complete=True,
+                      folder_path="Bill Evans/album", kind="studio",
+                      title="Alone")
+    _db.session.add(album)
+    _db.session.commit()
+
+    groups = {g["type"]: g for g in client.get("/api/search?q=alone").get_json()["groups"]}
+    assert groups["albums"]["label"] == "Albums"
+    item = groups["albums"]["items"][0]
+    assert item == {
+        "type": "album",
+        "id": album.id,
+        "title": "Alone",
+        "artist": "Bill Evans",
+        "artist_id": artist.id,
+        "year": 1970,
+        "image_url": None,
+        "hash": f"#/recording/{album.id}",
+    }
+
+
+def test_studio_recording_does_not_appear_in_shows_group(app, client):
+    from app.models.recording import Recording
+    from app.models.performance import Performance
+    artist = _db.session.query(Artist).filter_by(name="Bill Evans").first()
+    perf = Performance(artist_id=artist.id, start_year=1970)
+    _db.session.add(perf)
+    _db.session.flush()
+    _db.session.add(Recording(performance_id=perf.id, is_complete=True,
+                              folder_path="Bill Evans/album2", kind="studio",
+                              title="Alone Again"))
+    _db.session.commit()
+
+    groups = {g["type"]: g for g in client.get("/api/search?q=alone+again").get_json()["groups"]}
+    assert groups["albums"]["total"] == 1
+    assert "recordings" not in groups
+
+
+def test_albums_group_hidden_when_empty(client):
+    body = client.get("/api/search?q=evans").get_json()
+    assert "albums" not in {g["type"] for g in body["groups"]}
 
 
 def test_venue_city_is_searchable(client):
@@ -557,3 +644,69 @@ def test_venue_recording_count_is_derived_correctly(app, client):
     item = groups["venues"]["items"][0]
     assert item["id"] == venue.id
     assert item["recording_count"] == 1
+
+
+def test_artist_recording_count_includes_albums(app, client):
+    """_derived_counts (app/api/search.py) used to walk index["recordings"]
+    only, which is live-only as of Studio Records spec v1 -- an act with
+    nothing but a studio album showed a recording_count of 0 next to its own
+    listed album, in the same search response."""
+    artist = Artist(name="Albums Only Act")
+    _db.session.add(artist)
+    _db.session.flush()
+    perf = Performance(artist_id=artist.id, start_year=1985)
+    _db.session.add(perf)
+    _db.session.flush()
+    _db.session.add(Recording(performance_id=perf.id, is_complete=True,
+                              folder_path="Albums Only Act/album", kind="studio",
+                              title="Solo Debut"))
+    _db.session.commit()
+
+    groups = {g["type"]: g for g in client.get("/api/search?q=albums+only+act").get_json()["groups"]}
+    assert groups["artists"]["items"][0]["recording_count"] == 1
+    assert groups["albums"]["items"][0]["title"] == "Solo Debut"
+
+
+def test_share_search_puts_studio_hit_in_albums_group(app, client):
+    """share.py's /search mirror, over Studio Records spec v1 contract item
+    4: an album must land in the SAME group with the SAME shape a local
+    search would give it."""
+    from app.models.recording import Recording
+    from app.models.performance import Performance
+    from app.models.collection import Collection, SYSTEM_FULL_LIBRARY
+    from app.models.peer import Peer, CollectionGrant, PeerToken
+    from app.utils.peer_auth import generate_token, hash_secret
+
+    artist = _db.session.query(Artist).filter_by(name="Bill Evans").first()
+    perf = Performance(artist_id=artist.id, start_year=1970)
+    _db.session.add(perf)
+    _db.session.flush()
+    album = Recording(performance_id=perf.id, is_complete=True,
+                      folder_path="Bill Evans/album3", kind="studio",
+                      title="Conversations With Myself", is_published=True)
+    _db.session.add(album)
+
+    col = Collection(name="Full Library", system_key=SYSTEM_FULL_LIBRARY)
+    _db.session.add(col)
+    _db.session.flush()
+    peer = Peer(name="Peer")
+    _db.session.add(peer)
+    _db.session.flush()
+    _db.session.add(CollectionGrant(peer_id=peer.id, collection_id=col.id))
+    raw = generate_token()
+    _db.session.add(PeerToken(peer_id=peer.id, token_hash=hash_secret(raw)))
+    _db.session.commit()
+
+    q = "conversations+with+myself"
+    owner_groups = {g["type"]: g for g in client.get(f"/api/search?q={q}").get_json()["groups"]}
+    peer_resp = client.get(f"/api/share/search?q={q}",
+                           headers={"Authorization": f"Bearer {raw}"})
+    assert peer_resp.status_code == 200
+    peer_groups = {g["type"]: g for g in peer_resp.get_json()["groups"]}
+
+    assert "albums" in owner_groups and "albums" in peer_groups
+    assert peer_groups["albums"]["items"][0]["title"] == \
+        owner_groups["albums"]["items"][0]["title"] == "Conversations With Myself"
+    assert peer_groups["albums"]["items"][0]["id"] == owner_groups["albums"]["items"][0]["id"]
+    assert "recordings" not in peer_groups
+

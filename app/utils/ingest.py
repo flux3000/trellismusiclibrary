@@ -1398,16 +1398,58 @@ _TC_LOWER = frozenset({
     'in', 'of', 'on', 'to', 'up', 'as', 'is', 'it', 'if', 'so', 'vs',
 })
 
-def _title_case(s):
-    """Title-case a track title without mangling apostrophes (str.title() does 'Don'T')."""
-    words = s.split()
+_TC_INITIALS_RE = re.compile(r'^(\W*)([^\W\d_](?:\.[^\W\d_])+)(\.?\W*)$')
+_TC_APOS = "'\u2019"
+
+
+def _tc_first_alpha_upper(w):
+    for i, ch in enumerate(w):
+        if ch.isalpha():
+            return w[:i] + ch.upper() + w[i + 1:]
+    return w
+
+
+def title_case(s):
+    """The one title-case function (artist names, track titles, venues).
+
+    ALL-upper or ALL-lower input is lowercased first; mixed-case input keeps
+    each word's own tail ("JGB", "McCoury"). Then per word: first letter
+    capitalized past leading punctuation, minor words lowered (not first),
+    initials ("j.d." -> "J.D."), Mc + letter, a single-letter apostrophe
+    prefix ("o'donovan" -> "O'Donovan"; "i'm" is left alone), and the letter
+    after a hyphen. str.title() is not used: it turns "Don't" into "Don'T".
+    """
+    if not s:
+        return s
+    letters = [c for c in s if c.isalpha()]
+    normalize = bool(letters) and (all(c.isupper() for c in letters)
+                                   or all(c.islower() for c in letters))
     out = []
-    for i, w in enumerate(words):
-        low = w.lower()
-        if i == 0 or low not in _TC_LOWER:
-            out.append(w[0].upper() + w[1:] if w else w)
-        else:
-            out.append(low)
+    for i, w in enumerate(s.split()):
+        if normalize:
+            w = w.lower()
+        m = _TC_INITIALS_RE.match(w)
+        if m:
+            out.append(m.group(1) + m.group(2).upper() + m.group(3))
+            continue
+        core = w.rstrip('.,;:!?)"\'\u2019\u201d')
+        if i > 0 and core and core[0].isalnum() and core.lower() in _TC_LOWER:
+            out.append(w.lower())
+            continue
+        w = _tc_first_alpha_upper(w)
+        # Mc + letter (not Mac: Mack, Macon)
+        j = next((k for k, ch in enumerate(w) if ch.isalnum()), None)
+        if j is not None:
+            tok = w[j:].rstrip('.,;:!?)"\'\u2019\u201d')
+            if len(tok) >= 4 and tok[:2].lower() == 'mc' and tok[2].isalpha():
+                w = w[:j] + 'Mc' + w[j + 2].upper() + w[j + 3:]
+            # single letter + apostrophe + letter (O'Donovan, D'Angelo)
+            if (tok[:1].isalpha() and tok[:1].lower() != 'i' and len(tok) >= 3
+                    and tok[1] in _TC_APOS and tok[2].isalpha()):
+                w = w[:j + 2] + w[j + 2].upper() + w[j + 3:]
+        # letter after a hyphen
+        w = re.sub(r'-([^\W\d_])', lambda mm: '-' + mm.group(1).upper(), w)
+        out.append(w)
     return ' '.join(out)
 
 
@@ -1758,6 +1800,13 @@ def detect_source_tag_from_name(name):
 # date shape a folder name might use.
 _DATE_IN_NAME_RE = re.compile(r"((?:19|20)\d{2})[._-]\d{1,2}[._-]\d{1,2}")
 
+# Full YYYY-MM-DD (or ./_ delimited) date inside a folder name -- the single
+# canonical source for this pattern (Ingest Field Resolver spec v1, section
+# 10 build order). Previously duplicated between app/api/ingest.py and
+# app/utils/bulk_ingest.py; both now import this one instead.
+FOLDER_DATE_RE = re.compile(
+    r'\b(19|20)\d{2}[-._](0[1-9]|1[0-2])[-._](0[1-9]|[12]\d|3[01])\b')
+
 # 3 to 7 all-digit characters, delimited by . _ or - (or string start/end) on
 # both sides — never glued to letters ("flac16" must not match).
 _SHNID_SEGMENT_RE = re.compile(r"(?:^|[._-])(\d{3,7})(?:[._-]|$)")
@@ -1882,7 +1931,7 @@ def _parse_date(line):
         return None
 
 
-def _parse_location(line):
+def _parse_location_plain(line):
     """
     Extract (city, state, country) from a location line, positionally.
 
@@ -1937,6 +1986,66 @@ def _parse_location(line):
     return city, state, country
 
 
+# ── Venue/location dash-split (parser fix, spec section 7) ─────────────────
+#
+# A taper's header line often reads "Venue \u2013 City, State, Country" (en
+# dash, em dash, or a plain hyphen with spaces on both sides). Read
+# positionally, the whole thing looked like ONE location line and the venue
+# text ended up glued onto the city ("Stars \u2013 Philadelphia" as the
+# "city"). Splitting first means both halves get parsed for what they are:
+# the venue by _extract_venue(), the place by _parse_location() below.
+_DASH_SPLIT_RE = re.compile(r"\s+[\u2013\u2014-]\s+")
+
+
+def _split_dash_location(line):
+    """
+    "Venue \u2013 City, State, Country" -> ("Venue", "City, State, Country")
+    when the right side reads as a location and the left side does not
+    (so a plain "City - State" line is never mistaken for one). Returns
+    (None, line) when the line doesn't split this way.
+    """
+    parts = _DASH_SPLIT_RE.split(line, maxsplit=1)
+    if len(parts) != 2:
+        return None, line
+    left, right = parts[0].strip(), parts[1].strip()
+    if not left or not right:
+        return None, line
+    if any(_parse_location_plain(left)):
+        return None, line
+    if not any(_parse_location_plain(right)):
+        return None, line
+    return left, right
+
+
+def _parse_location(line):
+    """Dash-aware wrapper: splits a "Venue - City, State" line before
+    parsing, so the location half is never contaminated by the venue text
+    sitting in front of it. See _split_dash_location()."""
+    _, loc_part = _split_dash_location(line)
+    return _parse_location_plain(loc_part)
+
+
+# Venue plausibility (spec section 7): a candidate is rejected -- treated as
+# no venue, not ingested as one -- when it's obviously not a place name. This
+# sends the folder to review rather than inventing a venue out of a line like
+# "Two Shows: Show 1: 9:00 p.m. and Show 2: 11:00 p.m."
+_VENUE_CLOCK_TIME_RE = re.compile(r"\d{1,2}:\d{2}")
+_VENUE_IMPLAUSIBLE_START_RE = re.compile(
+    r"^(show\s+\d|two\s+shows|set\s+\d)", re.IGNORECASE)
+
+
+def venue_plausible(candidate):
+    """True if `candidate` could plausibly be a venue name."""
+    c = (candidate or "").strip()
+    if not c:
+        return False
+    if _VENUE_CLOCK_TIME_RE.search(c):
+        return False
+    if _VENUE_IMPLAUSIBLE_START_RE.match(c):
+        return False
+    return True
+
+
 def _extract_venue(header_lines):
     """
     Two-pass venue extraction:
@@ -1949,9 +2058,23 @@ def _extract_venue(header_lines):
     # Pass 1 — positional
     for line in header_lines[1:]:
         low = line.lower()
+        is_date = _looks_like_date_line(line)
+
+        # "Venue - City, State, Country" (spec section 7): recognise and
+        # peel the venue off BEFORE the line gets treated as a plain
+        # location and swallowed whole (Stars – Philadelphia would
+        # otherwise read as a location whose "city" is "Stars – Philadelphia").
+        dash_venue, _dash_loc = _split_dash_location(line)
+        if dash_venue and not is_date:
+            if venue_plausible(dash_venue):
+                return dash_venue.strip()
+            # The split held but the venue half didn't pass plausibility
+            # (e.g. a clock time snuck in) -- treat the line as a location
+            # line only, same as any other, and keep scanning.
+            skipped_date_loc.append(line)
+            continue
 
         # Save date and location lines for keyword fallback, but skip them here
-        is_date = _looks_like_date_line(line)
         city, state, country = _parse_location(line)
         is_location = bool(city or state or country)
         if is_date or is_location:
@@ -1974,7 +2097,12 @@ def _extract_venue(header_lines):
         if re.match(r"^\d+(st|nd|rd|th)?\s*[.\s]", line, re.IGNORECASE):
             continue
 
-        return line.strip()
+        cand = line.strip()
+        if venue_plausible(cand):
+            return cand
+        # Implausible (e.g. "Two Shows: Show 1: 9:00 p.m. ..."): not a venue,
+        # not a location either -- just skip it and keep looking.
+        continue
 
     # Pass 2 — keyword scan on skipped date/location lines
     for line in skipped_date_loc:
@@ -1985,7 +2113,7 @@ def _extract_venue(header_lines):
                 if any(re.search(r"\b" + re.escape(w) + r"\b", seg.lower()) for w in _VENUE_WORDS):
                     # Strip any leading date token (e.g. "1-28-89 Birchmere")
                     seg = re.sub(r"^\d{1,2}[-./]\d{1,2}[-./]\d{2,4}\s*", "", seg).strip()
-                    if seg:
+                    if seg and venue_plausible(seg):
                         return seg
 
     return None
@@ -2119,7 +2247,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
             # through the "on"/"of"/"in"-stay-lowercase rule meant for
             # titles (Ryan, 2026-08-30).
             raw_title, songwriter = _extract_trailing_songwriter(raw_title)
-            title = _title_case(raw_title)
+            title = title_case(raw_title)
             if not _is_track_noise(title) and (in_tracks or len(header_lines) >= 2):
                 in_tracks = True
                 # Multi-disc listings restart numbering at 1 each disc — e.g.
@@ -2159,7 +2287,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
     # Artist — first non-blank, non-filename line in the first 3 lines
     for line in header_lines[:3]:
         if not _is_filename_line(line) and not _looks_like_date_line(line):
-            result["artist"]       = line.title()
+            result["artist"]       = title_case(line)
             result["artist_match"] = _fuzzy_match(line, known_artists or [])
             break
 
@@ -2173,7 +2301,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
     # Venue — keyword scan then positional fallback
     venue_raw = _extract_venue(header_lines)
     if venue_raw:
-        result["venue"]       = venue_raw.title()
+        result["venue"]       = title_case(venue_raw)
         result["venue_match"] = _fuzzy_match(venue_raw, known_venues or [])
 
     # City / State / Country — first header line that validates
@@ -2493,6 +2621,39 @@ def build_scan_payload(folder_path, info_override=None):
 
     resp["health"] = compute_health(resp)
     log_step(job, "done", f"health {resp['health']['score']} ({resp['health']['band']})")
+
+    # Resolved fields + verdict (Ingest Field Resolver spec v1, chunk 6):
+    # every consumer of build_scan_payload() gets the resolver's answer for
+    # free, so the wizard's prefill and Review & Ingest never need their own
+    # copy of these merge rules. Best-effort -- library_root/placement come
+    # from app context, which some pure callers of this function (tests,
+    # scripts) don't have, and a scan payload must still be usable without
+    # them; resolved is simply None in that case rather than failing the scan.
+    try:
+        from app.utils.resolve import resolve as _resolve_scan
+        _library_root = None
+        _placement = None
+        try:
+            from flask import current_app as _current_app
+            _library_root = _current_app.config.get("LIBRARY_ROOT")
+        except Exception:
+            pass
+        try:
+            from app.utils import node_settings as _node_settings
+            _placement = _node_settings.get_file_handling().get("placement")
+        except Exception:
+            pass
+        resp["resolved"] = _resolve_scan(
+            resp, library_root=_library_root, placement=_placement).to_dict()
+    except Exception as e:  # noqa: BLE001
+        # Missing app context is already absorbed by the two inner guards and
+        # resolve() itself is pure, so reaching here means a real resolver bug.
+        # Log it: a silent None renders as an empty prefill with no trace.
+        import traceback as _tb_res
+        _tb_res.print_exc()
+        log_step(job, "resolver failed", f"{type(e).__name__}: {e}")
+        resp["resolved"] = None
+
     return resp
 
 
@@ -2757,10 +2918,10 @@ _PROTECTED_DIR_NAMES = {
     # the app to it functionally, so it doesn't reopen that decision).
     # Explicit ask (Ryan, 2026-08-23): these must never be removed even if
     # briefly empty between imports — unlike a "Artist Name" staging
-    # folder, they are permanent structure, not disposable. NOTE: "Download"
-    # (singular) is Flux's own folder and distinct from macOS's "Downloads"
-    # above; both are listed, neither substitutes for the other.
-    "Download", "Backlog", "Training", "Workshop",
+    # folder, they are permanent structure, not disposable. NOTE: Trellis's
+    # working folder is "Downloads" (2026-10-01, was "Download") and is
+    # covered by the macOS "Downloads" entry above.
+    "Backlog", "Training", "Workshop",
 }
 
 

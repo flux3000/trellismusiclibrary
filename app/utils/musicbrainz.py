@@ -33,6 +33,8 @@ failure can never block an ingest or a manual Artist create.
 """
 
 import json
+import re
+import unicodedata
 import time
 import logging
 import urllib.parse
@@ -413,6 +415,11 @@ def _summarise_release(release):
         "country":          release.get("country") or None,
         "track_count":      track_count,
         "score":            release.get("score"),
+        # Credited artist names, for the title-only fallback's own artist
+        # check in search_release(). Not stored anywhere.
+        "artist_names":     [ac.get("name") or (ac.get("artist") or {}).get("name") or ""
+                             for ac in (release.get("artist-credit") or [])
+                             if isinstance(ac, dict)],
     }
 
 
@@ -434,13 +441,58 @@ def search_release(artist_name, title, limit=8):
     # from MusicBrainz that the breaker counts as a failure (N3).
     def _escape(s):
         return s.replace("\\", "\\\\").replace('"', '\\"')
-    query = 'artist:"%s" AND release:"%s"' % (
-        _escape(artist_name.strip()), _escape(title.strip()))
-    data = _get("release/", {"query": query, "limit": limit,
-                             "inc": "labels+release-groups"})
-    if not data:
+
+    def _search(query):
+        data = _get("release/", {"query": query, "limit": limit,
+                                 "inc": "labels+release-groups"})
+        return [_summarise_release(r) for r in (data or {}).get("releases", [])]
+
+    release_q = 'release:"%s"' % _escape(title.strip())
+
+    # Tier 1: the whole artist name as one phrase. Right for a single act.
+    found = _search('artist:"%s" AND %s' % (_escape(artist_name.strip()), release_q))
+    if found:
+        return found
+
+    # A multi-artist credit ("Al Di Meola, John McLaughlin, Paco De Lucia")
+    # almost never matches MusicBrainz's credit as one phrase: order,
+    # joiners ("&") and accents differ (2026-10-01, The Guitar Trio). The
+    # next two tiers only run for a name that splits into two or more.
+    names = _split_artist_names(artist_name)
+    if len(names) < 2:
         return []
-    return [_summarise_release(r) for r in data.get("releases", [])]
+
+    # Tier 2: every name as its own phrase, any order.
+    found = _search(" AND ".join('artist:"%s"' % _escape(n) for n in names)
+                    + " AND " + release_q)
+    if found:
+        return found
+
+    # Tier 3: title alone, kept only where at least half of our names appear
+    # in the release's credit (accent- and case-insensitive).
+    want = [_fold(n) for n in names]
+    need = (len(want) + 1) // 2
+    out = []
+    for c in _search(release_q):
+        credit = " ".join(_fold(n) for n in c.get("artist_names") or [])
+        if sum(1 for w in want if w and w in credit) >= need:
+            out.append(c)
+    return out
+
+
+_ARTIST_SPLIT_RE = re.compile(r"\s*(?:,|&|\+|/|;|\band\b|\bwith\b|\bfeat\.?|\bfeaturing\b)\s*",
+                              re.IGNORECASE)
+
+
+def _split_artist_names(name):
+    """'Al Di Meola, John McLaughlin & Paco De Lucia' -> three names."""
+    return [n.strip() for n in _ARTIST_SPLIT_RE.split(name or "") if n and n.strip()]
+
+
+def _fold(s):
+    """Lowercase, accents stripped: 'Lucía' and 'Lucia' compare equal."""
+    return "".join(ch for ch in unicodedata.normalize("NFKD", s or "")
+                   if not unicodedata.combining(ch)).lower()
 
 
 def classify_release(candidates, track_count=None):
@@ -577,6 +629,9 @@ def _parse_partial_date(date_str):
     return year, month, day
 
 
+_PLACEHOLDER_TITLE = re.compile(r"^\s*Track\s+\d+\s*$", re.IGNORECASE)
+
+
 def apply_to_recording(rec, release, status="matched"):
     """
     Copy a resolved MusicBrainz release onto a Recording, fill-if-null only.
@@ -645,11 +700,23 @@ def apply_to_recording(rec, release, status="matched"):
     if release_tracks and len(release_tracks) == len(rec_tracks):
         titles_by_position = {t["position"]: t.get("title") for t in release_tracks}
         for position, track in enumerate(rec_tracks, start=1):
-            if track.title and track.title.strip():
+            # "Track 3" is the resolver's placeholder for an untitled file,
+            # not a title anyone chose, so it counts as empty (2026-10-01:
+            # without this, no release title ever landed).
+            if track.title and track.title.strip() and not _PLACEHOLDER_TITLE.match(track.title):
                 continue
             new_title = titles_by_position.get(position)
             if new_title:
                 track.title = new_title
+                # Flags are read from the title at ingest; add what the real
+                # title suggests, keeping any flag a person already set.
+                from app.utils.ingest import detect_track_flags
+                try:
+                    current = json.loads(track.flags) if track.flags else []
+                except ValueError:
+                    current = []
+                flags = sorted(set(current) | set(detect_track_flags(new_title)))
+                track.flags = json.dumps(flags) if flags else None
                 filled.append("track_%d_title" % position)
 
     rec.mb_release_id         = release.get("mbid")
@@ -679,6 +746,111 @@ def apply_to_recording(rec, release, status="matched"):
     return rec
 
 
+# ── Genre and cover art from a matched release (Ryan, 2026-10-01) ────────
+#
+# Genre: REVERSES the 2026-08-02 "nothing creates a genre implicitly" rule,
+# for this one path only, at Ryan's call: a matched studio release fills its
+# artist's EMPTY genre. Any MusicBrainz genre that matches an existing Trellis
+# genre wins (vote order); only when none matches is the top-voted one
+# created. Fill-if-null on the artist, so a genre a person set is never
+# replaced, and one genre per act still holds.
+#
+# Cover art: REVERSES the 2026-09-27 "Cover Art Archive is never fetched"
+# rule, at Ryan's call. Fetched only for a matched release and only when the
+# recording has no artwork of its own after the folder/embedded scan, so the
+# collector's own art always wins.
+
+_CAA_BASE = "https://coverartarchive.org"
+_CAA_TIMEOUT = 15.0
+
+
+def release_genres(release_group_id, artist_mbid=None):
+    """Genre names, most votes first: the release group's, else the artist's."""
+    paths = []
+    if release_group_id:
+        paths.append("release-group/%s" % release_group_id)
+    if artist_mbid:
+        paths.append("artist/%s" % artist_mbid)
+    for path in paths:
+        data = _get(path, {"inc": "genres"}) or {}
+        genres = [g for g in data.get("genres") or [] if g.get("name")]
+        if genres:
+            genres.sort(key=lambda g: -(g.get("count") or 0))
+            return [g["name"] for g in genres]
+    return []
+
+
+def _genre_key(name):
+    return " ".join(_fold(name).replace("-", " ").split())
+
+
+def apply_genre_to_artist(artist, names):
+    """Fill artist.genre_id from MusicBrainz genre names. Returns the Genre
+    set, or None. Does not commit."""
+    if artist is None or artist.genre_id is not None or not names:
+        return None
+    from app.extensions import db
+    from app.models.genre import Genre
+    existing = {_genre_key(g.name): g for g in db.session.query(Genre).all()}
+    for n in names:
+        g = existing.get(_genre_key(n))
+        if g is not None:
+            artist.genre_id = g.id
+            return g
+    # MusicBrainz genres are lowercase ("hard bop"); Trellis names are not.
+    g = Genre(name=names[0].strip().title()[:80])
+    db.session.add(g)
+    db.session.flush()
+    artist.genre_id = g.id
+    return g
+
+
+def fetch_cover_art(release_mbid, release_group_id=None):
+    """Front cover bytes from the Cover Art Archive, or None. Tries the
+    release, then its release group. Never raises; does not touch the
+    MusicBrainz breaker (a different service)."""
+    urls = []
+    if release_mbid:
+        urls.append("%s/release/%s/front-500" % (_CAA_BASE, release_mbid))
+    if release_group_id:
+        urls.append("%s/release-group/%s/front-500" % (_CAA_BASE, release_group_id))
+    for url in urls:
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=_CAA_TIMEOUT, context=SSL_CONTEXT) as resp:
+                data = resp.read()
+            if data:
+                return data
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+            log.info("cover art fetch failed (%s): %s", url, e)
+    return None
+
+
+def enrich_from_release(rec):
+    """Genre and cover art for a recording whose release was just matched or
+    linked. Never raises; does not commit. Off under TESTING, like every
+    other MusicBrainz call (enabled())."""
+    if not enabled():
+        return
+    try:
+        artist = rec.performance.artist if rec.performance else None
+        if artist is not None and artist.genre_id is None:
+            apply_genre_to_artist(artist, release_genres(rec.mb_release_group_id,
+                                                         getattr(artist, "mbid", None)))
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("genre from release failed for recording %r: %s",
+                    getattr(rec, "id", None), e)
+    try:
+        # Only once the folder/embedded scan has run, so the collector's own
+        # art is never pre-empted. The images follow-up covers the other order.
+        if rec.images_checked_at is not None:
+            from app.utils.recording_images import add_cover_art_if_missing
+            add_cover_art_if_missing(rec)
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("cover art from release failed for recording %r: %s",
+                    getattr(rec, "id", None), e)
+
+
 def try_match_release(rec):
     """
     The automatic pass for one studio recording: search, gate, and record
@@ -703,6 +875,7 @@ def try_match_release(rec):
         if status == "matched":
             details = lookup_release(best["mbid"]) or best
             apply_to_recording(rec, details, status="matched")
+            enrich_from_release(rec)
             return "matched"
         rec.mb_release_status     = status
         rec.mb_release_checked_at = datetime.now(timezone.utc)
@@ -736,6 +909,7 @@ def link_release(rec, mbid):
     if not details:
         return None
     apply_to_recording(rec, details, status="linked")
+    enrich_from_release(rec)
     return details
 
 

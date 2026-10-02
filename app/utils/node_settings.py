@@ -237,3 +237,27 @@ def set_file_handling(**changes):
             _set_setting(key, value or "")
     db.session.commit()
     return get_file_handling()
+
+
+# ── Download queue ───────────────────────────────────────────────────────────
+
+DOWNLOAD_QUEUE_PAUSED_KEY = "download_queue_paused"
+
+
+def download_queue_paused():
+    """Paused means the worker takes no NEW job; a running one finishes. A node
+    setting rather than a column: it is a fact about the queue, not a job.
+    (2026-10-01)"""
+    row = db.session.get(NodeSetting, DOWNLOAD_QUEUE_PAUSED_KEY)
+    return bool(row and row.value == "true")
+
+
+def set_download_queue_paused(paused):
+    value = "true" if paused else "false"
+    row = db.session.get(NodeSetting, DOWNLOAD_QUEUE_PAUSED_KEY)
+    if row:
+        row.value = value
+    else:
+        db.session.add(NodeSetting(key=DOWNLOAD_QUEUE_PAUSED_KEY, value=value))
+    db.session.commit()
+    return paused

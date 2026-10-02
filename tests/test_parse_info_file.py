@@ -163,7 +163,7 @@ Some Venue
 """
     result = _parse(text)
     titles = [t["title"] for t in result["tracks"]]
-    # "on" is one of _title_case()'s kept-lowercase minor words (same AP-style
+    # "on" is one of title_case()'s kept-lowercase minor words (same AP-style
     # rule that keeps "of"/"in" lowercase elsewhere) — "Carry on" is the
     # app's correct, existing casing, not a casualty of this fix.
     assert titles == ["Carry on", "Dark Star (Alternate Take)", "Long Time Gone"]

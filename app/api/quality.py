@@ -390,28 +390,6 @@ def _proposed_track_titles(scan, tags, info):
     return out
 
 
-def _tag_date_parts(concert_date):
-    """
-    Split a FLAC DATE-style tag ("YYYY-MM-DD", "YYYY-MM", or "YYYY")
-    into (year, month, day) ints, any of which may be None.
-
-    Mirrors the ingest wizard's own tags.concert_date.split('-') in app.js
-    exactly (2026-08-09) — Triage and Add Recording must read the same tag
-    the same way, or they can silently disagree about a recording's date.
-    """
-    if not concert_date:
-        return None, None, None
-    parts = str(concert_date).split('-')
-
-    def _int(i):
-        try:
-            return int(parts[i]) if i < len(parts) and parts[i] else None
-        except (ValueError, TypeError):
-            return None
-
-    return _int(0), _int(1), _int(2)
-
-
 def _scan_metadata(folder_path):
     """
     Metadata suggestions + completeness score for one folder, cached.
@@ -423,7 +401,8 @@ def _scan_metadata(folder_path):
     silently produces a score of 0 for every folder.
     """
     from app.utils.ingest import build_scan_payload, scan_folder
-    from app.utils.bulk_ingest import folder_format, classify_kind, _consistent_tag, _resolve_venue
+    from app.utils.bulk_ingest import folder_format
+    from app.utils.resolve import resolve
 
     try:
         mtime = os.path.getmtime(folder_path)
@@ -440,53 +419,53 @@ def _scan_metadata(folder_path):
     else:
         sug = (scan.get("suggestions") or {}).get("from_info_file") or {}
         tags = (scan.get("suggestions") or {}).get("from_tags") or {}
-        # Bug (Ryan, 2026-08-09): from_tags has no "year"/"month"/"day" keys —
-        # the FLAC date tag lands in "concert_date" ("YYYY-MM-DD"), same as the
-        # ingest wizard reads (see app.js's own tags.concert_date.split('-')).
-        # tags.get("year") was therefore always None, so triage silently fell
-        # through to from_info_file's parsed date on EVERY recording, with no
-        # tag-date fallback at all — the ingest wizard prefers the tag date and
-        # only falls back to the info file, so the two could disagree whenever
-        # the info file's own date line parsed differently (Art Blakey and the
-        # Jazz Messengers 1981-07-11 showing as 2026-07-11 in Triage but
-        # correctly in Review). _tag_date_parts() mirrors the wizard's split so
-        # both read the same date the same way.
-        tag_year, tag_month, tag_day = _tag_date_parts(tags.get("concert_date"))
         try:
             folder_format_str = folder_format(scan_folder(folder_path))
         except Exception:
             folder_format_str = None
+
+        # One resolver, every ingest path (Ingest Field Resolver spec v1) --
+        # this used to be its own fourth hand-rolled field merge (tags.get(x)
+        # or sug.get(x), including a since-fixed date bug where from_tags has
+        # no "year"/"month"/"day" keys at all -- the FLAC date tag lands in
+        # "concert_date"). resolve() is now the only place that logic lives;
+        # Triage and Review & Ingest read its answer instead of re-deriving
+        # one, so they can no longer silently disagree with Add Recording or
+        # Bulk Ingest about a folder's fields the way Art Blakey and the Jazz
+        # Messengers 1981-07-11 once did (2026-08-09).
+        from app.utils import node_settings as _node_settings
+        placement = _node_settings.get_file_handling().get("placement")
+        resolved = resolve(scan, library_root=current_app.config.get("LIBRARY_ROOT"),
+                           placement=placement)
+        date = resolved.date.value or {}
+
         payload = {
             # build_scan_payload already computed this; recomputing would just
             # risk the two disagreeing.
             "health": scan.get("health"),
             "extracted": {
-                "artist":  tags.get("artist") or sug.get("artist"),
-                "year":    tag_year  or sug.get("year"),
-                "month":   tag_month or sug.get("month"),
-                "day":     tag_day   or sug.get("day"),
-                "venue":   tags.get("venue")  or sug.get("venue"),
-                "city":    tags.get("city")   or sug.get("city"),
-                "state":   tags.get("state")  or sug.get("state"),
-                "country": tags.get("country") or sug.get("country"),
-                "source":  tags.get("source") or sug.get("source"),
-                "lineage": tags.get("lineage") or sug.get("lineage"),
+                "artist":  resolved.artist.value,
+                "year":    date.get("year"),
+                "month":   date.get("month"),
+                "day":     date.get("day"),
+                "venue":   resolved.venue.value,
+                "city":    resolved.city.value,
+                "state":   resolved.state.value,
+                "country": resolved.country.value,
+                "source":  resolved.source.value,
+                "lineage": resolved.lineage.value,
                 "track_count": len(scan.get("audio_files") or []),
                 # The titles themselves, not just how many are populated
                 # (2026-08-02). A ratio says the fields are filled; it cannot
                 # show that they are filled with "Jam >" and "Unknown".
                 "track_titles": _proposed_track_titles(scan, tags, sug),
-                # Format + Type (2026-09-27) -- same pure functions
-                # bulk_ingest.py's extract()/classify() use, so Review &
-                # Ingest's FORMAT/TYPE pills match Bulk Ingest's and Bulk
-                # Import's for the same folder. format needs scan_folder()'s
+                # Format + Type -- format needs scan_folder()'s
                 # unsupported_audio (SHN) that build_scan_payload() does not
                 # forward -- a second scan_folder() call is a directory walk,
-                # not a tag open, so no file is read twice.
+                # not a tag open, so no file is read twice. kind is the
+                # resolver's own (classify_kind, moved into resolve.py).
                 "format": folder_format_str,
-                "kind": classify_kind(scan,
-                                       _consistent_tag(tags.get("tracks", []), "album"),
-                                       _resolve_venue(scan)[0]),
+                "kind": resolved.kind,
             },
         }
 
@@ -623,7 +602,7 @@ def _attach_concerns(results):
     Must run AFTER _attach_interpretation / _attach_metadata / _attach_
     fingerprints: it reads all three rather than recomputing anything.
     """
-    from app.api.ingest import resolve_similar_artist_ids
+    from app.utils.artists import resolve_similar_artist_ids
     from app.models.performance import Performance
     from app.utils.format import format_partial_date
 
@@ -722,34 +701,52 @@ def _attach_concerns(results):
             except Exception:  # noqa: BLE001
                 _tb.print_exc()   # never let a duplicate check break a card
 
-        # Bulk Ingest review rows (spec chunk 7d): a folder classify()
-        # (app/utils/bulk_ingest.py) sent to review for missing artist/date, or
-        # an unsupported container format, staged itself here with
+        # Bulk Ingest / auto-confirm review rows (spec chunk 7d, and the
+        # Ingest Field Resolver spec's verdict() reasons): a folder the
+        # resolver sent to review -- missing artist/date, a date with only
+        # some of its precision, a conflict between sources, or an
+        # unsupported container format -- staged itself here with
         # listening_quality left null (bulk_ingest_run.py's _write_review_
         # staging) rather than a scored one. Surface WHY it needs a look by
-        # matching this row's folder_path back to that BulkIngestItem.
-        # unsupported_format gets no concern line here at all -- the existing
-        # convert affordance (_attach_convertible) already covers it, and spec
-        # chunk 7d is explicit that this card must not say anything extra
-        # about it.
-        reason = bulk_ingest_review_reasons.get(qs.norm_path(r.get("folder_path") or ""))
-        if reason == "needs_artist":
-            concerns.append({"level": "warn", "kind": "needs_artist", "text": "No artist found"})
-        elif reason == "needs_date":
-            concerns.append({"level": "warn", "kind": "needs_date", "text": "No date found"})
+        # matching this row's folder_path back to that BulkIngestItem. One
+        # folder can carry several reasons at once (verdict() returns a
+        # list); each gets its own line. unsupported_format gets no concern
+        # line here at all -- the existing convert affordance
+        # (_attach_convertible) already covers it, and spec chunk 7d is
+        # explicit that this card must not say anything extra about it.
+        reasons = bulk_ingest_review_reasons.get(qs.norm_path(r.get("folder_path") or "")) or []
+        for reason in reasons:
+            if reason == "needs_artist":
+                concerns.append({"level": "warn", "kind": "needs_artist", "text": "No artist found"})
+            elif reason == "needs_date":
+                concerns.append({"level": "warn", "kind": "needs_date", "text": "No date found"})
+            elif reason == "needs_month":
+                concerns.append({"level": "warn", "kind": "needs_month",
+                                 "text": "Only the year is known"})
+            elif reason == "needs_day":
+                concerns.append({"level": "warn", "kind": "needs_day",
+                                 "text": "Year and month known, day missing"})
+            elif reason.startswith("conflict:"):
+                field_name = reason.split(":", 1)[1].replace("_", " ")
+                concerns.append({"level": "warn", "kind": "conflict",
+                                 "text": f"Sources disagree on {field_name}"})
 
         r["concerns"] = concerns
 
 
 def _bulk_ingest_review_reasons():
     """
-    {folder_path: reason} for every 'review'-status BulkIngestItem across every
-    run, keyed by the folder's own absolute path (BulkIngestItem stores only
-    root-relative rel_path; the run it belongs to holds the root). Small and
-    cheap enough to rebuild per request -- Bulk Ingest review queues are not
-    a large fraction of a library, and this mirrors _build_dedup_map's
-    per-call approach in bulk_ingest_run.py rather than caching state that could
-    drift from a run's own progress.
+    {folder_path: [reasons]} for every 'review'-status BulkIngestItem across
+    every run, keyed by the folder's own absolute path (BulkIngestItem
+    stores only root-relative rel_path; the run it belongs to holds the
+    root). Small and cheap enough to rebuild per request -- Bulk Ingest
+    review queues are not a large fraction of a library, and this mirrors
+    _build_dedup_map's per-call approach in bulk_ingest_run.py rather than
+    caching state that could drift from a run's own progress.
+
+    BulkIngestItem.reason is a single String(32) column, so a folder that
+    needs several things (verdict() can return more than one reason) is
+    stored there comma-joined; this is where it gets split back apart.
     """
     from app.models.bulk_ingest import BulkIngestItem, BulkIngestRun
 
@@ -759,7 +756,8 @@ def _bulk_ingest_review_reasons():
             .filter(BulkIngestItem.status == "review")
             .all())
     for rel_path, reason, root in rows:
-        out[qs.norm_path(os.path.join(root, rel_path))] = reason
+        reasons = [r for r in (reason or "").split(",") if r]
+        out[qs.norm_path(os.path.join(root, rel_path))] = reasons
     return out
 
 
@@ -1051,6 +1049,14 @@ def browse():
                  ".ape", ".wv")
 
     raw = (request.args.get("path") or "").strip()
+    # Add Recordings opens at the Downloads folder, so make sure it exists
+    # (2026-10-01). Best effort: an unmounted share just falls through to the
+    # existing walk-up-to-an-ancestor handling below.
+    try:
+        from app.utils.downloads_dir import ensure_downloads_dir
+        ensure_downloads_dir()
+    except Exception:  # noqa: BLE001
+        pass
     import_dir = current_app.config.get("IMPORT_DIR", "/")
     path = os.path.abspath(os.path.expanduser(raw or import_dir))
 
@@ -1076,8 +1082,13 @@ def browse():
     # else to go. It stops there: above the app folder is the whole disk, which
     # is what made this a filesystem browser.
     app_root = os.path.dirname(import_dir.rstrip(os.sep)) or import_dir
-    nav_root = os.path.realpath(app_root) if os.path.isdir(app_root) else None
     roots = [os.path.realpath(r) for r in current_app.config.get("IMPORT_ROOTS", [])]
+    # ~/Downloads/Trellis (2026-10-01) has ~/Downloads above it, which is not
+    # an import root; stop "Up" at the folder itself rather than offering a 403.
+    _ra = os.path.realpath(app_root)
+    if not any(_ra == r or _ra.startswith(r + os.sep) for r in roots):
+        app_root = import_dir
+    nav_root = os.path.realpath(app_root) if os.path.isdir(app_root) else None
     real = os.path.realpath(path)
     if not any(real == r or real.startswith(r + os.sep) for r in roots):
         return jsonify({"error": "Outside the permitted import roots"}), 403

@@ -363,6 +363,8 @@ def peer_activity(peer_id):
             "track_id":      r.track_id,
             "track_title":   track.title if track else None,
             "recording_id":  rec.id if rec else None,
+            "kind":          rec.kind if rec else None,
+            "title":         rec.title if rec else None,
             "artist":     p.artist.name if (p and p.artist) else None,
             "date":          format_partial_date(p.start_year, p.start_month, p.start_day) if p else None,
         })

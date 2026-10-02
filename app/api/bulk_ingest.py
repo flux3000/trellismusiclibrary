@@ -34,7 +34,7 @@ import json
 
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.extensions import db
 from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
@@ -284,6 +284,20 @@ def items(run_id):
     if status == "done":
         q = q.filter(BulkIngestItem.status.in_(_DONE_STATUSES))
         order = BulkIngestItem.id.desc()
+    elif status == "queue":
+        # Import page tabs (2026-10-01): everything not yet in the library --
+        # pending, in progress, review, skipped, failed. Discovery order.
+        q = q.filter(BulkIngestItem.status != "ingested")
+        order = BulkIngestItem.id.asc()
+    elif status in ("live", "album"):
+        # The two completed tabs: ingested, split by kind. A NULL kind on an
+        # ingested item counts as live, the model default.
+        q = q.filter(BulkIngestItem.status == "ingested")
+        if status == "album":
+            q = q.filter(BulkIngestItem.kind == "studio")
+        else:
+            q = q.filter(or_(BulkIngestItem.kind.is_(None), BulkIngestItem.kind != "studio"))
+        order = BulkIngestItem.id.asc()
     elif status and status != "all":
         # "all" (2026-09-27, the progress/log table redesign) is every status,
         # pending and in_progress included, ordered like the rest -- id
@@ -300,6 +314,11 @@ def items(run_id):
             .limit(per_page)
             .all())
 
+    # Recording artwork for imported rows (2026-10-01): the completed tabs
+    # show it at the left of each row. One batched query, not one per row.
+    from app.utils.serialize import batch_recording_image_urls
+    image_urls = batch_recording_image_urls([it.recording_id for it in rows if it.recording_id])
+
     return jsonify({
         "total": total,
         "page": page,
@@ -313,6 +332,7 @@ def items(run_id):
             "kind":         it.kind,
             "format":       it.format,
             "recording_id": it.recording_id,
+            "image_url":    image_urls.get(it.recording_id) if it.recording_id else None,
             "duplicate_of": it.duplicate_of,
             "updated_at":   it.updated_at.isoformat() if it.updated_at else None,
             **_item_meta_fields(it),

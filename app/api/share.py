@@ -881,7 +881,7 @@ def genre_detail(genre_id):
             .filter(Performance.artist_id == p.id,
                     Performance.id.in_(visible_perf_ids))
             .order_by(
-                Performance.start_year.desc().nullsfirst(),
+                Performance.start_year.desc().nullslast(),
                 Performance.start_month.desc().nullsfirst(),
                 Performance.start_day.desc().nullsfirst(),
             ).all()
@@ -1027,6 +1027,28 @@ def recent_recordings():
     recs = query.order_by(Recording.created_at.desc()).limit(limit).all()
     img_urls = _peer_image_urls(recs)
     return jsonify([_peer_row(r, card=card, image_url=img_urls.get(r.id)) for r in recs])
+
+
+@bp.route("/recordings/kind-counts", strict_slashes=False)
+@peer_required
+def kind_counts():
+    """{"live": n, "studio": n}, counted over THIS peer's visible set only --
+    same shape as the local route, but never the whole library's counts."""
+    peer = current_peer()
+    visible = peer_visible_recording_ids(peer)
+    counts = {"live": 0, "studio": 0}
+    if not visible:
+        return jsonify(counts)
+    rows = (
+        db.session.query(Recording.kind, db.func.count(Recording.id))
+        .filter(Recording.id.in_(visible))
+        .group_by(Recording.kind)
+        .all()
+    )
+    for kind, n in rows:
+        if kind in counts:
+            counts[kind] = n
+    return jsonify(counts)
 
 
 @bp.route("/recordings/recommended", strict_slashes=False)
@@ -1252,6 +1274,11 @@ def search():
             r = {**r, "image_url": _SHARE_RECORDING_IMG_URL + u[len(_local_img_prefix) - 1:]}
         return r
     recordings = [_rewrite_image_url(r) for r in raw["recordings"] if r["id"] in visible_recs]
+    # Albums (studio records) go through the same visibility filter and image
+    # rewrite as Shows, then back into build_index() alongside them -- kind
+    # is a display split, never a visibility one, so nothing here decides
+    # who sees an album; that was already decided by peer_visible_recording_ids.
+    albums = [_rewrite_image_url(r) for r in raw.get("albums", []) if r["id"] in visible_recs]
     artists = [p for p in raw["artists"] if p["id"] in visible_artists]
     venues = [v for v in raw["venues"] if v["id"] in visible_venues]
     musicians = [
@@ -1261,7 +1288,7 @@ def search():
                                 if pid in visible_artists]}
         for a in raw["musicians"] if a["id"] in visible_musicians
     ]
-    index = se.build_index(artists, musicians, venues, recordings)
+    index = se.build_index(artists, musicians, venues, recordings + albums)
 
     result = se.run_search(index, q)
     counts = local_search._derived_counts(index)

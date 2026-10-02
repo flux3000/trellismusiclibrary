@@ -17,7 +17,9 @@ transaction, WAL refusal + backup on --apply, assertions before commit.
    step is filesystem-only and runs only with --apply; a dry run lists what
    it WOULD move. LIBRARY_ROOT being unreachable (unmounted volume) is
    tolerated -- the step is skipped with a message, not a failure.
-3. Assert: recording.kind and both new tables present, row counts unchanged
+3. ALTER TABLE recording ADD COLUMN resolver_json TEXT (if absent) -- the
+   ingest resolver's output saved at ingest time (Resolver tab).
+4. Assert: recording.kind, recording.resolver_json and both new tables present, row counts unchanged
    for every table this script touches.
 
 No-op on a second run: ALTER/CREATE are all guarded by an existence check, and
@@ -69,6 +71,17 @@ def add_kind_column(con):
         print("  recording.kind already present")
         return False
     sql = "ALTER TABLE recording ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'live'"
+    print("  " + sql)
+    con.execute(sql)
+    return True
+
+
+def add_resolver_json_column(con):
+    print("\nColumns")
+    if "resolver_json" in columns(con, "recording"):
+        print("  recording.resolver_json already present")
+        return False
+    sql = "ALTER TABLE recording ADD COLUMN resolver_json TEXT"
     print("  " + sql)
     con.execute(sql)
     return True
@@ -233,6 +246,8 @@ def assert_post(con, before):
     if "kind" not in have_recording:
         problems.append("recording missing 'kind'")
     have = tables(con)
+    if "resolver_json" not in columns(con, "recording"):
+        problems.append("recording missing 'resolver_json'")
     for t in ("bulk_ingest_run", "bulk_ingest_item"):
         if t not in have:
             problems.append(f"missing table {t}")
@@ -293,6 +308,7 @@ def main():
     con.execute("BEGIN IMMEDIATE")
     try:
         add_kind_column(con)
+        add_resolver_json_column(con)
         create_bulk_ingest_tables(con)
         add_format_column(con)
         add_meta_column(con)

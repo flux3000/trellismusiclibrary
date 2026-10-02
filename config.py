@@ -203,11 +203,12 @@ class Config:
     # folder" box should open to. Defined here rather than hardcoded in the
     # frontend so there is one place to change it — it has moved three times
     # now (Live Music Archive/Workshop/Import -> Flux Workshop/Download ->
-    # Flux Audio/Download, 2026-08-13 -> Trellis/Download, 2026-08-23) and an
+    # Flux Audio/Download, 2026-08-13 -> Trellis/Download, 2026-08-23 ->
+    # Trellis/Downloads, 2026-10-01) and an
     # old value was once baked into app.js.
     IMPORT_DIR = os.environ.get(
         "IMPORT_DIR",
-        "/Volumes/music/Trellis/Download"
+        "/Volumes/music/Trellis/Downloads"
     )
 
     # Triage destinations. During Listening Quality triage a show can be moved

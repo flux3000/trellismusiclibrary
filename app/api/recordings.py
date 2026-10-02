@@ -126,7 +126,7 @@ def recent_recordings():
 def _recommended_pool_query():
     return (
         Recording.query
-        .filter(Recording.quality.in_(("A", "A+")))
+        .filter(Recording.quality.in_(("A", "A+")), Recording.kind == "live")
         .options(
             selectinload(Recording.tracks).selectinload(Track.analysis),
             selectinload(Recording.performance),
@@ -327,6 +327,28 @@ def on_this_day():
     return jsonify([recording_row(r) for r in recs])
 
 
+# ── GET /api/recordings/kind-counts ───────────────────────────────────────────
+# {"live": n, "studio": n} over the whole library. Powers the Albums nav
+# entry / page existence check (Studio Records spec v1, contract item 3): a
+# live-only collector must not pay for or see an entry point to an empty
+# page. ONE GROUP BY, not a per-row scan -- this can run on every sidebar
+# render alongside list_artists() above, which is held to the same bar.
+
+@bp.route("/kind-counts")
+@login_required
+def kind_counts():
+    rows = (
+        db.session.query(Recording.kind, db.func.count(Recording.id))
+        .group_by(Recording.kind)
+        .all()
+    )
+    counts = {"live": 0, "studio": 0}
+    for kind, n in rows:
+        if kind in counts:
+            counts[kind] = n
+    return jsonify(counts)
+
+
 # ── GET /api/recordings/<id> ──────────────────────────────────────────────────
 
 @bp.route("/<int:recording_id>")
@@ -426,6 +448,9 @@ def get_recording(recording_id):
         "info_file_content":    rec.info_file_content,
         "notes":                rec.notes,
         "ai_research":          _json.loads(rec.ai_research_json) if rec.ai_research_json else None,
+        # Ingest provenance for the Resolver tab. Owner-only: app/api/share.py
+        # has its own serializer and deliberately does not carry this.
+        "resolver_json":        _json.loads(rec.resolver_json) if rec.resolver_json else None,
         # Junction rows ONLY, deliberately (2026-08-24). System collections are
         # dynamic and Full Library covers every published recording, so
         # resolving them here would stamp the same chip on all 580 recording

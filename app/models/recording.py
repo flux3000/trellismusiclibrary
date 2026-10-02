@@ -148,6 +148,14 @@ class Recording(db.Model):
     # once the browser tab closes. NULL until AI Assist has been run.
     ai_research_json = db.Column(db.Text, nullable=True)
 
+    # The ingest resolver's output as it stood at ingest time (JSON: per-field
+    # value / source / candidates / conflict, plus kind, duplicates, status,
+    # reasons; `tracks` deliberately omitted -- the recording's own tracks are
+    # the truth). Provenance for the Resolver tab on View Recording. NULL for a
+    # recording ingested before this column existed. Owner-only: never served
+    # to peers (app/api/share.py does not read it).
+    resolver_json = db.Column(db.Text, nullable=True)
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                            onupdate=lambda: datetime.now(timezone.utc))

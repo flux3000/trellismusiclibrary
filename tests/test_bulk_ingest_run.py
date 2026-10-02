@@ -69,7 +69,10 @@ def _build_tree(root):
     _flac(root / "CleanShow" / "01.flac",
           ARTIST="Grateful Dead", DATE="1977-05-08", VENUE="Barton Hall")
 
-    # Year + venue, no month/day -> ingested (year+venue rule)
+    # Year + venue, no month/day -> REVIEW as of the Ingest Field Resolver
+    # spec v1 (2026-09-28): the old "year+venue" auto-ingest rule is gone.
+    # Auto-ingest now requires a full date with no conflicts (or a studio
+    # record) -- year-only, with or without a venue, needs a month.
     _flac(root / "YearVenueShow" / "01.flac",
           ARTIST="Phish", DATE="1995", VENUE="The Gorge")
 
@@ -179,10 +182,14 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
     rec = _db.session.get(Recording, items["CleanShow"].recording_id)
     assert rec.kind == "live"
 
-    assert items["YearVenueShow"].status == "ingested"
+    assert items["YearVenueShow"].status == "review"
+    assert items["YearVenueShow"].reason == "needs_month"
 
+    # Year only, no venue -> needs_month, not the old blanket "needs_date"
+    # (Ingest Field Resolver spec v1 section 5: needs_date means NO year at
+    # all; a bare year gets its own reason).
     assert items["YearOnlyNoVenueShow"].status == "review"
-    assert items["YearOnlyNoVenueShow"].reason == "needs_date"
+    assert items["YearOnlyNoVenueShow"].reason == "needs_month"
 
     assert items["NoDateShow"].status == "review"
     assert items["NoDateShow"].reason == "needs_date"
@@ -223,7 +230,8 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
 
     # Review items got a QualityAnalysis staging row, source_dir == the run's
     # root, scores left null.
-    for rel in ("YearOnlyNoVenueShow", "NoDateShow", "NoArtistShow", "WavOnlyShow"):
+    for rel in ("YearOnlyNoVenueShow", "NoDateShow", "NoArtistShow", "WavOnlyShow",
+               "YearVenueShow"):
         folder_abs = str(root / rel)
         from app.utils.quality_store import norm_path
         row = (_db.session.query(QualityAnalysis)

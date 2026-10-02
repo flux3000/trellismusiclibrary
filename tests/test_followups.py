@@ -39,7 +39,8 @@ def _isolate_followup_queue(monkeypatch):
     monkeypatch.setattr(ingest_api, "_ANALYSIS_Q", queue.Queue())
     monkeypatch.setattr(ingest_api, "_QUEUED_KEYS", set())
     monkeypatch.setattr(ingest_api, "_PENDING_BY_KIND",
-                        {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0, "images": 0})
+                        {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0,
+                         "images": 0, "signals": 0})
     orig_worker = ingest_api._ANALYSIS_STATE["worker"]
     ingest_api._ANALYSIS_STATE["worker"] = True
     yield
@@ -83,7 +84,10 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
     # (rec_scored, rec_a, rec_b, and the neutralized seeded recording) has
     # zero RecordingImage rows and a null images_checked_at, so all four are
     # queued for the artwork backfill regardless of their "score" status.
-    assert counts == {"score": 2, "mb_artist": 1, "mb_release": 0, "images": 4}
+    # "signals" (Ingest Field Resolver spec v1 section 8): all four are LIVE
+    # recordings with no track carrying a non_music_score yet, so all four
+    # are queued for that too, independent of "score".
+    assert counts == {"score": 2, "mb_artist": 1, "mb_release": 0, "images": 4, "signals": 4}
 
     queued = set(ingest_api._QUEUED_KEYS)
     assert queued == {
@@ -91,15 +95,17 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
         ("mb_artist", artist_never.id),
         ("images", rec_scored.id), ("images", rec_a.id), ("images", rec_b.id),
         ("images", seeded_ids["recording_id"]),
+        ("signals", rec_scored.id), ("signals", rec_a.id), ("signals", rec_b.id),
+        ("signals", seeded_ids["recording_id"]),
     }
     assert not any(kind == "analysis" for kind, _ in queued)
-    assert ingest_api._ANALYSIS_Q.qsize() == 7
+    assert ingest_api._ANALYSIS_Q.qsize() == 11
 
     # A second call: everything above is still sitting in the queue, so
     # nothing new gets enqueued.
     again = ingest_api.enqueue_followups()
-    assert again == {"score": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
-    assert ingest_api._ANALYSIS_Q.qsize() == 7
+    assert again == {"score": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "signals": 0}
+    assert ingest_api._ANALYSIS_Q.qsize() == 11
 
     # Stub the scorer chain so this test needs no real audio on disk --
     # _handle_score imports these two names fresh from app.utils.quality
@@ -139,6 +145,8 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
         ("mb_artist", artist_never.id),
         ("images", rec_scored.id), ("images", rec_a.id), ("images", rec_b.id),
         ("images", seeded_ids["recording_id"]),
+        ("signals", rec_scored.id), ("signals", rec_a.id), ("signals", rec_b.id),
+        ("signals", seeded_ids["recording_id"]),
     }
 
     assert _db.session.query(RecordingQuality).filter_by(recording_id=rec_a.id).first() is not None
@@ -248,6 +256,9 @@ def test_pipeline_reports_pending_by_kind(app, seeded_ids):
     # both have zero RecordingImage rows and a null images_checked_at, so
     # both are queued for the artwork backfill regardless of "score".
     assert counts["images"] == 2
+    # "signals" (Ingest Field Resolver spec v1 section 8): both are LIVE
+    # recordings with no track carrying a non_music_score yet.
+    assert counts["signals"] == 2
 
     client = app.test_client()
     resp = client.get("/api/ingest/pipeline")
@@ -258,7 +269,8 @@ def test_pipeline_reports_pending_by_kind(app, seeded_ids):
     assert by_kind["mb_artist"] == 0
     assert by_kind["analysis"] == 0
     assert by_kind["images"] == 2
-    assert body["analysis"]["pending"] == 3
+    assert by_kind["signals"] == 2
+    assert body["analysis"]["pending"] == 5
 
 
 def test_bulk_ingest_run_completion_enqueues_score_for_every_ingested_recording(app, tmp_path, seeded_ids):

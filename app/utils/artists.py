@@ -14,6 +14,8 @@ from app.extensions import db
 from app.models.artist import Artist
 from app.models.musician import Musician, Membership
 
+import re
+
 
 def resolve_or_create_musician(name):
     """Find a Musician (person) by name (case-insensitive) or create it."""
@@ -183,3 +185,75 @@ def resolve_or_create_artist(name, member_names=None, lookup=True):
         _mb.try_match_artist(artist)
 
     return artist
+
+
+# ── Similar-act resolution (moved from app/api/ingest.py, Ingest Field
+# Resolver spec v1 section 6 -- the route layer imports utils, not the
+# other way round) ────────────────────────────────────────────────────────
+
+# How close two act names must read before they count as the same act. 0.85
+# is the threshold parse_info_file() already uses for fuzzy artist/venue
+# matching -- deliberately the same number, so the ingest form and the
+# duplicate check never disagree about whether two names are "the same".
+_ARTIST_SIMILARITY = 0.85
+
+# Words that decorate an act name without changing who it is. "Aoife
+# O'Donovan" and "Aoife O'Donovan Band" are one act to a collector and two
+# rows in the DB, which is exactly the variant Ryan asked this to catch
+# (2026-08-02).
+_ACT_NOISE_WORDS = {"band", "trio", "quartet", "quintet", "group", "ensemble",
+                    "orchestra", "the", "and", "with", "featuring", "feat"}
+
+
+def _act_key(name):
+    """Normalise an act name down to the words that identify it."""
+    words = re.sub(r"[^\w\s]", " ", (name or "").lower()).split()
+    core = [w for w in words if w not in _ACT_NOISE_WORDS]
+    return " ".join(core or words)
+
+
+def resolve_similar_artist_ids(artist_name):
+    """
+    Every Artist that plausibly IS the act named `artist_name`.
+
+    Three widening passes, because a duplicate that goes unnoticed costs an
+    accidental re-ingest and a duplicate flagged wrongly costs one glance:
+
+      1. exact, case-insensitive -- what resolve_or_create_artist() does, so
+         this can never disagree with what Confirm would actually resolve to
+      2. same normalised core after stripping act-noise words, so
+         "Aoife O'Donovan" finds "Aoife O'Donovan Band"
+      3. difflib ratio >= 0.85 on the core, catching spelling and punctuation
+         drift ("Bela Fleck" / "Béla Fleck")
+
+    Then the ARTIST (person) side: if a person of that name exists, every
+    Artist they are a member of counts too -- Ryan asked for "artist or
+    musician, or a similar variant of either", and the 07-11 remodel makes
+    those genuinely different tables.
+    """
+    from difflib import SequenceMatcher
+
+    name = (artist_name or "").strip()
+    if not name:
+        return []
+
+    ids = set()
+    key = _act_key(name)
+    rows = db.session.query(Artist.id, Artist.name).all()
+
+    for pid, pname in rows:
+        if pname and pname.lower() == name.lower():
+            ids.add(pid)
+            continue
+        pkey = _act_key(pname)
+        if not pkey or not key:
+            continue
+        if pkey == key or SequenceMatcher(None, pkey, key).ratio() >= _ARTIST_SIMILARITY:
+            ids.add(pid)
+
+    person = db.session.query(Musician).filter(
+        func.lower(Musician.name) == name.lower()).first()
+    if person:
+        ids.update(m.artist_id for m in person.memberships)
+
+    return sorted(ids)

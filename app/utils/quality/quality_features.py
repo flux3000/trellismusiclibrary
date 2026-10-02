@@ -5,7 +5,7 @@ Deliberately depends only on numpy / scipy / soundfile / pyloudnorm.
 Librosa is NOT used: everything here is STFT, filtering and statistics, and
 soundfile's native seek lets us decode only the windows we care about.
 
-Spec: Context Library/Recording Quality Score — Design Spec v1.md
+Spec: Context Library/2026-07-25 - Recording Quality Score — Design Spec v1.md
 
 Feature extraction is kept strictly separate from scoring. This module answers
 "what is physically true about this audio"; quality_scoring.py answers "how

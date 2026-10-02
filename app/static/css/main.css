@@ -988,9 +988,14 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .lq-brow-head.iq-brow, .lq-brow.iq-brow {
   grid-template-columns: 3px minmax(0, 1fr) 56px 52px 92px 62px 214px 30px;
 }
+/* No status spine on the import table (Ryan, 2026-10-01): the first cell
+   (spine on a row, empty span on the head) is hidden and its column gone. */
 .lq-brow-head.iq-brow.iq-brow--nosq, .lq-brow.iq-brow.iq-brow--nosq {
-  grid-template-columns: 3px minmax(0, 1fr) 56px 52px 62px 214px 30px;
+  grid-template-columns: minmax(0, 1fr) 56px 52px 62px 214px 30px;
 }
+.lq-brow-head.iq-brow.iq-brow--nosq > :first-child,
+.lq-brow.iq-brow.iq-brow--nosq > .lq-brow-spine { display: none; }
+
 .lq-brow.iq-brow { min-height: 46px; }
 .lq-brow-head.iq-brow > :nth-child(3),
 .lq-brow-head.iq-brow > :nth-child(4) { text-align: center; }
@@ -3779,6 +3784,7 @@ input[type="range"].progress-bar {
 .cksum-title { flex: 1; min-width: 0; color: var(--t1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cksum-type  { flex-shrink: 0; width: 32px; color: var(--t3); font-size: 10px; }
 .cksum-status { flex-shrink: 0; color: var(--t2); }
+.resolver-src { width: 72px; }
 .cksum-status--match      { color: var(--green); }
 .cksum-status--mismatch   { color: var(--red); font-weight: 600; }
 .cksum-status--unverified { color: var(--t3); }
@@ -7375,6 +7381,17 @@ a.member-chip-name:hover { color: var(--accent); }
   background: var(--bg-2);
 }
 
+/* Studio cover art (Studio Records spec v1, chunk 5, Ryan-approved): the
+   cover is what the date is for a live show, so it takes the same lead
+   position at the top of the card -- a square image rather than the small
+   round artist photo. Only rendered when the recording has one. */
+.rec-card-cover {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: var(--r-md);
+  margin: 0 0 10px; display: block;
+  border: 1px solid var(--genre-fg, var(--bd-1));
+  background: var(--bg-2);
+}
+
 /* The date is deliberately full-strength --t0, not a muted meta colour: for a
    live recording the date IS the identity — it's how collectors name, trade
    and search for shows. Tabular numerals so stacked cards align. */
@@ -8595,6 +8612,21 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Album tile (Studio Records spec v1, section 7) -- .top-tile/.top-art/
+   .top-overlay above do all the visual work; .album-tile only overrides the
+   Top Shelf strip's fixed flex-basis sizing so the SAME markup fills a grid
+   cell (Albums page) or a smaller strip tile (Artist page) instead. */
+.album-tile { flex: none; width: 100%; height: auto; aspect-ratio: 1 / 1; }
+
+/* Artist page Albums strip -- smaller tiles, horizontal, no nav buttons or
+   dealing/prefetch machinery (spec, section 7: "a strip suits the ratio"). */
+.albums-strip {
+  display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.albums-strip::-webkit-scrollbar { display: none; }
+.albums-strip .album-tile { flex: 0 0 96px; width: 96px; height: 96px; }
+
 /* Shelf nav buttons. Icons are real Lucide chevron-left/chevron-right from
    ICONS (app.js), not the small-caret chevronIcon() helper used for
    dropdown/tree carets elsewhere — that one is a different, deliberately
@@ -8683,21 +8715,23 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    the longest one. */
 .brow {
   display: grid;
+  /* Order and spine removal: Ryan, 2026-10-01. Image, Artist, Date, Venue,
+     Location left; Rating, Source right. */
   grid-template-columns:
-    3px                    /* genre spine   */
-    26px                   /* photo         */
+    26px                   /* image         */
+    minmax(110px, 200px)   /* artist        */
     104px                  /* date          */
-    minmax(110px, 200px)   /* artist     */
-    minmax(0, 1fr)         /* venue + place */
-    46px                   /* source        */
-    26px;                  /* grade         */
+    minmax(0, 1fr)         /* venue         */
+    minmax(0, .7fr)        /* location      */
+    112px                  /* tracks, length */
+    26px                   /* rating        */
+    46px;                  /* source        */
   gap: 12px; align-items: center;
   height: 44px; padding-right: 10px;
   border-bottom: 1px solid var(--bd-0);
   text-decoration: none; color: inherit;
 }
 .brow:hover { background: var(--bg-3); }
-.brow-spine { align-self: stretch; background: var(--genre-fg, var(--t3)); }
 .brow-av {
   width: 24px; height: 24px; border-radius: var(--r-sm);
   display: flex; align-items: center; justify-content: center;
@@ -8713,15 +8747,44 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   font-family: var(--font-display); font-size: 13px; color: var(--t0);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.brow-venue {
+.brow-venue, .brow-loc {
   font-size: 11.5px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Browse sits inside .lib-modules, which already carries the 28px page
+   gutter; the list and its bar take none of their own so the image column
+   lines up with the page heading (Ryan, 2026-10-01). */
+.lib-modules .brows { padding-left: 0; padding-right: 0; }
+.lib-modules .browse-bar { padding-left: 0; padding-right: 0; }
+
+/* Albums page row (2026-10-01): the Live Recordings grid, album facts in
+   the live slots. Title takes the venue column; tracks/length and release
+   take location and the right-hand cells. */
+.brow--album {
+  grid-template-columns:
+    26px                   /* image          */
+    minmax(110px, 200px)   /* artist         */
+    104px                  /* year           */
+    minmax(0, 1fr)         /* title          */
+    112px                  /* tracks, length */
+    minmax(0, .5fr);       /* release        */
+}
+.brow-title {
+  font-size: 12.5px; color: var(--t0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.brow-size {
+  font-size: 11px; color: var(--t2); font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.brow-release {
+  font-size: 11px; color: var(--t2); text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 /* Reserved cells. `.brow-srccell` is the cell, `.brow-src` the pill inside
    it — two elements because the pill is content-width (a badge that hugged
    the cell would stretch "SBD" to 46px) while the cell must hold its column
    whether or not there is a pill in it. */
-.brow-srccell { display: flex; justify-content: flex-start; overflow: hidden; }
+.brow-srccell { display: flex; justify-content: flex-end; overflow: hidden; }
 .brow-src {
   font-size: 8.5px; font-weight: 700; letter-spacing: .1em;
   border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
@@ -9126,3 +9189,320 @@ select.set-input { max-width: 480px; }
 .col-card-x:hover { color: var(--red); border-color: var(--red); }
 .col-card-x:disabled { opacity: .4; cursor: default; }
 .col-card-x .tic { width: 12px; height: 12px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Archive Downloads (2026-10-01) -- Live Music Archive catalog and drawer, the
+   global queue tab and panel, and the Downloads page. Mockups: "Trellis
+   Archive Downloads", Option B. Every colour is a palette token; the one
+   exception is the archive teal below, which is deliberately NOT a palette
+   colour (it marks "you are in the archive, not your library") and so is
+   defined per light/dark class instead.
+
+   Teal contract, measured against every palette's bg-0..bg-3 (bg-4/5 are hover
+   and pressed): dark palettes #5fb8a6, 6.0 to 8.0:1 across bg-0..bg-4; the three
+   light palettes (steely, krauss, monk) #0b6a5a, 5.4 to 6.5:1 across bg-0..bg-3.
+   accent-lit text clears 7.0:1 on its own accent-dim wash in every palette.
+   ══════════════════════════════════════════════════════════════════════════ */
+.archive-space, .dlq-tab, .dlq-panel, .arc-drawer, .dl-prog {
+  --accent:      #5fb8a6;
+  --accent-lit:  #7fcbbb;
+  --accent-dim:  rgba(95,184,166,0.15);
+  --accent-dim2: rgba(95,184,166,0.25);
+  --accent-ink:  #141210;
+}
+:root[data-palette="steely"] .archive-space, :root[data-palette="steely"] .dlq-tab,
+:root[data-palette="steely"] .dlq-panel, :root[data-palette="steely"] .arc-drawer,
+:root[data-palette="steely"] .dl-prog,
+:root[data-palette="krauss"] .archive-space, :root[data-palette="krauss"] .dlq-tab,
+:root[data-palette="krauss"] .dlq-panel, :root[data-palette="krauss"] .arc-drawer,
+:root[data-palette="krauss"] .dl-prog,
+:root[data-palette="monk"] .archive-space, :root[data-palette="monk"] .dlq-tab,
+:root[data-palette="monk"] .dlq-panel, :root[data-palette="monk"] .arc-drawer,
+:root[data-palette="monk"] .dl-prog {
+  --accent:      #0b6a5a;
+  --accent-lit:  #075245;
+  --accent-dim:  rgba(11,106,90,0.12);
+  --accent-dim2: rgba(11,106,90,0.2);
+  --accent-ink:  #ffffff;
+}
+
+.content-column { position: relative; --dlq-h: 76px; }
+.nav-dl-count { margin-left: auto; }
+
+/* While the queue tab is up it sits over the right edge of the page header
+   row, so the headers that carry controls on that side leave room for it. */
+body.dlq-on .artist-header,
+body.dlq-on .lq-header,
+body.dlq-on .arc-head { padding-right: 210px; }
+
+/* ── Queue tab ──────────────────────────────────────────────────────────── */
+.dlq-tab {
+  position: absolute; top: var(--dlq-top, 0px); right: 0; z-index: 46;
+  height: var(--dlq-h); display: flex; align-items: center; gap: 8px;
+  padding: 0 28px 0 18px; box-sizing: border-box;
+  background: var(--bg-2); color: var(--t0);
+  border: 0; border-left: 1px solid var(--bd-1); border-bottom: 1px solid var(--bd-0);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500; cursor: pointer;
+}
+.dlq-tab[hidden] { display: none; }
+.dlq-tab:hover, .dlq-tab.on { background: var(--bg-3); }
+body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
+.dlq-tab svg { flex: none; }
+.dlq-ring-track { stroke: var(--bg-5); }
+.dlq-ring-arc { stroke: var(--accent); }
+.dlq-tab-n { font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
+
+/* ── Queue panel ────────────────────────────────────────────────────────── */
+.dlq-panel {
+  position: absolute; top: calc(var(--dlq-top, 0px) + var(--dlq-h)); right: 0; bottom: 0;
+  z-index: 45; width: 380px; max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  background: var(--bg-1); border-left: 1px solid var(--bd-1); color: var(--t0);
+  box-shadow: -12px 0 32px rgba(0,0,0,.28);
+  transform: translateX(100%); visibility: hidden;
+  transition: transform .18s ease, visibility 0s linear .18s;
+}
+.dlq-panel.open { transform: none; visibility: visible; transition: transform .18s ease; }
+.dlq-head {
+  display: flex; align-items: center; gap: 8px; height: 64px; flex: none;
+  padding: 0 10px 0 18px; border-bottom: 1px solid var(--bd-1);
+}
+.dlq-title { flex: 1; font-family: var(--font-display); font-size: 16px; font-weight: 600; }
+.dlq-body { flex: 1; min-height: 0; overflow-y: auto; }
+.dlq-sec + .dlq-sec { border-top: 1px solid var(--bd-1); }
+.dlq-h {
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--t2); padding: 16px 18px 6px;
+}
+.dlq-h--row { display: flex; align-items: center; justify-content: space-between; }
+.dlq-h--row .dlq-btn { text-transform: none; letter-spacing: 0; }
+.dlq-btn {
+  display: inline-flex; align-items: center; background: none; border: 0; cursor: pointer;
+  font-family: var(--font-ui); font-size: 11.5px; font-weight: 500; color: var(--t1);
+  padding: 4px 6px; border-radius: var(--r-sm);
+}
+.dlq-btn:hover { color: var(--t0); background: var(--bg-3); }
+.dlq-btn--flat { padding: 0; }
+.dlq-btn--flat:hover { background: none; }
+.dlq-btn--acc { color: var(--accent); }
+.dlq-btn .tic { width: 14px; height: 14px; }
+.dlq-now { padding: 6px 18px 14px; display: flex; flex-direction: column; gap: 7px; }
+.dlq-now-top { display: flex; align-items: baseline; gap: 8px; }
+.dlq-now-top .dlq-name { flex: 1; }
+.dlq-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.dlq-name {
+  font-family: var(--font-display); font-size: 13px; color: var(--t0);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dlq-sub { font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
+.dlq-sub--dim { font-size: 11px; color: var(--t2); }
+.dlq-sub--bad { font-size: 11px; color: var(--red); }
+.dlq-bar { height: 4px; border-radius: 2px; background: var(--bg-5); }
+.dlq-bar-fill { height: 4px; border-radius: 2px; background: var(--accent); }
+.dlq-q { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 18px; }
+.dlq-q.dragging { opacity: .4; }
+.dlq-grip { width: 14px; height: 14px; color: var(--t3); cursor: grab; }
+.dlq-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 18px; }
+.dlq-link { font-size: 11.5px; font-weight: 500; color: var(--accent); text-decoration: none; }
+.dlq-link:hover { text-decoration: underline; }
+.dlq-foot { flex: none; display: flex; padding: 12px 18px; border-top: 1px solid var(--bd-1); }
+.dlq-path {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--t2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ── Catalog ────────────────────────────────────────────────────────────── */
+.archive-space { min-height: 100%; }
+.arc-sticky {
+  position: sticky; top: 0; z-index: 5; background: var(--bg-2);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.arc-head {
+  height: var(--dlq-h, 76px); box-sizing: border-box; padding: 0 28px;
+  display: flex; align-items: center; gap: 20px; border-bottom: 1px solid var(--bd-0);
+}
+.arc-title { margin: 0; font-family: var(--font-display); font-size: 26px; font-weight: 600; color: var(--t0); }
+.arc-search {
+  display: flex; align-items: center; gap: 8px; width: 360px; max-width: 100%; box-sizing: border-box;
+  padding: 7px 12px; background: var(--bg-0); border: 1px solid var(--bd-1); border-radius: var(--r-md);
+  color: var(--t3); font-size: 12.5px;
+}
+.arc-search:focus-within { border-color: var(--accent); }
+.arc-search .tic { width: 14px; height: 14px; flex: none; }
+.arc-search input {
+  border: 0; background: none; outline: none; color: var(--t0);
+  font: inherit; width: 100%; min-width: 0;
+}
+.arc-bar { padding: 10px 28px 8px; }
+.brow.arc-row {
+  grid-template-columns:
+    minmax(110px, 200px)   /* artist   */
+    104px                  /* date     */
+    minmax(0, 1fr)         /* venue    */
+    minmax(0, .7fr)        /* location */
+    40px                   /* format   */
+    46px                   /* source   */
+    60px                   /* size     */
+    40px                   /* added    */
+    170px;                 /* action   */
+  height: 38px; padding: 0 10px; cursor: pointer;
+}
+.brow.arc-row.sel { background: var(--bg-4); }
+.brow.arc-cols { height: 28px; margin: 0 28px; border-bottom: 1px solid var(--bd-1); cursor: default; }
+.brow.arc-cols:hover { background: none; }
+.arc-rows { padding: 0 28px 8px; }
+.arc-hd {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--t3);
+}
+.arc-hd--r { text-align: right; }
+.arc-fmt { font-size: 10.5px; color: var(--t1); text-align: right; }
+.arc-src {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .1em; white-space: nowrap;
+  border: 1px solid currentColor; border-radius: 3px; padding: 1px 4px;
+}
+.arc-src--sbd   { color: var(--sbd-fg); }
+.arc-src--aud   { color: var(--aud-fg); }
+.arc-src--mtx   { color: var(--mtx-fg); }
+.arc-src--fm    { color: var(--fm-fg); }
+.arc-src--other { color: var(--other-fg); }
+.arc-num {
+  font-size: 11.5px; color: var(--t1); text-align: right;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.arc-num--dim { color: var(--t2); }
+.arc-row .arc-num { font-size: 11px; color: var(--t2); }
+.arc-row .arc-num--dim { color: var(--t3); }
+.arc-name { font-size: 13px; color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arc-actcell { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
+.arc-act {
+  font-family: var(--font-ui); font-size: 11.5px; font-weight: 600; color: var(--accent);
+  background: none; border: 1px solid var(--accent-dim2); border-radius: var(--r-sm);
+  padding: 3px 9px; cursor: pointer;
+}
+.arc-act:hover { border-color: var(--accent); background: var(--accent-dim); }
+.arc-state { font-size: 11.5px; font-weight: 600; color: var(--accent); padding: 3px 9px; }
+.arc-note  { font-size: 11.5px; color: var(--t3); padding: 3px 9px; }
+.arc-owned { font-size: 11.5px; color: var(--t3); white-space: nowrap; }
+.arc-msg, .arc-more { padding: 0 28px; }
+.arc-err { font-size: 12px; color: var(--red); padding: 12px 20px; }
+.arc-msg .arc-err { padding-left: 0; }
+
+/* ── Drawer ─────────────────────────────────────────────────────────────── */
+.arc-drawer {
+  position: absolute; top: calc(var(--dlq-top, 0px) + var(--dlq-h)); right: 0; bottom: 0;
+  z-index: 40; width: 560px; max-width: 100%; box-sizing: border-box;
+  display: flex; flex-direction: column;
+  background: var(--bg-1); border-left: 1px solid var(--bd-1);
+  box-shadow: -12px 0 32px rgba(0,0,0,.28);
+}
+.arc-dr-head {
+  flex: none; padding: 20px 20px 16px; display: flex; flex-direction: column; gap: 6px;
+  border-bottom: 1px solid var(--bd-1);
+}
+.arc-dr-top { display: flex; align-items: flex-start; gap: 12px; }
+.arc-dr-title { flex: 1; margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 600; color: var(--t0); }
+.arc-dr-x { display: flex; background: none; border: 0; padding: 4px; color: var(--t1); cursor: pointer; }
+.arc-dr-x:hover { color: var(--t0); }
+.arc-dr-x .tic { width: 16px; height: 16px; }
+.arc-dr-date { font-size: 12.5px; font-weight: 600; letter-spacing: .14em; color: var(--t0); font-variant-numeric: tabular-nums; }
+.arc-dr-venue { font-size: 12.5px; color: var(--t1); }
+.arc-prov { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 5px 12px; margin-top: 8px; }
+.arc-lb { font-size: 10.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--t3); }
+.arc-vl { font-size: 12px; color: var(--t1); }
+.arc-dr-act { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.arc-primary {
+  padding: 7px 16px; border-radius: var(--r-md); border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 600;
+}
+.arc-primary:disabled { background: var(--bg-4); color: var(--t3); cursor: default; }
+.arc-facts { font-size: 11.5px; color: var(--t2); font-variant-numeric: tabular-nums; }
+.arc-dr-gap { flex: 1; }
+.arc-ext { font-size: 12px; color: var(--accent); text-decoration: none; }
+.arc-ext:hover { color: var(--accent-lit); text-decoration: underline; }
+.arc-tabs { flex: none; display: flex; padding: 0 8px; border-bottom: 1px solid var(--bd-1); }
+.arc-tab {
+  font-family: var(--font-ui); font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  padding: 10px 12px; color: var(--t2); background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+}
+.arc-tab:hover { color: var(--t0); }
+.arc-tab.on { color: var(--t0); border-bottom-color: var(--accent); }
+.arc-dr-body { flex: 1; min-height: 0; overflow-y: auto; padding-top: 4px; }
+.arc-tr {
+  display: grid; grid-template-columns: 24px minmax(0, 1fr) 50px; gap: 10px; align-items: center;
+  height: 32px; padding: 0 20px; border-bottom: 1px solid var(--bd-0);
+}
+.arc-tr--file { grid-template-columns: minmax(0, 1fr) 70px; }
+.arc-tr-n { font-size: 11px; color: var(--t3); text-align: right; font-variant-numeric: tabular-nums; }
+.arc-tr-t { font-size: 12.5px; color: var(--t0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arc-tr-l { font-size: 11px; color: var(--t2); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Downloads page ─────────────────────────────────────────────────────── */
+.dl-path { font-family: var(--font-mono); font-size: 11px; color: var(--t3); }
+.dl-list { padding: 12px 28px 0; }
+.brow.dl-row {
+  grid-template-columns: minmax(0, 1fr) 24px 60px 70px 56px 90px 190px;
+  gap: 14px; height: 44px; padding: 0 10px;
+}
+.brow.dl-cols { height: 30px; border-bottom: 1px solid var(--bd-1); cursor: default; }
+.brow.dl-cols:hover { background: none; }
+.dl-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.dl-row .lq-act { padding: 4px 10px; font-size: 11.5px; font-weight: 600; }
+.dl-acts .lq-move-menu { min-width: 180px; }
+.lq-move-opt--danger, .lq-move-opt--danger:hover { color: var(--red); }
+.dl-prog { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--t1); font-variant-numeric: tabular-nums; }
+.dl-bar { display: block; width: 70px; height: 4px; border-radius: 2px; background: var(--bg-5); }
+.dl-bar-fill { display: block; height: 4px; border-radius: 2px; background: var(--accent); }
+
+/* Import page tabs (2026-10-01): Queue / Live Recordings / Albums above the
+   table, reusing the profile-page tab look. */
+.bi-tabs { margin-bottom: 12px; }
+.bi-tab-note-wrap { margin: 0 0 12px; }
+.bi-tab-note-wrap:empty { display: none; }
+.bi-tab-note { font-size: 13px; color: var(--t1); margin: 0; }
+
+/* Recently Added row (2026-10-01): same grid family as Live Recordings and
+   Albums, with source/release, tracks/length and date added on the right. */
+.brow--recent {
+  grid-template-columns:
+    26px                   /* image          */
+    minmax(100px, 180px)   /* artist         */
+    92px                   /* date           */
+    minmax(120px, 1fr)     /* venue or title */
+    minmax(46px, .4fr)     /* source/release */
+    100px                  /* tracks, length */
+    76px;                  /* date added     */
+}
+.brow-added { text-align: right; color: var(--t2); }
+
+.dl-fp--ok  { color: var(--green); }
+.dl-fp--bad { color: var(--red); }
+
+/* An expanded dimension (Venues, Artists ...) grows the pinned foot upward over
+   the main nav; give it an edge and a lift so the two read as separate layers. */
+.nav-dims-foot:has(.nav-dim .nav-caret.open) {
+  border-top-color: var(--bd-2);
+  box-shadow: 0 -6px 16px rgba(0,0,0,.16);
+}
+
+/* Import Queue heading and tab brightness (Ryan, 2026-10-01): the tabs read
+   brighter than the default profile tabs, Live a step above Albums. */
+.bi-queue-head {
+  font-size: 13px; font-weight: 600; color: var(--t0); margin: 4px 0 6px;
+}
+.bi-tabs .pp-tab.bi-tab--queue,
+.bi-tabs .pp-tab.bi-tab--live   { color: var(--t1); }
+.bi-tabs .pp-tab.bi-tab--album  { color: var(--t2); }
+.bi-tabs .pp-tab.active         { color: var(--accent); }
+.bi-note-ic { width: 13px; height: 13px; vertical-align: -2px; color: var(--amber); }
+/* Completed import tabs (2026-10-01): the image spans the title and the
+   folder line, so it sits beside both rather than inside the title row. */
+.iq-main--thumb { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.iq-main-text { min-width: 0; flex: 1; }
+.iq-main--thumb .iq-thumb { flex: none; width: 34px; height: 34px; }
+
+/* Import table rows (2026-10-01): near-page background instead of the raised
+   card fill, and the header's divider between rows. */
+#bi-table .lq-brow { background: var(--bg-2); }
+#bi-table .lq-row.is-open .lq-brow { background: var(--bg-3); }
+#bi-rows > .lq-row + .lq-row { border-top: 1px solid var(--bd-1); }

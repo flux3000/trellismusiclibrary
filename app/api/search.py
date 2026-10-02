@@ -107,6 +107,7 @@ def build_search_index():
     rows = (
         db.session.query(
             Recording.id, Recording.performance_id, Recording.source, Recording.quality,
+            Recording.kind, Recording.title,
             Performance.artist_id,
             Performance.start_year, Performance.start_month, Performance.start_day,
             Artist.name.label("artist_name"),
@@ -142,6 +143,8 @@ def build_search_index():
         {
             "id":                  r.id,
             "performance_id":      r.performance_id,
+            "kind":                r.kind,
+            "title":               r.title,
             "artist_id":        r.artist_id,
             "artist_name":      r.artist_name,
             "artist_sort_name": r.artist_sort_name,
@@ -216,8 +219,26 @@ def _recording_item(row):
     }
 
 
+def _album_item(row):
+    """Studio Records spec v1, section 7 -- an album leads with its title,
+    not a date/venue it does not have."""
+    return {
+        "type": "album", "id": row["id"],
+        "title": row.get("title"),
+        "artist": row.get("artist_name"),
+        "artist_id": row.get("artist_id"),
+        "year": row.get("year"),
+        "image_url": row.get("image_url"),
+        "hash": f"#/recording/{row['id']}",
+    }
+
+
 def _derived_counts(index):
-    """Recording counts per act and per venue, free from the index we already built."""
+    """Recording counts per act and per venue, free from the index we already built.
+
+    An act's count includes its albums -- an albums-only act still has
+    recordings, and a count that only ever looked at index["recordings"]
+    (live-only, Studio Records spec v1) would print 0 for one."""
     artists, venues = {}, {}
     for r in index["recordings"]:
         pid, vid = r.get("artist_id"), r.get("venue_id")
@@ -225,6 +246,10 @@ def _derived_counts(index):
             artists[pid] = artists.get(pid, 0) + 1
         if vid:
             venues[vid] = venues.get(vid, 0) + 1
+    for a in index["albums"]:
+        pid = a.get("artist_id")
+        if pid:
+            artists[pid] = artists.get(pid, 0) + 1
     return {"artists": artists, "venues": venues}
 
 
@@ -236,6 +261,8 @@ def _serialise(group_key, entries, index, counts):
     if group_key == "musicians":
         names = {p["id"]: p["name"] for p in index["artists"]}
         return [_musician_item(e["row"], names) for e in entries]
+    if group_key == "albums":
+        return [_album_item(e["row"]) for e in entries]
     return [_recording_item(e["row"]) for e in entries]
 
 

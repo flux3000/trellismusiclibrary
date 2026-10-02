@@ -59,6 +59,9 @@ def main():
         print(f"  SERVER_MODE : ON — share door only; no frontend, no admin API", flush=True)
     print("─" * 60, flush=True)
 
+    if not Config.SERVER_MODE:
+        from app.utils.download_queue import resume_on_boot as _resume_downloads
+        _resume_downloads(app)
     _serve(app)
 
 

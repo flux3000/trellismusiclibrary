@@ -344,7 +344,7 @@ def build_index(artists, musicians, venues, recordings):
     Normalisation happens once here rather than once per query term, which is
     what keeps the measured cost at ~15ms for the whole corpus.
     """
-    idx = {"artists": [], "musicians": [], "venues": [], "recordings": []}
+    idx = {"artists": [], "musicians": [], "venues": [], "recordings": [], "albums": []}
 
     for p in artists:
         idx["artists"].append({**p, "_keys": keys(p.get("name"), p.get("sort_name"))})
@@ -359,6 +359,17 @@ def build_index(artists, musicians, venues, recordings):
         })
 
     for r in recordings:
+        # Studio records have no venue, event, location or source -- ever
+        # (product rule) -- so they cannot share the live dimension set below
+        # and get their own group, matched on title + artist instead. `kind`
+        # defaults to "live" at the model, so a row with no kind at all (a
+        # hand-built test dict, mostly) falls through to the live branch.
+        if r.get("kind") == "studio":
+            idx["albums"].append({
+                **r,
+                "_keys": keys(r.get("title"), r.get("artist_name"), r.get("artist_sort_name")),
+            })
+            continue
         # A recording's searchable text is the union of its three text
         # dimensions: the act, its members (musician reaches shows through
         # membership, NOT performance_personnel — Ryan, 2026-08-18, matching
@@ -387,14 +398,16 @@ def build_index(artists, musicians, venues, recordings):
 GROUP_LABELS = {
     "artists": "Artists",
     "recordings": "Recordings",
+    "albums":     "Albums",
     "venues":     "Venues",
     "musicians":    "Musicians",
 }
 
 # Fixed group order rather than reordering by best match. A dropdown whose
 # groups reshuffle between keystrokes is impossible to aim at — the user
-# starts moving toward a row that has already moved.
-GROUP_ORDER = ("artists", "recordings", "venues", "musicians")
+# starts moving toward a row that has already moved. Albums sits right after
+# Recordings/Shows (Studio Records spec v1, section 7).
+GROUP_ORDER = ("artists", "recordings", "albums", "venues", "musicians")
 
 
 def _sort_key_entity(entry):
@@ -444,10 +457,13 @@ def run_search(index, q, today_year=None):
     if not query:
         return {"query": query.raw, "text_terms": [], "date_terms": [], "groups": groups}
 
-    # Entities — text terms only.
+    # Entities — text terms only. Albums rides along here too: a studio
+    # record is matched on title + artist (no date dimension -- its
+    # Performance carries a year or nothing, never a full show date), which
+    # is exactly the shape of matching an entity by name.
     if query.text_terms:
         entity_query = Query(query.raw, query.text_terms, [])
-        for key in ("artists", "venues", "musicians"):
+        for key in ("artists", "venues", "musicians", "albums"):
             hits = []
             for row in index.get(key, []):
                 s = score_row(entity_query, row["_keys"])

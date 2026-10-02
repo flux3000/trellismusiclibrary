@@ -106,7 +106,7 @@ def get_genre(genre_id):
             db.session.query(Performance)
             .filter(Performance.artist_id == p.id)
             .order_by(
-                Performance.start_year.desc().nullsfirst(),
+                Performance.start_year.desc().nullslast(),
                 Performance.start_month.desc().nullsfirst(),
                 Performance.start_day.desc().nullsfirst(),
             ).all()

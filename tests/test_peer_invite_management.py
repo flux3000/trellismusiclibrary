@@ -195,3 +195,41 @@ def test_share_address_setting_requires_admin(app):
     assert c.get("/api/peers/settings/share-address").status_code in (401, 403)
     assert c.put("/api/peers/settings/share-address",
                  json={"share_base_url": "https://x.example.com"}).status_code in (401, 403)
+
+
+def test_peer_activity_carries_kind_and_title_for_studio_rows(app, peer):
+    """/api/peers/<id>/activity (app/api/peers.py) used to send only
+    [artist, date] for each row, which is meaningless for a studio record
+    (no venue/date) -- the Peers page activity list read it as a bare
+    artist name with no album title at all. `kind` and `title` now ride
+    along so the frontend can render title / artist / year for an album."""
+    from app.models.recording import Recording
+    from app.models.performance import Performance
+    from app.models.artist import Artist
+    from app.models.track import Track
+    from app.models.peer import PeerAccessLog
+
+    artist = Artist(name="Activity Test Act")
+    _db.session.add(artist)
+    _db.session.flush()
+    perf = Performance(artist_id=artist.id, start_year=1985)  # studio: year only
+    _db.session.add(perf)
+    _db.session.flush()
+    album = Recording(performance_id=perf.id, is_complete=True,
+                       folder_path="Activity Test Act/album", kind="studio",
+                       title="Test Sessions")
+    _db.session.add(album)
+    _db.session.flush()
+    track = Track(recording_id=album.id, track_number=1, title="Track 1",
+                  file_path="Activity Test Act/album/01 Track 1.flac")
+    _db.session.add(track)
+    _db.session.flush()
+    _db.session.add(PeerAccessLog(peer_id=peer.id, track_id=track.id))
+    _db.session.commit()
+
+    c = app.test_client()
+    _login_as(c)
+    body = c.get(f"/api/peers/{peer.id}/activity").get_json()
+    assert body[0]["kind"] == "studio"
+    assert body[0]["title"] == "Test Sessions"
+    assert body[0]["artist"] == "Activity Test Act"

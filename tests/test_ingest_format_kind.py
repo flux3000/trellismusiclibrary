@@ -24,22 +24,31 @@ def _flac_with_tags(path, **tags):
 
 # -- Staging payload (Review & Ingest) ---------------------------------------
 
-def test_scan_metadata_yields_format_and_kind_for_a_studio_album(tmp_path):
+def test_scan_metadata_yields_format_and_kind_for_a_studio_album(app, tmp_path):
+    # _scan_metadata now sources its fields from resolve() (Ingest Field
+    # Resolver spec v1, Fix 2) instead of a standalone tag/info merge, and
+    # resolve()'s artist rule reads LIBRARY_ROOT / node_settings, both of
+    # which need a real app + DB context -- the same context every one of
+    # its real callers (Review & Ingest's own route) already has.
     show = tmp_path / "show"
     _flac_with_tags(show / "01.flac", ARTIST="Phish", ALBUM="A Picture of Nectar")
     _flac_with_tags(show / "02.flac", ARTIST="Phish", ALBUM="A Picture of Nectar")
 
-    payload = _scan_metadata(str(show))
+    with app.app_context():
+        app.config["LIBRARY_ROOT"] = str(tmp_path)
+        payload = _scan_metadata(str(show))
     assert payload["extracted"]["format"] == "FLAC"
     assert payload["extracted"]["kind"] == "studio"
 
 
-def test_scan_metadata_yields_live_kind_with_a_date(tmp_path):
+def test_scan_metadata_yields_live_kind_with_a_date(app, tmp_path):
     show = tmp_path / "show"
     _flac_with_tags(show / "01.flac", ARTIST="Phish", DATE="1995-07-08",
                      VENUE="Deer Creek")
 
-    payload = _scan_metadata(str(show))
+    with app.app_context():
+        app.config["LIBRARY_ROOT"] = str(tmp_path)
+        payload = _scan_metadata(str(show))
     assert payload["extracted"]["format"] == "FLAC"
     assert payload["extracted"]["kind"] == "live"
 

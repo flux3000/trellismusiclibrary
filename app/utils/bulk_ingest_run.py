@@ -33,10 +33,10 @@ from app.models.recording import Recording, RecordingFingerprint
 from app.models.quality import QualityAnalysis
 from app.models.user import User
 from app.utils.ingest import resolve_shows_in_dir
-from app.utils.bulk_ingest import extract, classify, confirm_payload
 from app.utils.health import compute_health
 from app.utils.checksums import parse_checksum_file
 from app.utils.format import format_partial_date
+from app.utils.resolve import DEDUP_FP_TYPES
 
 # One worker thread per process, same shape as _analysis_worker/_ANALYSIS_Q
 # in app/api/ingest.py: a module-level flag under a lock rather than a
@@ -49,14 +49,14 @@ _WORKER_LOCK = threading.Lock()
 # one both worked the same run's items at once.
 _ACTIVE_WORKERS = {}
 
-# Fingerprint types cheap enough to double as a content-identity key for
-# dedup -- a header read, not a full re-hash. "md5" is deliberately excluded:
-# two different recordings of the same show do not share MD5s (that hash
-# covers the whole file, encoding included), so it would never fire, and
-# computing it here would mean the exact per-file re-hash chunk 5 spends
-# effort NOT doing during ingest (see _do_confirm's bulk=True skip of MD5
-# verification) just to build a map that gains nothing from it.
-_DEDUP_FP_TYPES = ("ffp", "st5")
+# Canonical DEDUP_FP_TYPES now lives in app.utils.resolve (spec section 6).
+# "md5" is deliberately excluded there too: two different recordings of the
+# same show do not share MD5s (that hash covers the whole file, encoding
+# included), so it would never fire, and computing it here would mean the
+# exact per-file re-hash chunk 5 spends effort NOT doing during ingest (see
+# _do_confirm's bulk=True skip of MD5 verification) just to build a map that
+# gains nothing from it.
+_DEDUP_FP_TYPES = DEDUP_FP_TYPES
 
 
 def _norm_rel(path):
@@ -229,28 +229,24 @@ def _build_dedup_map():
     return hash_to_recording
 
 
-def _check_and_record_duplicate(item, recording_id, hash_to_recording):
+def _record_hashes(recording_id, hash_to_recording):
     """
-    After an item is ingested: look at the FFP/ST5 hashes its own fingerprints
-    just registered. Any hash already in the map under a DIFFERENT recording
-    marks this item duplicate_of that recording (first hit wins). Either way,
-    this recording's own hashes go into the map so a LATER duplicate in the
-    same run is caught too.
+    After an item is ingested: fold its own FFP/ST5 hashes into the run's
+    per-run cache, so a LATER duplicate in the same run is caught by
+    find_duplicates()'s hash_cache lookup without a fresh DB query per item.
+
+    Exact-duplicate detection itself moved BEFORE ingest (spec section 9,
+    resolved question 1: find_duplicates() checks the scan's own fingerprint
+    files against this cache/DB, and verdict() skips the item outright) --
+    this function only keeps the cache current for what comes next.
     """
     rows = (db.session.query(RecordingFingerprint.content)
             .filter(RecordingFingerprint.recording_id == recording_id,
                     RecordingFingerprint.fingerprint_type.in_(_DEDUP_FP_TYPES))
             .all())
-    found_duplicate_of = None
     for (content,) in rows:
         for entry in parse_checksum_file(content or ""):
-            h = entry["checksum"]
-            existing = hash_to_recording.get(h)
-            if existing is not None and existing != recording_id and found_duplicate_of is None:
-                found_duplicate_of = existing
-            hash_to_recording.setdefault(h, recording_id)
-    if found_duplicate_of is not None:
-        item.duplicate_of = found_duplicate_of
+            hash_to_recording.setdefault(entry["checksum"], recording_id)
 
 
 def process(run, stop_flag):
@@ -266,7 +262,7 @@ def process(run, stop_flag):
     recorded on that item as 'failed', and the run moves on -- one bad
     folder must not stop a whole-library pass.
     """
-    from app.api.ingest import _do_confirm
+    from app.api.ingest import auto_confirm
 
     library_root = run.root
     user_id = _owner_user_id()
@@ -304,11 +300,18 @@ def process(run, stop_flag):
                 db.session.commit()
                 continue
 
-            from app.utils import node_settings
-            placement = node_settings.get_file_handling()["placement"]
-            extracted = extract(folder_abs, library_root, placement=placement)
-            status, reason, kind = classify(extracted)
-            item.format = extracted.get("format")
+            # The one server function that turns a folder into an ingested
+            # (or reviewed, or skipped) recording, via the resolver -- Batch
+            # Import's auto-confirm endpoint calls the exact same function
+            # (spec section 4), so a bulk-ingested and an auto-ingested-from-
+            # Batch-Import recording can never come out different.
+            outcome = auto_confirm(folder_abs, user_id, bulk=True,
+                                   hash_cache=hash_to_recording)
+            status   = outcome["status"]
+            reasons  = outcome["reasons"]
+            resolved = outcome["resolved"]
+            item.format = outcome.get("format")
+
             # meta_band (2026-09-27 unified ingest queue table): the same
             # High/Medium/Low read compute_health() gives triage, computed
             # here at extraction time -- cheaper than a per-row recompute at
@@ -317,54 +320,64 @@ def process(run, stop_flag):
             # that needs review is always "red" regardless of the computed
             # band, same rule the shared table applies everywhere else.
             meta_band = "red"
-            if extracted.get("payload"):
+            if resolved is not None and resolved.scan:
                 try:
-                    meta_band = compute_health(extracted["payload"])["band"]
+                    meta_band = compute_health(resolved.scan)["band"]
                 except Exception:
                     meta_band = "red"
             if status == "review":
                 meta_band = "red"
+
+            date = (resolved.date.value if resolved else None) or {}
             # 2026-09-27 progress/log redesign: the log's expand panel needs
-            # these fields without a per-item re-scan -- stash whatever
-            # extract() found, win or lose (a review/failed item still has
+            # these fields without a per-item re-scan -- stash whatever the
+            # resolver found, win or lose (a review/failed item still has
             # partial data worth showing).
             item.meta = json.dumps({
-                "artist":    extracted.get("artist"),
-                "date_text": format_partial_date(extracted.get("year"),
-                                                 extracted.get("month"),
-                                                 extracted.get("day")),
-                "venue":     extracted.get("venue"),
-                "city":      extracted.get("city"),
-                "state":     extracted.get("state"),
-                "country":   extracted.get("country"),
-                "source":    extracted.get("source"),
-                "lineage":   extracted.get("lineage"),
-                "title":     extracted.get("album"),
+                "artist":    resolved.artist.value if resolved else None,
+                "date_text": format_partial_date(date.get("year"), date.get("month"),
+                                                 date.get("day")),
+                "venue":     resolved.venue.value if resolved else None,
+                "city":      resolved.city.value if resolved else None,
+                "state":     resolved.state.value if resolved else None,
+                "country":   resolved.country.value if resolved else None,
+                "source":    resolved.source.value if resolved else None,
+                "lineage":   resolved.lineage.value if resolved else None,
+                "title":     resolved.album.value if resolved else None,
                 "meta_band": meta_band,
             })
 
+            # BulkIngestItem.reason is a single String(32) column -- there is
+            # no list-of-reasons column to add without a migration framework
+            # (out of scope here), so several reasons are stored comma-joined
+            # and split back apart by the one reader (app/api/quality.py's
+            # _bulk_ingest_review_reasons).
+            reason_str = ",".join(reasons) if reasons else None
+
             if status == "ingested":
-                payload = confirm_payload(extracted, kind)
-                result = _do_confirm(payload, user_id, bulk=True)
-                recording_id = result["recording_id"]
+                recording_id = outcome["result"]["recording_id"]
                 item.status = "ingested"
                 item.reason = None
-                item.kind = kind
+                item.kind = resolved.kind if resolved else None
                 item.recording_id = recording_id
-                _check_and_record_duplicate(item, recording_id, hash_to_recording)
+                _record_hashes(recording_id, hash_to_recording)
             elif status == "review":
                 item.status = "review"
-                item.reason = reason
-                item.kind = kind
+                item.reason = reason_str
+                item.kind = resolved.kind if resolved else None
                 _write_review_staging(folder_abs, library_root, item)
-            else:  # "failed" from classify() itself (e.g. no_audio)
+            elif status == "skipped":
+                # Exact content duplicate (spec section 9, resolved
+                # question 1) -- never ingested a second time.
+                item.status = "skipped"
+                item.reason = reason_str or "duplicate_content"
+                item.duplicate_of = outcome.get("duplicate_of")
+            else:  # "failed" -- no_audio / unreadable
                 item.status = "failed"
-                item.reason = reason
+                item.reason = reason_str
                 # R2-N2: detail is supposed to be a human-readable message,
-                # not the reason word itself -- for "unreadable" that message
-                # is the first file-open error extract() actually hit.
-                item.detail = (extracted.get("unreadable_detail") or reason
-                               if reason == "unreadable" else reason)
+                # not the reason word itself.
+                item.detail = outcome.get("detail") or reason_str
             db.session.commit()
         except OSError as e:
             # R2-1: a folder that became unreadable between discover() and

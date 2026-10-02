@@ -51,9 +51,14 @@ def test_recording_summary_shape(app, seeded_ids):
     # artwork's primary image, or null. "share_override" briefly joined it
     # the same day (Studio Records spec v1) and was reversed later that day:
     # a studio recording shares like any other, no per-recording switch.
+    # "title" joined this set in the Studio Records v1 contract build --
+    # an album's name, None for a live show (see the field's own docstring).
+    # "mb_label"/"mb_catalog_number" joined 2026-10-01 for the Albums list's
+    # release column (null for anything without a matched release).
     assert set(s.keys()) == {"id", "source", "quality", "listening_quality",
                              "is_favorite", "is_complete",
-                             "is_official", "kind",
+                             "is_official", "kind", "title",
+                             "mb_label", "mb_catalog_number",
                              "track_count", "duration_sec",
                              "created_at", "image_url"}
 
@@ -1495,6 +1500,39 @@ def test_genre_delete_guarded_while_referenced(api, seeded_ids):
 def test_genre_delete_when_unreferenced(api):
     g = api.post("/api/genres/", json={"name": "Unreferenced Genre"}).get_json()
     assert api.delete(f"/api/genres/{g['id']}").status_code == 200
+
+
+def test_genre_page_orders_year_only_rows_last(api):
+    """GET /api/genres/<id> ordered Performance.start_year DESC.nullsfirst(),
+    which put a studio record's year-only Performance (start_year set, but
+    no venue/month at all is fine -- the bug was about start_year itself
+    being NULL) or a truly dateless Performance ahead of every real date in
+    the same descending list. Fixed to nullslast() (share.py mirrors it)."""
+    from app.models.genre import Genre
+    from app.models.recording import Recording
+
+    g = Genre(name="Nulls Last Test Genre")
+    _db.session.add(g)
+    _db.session.flush()
+    artist = Artist(name="Nulls Last Test Act", genre_id=g.id)
+    _db.session.add(artist)
+    _db.session.flush()
+
+    dated_perf = Performance(artist_id=artist.id, start_year=2000, start_month=1, start_day=1)
+    dateless_perf = Performance(artist_id=artist.id)  # no start_year at all
+    _db.session.add_all([dated_perf, dateless_perf])
+    _db.session.flush()
+    _db.session.add(Recording(performance_id=dated_perf.id, is_complete=True,
+                              folder_path="Nulls Last Test Act/live", kind="live"))
+    _db.session.add(Recording(performance_id=dateless_perf.id, is_complete=True,
+                              folder_path="Nulls Last Test Act/album", kind="studio",
+                              title="Undated"))
+    _db.session.commit()
+
+    body = api.get(f"/api/genres/{g.id}").get_json()
+    artist_row = body["artists"][0]
+    years = [r["start_year"] for r in artist_row["recordings"]]
+    assert years == [2000, None],         f"expected the dated recording before the year-only one, got {years}"
 
 
 def test_artist_genre_nullable_and_defaults_null(api, seeded_ids):

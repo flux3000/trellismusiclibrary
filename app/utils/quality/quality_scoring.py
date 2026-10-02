@@ -5,7 +5,7 @@ A PURE FUNCTION over the raw features produced by quality_features.py. No audio
 decode happens here, which is the point: retuning any curve or weight below is a
 fast re-score pass over stored feature values.
 
-Spec: Context Library/Recording Quality Score — v2 Build Brief (HANDOFF).md
+Spec: Context Library/2026-07-27 - Recording Quality Score — v2 Build Brief (HANDOFF).md
 
 ──────────────────────────────────────────────────────────────────────────────
 WHAT THIS IS FOR

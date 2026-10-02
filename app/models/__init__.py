@@ -24,3 +24,4 @@ from .play_log import PlayLog
 from .quality import QualityAnalysis, RecordingQuality
 from .node_setting import NodeSetting
 from .bulk_ingest import BulkIngestRun, BulkIngestItem
+from .download_job import DownloadJob

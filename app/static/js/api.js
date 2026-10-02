@@ -353,6 +353,9 @@ const API = (() => {
     // ── Recordings ───────────────────────────────────────────────────────────
     recordings: {
       get:        (id)       => get(`/api/recordings/${id}`),
+      // Sidebar Albums entry + Browse/Top Shelf's kind split (Studio
+      // Records spec v1) -- counts of live vs studio recordings.
+      kindCounts: ()          => get('/api/recordings/kind-counts'),
       // Two independent opt-ins, both off by default so the List view's flat
       // table request is unchanged (see app/utils/serialize.py):
       //   `waveform` — downsampled peak strip. Nothing requests it since the
@@ -504,6 +507,10 @@ const API = (() => {
     // ── Ingest ───────────────────────────────────────────────────────────────
     ingest: {
       confirm:       (data)  => post('/api/ingest/confirm', data),
+      // Batch Import's auto-ingest (spec section 4) -- one POST of the source
+      // path; the resolver does the rest server-side. Same job/poll shape as
+      // confirm -- poll with confirmStatus, same as confirm's job id.
+      autoConfirm:   (path)   => post('/api/ingest/auto-confirm', { path }),
       confirmStatus: (jobId) => get(`/api/ingest/confirm/${jobId}`),
       // Cooperative cancel. The worker stops between files, undoes its own
       // filesystem work and rolls back its uncommitted DB session. Recordings
@@ -579,6 +586,40 @@ const API = (() => {
         if (page)   params.push(`page=${encodeURIComponent(page)}`)
         return get(`/api/bulk-ingest/${runId}/items${params.length ? `?${params.join('&')}` : ''}`)
       },
+    },
+
+    // ── Archive Downloads (spec "Archive Downloads v1", section 6) ─────────
+    // Browse a source's catalog, queue shows for download, list what landed
+    // in the Downloads folder. Admin-only; none of these paths are in
+    // REMOTE_CAPABLE, so a joined library never rewrites them.
+    archive: {
+      lma: {
+        recent: (page, sort) => {
+          const p = new URLSearchParams()
+          if (page) p.set('page', page)
+          if (sort) p.set('sort', sort)
+          return get(`/api/archive/lma/recent?${p.toString()}`)
+        },
+        search: (q, page, sort) => {
+          const p = new URLSearchParams()
+          p.set('q', q || '')
+          if (page) p.set('page', page)
+          if (sort) p.set('sort', sort)
+          return get(`/api/archive/lma/search?${p.toString()}`)
+        },
+        item: (id) => get(`/api/archive/lma/item/${encodeURIComponent(id)}`),
+      },
+    },
+    downloads: {
+      queue:      ()            => get('/api/downloads/queue'),
+      enqueue:    (source, id)  => post('/api/downloads/queue', { source, id }),
+      cancel:     (jobId)       => post(`/api/downloads/queue/${jobId}/cancel`, {}),
+      retry:      (jobId)       => post(`/api/downloads/queue/${jobId}/retry`, {}),
+      remove:     (jobId)       => request('DELETE', `/api/downloads/queue/${jobId}`),
+      reorder:    (order)       => post('/api/downloads/queue/reorder', { order }),
+      pause:      ()            => post('/api/downloads/queue/pause', {}),
+      resume:     ()            => post('/api/downloads/queue/resume', {}),
+      folder:     (which)       => get('/api/downloads/folder' + (which ? `?which=${encodeURIComponent(which)}` : '')),
     },
   }
 })()

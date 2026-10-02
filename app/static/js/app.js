@@ -441,6 +441,52 @@ const App = (() => {
     return iso ? iso.slice(0, 10) : ''
   }
 
+  // Studio vs live naming layer (Studio Records spec v1, chunk 5 — Ryan
+  // approved). Every render helper that decides how to label a recording row
+  // routes through this instead of assuming a live show's date/venue/source.
+  // Live (kind !== 'studio', including missing kind) returns exactly what
+  // every call site already computed before this helper existed, so nothing
+  // about live rendering changes. Studio never carries a venue, location or
+  // source -- `lead`/`sub`/`dateText` are the only three fields a studio row
+  // ever needs.
+  function recIdentity(r) {
+    const isStudio = !!(r && r.kind === 'studio')
+    if (!isStudio) {
+      return {
+        lead:     (r && r.artist) || '',
+        sub:      (r && r.venue) || '',
+        dateText: r ? fmtDate(r.start_year, r.start_month, r.start_day) : '',
+        isStudio: false,
+      }
+    }
+    const hasTitle = !!(r.title)
+    return {
+      lead:     r.title || r.artist || '',
+      sub:      hasTitle ? (r.artist || '') : '',
+      dateText: r.start_year ? String(r.start_year) : '',
+      isStudio: true,
+    }
+  }
+
+  // Date comparator shared by every list that sorts recordings/performances
+  // chronologically. A dateless studio row (no start_year at all) sorts by
+  // year like everything else, and lands LAST whichever direction is asked
+  // for -- `desc` reverses real dates, never where the nulls go.
+  function compareByDate(a, b, desc) {
+    const ay = a && a.start_year, by = b && b.start_year
+    if (ay == null && by == null) return 0
+    if (ay == null) return 1
+    if (by == null) return -1
+    // A year-only row (no month at all -- every studio row) compares by year
+    // alone: falling to month/day with a missing one defaulted to 0 would
+    // sort it as January against a real date in the same year.
+    let cmp = ay - by
+    if (cmp === 0 && a.start_month != null && b.start_month != null) {
+      cmp = (a.start_month - b.start_month) || ((a.start_day || 0) - (b.start_day || 0))
+    }
+    return desc ? -cmp : cmp
+  }
+
   function sourceBadge(source) {
     if (!source) return ''
     const cls = ['SBD','AUD','MTX','FM'].includes(source) ? `badge-${source}` : 'badge-src'
@@ -555,6 +601,11 @@ const App = (() => {
     'library':      '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
     'search':       '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
     'clock':        '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+    // Left nav Albums entry (Studio Records spec v1, chunk 7). No 'album'
+    // glyph exists in the set actually vendored into this file; Lucide
+    // 'disc' is the closest match (a record) and reads at the same weight
+    // as the library/search/clock icons beside it -- copied verbatim.
+    'disc':         '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>',
     'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
     'rotate-cw':    '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
     'play':         '<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>',
@@ -567,6 +618,18 @@ const App = (() => {
     'chevron-left':  '<path d="m15 18-6-6 6-6"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down':  '<path d="m6 9 6 6 6-6"/>',
+    // Archive Downloads (2026-10-01): the sidebar's Downloads
+    // link, and the drag handle on the queue's Up next rows. Lucide 'download'
+    // and 'grip-vertical', copied verbatim from lucide-static. 'ticket' is
+    // Live Recordings' icon (a concert).
+    'ticket':       '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>',
+    'landmark':     '<path d=\"M10 18v-7\"/><path d=\"M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z\"/><path d=\"M14 18v-7\"/><path d=\"M18 18v-7\"/><path d=\"M3 22h18\"/><path d=\"M6 18v-7\"/>',
+    // Reserved for the Bluegrass Archive entry (Ryan, 2026-10-01).
+    'guitar':       '<path d=\"m11.9 12.1 4.514-4.514\"/><path d=\"M20.1 2.3a1 1 0 0 0-1.4 0l-1.114 1.114A2 2 0 0 0 17 4.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 17.828 7h1.344a2 2 0 0 0 1.414-.586L21.7 5.3a1 1 0 0 0 0-1.4z\"/><path d=\"m6 16 2 2\"/><path d=\"M8.23 9.85A3 3 0 0 1 11 8a5 5 0 0 1 5 5 3 3 0 0 1-1.85 2.77l-.92.38A2 2 0 0 0 12 18a4 4 0 0 1-4 4 6 6 0 0 1-6-6 4 4 0 0 1 4-4 2 2 0 0 0 1.85-1.23z\"/>',
+    'wrench':       '<path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"/>',
+    'archive':      '<rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\"/><path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\"/><path d=\"M10 12h4\"/>',
+    'download':     '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+    'grip-vertical': '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
   }
 
   // `fill` is for the one genuine filled/outline pair we have: a favourited
@@ -614,207 +677,6 @@ const App = (() => {
   // between the two can silently miss a match on any accented folder name
   // (the "Guitar Trio" bug, 2026-07-28). Normalise both sides before comparing.
   const nfc = s => (s || '').normalize('NFC')
-
-  // Title-case a string: capitalize each word, lowercase the rest.
-  // Keeps short connective words lowercase unless they're the first word.
-  const _lcWords = new Set(['a','an','the','and','but','or','for','nor','on','at',
-                             'to','by','in','of','up','as','is','with','vs','feat'])
-  function titleCase(s) {
-    if (!s) return s
-    return s.split(' ').map((w, i) => {
-      if (!w) return w
-      const lo = w.toLowerCase()
-      // Words can start with punctuation ("(Bill", "\"Song", "-Encore") — find
-      // the first actual letter to capitalize instead of blindly upper-casing
-      // index 0, which no-ops on the punctuation and leaves the real first
-      // letter (and everything else) lowercase. Minor-word lowering only
-      // applies to the plain no-punctuation case, same as before.
-      const m = lo.match(/[a-z]/)
-      if (!m) return lo
-      const idx = m.index
-      if (idx === 0 && i !== 0 && _lcWords.has(lo)) return lo
-      return lo.slice(0, idx) + lo.charAt(idx).toUpperCase() + lo.slice(idx + 1)
-    }).join(' ')
-  }
-
-  // ── Track flag auto-detection ─────────────────────────────────────────────
-  // JS port of app/utils/ingest.py::detect_track_flags — kept deliberately
-  // conservative. Words like "talk"/"speak"/"crowd" also show up in real
-  // song titles ("Don't Talk", "Speak Low"), so ambiguous flags only fire on
-  // a whole-segment match, never a loose substring. These are suggestions
-  // pre-checked in the ingest wizard for the archivist to approve or remove
-  // — never applied silently.
-  const _FLAG_START_TRUNC = /^\s*\/\//
-  const _FLAG_END_TRUNC   = /\/\/\s*$/
-  const _FLAG_INCOMPLETE  = /\(\s*x\s*\)\s*$/i
-  const _FLAG_TRAILING_PAREN = /^(.*?)\s*\([^)]*\)\s*$/
-  const _FLAG_SEGMENT_SPLIT  = /\s*(?:,|\/|&|\band\b)\s*/i
-  // Whole-segment thesaurus — mirrors _FLAG_SEGMENT_SYNONYMS in
-  // app/utils/ingest.py::detect_track_flags exactly. Adding a synonym here
-  // MUST be added there too, or the two engines disagree.
-  const _FLAG_SEGMENT_SYNONYMS = {
-    tuning:       ['tuning'],
-    banter:       ['banter', 'dialogue', 'chatter', 'crosstalk'],
-    audience:     ['audience', 'crowd'],
-    band_intros:  ['band intro', 'band introduction'],
-    introduction: ['intro', 'introduction'],
-  }
-  function _segmentPattern(words) {
-    const alts = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')
-    return new RegExp(`^(?:${alts})s?\\.?$`, 'i')
-  }
-  const _FLAG_SEGMENT_PATTERNS = Object.entries(_FLAG_SEGMENT_SYNONYMS)
-    .map(([key, words]) => [key, _segmentPattern(words)])
-  const _FLAG_WORD_PATTERNS = [
-    ['announcement', /\bannouncements?\b/i],
-    ['interview',    /\binterviews?\b/i],
-  ]
-
-  // ── The ONE track builder ────────────────────────────────────────────────
-  //
-  // Every path that posts to /api/ingest/confirm builds its track list here:
-  // the triage page's Ingest button and bulk queue (ingestOne), Batch Import's
-  // auto-ingest (_batchIngestOne), and the Add Recording wizard
-  // (renderIngestReview). There were three copies of this logic and they had
-  // drifted badly (Ryan, 2026-08-28: "ensure parity ... no matter if it happens
-  // from a bulk run or from a single addition"):
-  //
-  //   * the two AUTO paths never called detectTrackFlags at all, so every
-  //     recording ingested without opening the wizard arrived with zero track
-  //     flags — and since Quick Add became the default, that is nearly
-  //     everything. The Skip Filter, which reads those flags, was doing nothing
-  //     for recent material;
-  //   * the two AUTO paths were not set-aware, so a multi-disc source could
-  //     produce two tracks numbered 1. That collision was found and fixed for
-  //     the wizard on 2026-07-14 and never ported;
-  //   * only the wizard title-cased, so the same folder produced differently
-  //     capitalised titles depending on which button was pressed.
-  //
-  // Returns the array the confirm endpoint expects. Pure: no DOM, no state, no
-  // network, so the three callers cannot diverge again without editing this.
-  function buildIngestTracks(scan) {
-    const tags  = scan?.suggestions?.from_tags || {}
-    const info  = scan?.suggestions?.from_info_file || {}
-    const files = scan?.audio_files || []
-    const tagTracks  = tags.tracks || []
-    const infoTracks = info.tracks || []
-
-    // Info-file titles are keyed by their printed track NUMBER, which lines up
-    // with the scan's 1-based index.
-    const infoMap = {}
-    infoTracks.forEach(t => { infoMap[t.number] = t.title })
-
-    // Songwriter credits the parser split out of a title's trailing
-    // "(Composer Name)" (Ryan, 2026-08-30) — keyed the same way, and offered
-    // as a fallback regardless of which source wins the TITLE, since the
-    // credit only ever comes from the info file's text either way.
-    const infoSongwriterMap = {}
-    infoTracks.forEach(t => { if (t.songwriter) infoSongwriterMap[t.number] = t.songwriter })
-
-    // rel_path, not bare filename: a multi-disc source has a "01.flac" per
-    // disc and the bare name collides.
-    const setByRelPath = {}
-    const discByRelPath = {}
-    files.forEach(af => {
-      if (af.set_number && af.rel_path) setByRelPath[af.rel_path] = af.set_number
-      if (af.rel_path && (af.disc_number != null || af.disc_track_number != null)) {
-        discByRelPath[af.rel_path] = {
-          disc_number:       af.disc_number,
-          disc_track_number: af.disc_track_number,
-        }
-      }
-    })
-    const setsDetected = !!scan?.sets_detected
-
-    const mk = (title, relPath, trackNumber, duration, setNumber, songwriter) => {
-      const disc = discByRelPath[relPath] || {}
-      return {
-        track_number: trackNumber,
-        title,
-        songwriter:   songwriter || null,
-        set_number:   setNumber || null,
-        disc_number:       disc.disc_number != null ? disc.disc_number : null,
-        disc_track_number: disc.disc_track_number != null ? disc.disc_track_number : null,
-        duration:     duration || null,
-        filename:     relPath,
-        // Suggestions, not assertions. The wizard shows them as pills to approve
-        // or remove; the auto paths accept them as-is, which is the same bargain
-        // the auto paths already make with every other extracted field.
-        flags:        detectTrackFlags(title),
-      }
-    }
-
-    // Preferred: one entry per tagged audio file.
-    if (tagTracks.length) {
-      return tagTracks.map(t => {
-        const relPath = t.rel_path || t.filename
-        return mk(
-          titleCase(t.title || infoMap[t.index]) || `Track ${t.index}`,
-          relPath,
-          // Multi-disc sources reset TRACKNUMBER per disc, so the tag is only
-          // trustworthy when there is a single set. The scan index is already
-          // continuous across discs in the right order.
-          (!setsDetected && t.track_number) ? parseInt(t.track_number) : t.index,
-          t.duration,
-          setByRelPath[relPath],
-          infoSongwriterMap[t.index])
-      })
-    }
-
-    // Nothing tagged: fall back to the info file's listing, positionally.
-    if (infoTracks.length) {
-      return infoTracks.map(t => {
-        const f = files[t.number - 1] || {}
-        const relPath = f.rel_path || f.filename || ''
-        return mk(titleCase(t.title) || `Track ${t.number}`,
-                  relPath, t.number, null, setByRelPath[relPath], t.songwriter)
-      })
-    }
-
-    // Neither source has anything to say — describe the files themselves
-    // rather than posting an empty track list.
-    return files.map((f, idx) => {
-      const relPath = f.rel_path || f.filename || ''
-      return mk(`Track ${idx + 1}`, relPath, idx + 1, null, f.set_number)
-    })
-  }
-
-  function detectTrackFlags(title) {
-    if (!title) return []
-    const flags = new Set()
-    const raw = title.trim()
-
-    if (_FLAG_START_TRUNC.test(raw)) flags.add('start_truncated')
-    if (_FLAG_END_TRUNC.test(raw))   flags.add('end_truncated')
-    if (_FLAG_INCOMPLETE.test(raw))  flags.add('incomplete')
-
-    // One trailing parenthetical is stripped as an attribution ("(Bobby)").
-    // ⚠ Unless that leaves NOTHING: "(Chatter)", "(Introduction)",
-    // "(Cox Family Intro)" are titles that are ENTIRELY a parenthetical, and
-    // the strip reduced them to "" so nothing could match. 9 of 53 missed
-    // non-music tracks across 1,499 real titles were this one case.
-    // Mirrors detect_track_flags in app/utils/ingest.py — change both.
-    const parenMatch = raw.match(_FLAG_TRAILING_PAREN)
-    let base = parenMatch ? parenMatch[1].trim() : raw
-    if (parenMatch && !base) {
-      const inner = raw.match(/^\s*\((.*)\)\s*$/)
-      base = inner ? inner[1].trim() : raw
-    }
-
-    base.split(_FLAG_SEGMENT_SPLIT).forEach(segment => {
-      segment = segment.trim()
-      if (!segment) return
-      _FLAG_SEGMENT_PATTERNS.forEach(([key, pattern]) => {
-        if (pattern.test(segment)) flags.add(key)
-      })
-    })
-
-    _FLAG_WORD_PATTERNS.forEach(([key, pattern]) => {
-      if (pattern.test(base)) flags.add(key)
-    })
-
-    return [...flags].sort()
-  }
 
   // ── Who may edit, and are they asking to? ────────────────────────────────
   //
@@ -1359,7 +1221,9 @@ const App = (() => {
   function setActiveNav(active) {
     state._activeNav = active
     const nav = document.getElementById('sidebar-nav')
-    if (nav) nav.querySelectorAll('[data-nav]').forEach(el =>
+    // The shelf heading shares data-nav="library" with Live Recordings but is
+    // a heading, not a page: it never lights up (Ryan, 2026-10-01).
+    if (nav) nav.querySelectorAll('[data-nav]:not(.nav-shelf-head)').forEach(el =>
       el.classList.toggle('active', el.dataset.nav === active))
   }
 
@@ -1627,7 +1491,11 @@ const App = (() => {
   // the recording in Favorites"). Both payloads come back with card=True, so
   // both carry image_id and the photo path works in both places.
   function navRecRowHtml(r, extraCls) {
-    const full = esc([r.artist, r.date, r.venue].filter(Boolean).join(' · '))
+    // Studio: lead with the title (falling back to the artist), artist
+    // second, year last -- never the venue this row would otherwise show.
+    const id = recIdentity(r)
+    const full = esc((id.isStudio ? [id.lead, id.sub, id.dateText] : [r.artist, r.date, r.venue])
+      .filter(Boolean).join(' · '))
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
     const avatar = r.image_id
@@ -1952,9 +1820,39 @@ const App = (() => {
     document.documentElement.classList.toggle('peer-mode', libraryState.activeId != null)
   }
 
+  // Bumped at the top of every renderSidebar() call so the async
+  // kindCounts().then below can tell whether it is still the newest one in
+  // flight -- a slow response landing after a later renderSidebar (or after
+  // the active library changed) must not touch a sidebar it no longer owns.
+  let _sidebarRenderSeq = 0
+
+  // OTHER ARCHIVES: the Live Music Archive (admin only) and one entry per
+  // library joined through an invite, which any role may browse. A peer entry
+  // switches library exactly as the header selector does (switchLibrary).
+  // All entries carry the icon Live Recordings had before it became a ticket.
+  function _otherArchivesHtml() {
+    const lma = _dlAllowed()
+      ? `<a class="nav-item" data-nav="archive-lma" href="#/archive/lma">${icon('landmark', 'nav-ic')}Live Music Archive</a>`
+      : ''
+    const peers = (libraryState.remotes || []).map(r =>
+      `<a class="nav-item${libraryState.activeId === r.id ? ' active' : ''}" href="#/" data-lib-switch="${r.id}">${icon('library', 'nav-ic')}<span class="truncate">${esc(r.display_name)}</span></a>`).join('')
+    // Two sections (Ryan, 2026-10-01): public archives, then libraries this
+    // user is a peer of. Each header shows only when it has entries.
+    const head = t => `<div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">${t}</div>`
+    return (lma ? `
+        ${head('Archives')}
+        ${lma}` : '') + (peers ? `
+        ${head('Other Libraries')}
+        ${peers}` : '')
+  }
+
   async function renderSidebar() {
     const nav = document.getElementById('sidebar-nav')
     if (!nav) return
+    // Workshop/Backlog entries depend on which working folders are set.
+    if (!appPrefs) await getPrefs()
+    const _mySidebarSeq = ++_sidebarRenderSeq
+    const _mySidebarLib = libraryState.activeId
     _dimCache.venues = _dimCache.artists = _dimCache.musicians =
       _dimCache.collections = _dimCache.genres = _dimCache.events = null
 
@@ -2042,9 +1940,12 @@ const App = (() => {
         ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings</a>` : ''}
         ${bulkIngestActive ? `<a class="nav-item" data-nav="bulk-ingest" href="#/bulk-ingest">Adding recordings</a>` : ''}
         <a class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate" data-nav="library" href="${homeHashUrl}">${esc(shelfTitle)}</a>
-        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('library', 'nav-ic')}Browse</a>
+        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('library', 'nav-ic')}Live Recordings</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
         <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
+        ${_dlAllowed() ? `<a class="nav-item" data-nav="downloads" href="#/downloads">${icon('download', 'nav-ic')}Downloads<span class="nav-record-count nav-dl-count" data-dl-count>${DL.folderCount || ''}</span></a>` : ''}
+        ${_dlAllowed() && triageDests().includes('workshop') ? `<a class="nav-item" data-nav="workshop" href="#/workshop">${icon('wrench', 'nav-ic')}Workshop</a>` : ''}
+        ${_dlAllowed() && triageDests().includes('backlog') ? `<a class="nav-item" data-nav="backlog" href="#/backlog">${icon('archive', 'nav-ic')}Backlog</a>` : ''}
         <!-- Collections was the ONE section with no actions on its header
              (Ryan, 2026-09-03) — every dimension in .nav-dims-foot has had a
              "+" and a refresh since the sidebar was built, and this one was
@@ -2052,7 +1953,7 @@ const App = (() => {
              Same two controls, same order, same icons; the header itself
              stays static (it does not expand, so it has no caret). -->
         <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced nav-shelf-head--acts">
-          <span class="nav-dim-label truncate">Collections</span>
+          <span class="nav-dim-label truncate">My Collections</span>
           <span class="nav-dim-actions">
             ${canEditLibrary() ? `<span class="nav-action" data-col-new data-admin
                      title="Create new collection">${icon('plus')}</span>` : ''}
@@ -2060,6 +1961,7 @@ const App = (() => {
           </span>
         </div>
         <div class="nav-records" id="nav-records-collections"></div>
+        ${_otherArchivesHtml()}
         <div class="nav-favorites" id="nav-favorites-flat"></div>
       </div>
       <div class="nav-dims-foot">
@@ -2095,6 +1997,11 @@ const App = (() => {
         else createInDim(dimEl.dataset.dim)
       })
     })
+    nav.querySelectorAll('[data-lib-switch]').forEach(el =>
+      el.addEventListener('click', e => {
+        e.preventDefault()
+        switchLibrary(Number(el.dataset.libSwitch))
+      }))
     nav.querySelector('[data-col-new]')?.addEventListener('click', e => {
       e.stopPropagation(); createInDim('collections')
     })
@@ -2118,6 +2025,26 @@ const App = (() => {
     // stores — resolved in _renderFavoritesFlat, not here.
     _renderFavoritesFlat()
     setActiveNav(state._activeNav)
+    _dlSidebarSync()
+
+    // Albums nav entry (Studio Records spec v1, chunk 7) — present only
+    // when the visible set holds at least one studio record (a peer's own
+    // visible set too: 'recordings' is REMOTE_CAPABLE). Fetched after the
+    // rest of the sidebar has already painted so a slow call never blocks
+    // it; inserted in place once it resolves, and re-fetched every time the
+    // sidebar itself refreshes since this whole function is that refresh.
+    API.recordings.kindCounts().then(counts => {
+      if (_mySidebarSeq !== _sidebarRenderSeq || libraryState.activeId !== _mySidebarLib) return
+      if (!nav.isConnected || !counts || !counts.studio) return
+      if (nav.querySelector('[data-nav="albums"]')) return
+      // Directly under Live Recordings (Ryan, 2026-10-01): Live Recordings,
+      // Albums, Search, Recently Added.
+      const liveLink = nav.querySelector('a.nav-item[data-nav="library"]:not(.nav-shelf-head)')
+      if (!liveLink) return
+      liveLink.insertAdjacentHTML('afterend',
+        `<a class="nav-item" data-nav="albums" href="#/albums">${icon('disc', 'nav-ic')}Albums</a>`)
+      setActiveNav(state._activeNav)
+    }).catch(() => {})
   }
 
   // Back-compat alias — call sites still say loadArtistList().
@@ -2125,9 +2052,15 @@ const App = (() => {
 
   // ── Shared compact recording row (one line, all show info) ───────────────────
   function flatRowHtml(r, showArtist, hasThumbs) {
-    const date    = fmtDate(r.start_year, r.start_month, r.start_day)
-    const loc     = fmtLocation(r.city, r.state, r.country)
-    const quality = r.quality || ''
+    const id      = recIdentity(r)
+    // Studio: date cell is the year (or blank), the venue cell carries the
+    // title instead (falling back to the artist when there is no title),
+    // and location/source/quality stay empty -- a studio release has none
+    // of those (Studio Records spec v1, chunk 5).
+    const date    = id.isStudio ? id.dateText : fmtDate(r.start_year, r.start_month, r.start_day)
+    const loc     = id.isStudio ? '' : fmtLocation(r.city, r.state, r.country)
+    const quality = id.isStudio ? '' : (r.quality || '')
+    const venueText = id.isStudio ? id.lead : (r.venue || '(unknown venue)')
     const runtime = fmtRuntime(r.duration_sec)
     const inc     = r.is_complete ? '' : '<span class="rec-inc" title="Incomplete recording">inc</span>'
     // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
@@ -2142,10 +2075,10 @@ const App = (() => {
         ${hasThumbs ? thumb : ''}
         ${showArtist ? `<span class="rec-artist-cell truncate">${esc(r.artist || '')}</span>` : ''}
         <span class="rec-date truncate">${esc(date)}</span>
-        <span class="rec-venue truncate">${esc(r.venue || '(unknown venue)')}</span>
+        <span class="rec-venue truncate">${esc(venueText)}</span>
         <span class="rec-location truncate">${esc(loc)}</span>
-        <span>${sourceBadge(r.source)}</span>
-        <span class="quality ${qualityClass(quality)}">${esc(quality)}</span>
+        <span>${id.isStudio ? '' : sourceBadge(r.source)}</span>
+        <span class="quality ${id.isStudio ? '' : qualityClass(quality)}">${esc(quality)}</span>
         <span class="rec-runtime">${runtime}</span>
         <span class="rec-tracks">${r.track_count}t${inc ? ' ' + inc : ''}</span>
         <span class="rec-date-added">${esc(fmtDateAdded(r.created_at))}</span>
@@ -3125,10 +3058,20 @@ const App = (() => {
         const acts = await API.peers.activity(p.id)
         const box = document.getElementById('peer-activity')
         if (box) {
+          // A studio row has no venue/date, so it needs recIdentity's own
+          // title/artist/year shape rather than the live [artist, date] line.
+          const activityLine = a => {
+            if (a.kind === 'studio') {
+              const id = recIdentity({ kind: 'studio', title: a.title, artist: a.artist,
+                                        start_year: a.date ? parseInt(a.date, 10) : null })
+              return [id.lead, id.sub, id.dateText].filter(Boolean).join(' · ')
+            }
+            return [a.artist, a.date].filter(Boolean).join(' · ')
+          }
           box.innerHTML = acts.length
             ? `<div>${acts.slice(0, 12).map(a => `
                 <div class="peer-act">
-                  <span class="truncate">${esc([a.artist, a.date].filter(Boolean).join(' · ') || a.track_title || 'track')}</span>
+                  <span class="truncate">${esc(activityLine(a) || a.track_title || 'track')}</span>
                   <span class="peer-act-when">${esc(fmtDateAdded(a.occurred_at))}</span>
                 </div>`).join('')}</div>`
             : `<div class="peer-empty">Nothing streamed yet.</div>`
@@ -3543,13 +3486,22 @@ const App = (() => {
         const have = new Set(rows.map(r => r.id))
         drop.innerHTML = items.map(it => {
           const inSet = have.has(it.id)
-          const line2 = [it.date, it.venue, [it.city, it.state].filter(Boolean).join(', ')]
-            .filter(Boolean).join(' · ')
+          let mainHtml
+          if (it.type === 'album') {
+            // Albums have no date/venue — lead with title (falling back to
+            // artist), sub-line is artist · year (year alone with no title).
+            const id = recIdentity({ kind: 'studio', title: it.title, artist: it.artist, start_year: it.year })
+            const sub2 = [id.sub, id.dateText].filter(Boolean).join(' · ')
+            mainHtml = `<span class="col-add-perf">${esc(id.lead)}</span>
+              ${sub2 ? `<span class="col-add-sub">${esc(sub2)}</span>` : ''}`
+          } else {
+            const line2 = [it.date, it.venue, [it.city, it.state].filter(Boolean).join(', ')]
+              .filter(Boolean).join(' · ')
+            mainHtml = `<span class="col-add-perf">${esc(it.artist || '(unknown)')}</span>
+              ${line2 ? `<span class="col-add-sub">${esc(line2)}</span>` : ''}`
+          }
           return `<div class="col-add-row${inSet ? ' is-in' : ''}" data-add="${it.id}" ${inSet ? 'data-in="1"' : ''}>
-            <span class="col-add-main">
-              <span class="col-add-perf">${esc(it.artist || '(unknown)')}</span>
-              ${line2 ? `<span class="col-add-sub">${esc(line2)}</span>` : ''}
-            </span>
+            <span class="col-add-main">${mainHtml}</span>
             <span class="col-add-act">${inSet ? 'Added' : 'Add'}</span>
           </div>`
         }).join('')
@@ -3596,9 +3548,13 @@ const App = (() => {
         debounce = setTimeout(async () => {
           lastQuery = text
           try {
-            const res = await API.search.group(text, 'recordings', 12, 0)
+            const [recRes, albRes] = await Promise.all([
+              API.search.group(text, 'recordings', 12, 0),
+              API.search.group(text, 'albums', 12, 0),
+            ])
             if (lastQuery !== text) return      // a later keystroke already won
-            paint(res.items || [], res.total || 0)
+            paint([...(recRes.items || []), ...(albRes.items || [])],
+                  (recRes.total || 0) + (albRes.total || 0))
           } catch (_) { close() }
         }, 220)
       })
@@ -3634,10 +3590,7 @@ const App = (() => {
 
     // One <section> per artist (alpha), each with a header + flat recording rows.
     const groupsHtml = perfRecs.map(g => {
-      const ordered = g.performances.slice().sort((x, y) =>
-        (x.start_year || 0) - (y.start_year || 0) ||
-        (x.start_month || 0) - (y.start_month || 0) ||
-        (x.start_day || 0) - (y.start_day || 0))
+      const ordered = g.performances.slice().sort((x, y) => compareByDate(x, y, false))
       const rowObjs = ordered.flatMap(p =>
         p.recordings.map(r => ({
           id: r.id, artist: p.artist_name,
@@ -3646,6 +3599,7 @@ const App = (() => {
           source: r.source, quality: r.quality,
           is_complete: r.is_complete,
           track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
+          kind: r.kind, title: r.title,
         })))
       const hasThumbs = rowObjs.some(r => r.image_url)
       const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
@@ -3673,10 +3627,7 @@ const App = (() => {
     const totalGuestRecordings = guestAppearances.reduce((n, g) => n + (g.recordings || []).length, 0)
 
     const guestGroupsHtml = Object.values(guestByArtist).map(g => {
-      const ordered = g.appearances.slice().sort((x, y) =>
-        (x.start_year || 0) - (y.start_year || 0) ||
-        (x.start_month || 0) - (y.start_month || 0) ||
-        (x.start_day || 0) - (y.start_day || 0))
+      const ordered = g.appearances.slice().sort((x, y) => compareByDate(x, y, false))
       const rowObjs = ordered.flatMap(ap =>
         (ap.recordings || []).map(r => ({
           id: r.id, artist: g.artist_name,
@@ -3685,6 +3636,7 @@ const App = (() => {
           source: r.source, quality: r.quality,
           is_complete: r.is_complete,
           track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
+          kind: r.kind, title: r.title,
         })))
       const hasThumbs = rowObjs.some(r => r.image_url)
       const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
@@ -3926,6 +3878,20 @@ const App = (() => {
     return foot
   }
 
+  // Studio footer variant: track count and runtime only -- a studio record
+  // has no source or quality grade (product rule), so recCardFootParts'
+  // source/quality bits would either read blank or, worse, leak a value the
+  // model still carries from before it was marked studio.
+  function recCardFootPartsStudio(r) {
+    const foot = []
+    if (r.track_count) {
+      foot.push(`<span>${r.track_count} track${r.track_count === 1 ? '' : 's'}</span>`)
+    }
+    const runtime = fmtRuntime(r.duration_sec)
+    if (runtime) foot.push(`<span>${esc(runtime)}</span>`)
+    return foot
+  }
+
   // ── Handbill card — RECOMMENDED MODULE ONLY (Ryan, 2026-08-07) ─────────────
   //
   // Replaced the waveform strip: waveform-led cards are what the Internet
@@ -3942,7 +3908,33 @@ const App = (() => {
   // Colour comes from the artist's GENRE, not the source — source is a
   // technical attribute and makes a poor identity, whereas genre groups the
   // library the way a listener actually browses it.
+  // Studio variant: cover-led (Ryan, Studio Records spec v1 chunk 5 --
+  // "for an album the cover is what the date is for a show"). The cover
+  // photo takes the date line's spot when there is one; the title always
+  // takes the date line's strong typographic slot, artist below it, year
+  // where the venue line was. Never a venue, location or source line.
+  function _studioRecCardHtml(r, id) {
+    const cover = r.image_url
+      ? `<img class="rec-card-cover" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : ''
+    const foot = recCardFootPartsStudio(r)
+    return `
+      <a class="rec-card rec-card--studio" href="#/recording/${r.id}" data-rec-id="${r.id}"
+         style="--genre-fg:${esc(genreColor(r))}">
+        <div class="rec-card-spine"></div>
+        ${cover}
+        <div class="rec-card-date">${esc(id.lead)}</div>
+        <div class="rec-card-rule"></div>
+        ${id.sub ? `<div class="rec-card-artist">${esc(id.sub)}</div>
+        <div class="rec-card-rule"></div>` : ''}
+        <div class="rec-card-venue">${esc(id.dateText)}</div>
+        <div class="rec-card-foot">${foot.join('<span class="rec-card-dot">·</span>')}</div>
+      </a>`
+  }
+
   function recCardHtml(r) {
+    const id = recIdentity(r)
+    if (id.isStudio) return _studioRecCardHtml(r, id)
     const date = handbillDate(r.start_year, r.start_month, r.start_day)
     const loc  = fmtLocation(r.city, r.state, r.country)
     const foot = recCardFootParts(r)
@@ -3973,12 +3965,49 @@ const App = (() => {
   // The ingest date is the point of this module — "what's new" is the question
   // being answered, and the show date (1969) says nothing about that. The
   // server orders by created_at DESC; this does not re-sort.
+  // Recently Added row (2026-10-01): the Live Recordings / Albums row grid,
+  // one layout for both kinds. Image, Artist, Date, then venue + place or
+  // the album title, then source or release, tracks/length, date added.
+  function _recentRowHtml(r) {
+    const id = recIdentity(r)
+    const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const av = r.image_url
+      ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : r.image_id
+        ? `<img class="brow-av brow-av--img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
+        : `<span class="brow-av">${esc(initials)}</span>`
+    const dateText = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
+    const main = id.isStudio
+      ? `<span class="brow-title">${esc(r.title || '')}</span>`
+      : `<span class="brow-venue">${esc([r.venue || '(unknown venue)', fmtLocation(r.city, r.state, r.country)].filter(Boolean).join(', '))}</span>`
+    const info = id.isStudio
+      ? `<span class="brow-release">${esc([r.mb_label, r.mb_catalog_number].filter(Boolean).join(' · '))}</span>`
+      : `<span class="brow-srccell">${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}</span>`
+    return `
+      <a class="brow brow--recent" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(genreColor(r))}">
+        ${av}
+        <span class="brow-perf">${esc(r.artist || '')}</span>
+        <span class="brow-date">${esc(dateText)}</span>
+        ${main}
+        ${info}
+        <span class="brow-size">${esc(_rowSizeText(r))}</span>
+        <span class="brow-date brow-added">${esc(fmtDateAdded(r.created_at) || '—')}</span>
+      </a>`
+  }
+
   function recentRowCardHtml(r) {
-    const date = handbillDate(r.start_year, r.start_month, r.start_day)
+    const id = recIdentity(r)
+    // Studio: the row already leads with an "artist" line, so it leads with
+    // the title instead and puts the artist second (falling back to the
+    // artist alone when there is no title) -- never a venue line.
+    const date = id.isStudio ? (id.dateText || '') : handbillDate(r.start_year, r.start_month, r.start_day)
     const loc  = fmtLocation(r.city, r.state, r.country)
-    const foot = recCardFootParts(r)
+    const foot = id.isStudio ? recCardFootPartsStudio(r) : recCardFootParts(r)
     const photo = perfPhotoHtml(r, 'rec-rowcard-photo')
     const venue = [r.venue || '(unknown venue)', loc].filter(Boolean).join(' · ')
+    const mainLead = id.isStudio ? id.lead : (r.artist || '')
+    const mainSub  = id.isStudio ? id.sub  : venue
     return `
       <a class="rec-rowcard" href="#/recording/${r.id}" data-rec-id="${r.id}"
          style="--genre-fg:${esc(genreColor(r))}">
@@ -3986,8 +4015,8 @@ const App = (() => {
         <div class="rec-rowcard-avatar">${photo}</div>
         <div class="rec-rowcard-date">${esc(date || '—')}</div>
         <div class="rec-rowcard-main">
-          <div class="rec-rowcard-artist truncate">${esc(r.artist || '')}</div>
-          <div class="rec-rowcard-venue truncate">${esc(venue)}</div>
+          <div class="rec-rowcard-artist truncate">${esc(mainLead)}</div>
+          <div class="rec-rowcard-venue truncate">${esc(mainSub)}</div>
         </div>
         <div class="rec-rowcard-meta">${foot.join('<span class="rec-card-dot">·</span>')}</div>
         <div class="rec-rowcard-added">
@@ -4410,20 +4439,26 @@ const App = (() => {
       if (f.source === '__other') return !!r.source && rare.has(r.source)
       return r.source === f.source
     })
-    const byDate = (a, b) =>
-      (a.start_year || 0) - (b.start_year || 0) ||
-      (a.start_month || 0) - (b.start_month || 0) ||
-      (a.start_day || 0) - (b.start_day || 0)
+    // Nulls-last regardless of direction (compareByDate) — a dateless
+    // studio row never jumps to the front of "Newest".
     if (_browseSort === 'az')      out = out.slice().sort((a, b) =>
-      (a.artist || '').localeCompare(b.artist || '') || byDate(a, b))
-    if (_browseSort === 'newest')  out = out.slice().sort((a, b) => byDate(b, a))
-    if (_browseSort === 'oldest')  out = out.slice().sort(byDate)
+      (a.artist || '').localeCompare(b.artist || '') || compareByDate(a, b, false))
+    if (_browseSort === 'newest')  out = out.slice().sort((a, b) => compareByDate(a, b, true))
+    if (_browseSort === 'oldest')  out = out.slice().sort((a, b) => compareByDate(a, b, false))
     if (_browseSort === 'added')   out = out.slice().sort((a, b) =>
       String(b.created_at || '').localeCompare(String(a.created_at || '')))
     return out
   }
 
+  // "20 tracks · 72 min" -- one wording for every row list (2026-10-01).
+  function _rowSizeText(r) {
+    const n = r.track_count || 0
+    const mins = r.duration_sec ? Math.round(r.duration_sec / 60) : 0
+    return [n ? `${n} track${n === 1 ? '' : 's'}` : '', mins ? `${mins} min` : ''].filter(Boolean).join(' · ')
+  }
+
   function _browseRowHtml(r) {
+    const id = recIdentity(r)
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
     const loc = fmtLocation(r.city, r.state, r.country)
@@ -4433,23 +4468,31 @@ const App = (() => {
     // NORMAL case for the rest, so it stays exactly as it was rather than
     // becoming a broken-image placeholder. `image_id` rides on the artist
     // in /api/artists/all-recordings, added the same day.
-    const av = r.image_id
-      ? `<img class="brow-av brow-av--img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
-      : `<span class="brow-av">${esc(initials)}</span>`
-    // Source and grade are their own CELLS now, always emitted even when
-    // empty. They used to share one auto-width `.brow-tail`, so a row WITH a
-    // letter grade was wider than a row without one and dragged every column
-    // left of it out of line (Ryan, 2026-09-02). A reserved cell cannot do
-    // that whatever it holds.
+    // Recording image first, then the artist photo, then initials
+    // (Ryan, 2026-10-01: the square is the recording's image).
+    const av = r.image_url
+      ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : r.image_id
+        ? `<img class="brow-av brow-av--img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
+        : `<span class="brow-av">${esc(initials)}</span>`
+    // Column order (Ryan, 2026-10-01): Image, Artist, Date, Venue, Location
+    // left; Rating, Source right. Genre spine removed. Source and rating
+    // are reserved cells, always emitted even when empty, so a graded row
+    // is never wider than an ungraded one (2026-09-02).
+    // Studio: the venue cell carries the title, location stays empty.
+    const dateText  = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
+    const venueText = id.isStudio ? id.lead : (r.venue || '(unknown venue)')
+    const locText   = id.isStudio ? '' : loc
     return `
       <a class="brow" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
-        <span class="brow-spine"></span>
         ${av}
-        <span class="brow-date">${esc(handbillDate(r.start_year, r.start_month, r.start_day) || '—')}</span>
         <span class="brow-perf">${esc(r.artist || '')}</span>
-        <span class="brow-venue">${esc([r.venue, loc].filter(Boolean).join(', ') || '(unknown venue)')}</span>
-        <span class="brow-srccell">${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}</span>
-        <span class="brow-grade">${r.quality ? esc(r.quality) : ''}</span>
+        <span class="brow-date">${esc(dateText)}</span>
+        <span class="brow-venue">${esc(venueText)}</span>
+        <span class="brow-loc">${esc(locText)}</span>
+        <span class="brow-size">${esc(_rowSizeText(r))}</span>
+        <span class="brow-grade">${id.isStudio ? '' : (r.quality ? esc(r.quality) : '')}</span>
+        <span class="brow-srccell">${id.isStudio ? '' : (r.source ? `<span class="brow-src">${esc(r.source)}</span>` : '')}</span>
       </a>`
   }
 
@@ -4669,7 +4712,12 @@ const App = (() => {
   // panel below it — the image is the whole tile now, and the scrim exists
   // purely for legibility (dark gradient works over both a photo and a
   // genre-colour field, light or saturated).
+  // The Top Shelf draws from live recordings only (server-side filter), so
+  // this stays live-shaped -- routed through recIdentity anyway so a stray
+  // studio row (a bad fetch, a future relaxation of that filter) never shows
+  // a venue or "undefined" rather than just quietly showing less.
   function _topTileHtml(r) {
+    const id = recIdentity(r)
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
     const c = r.genre_color || 'var(--bg-4)'
@@ -4680,17 +4728,43 @@ const App = (() => {
       <a class="top-tile" href="#/recording/${r.id}" style="--genre-fg:${esc(c)}">
         <span class="top-art">${art}</span>
         <span class="top-overlay">
-          <span class="top-perf">${esc(r.artist || '')}</span>
-          ${r.venue ? `<span class="top-venue">${esc(r.venue)}</span>` : ''}
+          <span class="top-perf">${esc(id.isStudio ? id.lead : (r.artist || ''))}</span>
+          ${(!id.isStudio && r.venue) ? `<span class="top-venue">${esc(r.venue)}</span>` : ''}
           <span class="top-meta">${[
-            handbillDate(r.start_year, r.start_month, r.start_day) || '',
+            id.isStudio ? id.dateText : (handbillDate(r.start_year, r.start_month, r.start_day) || ''),
             // Source between the date and the grade (Ryan, 2026-09-02). On a
             // shelf of A/A+ shows the grade barely separates them; SBD vs AUD
             // is the thing that actually decides whether you pull the record
             // out of the bin.
-            r.source || '',
-            r.quality || '',
+            id.isStudio ? '' : (r.source || ''),
+            id.isStudio ? '' : (r.quality || ''),
           ].filter(Boolean).map(esc).join(' · ')}</span>
+        </span>
+      </a>`
+  }
+
+  // Album tile (Studio Records spec v1, section 7) -- the Top Shelf's own
+  // art/overlay treatment reused for the Albums page grid and the Artist
+  // page's Albums strip (`.album-tile` in main.css sizes it for each of
+  // those two layouts; `.top-tile`/`.top-art`/`.top-overlay` do everything
+  // else, unchanged). Initials come from the TITLE, not the artist -- an
+  // album is named by its title everywhere (spec, principle 2) -- falling
+  // back to the artist's initials only when a studio record has no title.
+  function _albumTileHtml(r) {
+    const id = recIdentity(r)
+    const initials = String(id.lead || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const c = r.genre_color || 'var(--bg-4)'
+    const art = r.image_url
+      ? `<img class="top-img" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : `<span class="top-initials">${esc(initials)}</span>`
+    return `
+      <a class="top-tile album-tile" href="#/recording/${r.id}" style="--genre-fg:${esc(c)}">
+        <span class="top-art">${art}</span>
+        <span class="top-overlay">
+          <span class="top-perf">${esc(id.lead)}</span>
+          ${id.sub ? `<span class="top-venue">${esc(id.sub)}</span>` : ''}
+          <span class="top-meta">${esc(id.dateText)}</span>
         </span>
       </a>`
   }
@@ -4703,6 +4777,31 @@ const App = (() => {
         <span class="col-card-n">${esc(c.name)}</span>
         <span class="col-card-c">${c.recording_count || 0} recording${c.recording_count === 1 ? '' : 's'}</span>
       </a>`
+  }
+
+  // Flatten /api/artists/all-recordings to one row per recording — shared by
+  // Browse (live-only) and the Albums page (studio-only), so both read the
+  // exact same shape off the exact same fetch (Studio Records spec v1,
+  // section 9: "no new endpoint"). Already ordered by artist (backend) then
+  // chronologically old→new; genre/genre_color ride on the ARTIST (one genre
+  // per act) and colour the spine as well as driving the genre filters.
+  function _flattenLibraryRows(allArtists) {
+    return allArtists.flatMap(artist =>
+      artist.performances.flatMap(p =>
+        p.recordings.map(r => ({
+          id: r.id, artist: artist.artist_name, artist_id: artist.artist_id,
+          genre: artist.genre, genre_color: artist.genre_color,
+          image_id: artist.image_id,
+          start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
+          venue: p.venue_name, city: p.city, state: p.state, country: p.country,
+          source: r.source, quality: r.quality,
+          is_complete: r.is_complete,
+          track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
+          kind: r.kind, title: r.title, image_url: r.image_url,
+          mb_label: r.mb_label, mb_catalog_number: r.mb_catalog_number,
+        }))
+      )
+    )
   }
 
   async function renderLibraryView() {
@@ -4720,13 +4819,33 @@ const App = (() => {
       return
     }
 
+    // Browse is live-only (Studio Records spec v1, section 7): its filters,
+    // sorts and grade logic only make sense for a show. Studio rows still
+    // ride along in the fetch — they just never reach renderBrowseModules.
+    const allRows   = _flattenLibraryRows(allArtists)
+    const rows      = allRows.filter(r => r.kind !== 'studio')
+    const hasStudio = allRows.some(r => r.kind === 'studio')
+
     // Zero recordings: two lines and nothing else (Ryan, testing feedback).
     // Hidden the instant a recording exists, and never shown while a Bulk
     // Ingest run is in flight -- that has its own page at #/bulk-ingest, and
     // showing this underneath it would read as two contradictory states.
+    // A library with albums but no live recordings routes to Albums instead
+    // (Studio Records spec v1, section 7) — Browse's own message is about
+    // importing music, which would be wrong for a collector whose ingest
+    // already worked.
     const bulkIngestInFlight = state.bulkIngest
       && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
-    if (!allArtists.length && !bulkIngestInFlight) {
+    if (!rows.length && !bulkIngestInFlight) {
+      if (hasStudio) {
+        // Same reasoning as route()'s admin bounce: this redirect is not a
+        // real navigation the user asked for, so it must not push a
+        // history/nav-stack entry, or Back would loop between the two.
+        _navMoving  = false
+        _navReplace = true
+        window.location.hash = '#/albums'
+        return
+      }
       setMainHTML(`
         <div class="empty-state">
           <div class="empty-title">Click Add Recordings to begin importing music into your library.</div>
@@ -4742,28 +4861,10 @@ const App = (() => {
     const headerHtml = `
       <div class="artist-header">
         <div class="artist-header-row">
-          <h1>Browse My Library</h1>
+          <h1>Browse Live Recordings</h1>
         </div>
       </div>`
 
-    // Flatten to one row per recording — artist + date + venue on every line,
-    // already ordered by artist (backend) then chronologically old→new.
-    // genre/genre_color ride on the ARTIST (one genre per act) and colour
-    // the spine as well as driving Browse's genre filter.
-    const rows = allArtists.flatMap(artist =>
-      artist.performances.flatMap(p =>
-        p.recordings.map(r => ({
-          id: r.id, artist: artist.artist_name,
-          genre: artist.genre, genre_color: artist.genre_color,
-          image_id: artist.image_id,
-          start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
-          venue: p.venue_name, city: p.city, state: p.state, country: p.country,
-          source: r.source, quality: r.quality,
-          is_complete: r.is_complete,
-          track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
-        }))
-      )
-    )
     setMainHTML(`<div id="lib-topshelf"></div>${headerHtml}`
               + `<div class="lib-modules" id="lib-modules-mount"></div>`)
     await renderBrowseModules(document.getElementById('lib-modules-mount'), rows)
@@ -4807,7 +4908,7 @@ const App = (() => {
     // except a longer list of recently added recordings. Same class of bug as
     // the Collection view's.
     setMainHTML(`${headerHtml}
-      <div class="rec-rowcard-list" id="recent-rowcards"></div>
+      <div class="brows" id="recent-rowcards"></div>
       <div class="recent-more" id="recent-more"></div>`)
 
     // Endless scroll (Ryan, 2026-08-23) — was a hardcoded 50 with a
@@ -4816,7 +4917,14 @@ const App = (() => {
     // returns a short page, which is how we know we have reached the end.
     const listEl = document.getElementById('recent-rowcards')
     const moreEl = document.getElementById('recent-more')
-    listEl.innerHTML = rows.map(recentRowCardHtml).join('')
+    listEl.innerHTML = rows.map(_recentRowHtml).join('')
+    // Right-click to file into a collection, as the old row cards had.
+    listEl.addEventListener('contextmenu', e => {
+      const el = e.target.closest('[data-rec-id]')
+      if (!el) return
+      e.preventDefault()
+      openAddToCollectionMenu(parseInt(el.dataset.recId), e.clientX, e.clientY)
+    })
 
     let loading = false, done = rows.length < RECENT_INITIAL
     moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
@@ -4833,7 +4941,7 @@ const App = (() => {
         loading = false
         return
       }
-      listEl.insertAdjacentHTML('beforeend', next.map(recentRowCardHtml).join(''))
+      listEl.insertAdjacentHTML('beforeend', next.map(_recentRowHtml).join(''))
       // A short page means the end. Checking the RETURNED count rather than
       // a total avoids a second endpoint and cannot disagree with it.
       done = next.length < RECENT_PAGE
@@ -4855,6 +4963,115 @@ const App = (() => {
       io.observe(sentinel)
     }
     observe()
+  }
+
+  /** Albums page (Studio Records spec v1, section 7) — a grid of studio
+   *  recordings, reached from the nav only when at least one exists. Built
+   *  client-side off the same /api/artists/all-recordings fetch Browse uses
+   *  (no new endpoint) — _flattenLibraryRows() is the shared shape. */
+  async function renderAlbumsView() {
+    setActiveNav('albums')
+    setActiveArtist(null)
+    state.selectedArtist = null
+    setNavCurrent('Albums')
+    setLoading()
+
+    let allArtists
+    try {
+      allArtists = await API.artists.allRecordings()
+    } catch (e) {
+      setMainHTML(`<div class="empty-state"><div class="empty-title">Failed to load library</div></div>`)
+      return
+    }
+
+    const rows = _flattenLibraryRows(allArtists).filter(r => r.kind === 'studio')
+
+    const headerHtml = `
+      <div class="artist-header">
+        <div class="artist-header-row">
+          <h1>Albums</h1>
+        </div>
+      </div>`
+
+    const { genres } = _browseFilterOptions(rows)
+    const opt = (v, label) => `<option value="${esc(v)}">${esc(label)}</option>`
+
+    // Same bar and row grid as Live Recordings, minus Quality and Source
+    // (Ryan, 2026-10-01). A-Z is artist then year: the discography order the
+    // backend already returns, so it needs no re-sort.
+    setMainHTML(`${headerHtml}
+      <div class="browse-bar">
+        <div class="browse-sorts" id="albums-sorts">
+          <button class="sortb on" data-sort="az">A–Z</button>
+          <button class="sortb" data-sort="newest">Newest</button>
+          <button class="sortb" data-sort="oldest">Oldest</button>
+          <button class="sortb" data-sort="added">Recently added</button>
+        </div>
+        <div class="browse-filters">
+          <label class="bfilter">Genre
+            <select id="albums-genre">
+              ${opt('any', 'Any')}
+              ${genres.map(([v]) => opt(v, v)).join('')}
+            </select>
+          </label>
+          <button type="button" class="bfilter-clear" id="albums-clear">Clear</button>
+        </div>
+        <span class="browse-count" id="albums-count"></span>
+      </div>
+      <div class="brows" id="albums-rows"></div>`)
+
+    let sort = 'az', genreFilter = 'any'
+    function draw() {
+      let out = rows.filter(r => genreFilter === 'any' || r.genre === genreFilter)
+      if (sort === 'newest') out = out.slice().sort((a, b) => compareByDate(a, b, true))
+      if (sort === 'oldest') out = out.slice().sort((a, b) => compareByDate(a, b, false))
+      if (sort === 'added')  out = out.slice().sort((a, b) =>
+        String(b.created_at || '').localeCompare(String(a.created_at || '')))
+      document.getElementById('albums-count').textContent = `${out.length} of ${rows.length} albums`
+      const list = document.getElementById('albums-rows')
+      list.innerHTML = out.length
+        ? out.map(_albumRowHtml).join('')
+        : `<div class="empty-state" style="min-height:120px"><div class="empty-title">Nothing matches these filters</div></div>`
+    }
+    draw()
+
+    document.querySelectorAll('#albums-sorts .sortb').forEach(b =>
+      b.addEventListener('click', () => {
+        sort = b.dataset.sort
+        document.querySelectorAll('#albums-sorts .sortb').forEach(x => x.classList.toggle('on', x === b))
+        draw()
+      }))
+    const genreSel = document.getElementById('albums-genre')
+    genreSel?.addEventListener('change', e => { genreFilter = e.target.value; draw() })
+    document.getElementById('albums-clear')?.addEventListener('click', () => {
+      genreFilter = 'any'
+      if (genreSel) genreSel.value = 'any'
+      draw()
+    })
+  }
+
+  // Album row (2026-10-01): the Live Recordings grid with album facts in the
+  // live slots. Image, Artist, Year, Title, then "N tracks · N min", then the
+  // release (label · catalog number) when MusicBrainz knows it.
+  function _albumRowHtml(r) {
+    const id = recIdentity(r)
+    const initials = String(id.lead || '?').split(/\s+/).filter(Boolean).slice(0, 2)
+      .map(w => w[0]).join('').toUpperCase()
+    const c = r.genre_color || 'var(--t2)'
+    const av = r.image_url
+      ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : `<span class="brow-av">${esc(initials)}</span>`
+    const size = _rowSizeText(r)
+    const release = [r.mb_label, r.mb_catalog_number].filter(Boolean).join(' · ')
+    return `
+      <a class="brow brow--album" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
+        ${av}
+        <span class="brow-perf">${esc(r.artist || '')}</span>
+        <span class="brow-date">${esc(id.dateText || '—')}</span>
+        <span class="brow-title">${esc(r.title || '')}</span>
+        <span class="brow-size">${esc(size)}</span>
+        <span class="brow-release">${esc(release)}</span>
+      </a>`
   }
 
   /** Artist page — editable info + member Musicians + recording catalog. */
@@ -4894,13 +5111,11 @@ const App = (() => {
     let expandedMemberId = null   // which member's stint editor drawer is open, if any
 
     const withRecs = performances.filter(p => (p.recordings || []).length > 0)
-    const totalRecordings = withRecs.reduce((n, p) => n + p.recordings.length, 0)
 
     // Flat one row per recording, oldest→newest. No year headers (one artist).
-    const ordered = withRecs.slice().sort((a, b) =>
-      (a.start_year || 0) - (b.start_year || 0) ||
-      (a.start_month || 0) - (b.start_month || 0) ||
-      (a.start_day || 0) - (b.start_day || 0))
+    // Nulls-last (compareByDate): a dateless studio row goes at the end
+    // rather than sorting to the front alongside "no date at all" = 0.
+    const ordered = withRecs.slice().sort((a, b) => compareByDate(a, b, false))
     const perfRows = ordered.flatMap(p =>
       p.recordings.map(r => ({
         id: r.id, artist: p.artist_name,
@@ -4909,9 +5124,19 @@ const App = (() => {
         source: r.source, quality: r.quality,
         is_complete: r.is_complete,
         track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
+        kind: r.kind, title: r.title, image_url: r.image_url,
+        genre: artist.genre ? artist.genre.name : null,
+        genre_color: artist.genre ? artist.genre.color : null,
       }))
     )
     const rowsHtml = perfRows.map(r => flatRowHtml(r, false)).join('')
+
+    // Live vs studio (Studio Records spec v1, section 7): the Recordings tab
+    // stays live-only; the hero stat and the Albums strip read the split.
+    const liveRows        = perfRows.filter(r => r.kind !== 'studio')
+    const studioRows      = perfRows.filter(r => r.kind === 'studio')
+    const totalRecordings = liveRows.length
+    const studioCount     = studioRows.length
 
     const descText = artist.bio && artist.bio.trim()
 
@@ -4923,9 +5148,16 @@ const App = (() => {
     // dates happen to be filled in, so an act with one undated show would
     // advertise a range that contradicts the recordings listed right below it.
     // The derivations for all three are gone rather than left computed-unused.
-    const stats = [
-      [totalRecordings, totalRecordings === 1 ? 'Recording' : 'Recordings'],
-    ]
+    // Album count joins it (Studio Records spec v1, section 7) only when the
+    // act has any — most acts don't, and a stat that always read "0 Albums"
+    // would be worse than not being there.
+    // An albums-only act (no live recordings at all) shows only the Albums
+    // stat -- a "0 Recordings" reading next to it would misdescribe a
+    // library that in fact has music, just none of it live.
+    const stats = (totalRecordings === 0 && studioCount)
+      ? []
+      : [[totalRecordings, totalRecordings === 1 ? 'Recording' : 'Recordings']]
+    if (studioCount) stats.push([studioCount, studioCount === 1 ? 'Album' : 'Albums'])
 
     // MusicBrainz one-liner: type · origin · active years, whichever exist.
     const mbBits = [
@@ -4956,7 +5188,17 @@ const App = (() => {
       // Overview led with Members and a Description that is empty on most acts.
       tabs: [
         { id: 'recordings', label: 'Recordings', count: totalRecordings, active: true,
-          html: recordingsPaneHtml(perfRows, { mountId: 'rec-table-artist' }) },
+          // Albums strip above the live list (Studio Records spec v1,
+          // section 7) — release order (year ascending, nulls last), only
+          // when the act has any. When an act has ONLY albums the live list
+          // is skipped entirely rather than printing its own empty state
+          // (spec, section 7: "no empty-state text for the live list").
+          html: (studioCount ? `
+            <div class="pp-sec">Albums</div>
+            <div class="albums-strip">${studioRows.slice().sort((a, b) => compareByDate(a, b, false)).map(_albumTileHtml).join('')}</div>` : '')
+            + (liveRows.length || !studioCount
+                ? recordingsPaneHtml(liveRows, { mountId: 'rec-table-artist' })
+                : '') },
         { id: 'about',      label: 'About', html: `
             <!-- Members first (Ryan, 2026-08-07): who the act IS comes before
                  prose about it, and Description is empty on most artists so
@@ -5026,7 +5268,7 @@ const App = (() => {
     wireEntityShell(mainContent, navBack)
 
     wireRecordingRows(mainContent)
-    if (perfRows.length) wireDateAddedSort(document.getElementById('rec-table-artist'), perfRows, false)
+    if (liveRows.length) wireDateAddedSort(document.getElementById('rec-table-artist'), liveRows, false)
 
     const refreshSidebar = () => { _dimCache.artists = null; if (state.expandedDims.has('artists')) _renderDimRecords('artists') }
 
@@ -6111,6 +6353,38 @@ const App = (() => {
       <div class="cksum-rows">${rows}</div>`
   }
 
+  // ── Resolver pane — where the sources disagreed at ingest ────────────────────
+  // One builder for View Recording (rec.resolver_json) and Add Recording
+  // (ingest.scan.resolved); both are the resolver's to_dict() shape. Returns
+  // '' when no field has a conflict, and the caller then renders no tab at all.
+  const _RESOLVER_SOURCE_LABEL = { tags: 'Tags', info: 'Info file', folder: 'Folder' }
+
+  function _resolverValueText(v) {
+    if (v && typeof v === 'object') {
+      const p2 = n => String(n).padStart(2, '0')
+      return [v.year, v.month ? p2(v.month) : null, v.day ? p2(v.day) : null]
+        .filter(x => x != null).join('-')
+    }
+    return String(v)
+  }
+
+  function buildResolverPaneHtml(resolved) {
+    if (!resolved) return ''
+    return Object.keys(_INGEST_FIELD_LABEL).filter(k => resolved[k]?.conflict).map(k => {
+      const f = resolved[k]
+      const label = _INGEST_FIELD_LABEL[k]
+      const rows = Object.keys(_RESOLVER_SOURCE_LABEL)
+        .filter(s => f.candidates && f.candidates[s] != null)
+        .map(s => {
+          const src = esc(_RESOLVER_SOURCE_LABEL[s])
+          const val = esc(_resolverValueText(f.candidates[s]))
+          const used = s === f.source
+          return `<div class="cksum-row"><span class="cksum-status resolver-src">${used ? `<strong>${src}</strong>` : src}</span><span class="cksum-title">${used ? `<strong>${val}</strong>` : val}</span></div>`
+        }).join('')
+      return `<div class="cksum-summary">${esc(label.charAt(0).toUpperCase() + label.slice(1))}</div><div class="cksum-rows">${rows}</div>`
+    }).join('')
+  }
+
   // ── Shared AI Assist results template — Add Recording + View Recording ────────
   // One HTML builder for both surfaces so they stay visually/structurally in
   // sync as the feature evolves; each caller wires its own Apply behavior
@@ -6407,7 +6681,6 @@ const App = (() => {
 
   /** Recording detail — split panel: tracks + info file */
   async function renderRecordingView(recordingId) {
-    setActiveNav('library')
     setLoading()
     state.currentRecId      = recordingId
     state._lastTrackCount   = null   // reset until rec loads
@@ -6416,6 +6689,9 @@ const App = (() => {
     try {
       rec = await API.recordings.get(recordingId)
       state._lastTrackCount = rec.tracks?.length ?? null
+      // A studio record lives under Albums, not Live Recordings (2026-10-01).
+      // Set after the fetch so the wrong item never flashes while loading.
+      setActiveNav(rec.kind === 'studio' ? 'albums' : 'library')
     } catch (e) {
       setMainHTML(`<div class="empty-state"><div class="empty-title">Recording not found</div></div>`)
       return
@@ -6497,6 +6773,7 @@ const App = (() => {
     // Grouping is markup only: it never touches Player or playback order,
     // which follows the continuous track_number as it always has.
     const canEdit  = canEditLibrary()
+    const resolverPaneHtml = buildResolverPaneHtml(rec.resolver_json)
     const editHint = canEdit ? ' title="Click title to rename · right-click for flags"' : ''
     // Set cell is content for everyone (the label always renders) and a
     // click-to-edit control only for admins -- makeInlineEditable() itself
@@ -6641,16 +6918,18 @@ const App = (() => {
           <span class="mg-row-label">Discs</span>
           <span class="hm-val">${esc(String(rec.disc_count))}</span>
         </div>` : ''
+    // Rating (the letter-grade chip) is a live-show judgement — Ryan does not
+    // grade studio releases, so it never appears in a studio Provenance Row.
     const rowIsEmpty = isStudioKind
-      ? (!qEditable && !rec.quality && !showReleaseBlock)
+      ? (!showReleaseBlock)
       : (!qEditable && !rec.source && !rec.lineage && !rec.quality
          && !rec.source_tag && !rec.etree_shnid)
     const sourceLineageRow = rowIsEmpty ? '' : `
       <div class="rec-sl-row">
-        <div class="rec-sl-item rec-sl-item--quality">
+        ${!isStudioKind ? `<div class="rec-sl-item rec-sl-item--quality">
           <span class="mg-row-label">Rating</span>
           <span class="hm-val hm-val--chip${qc}"${qa('quality')}><span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '\u2014')}</span></span>
-        </div>
+        </div>` : ''}
         ${!isStudioKind ? `<div class="rec-sl-item">
           <span class="mg-row-label">Source</span>
           <span class="hm-val hm-val--chip${qc}"${qa('source')}>${sourceBadge(rec.source) || '\u2014'}</span>
@@ -6721,7 +7000,7 @@ const App = (() => {
             <button class="actions-item" role="menuitem" data-act="official">${
               rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>
             <button class="actions-item" role="menuitem" data-act="kind">${
-              rec.kind === 'studio' ? 'Mark as Live Recording' : 'Mark as Studio Record'}</button>
+              rec.kind === 'studio' ? 'Mark as Live Recording' : 'Mark as Album'}</button>
             <!-- Move to — same two destinations as the triage queue's Move,
                  deliberately: Workshop and Backlog are the two real folders a
                  show goes back to, and having a different vocabulary before
@@ -6945,6 +7224,7 @@ const App = (() => {
                  from every other tab. -->
             <button class="slide-tab${stagedCount > 0 ? ' slide-tab--staged' : ''}" data-pane="filetags">File Tags</button>
             <button class="slide-tab" data-pane="checksums">Checksums</button>
+            ${resolverPaneHtml ? `<button class="slide-tab" data-pane="resolver">Resolver</button>` : ''}
             ${canEdit ? `<button class="slide-tab slide-tab--ai" data-pane="ai">AI Assist</button>` : ''}
           </div>
 
@@ -7008,6 +7288,12 @@ const App = (() => {
             <div class="slide-pane" id="sp-checksums">
               <div class="slide-pane-scroll" id="sp-checksums-body">${buildChecksumsPaneHtml(rec.tracks)}</div>
             </div>
+
+            ${resolverPaneHtml ? `
+            <!-- Resolver pane — ingest provenance; content, not an editing control -->
+            <div class="slide-pane" id="sp-resolver">
+              <div class="slide-pane-scroll">${resolverPaneHtml}</div>
+            </div>` : ''}
 
             ${canEdit ? `
             <!-- AI Assist pane. The execute button lives in the tab strip with
@@ -8273,6 +8559,9 @@ const App = (() => {
           const nextKind = rec.kind === 'studio' ? 'live' : 'studio'
           try { await API.recordings.update(recordingId, { kind: nextKind, change_note: 'Quick edit' }) }
           catch (e) { alert('Failed: ' + e.message) }
+          // The Albums nav entry and its kind-counts depend on this -- refresh
+          // the sidebar the same way other kind-affecting actions do.
+          loadArtistList()
           return renderRecordingView(recordingId)
         }
         if (act === 'move-toggle') {
@@ -8355,7 +8644,8 @@ const App = (() => {
       // recPanelOpen persists a deliberate collapse across recordings: someone
       // who put Details away is listening, not auditing, and should not have to
       // dismiss it again on every show. Undefined (first visit) means open.
-      const startPane = (state.recLastPane && state.recLastPane !== 'spectrogram')
+      const startPane = (state.recLastPane && state.recLastPane !== 'spectrogram'
+                         && document.getElementById(`sp-${state.recLastPane}`))
         ? state.recLastPane : 'info'
       if (state.recPanelOpen === false) closePanel()
       else openPane(startPane)
@@ -8644,9 +8934,13 @@ const App = (() => {
     const metaParts = [e.artist, dateStr, e.venue || loc].filter(Boolean).map(esc)
     const meta = metaParts.length ? metaParts.join('<span class="sep">·</span>') : ''
 
-    const reviewIssues = []
-    if (!e.artist) reviewIssues.push('No artist found')
-    if (!dateStr) reviewIssues.push('No date found')
+    // e.reasons is the resolver's own verdict() reasons (spec chunk 6) --
+    // batch_scan() computed these off the same resolve() call that produced
+    // every other `extracted` field, so this reads its answer rather than
+    // re-deriving "no artist"/"no date" (and now needs_month/needs_day/
+    // conflict:<field>/duplicate_content, which a purely artist/date check
+    // never covered) a second time in JS.
+    const reviewIssues = _ingestReasonLabels(e.reasons || [])
     const reviewReason = reviewIssues[0] || null
     const needsReview = !!reviewReason
 
@@ -8710,13 +9004,15 @@ const App = (() => {
 
     const iqRows = items.map(item => _batchBuildIqRow(item))
 
-    // Auto-Ingest All covers green + yellow — yellows are frequently good
-    // enough to trust (Ryan, 2026-07-16: "the user may be just fine with
-    // blank track titles"). Red stays manual — those are missing artist or
-    // date entirely, a real gap worth a human look before it lands in the
-    // library.
+    // Auto-Ingest All covers green only (Ingest Field Resolver spec v1,
+    // chunk 6): tier is now the resolver's own verdict -- green means
+    // auto_confirm() would actually ingest it, yellow means it needs review
+    // (a missing field or a conflict between sources) and would come back
+    // from POST /api/ingest/auto-confirm as status "review"/"skipped" rather
+    // than ingested. Yellow used to auto-ingest here too under the old
+    // heuristic tier; it no longer can without a human filling the gap.
     const autoIngestPending = items.filter(i =>
-      (i.tier === 'green' || i.tier === 'yellow') && !batch.ingestedIds.has(i.path))
+      i.tier === 'green' && !batch.ingestedIds.has(i.path))
 
     const tableBody = ingestQueueTable({
       rows: iqRows,
@@ -8744,7 +9040,7 @@ const App = (() => {
             ${nDone > 0 ? `<span class="batch-tier-pill batch-tier-done">${nDone} ingested</span>` : ''}
             ${autoIngestPending.length > 0
               ? `<button class="btn btn-primary btn-sm" id="batch-ingest-all-btn" style="margin-left:8px">
-                   ⇉ Auto-Ingest All Green + Yellow (${autoIngestPending.length})
+                   ⇉ Auto-Ingest All Green (${autoIngestPending.length})
                  </button>`
               : ''}
             <span class="batch-tier-pill batch-tier-total">${items.length} total</span>
@@ -8773,7 +9069,7 @@ const App = (() => {
     })
     _wireFhStrip('batch-fh-strip')
 
-    // Ingest All Green + Yellow — red stays manual (missing artist/date entirely).
+    // Ingest All Green — yellow (review/skipped) and red (failed) stay manual.
     document.getElementById('batch-review-toggle')?.addEventListener('click', () => {
       batch.reviewFilter = !batch.reviewFilter
       renderBatchResultsView()
@@ -8781,7 +9077,7 @@ const App = (() => {
     document.getElementById('batch-ingest-all-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('batch-ingest-all-btn')
       const pending = items.filter(i =>
-        (i.tier === 'green' || i.tier === 'yellow') && !batch.ingestedIds.has(i.path))
+        i.tier === 'green' && !batch.ingestedIds.has(i.path))
       if (!pending.length) return
       btn.disabled = true
 
@@ -8842,40 +9138,26 @@ const App = (() => {
     })
   }
 
-  // Direct ingest of a single item (green path — no wizard)
+  // Direct ingest of a single item (green path — no wizard).
+  //
+  // One POST to the resolver's own auto-confirm endpoint (spec section 4) --
+  // the client used to scan the folder and rebuild the whole confirm body
+  // itself (tracks, date, venue…), which is exactly the three-way-drift the
+  // resolver exists to end. Now it just posts the path and polls, same as
+  // /api/ingest/confirm, through the same job/poll pair (pollConfirmJob).
+  //
+  // Throws for anything but an "ingested" verdict -- review/skipped/failed --
+  // so the existing callers (the "Ingest All" loop and the queue table's
+  // onIngest) keep working unchanged: they already treat a rejected promise
+  // as this row's failure and show it as such.
   async function _batchIngestOne(item) {
-    const scan = await API.recordings.scan(item.path)
-    const e    = item.extracted
-
-    const tracks = buildIngestTracks(scan)
-
-    // /api/ingest/confirm returns a job id immediately — the actual copy + DB
-    // work runs in the background. Poll it to completion so we never report
-    // "ingested" (or silently do nothing) before the job has actually finished.
-    const { job_id } = await API.ingest.confirm({
-      source_folder_path: item.path,
-      artist_name:        e.artist,
-      start_year:         e.year,
-      start_month:        e.month,
-      start_day:          e.day,
-      venue_name:         e.venue   || null,
-      city:               e.city    || null,
-      state:              e.state   || null,
-      country:            e.country || null,
-      source:             e.source  || null,
-      lineage:            e.lineage || null,
-      // No form in this auto path (spec section 5) -- take the folder-name
-      // detection straight off the scan, same suggestion Add Recording's
-      // fields would have been seeded from.
-      source_tag:         scan.suggestions?.from_info_file?.source_tag  || null,
-      etree_shnid:        scan.suggestions?.from_info_file?.etree_shnid || null,
-      is_complete:        true,
-      info_file_content:  scan.info_file_content || null,
-      fingerprints:       scan.fingerprints || [],
-      tracks,
-    })
-    const result = await pollConfirmJob(job_id)
-    return result.recording_id
+    const { job_id } = await API.ingest.autoConfirm(item.path)
+    const outcome = await pollConfirmJob(job_id)
+    if (!outcome || outcome.status !== 'ingested') {
+      const labels = _ingestReasonLabels((outcome && outcome.reasons) || [])
+      throw new Error(labels.length ? labels.join(', ') : (outcome?.detail || outcome?.status || 'Needs review'))
+    }
+    return outcome.result.recording_id
   }
 
   // Open ingest wizard pre-scanned (yellow / red / manual green)
@@ -9085,6 +9367,22 @@ const App = (() => {
     // never resettable, whatever any other flag says.
     const resumable = ingest.step === 'triage' && lq.rows.length
                       && (lq.running || !lq.jobFinished)
+    // A folder handed over by the Downloads page's Ingest button (one-shot).
+    // Never over a run in flight.
+    const handoff = lq.running ? null : _ingestHandoffDir
+    _ingestHandoffDir = null
+    if (handoff) {
+      resetIngestState()
+      _lqReset()
+      setInPageBack(ingestStepBack)
+      setLoading()
+      startAnalysis(handoff, false, msg => {
+        if (!msg) return
+        renderIngestStep()
+        alert(msg)
+      })
+      return
+    }
     if (ingest._resume) {
       ingest._resume = false
     } else if (!resumable) {
@@ -9235,7 +9533,7 @@ const App = (() => {
     // "Flux Audio"; mirrors config.py's IMPORT_DIR default. Only a fallback —
     // getPrefs().import_dir wins whenever the backend actually has one.
     const defaultDir = (await getPrefs()).import_dir
-                       || '/Volumes/music/Trellis/Download'
+                       || '/Volumes/music/Trellis/Downloads'
 
     // No explanatory paragraph (Ryan, 2026-08-28). The page lists the folder
     // and offers a Browse button; a sentence telling you that a folder is a
@@ -9946,6 +10244,47 @@ const App = (() => {
     return parts.filter(p => p && p.n).map(p => `${p.n} ${p.label}`).join(' · ')
   }
 
+  // ── Resolver reason codes -> short review labels ───────────────────────────
+  // Ingest Field Resolver spec v1, chunk 6: verdict() (app/utils/resolve.py)
+  // can return several reason codes for one folder at once, so every surface
+  // that shows them -- Batch Import's extracted.reasons, Bulk Ingest's
+  // BulkIngestItem.reason (a single comma-joined column, split back apart
+  // the same way app/api/quality.py's _bulk_ingest_review_reasons does) --
+  // reads this one map rather than keeping its own copy of these strings.
+  const _INGEST_FIELD_LABEL = {
+    date: 'date', artist: 'artist', venue: 'venue', city: 'city',
+    state: 'state', country: 'country', source: 'source', lineage: 'lineage',
+    source_tag: 'source tag', shnid: 'shnid', album: 'album',
+  }
+  const _INGEST_REASON_LABEL = {
+    needs_artist:        'No artist found',
+    needs_date:          'No date found',
+    needs_month:         'Only the year is known',
+    needs_day:           'Year and month known, day missing',
+    unsupported_format:  'Unsupported format',
+    unreadable:          'Could not be read',
+    no_audio:            'No audio files',
+    // Shortest plain phrasing (Ryan should confirm wording): every track's
+    // fingerprint already belongs to one recording in the library -- this
+    // folder was never ingested a second time (spec section 9).
+    duplicate_content:   'Duplicate recording',
+  }
+  function _ingestReasonLabel(code) {
+    if (!code) return null
+    if (code.startsWith('conflict:')) {
+      const field = code.slice('conflict:'.length)
+      return `Sources disagree on ${_INGEST_FIELD_LABEL[field] || field}`
+    }
+    return _INGEST_REASON_LABEL[code] || null
+  }
+  // `codes` is an array (Batch Import's extracted.reasons) or a comma-joined
+  // string (BulkIngestItem.reason) -- either way, the labels that actually
+  // have text for their code, in order, nothing invented for an unknown one.
+  function _ingestReasonLabels(codes) {
+    const list = Array.isArray(codes) ? codes : String(codes || '').split(',')
+    return list.map(_ingestReasonLabel).filter(Boolean)
+  }
+
   // Header block shared by all three surfaces: title, one subtitle line
   // (plus an optional second small line while scoring/reasons continue),
   // the source-folder chip (+ optional mode select for Review & Ingest),
@@ -10033,7 +10372,7 @@ const App = (() => {
     const baseRows = [
       ['Artist', d.artist], ['Date', d.date], ['Venue', d.venue],
       ['Location', d.location], ['Source', d.source], ['Lineage', d.lineage],
-      ['Format', row.format], ['Type', row.kind === 'studio' ? 'Studio' : (row.kind ? 'Live' : null)],
+      ['Format', row.format], ['Type', row.kind === 'studio' ? 'Album' : (row.kind ? 'Live' : null)],
       ['Tracks', d.tracksText],
     ]
     const listingRow = d.trackListing ? `
@@ -10121,15 +10460,20 @@ const App = (() => {
       <div class="lq-brow ${cls}${row.status === 'pending' ? ' lq-brow--pending' : ''}${
            row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}">
         <span class="lq-brow-spine" style="background:${spineColour}"></span>
-        <div class="lq-brow-main">
-          <div class="iq-name-row">
-            <div class="lq-brow-name" title="${esc((row.detail && row.detail.path) || row.name)}">${esc(row.name)}</div>
-            ${_iqReviewChip(row)}
+        <div class="lq-brow-main${row.thumb ? ' iq-main--thumb' : ''}">
+          ${row.thumb ? (row.thumb.url
+            ? `<img class="brow-av brow-av--img iq-thumb" src="${esc(row.thumb.url)}" alt="" loading="lazy">`
+            : `<span class="brow-av iq-thumb">${esc(row.thumb.initials)}</span>`) : ''}
+          <div class="iq-main-text">
+            <div class="iq-name-row">
+              <div class="lq-brow-name" title="${esc((row.detail && row.detail.path) || row.name)}">${esc(row.name)}</div>
+              ${_iqReviewChip(row)}
+            </div>
+            <div class="lq-brow-sub">${metaLine}</div>
           </div>
-          <div class="lq-brow-sub">${metaLine}</div>
         </div>
         <span class="iq-col-format">${row.format ? `<span class="iq-pill">${esc(row.format)}</span>` : ''}</span>
-        <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Studio' : 'Live'}</span>` : ''}</span>
+        <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Album' : 'Live'}</span>` : ''}</span>
         ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
         <span class="lq-brow-meta">${_iqBandPill(row.needs_review ? 'red' : (row.meta_band || 'red'), !!(row.concerns && row.concerns.length))}</span>
         <span class="lq-actions iq-actions">${actions}</span>
@@ -11811,7 +12155,10 @@ const App = (() => {
                       + 'Review to fill it in, or set one above and press Apply Values.')
       }
       const scan = await API.recordings.scan(row.folder_path)
-      const tracks = buildIngestTracks(scan)
+      // Track list comes straight off the resolver now (Ingest Field
+      // Resolver spec v1, chunk 6) -- build_scan_payload() already ran it
+      // server-side, title-cased and flagged; buildIngestTracks is gone.
+      const tracks = scan.resolved?.tracks || []
 
       const { job_id } = await API.ingest.confirm({
         source_folder_path: row.folder_path,
@@ -12004,11 +12351,6 @@ const App = (() => {
   }
 
   // ── Step 2: Combined metadata + track review ──────────────────────────────
-
-  function pick(tags, info, field) {
-    return tags?.[field] || info?.[field] || ''
-  }
-
 
   function hintChips(fieldId, tagVal, infoVal) {
     const chips = []
@@ -12831,46 +13173,44 @@ const App = (() => {
     const info = ingest.scan.suggestions.from_info_file
 
     // Build the track list on first load; edits survive a back-nav. Same
-    // builder the two auto-ingest paths use, so the wizard shows exactly what
-    // an unattended ingest would have produced.
+    // resolve_tracks() (app/utils/resolve.py) the auto-confirm and bulk
+    // paths ingest from, so the wizard shows exactly what an unattended
+    // ingest would have produced.
     if (!ingest.tracks.length) {
-      ingest.tracks = buildIngestTracks(ingest.scan)
+      // Resolver-built (spec chunk 6) -- title-cased, flagged, scan-index
+      // numbered. The human can still edit this list before it posts.
+      ingest.tracks = ingest.scan?.resolved?.tracks || []
     }
 
     // Pre-fill metadata form on first load
     const f = ingest.form
     if (!f._filled) {
-      let tagYear = null, tagMonth = null, tagDay = null
-      if (tags.concert_date) {
-        const p  = tags.concert_date.split('-')
-        tagYear  = parseInt(p[0]) || null
-        tagMonth = parseInt(p[1]) || null
-        tagDay   = parseInt(p[2]) || null
-      }
-      f.artist_name     = titleCase(pick(tags, info, 'artist')) || ''
-      f.start_year      = tagYear  || info.year  || ''
-      f.start_month     = tagMonth || info.month || ''
-      f.start_day       = tagDay   || info.day   || ''
-      f.venue_name      = pick(tags, info, 'venue') || ''
+      // Resolver-built (Ingest Field Resolver spec v1, chunk 6): every field
+      // below reads scan.resolved.<field>.value -- tags-vs-info precedence,
+      // date precision, and the tag/info-file merge (including its own
+      // ad hoc concert_date parsing) all used to be re-derived here in JS;
+      // that logic is deleted and this just reads the resolver's answer,
+      // same one the wizard's prefill, batch_scan and auto_confirm all use.
+      const r = ingest.scan.resolved || {}
+      const rv = key => r[key]?.value ?? null
+      const date = r.date?.value || {}
+      f.artist_name     = rv('artist') || ''
+      f.start_year      = date.year  || ''
+      f.start_month     = date.month || ''
+      f.start_day       = date.day   || ''
+      f.venue_name      = rv('venue') || ''
       f.venue_id        = null
-      // FLAC tags take priority; info file fills only what tags didn't supply.
-      f.city            = tags.city    || info.city    || ''
-      f.state           = tags.state   || info.state   || ''
-      f.country         = tags.country || info.country || ''
-      f.source          = pick(tags, info, 'source') || ''
-      // Folder-name only (spec section 5) -- suggestions.from_info_file
-      // carries these even though neither tags nor the info file's text
-      // itself produces them; never written without the form.
-      f.source_tag      = info.source_tag || ''
-      f.etree_shnid     = info.etree_shnid != null ? String(info.etree_shnid) : ''
+      f.city            = rv('city')    || ''
+      f.state           = rv('state')   || ''
+      f.country         = rv('country') || ''
+      f.source          = rv('source') || ''
+      // Folder-name only (spec section 5) -- resolved.source_tag/shnid carry
+      // these even though neither tags nor the info file's text itself
+      // produces them; never written without the form.
+      f.source_tag      = rv('source_tag') || ''
+      f.etree_shnid     = r.shnid?.value != null ? String(r.shnid.value) : ''
       f.quality         = ''
-      // Bug (Ryan, 2026-08-09): lineage almost always comes from the info
-      // file's "Source:"/"Lineage:" text, not a FLAC tag, but this only ever
-      // read tags.lineage — every other field here already falls back to the
-      // info file via pick(). The Review & Ingest card shows the inferred
-      // lineage correctly (it reads row.extracted, a separate server-side
-      // merge); this was Add Recording's own re-scan losing it on the way in.
-      f.lineage         = pick(tags, info, 'lineage')
+      f.lineage         = rv('lineage') || ''
       f.notes           = ''
       f.end_year        = ''
       f.end_month       = ''
@@ -12922,17 +13262,36 @@ const App = (() => {
       <div id="panel-flac-tracks" style="display:none">${rawTrackRows}</div>` : ''
 
     // Right panel: parsed info file — arrows on LEFT of label
-    const infoDate = (info.year && info.month && info.day)
-      ? `${info.year}-${String(info.month).padStart(2,'0')}-${String(info.day).padStart(2,'0')}`
-      : info.year ? String(info.year) : null
+    //
+    // Reads the resolver's own candidates (Ingest Field Resolver spec v1,
+    // chunk 6) rather than the raw info-file suggestions: resolved.<field>
+    // .candidates.info is the SAME value build_scan_payload's resolve() call
+    // already filtered (an implausible venue line -- a clock time, "Two
+    // Shows: Show 1..." -- is rejected there and never becomes a candidate
+    // at all), so this panel cannot offer an apply arrow onto a value the
+    // resolver itself would not have trusted.
+    //
+    // resolved.<field>.conflict (true when tags and the info file disagree)
+    // is available here but not rendered -- no existing style in this file
+    // marks a field as uncertain/conflicting (grepped for "uncertain": only
+    // hits are unrelated doc comments), and this task does not add new UI.
+    const resolvedFields = ingest.scan.resolved || {}
+    const infoCand = key => resolvedFields[key]?.candidates?.info ?? null
+    const infoDateCand = resolvedFields.date?.candidates?.info || null
+    const infoDate = infoDateCand
+      ? (infoDateCand.month
+          ? `${infoDateCand.year}-${String(infoDateCand.month).padStart(2,'0')}` +
+            (infoDateCand.day ? `-${String(infoDateCand.day).padStart(2,'0')}` : '')
+          : String(infoDateCand.year))
+      : null
 
     const parsedFields = [
-      { label: 'Artist', val: titleCase(info.artist),  action: 'apply-artist' },
-      { label: 'Date',   val: infoDate,                action: 'apply-date'   },
-      { label: 'Venue',  val: titleCase(info.venue),   action: 'apply-venue'  },
-      { label: 'City',   val: titleCase(info.city),    action: 'apply-city'   },
-      { label: 'State',  val: info.state,              action: 'apply-state'  },
-      { label: 'Country',val: titleCase(info.country), action: 'apply-country'},
+      { label: 'Artist', val: infoCand('artist'),   action: 'apply-artist' },
+      { label: 'Date',   val: infoDate,                       action: 'apply-date'   },
+      { label: 'Venue',  val: infoCand('venue'),    action: 'apply-venue'  },
+      { label: 'City',   val: infoCand('city'),     action: 'apply-city'   },
+      { label: 'State',  val: infoCand('state'),              action: 'apply-state'  },
+      { label: 'Country',val: infoCand('country'), action: 'apply-country'},
     ].filter(f => f.val)
 
     const parsedTrackCount = info.tracks?.length || 0
@@ -12941,14 +13300,14 @@ const App = (() => {
     const parsedRows = parsedFields.map(f => `
       <div class="rev-parsed-row">
         <button class="btn-parsed-apply" data-action="${f.action}" data-val="${esc(f.val)}"
-                data-year="${info.year||''}" data-month="${info.month||''}" data-day="${info.day||''}">${icon('arrow-left')}</button>
+                data-year="${infoDateCand?.year||''}" data-month="${infoDateCand?.month||''}" data-day="${infoDateCand?.day||''}">${icon('arrow-left')}</button>
         <span class="rev-parsed-key">${f.label}</span>
         <span class="rev-parsed-val">${esc(f.val)}</span>
       </div>`).join('')
 
     // Tracks row: apply button + expandable track list
     const parsedTrackItems = (info.tracks || []).map(t =>
-      `<div class="rev-parsed-track-item">${String(t.number).padStart(2,'0')}. ${esc(titleCase(t.title))}</div>`
+      `<div class="rev-parsed-track-item">${String(t.number).padStart(2,'0')}. ${esc(t.title)}</div>`
     ).join('')
 
     const parsedTracksRow = parsedTrackCount ? `
@@ -12998,6 +13357,7 @@ const App = (() => {
     // to protect and typing one in from scratch is the documented purpose of
     // the box, so it opens unlocked and the Edit button already says Cancel.
     const infoLocked = !!(ingest.scan.info_file_content || '').trim()
+    const resolverPaneHtml = buildResolverPaneHtml(ingest.scan.resolved)
     const infoText = `${textSwitcher}<textarea class="rev-info-text rev-info-edit${infoLocked ? ' rev-info-text--locked' : ''}" id="rev-info-edit"
       ${infoLocked ? 'readonly' : ''}
       placeholder="No info file found. Paste or type one in.">${esc(ingest.scan.info_file_content || '')}</textarea>`
@@ -13029,9 +13389,9 @@ const App = (() => {
       // titled e.g. "Banter & Tuning"): this used to join the FULL chips
       // array here, so the first chip was shown once under the title AND
       // again in this row every time a track had 2+ chips. Not a data bug —
-      // t.flags itself was always clean (detectTrackFlags/detect_track_flags
-      // both build off a Set, which can't hold a duplicate key) — purely a
-      // rendering double-count.
+      // t.flags itself was always clean (detect_track_flags in
+      // app/utils/ingest.py builds off a Set, which can't hold a duplicate
+      // key) — purely a rendering double-count.
       return `<tr class="track-review-chiprow" data-idx="${i}">
           <td colspan="7"><div class="track-chip-expand-row">${chips.slice(1).join('')}</div></td>
         </tr>`
@@ -13343,6 +13703,7 @@ const App = (() => {
               <button class="slide-tab" data-ipane="isp-quality">Quality</button>
               <button class="slide-tab" data-ipane="isp-filetags">File Tags</button>
               <button class="slide-tab" data-ipane="isp-checksums">Checksums</button>
+              ${resolverPaneHtml ? `<button class="slide-tab" data-ipane="isp-resolver">Resolver</button>` : ''}
               <button class="slide-tab slide-tab--ai" data-ipane="isp-ai">AI Assist</button>
             </div>
             <!-- Same three info-file controls, in the same order, as View
@@ -13374,6 +13735,9 @@ const App = (() => {
               <div class="slide-pane" id="isp-checksums">
                 <div class="slide-pane-scroll">${buildChecksumsPreviewHtml(ingest.scan.fingerprints)}</div>
               </div>
+              ${resolverPaneHtml ? `<div class="slide-pane" id="isp-resolver">
+                <div class="slide-pane-scroll">${resolverPaneHtml}</div>
+              </div>` : ''}
               <!-- Permanent, not built on first use (it used to be created by
                    ensureAiPane the moment AI Assist ran). A tab that appears
                    only after you have already found the button is a tab that
@@ -13433,7 +13797,7 @@ const App = (() => {
             document.getElementById('f-country').value = val
 
           } else if (action === 'apply-tracks') {
-            const titles  = (info.tracks || []).map(t => titleCase(t.title))
+            const titles  = (ingest.scan.resolved?.tracks || []).map(t => t.info_title)
             const inputs  = [...mainContent.querySelectorAll('.t-title')]
             inputs.forEach((inp, i) => { if (titles[i] != null) inp.value = titles[i] })
             inputs.forEach((inp, i) => { if (titles[i] != null) ingest.tracks[i].title = titles[i] })
@@ -13524,13 +13888,12 @@ const App = (() => {
 
       /** The rows that actually have a file behind them.
        *
-       *  Not every row does: buildIngestTracks' info-file branch leaves
-       *  `filename` empty when the info file lists more tracks than there are
-       *  audio files, which is common in the folders that most need checking.
-       *  Stepping used to stop dead at the first such row, and if it happened
-       *  to be row 1 the transport never loaded anything at all and every
-       *  control was inert. Skipping them is the only behaviour that makes
-       *  sense — there is nothing to play. */
+       *  resolve_tracks() (app/utils/resolve.py) always emits one track per
+       *  audio file with a real filename now, but this guard stays: a track
+       *  row missing one used to stop stepping dead at the first such row,
+       *  and if it happened to be row 1 the transport never loaded anything
+       *  at all and every control was inert. Skipping them is the only
+       *  behaviour that makes sense -- there is nothing to play. */
       const playable = () => previewBtns.filter(b => b.dataset.filename)
 
       /** Step to the track `delta` playable rows away. Stops at both ends
@@ -14347,14 +14710,14 @@ const App = (() => {
       })
       document.getElementById('ingest-slide-rail')?.addEventListener('click', () => {
         if (panel.classList.contains('open')) _ingestPanelOpen(false)
-        else switchIngestPane(state.ingestLastPane || 'isp-info')
+        else switchIngestPane(document.getElementById(state.ingestLastPane) ? state.ingestLastPane : 'isp-info')
       })
       // Default open on Info File (Ryan, 2026-08-28), or wherever the reviewer
       // was last — a deliberate collapse survives moving between recordings,
       // same rule as recPanelOpen on View Recording.
       _ingestQualityLoaded = false
       if (state.ingestPanelOpen === false) _ingestPanelOpen(false)
-      else switchIngestPane(state.ingestLastPane || 'isp-info')
+      else switchIngestPane(document.getElementById(state.ingestLastPane) ? state.ingestLastPane : 'isp-info')
     })()
 
     const _submitReview = async (ev) => {
@@ -14442,6 +14805,7 @@ const App = (() => {
         // the result along so it lands on the new recording instead of being
         // lost the moment confirm creates the row (2026-07-14 bug: it wasn't).
         ai_result: ingest.aiResult || null,
+        resolver_result: ingest.scan?.resolved || null,
         // Was missing entirely (2026-08-28). Review is the OTHER way into
         // /api/ingest/confirm, so without this the mode set on the triage page
         // was silently ignored the moment a user clicked Review instead of
@@ -14623,25 +14987,35 @@ const App = (() => {
       if (!tracks) tracks = recData.tracks
     } catch (e) { return }
 
-    // Build meta string: Artist · Date · Venue
+    // Build meta string: Artist · Date · Venue (studio: Title · Year)
     const artist = state.selectedArtist?.name || ''
     const perfId = recData?.performance_id
-    let dateStr = '', venueStr = '', sourceStr = '', artistName = ''
+    const isStudio = recData?.kind === 'studio'
+    let dateStr = '', venueStr = '', sourceStr = '', artistName = '', studioMeta = ''
     if (perfId) {
       try {
         const perf = await API.performances.get(perfId)
         dateStr       = perf ? fmtDateLong(perf.start_year, perf.start_month, perf.start_day) : ''
         venueStr      = perf?.venue_name || ''
         artistName = perf?.artist  || ''
+        if (isStudio) {
+          const id = recIdentity({ kind: 'studio', title: recData?.title, artist: artistName, start_year: perf?.start_year })
+          // No title: year alone, never the artist again -- it's already
+          // shown on line 3 as recLabel below.
+          studioMeta = recData?.title ? [id.lead, id.dateText].filter(Boolean).join(' · ') : (id.dateText || '')
+        }
       } catch (_) {}
     }
     if (recData) {
       sourceStr = recData.source || ''
     }
     // Player bar line 2: Date · Venue (artist name is redundant here — it's
-    // shown on line 3). Line 3: the artist/band name.
+    // shown on line 3). Line 3: the artist/band name. Studio: Title · Year,
+    // never a venue (studio releases don't have one) and never source --
+    // a studio record has none, so falling back to it would be reading a
+    // stale value off a recording that used to be a live show.
     const metaParts = [dateStr, venueStr].filter(Boolean)
-    const meta      = metaParts.join(' · ') || sourceStr || '—'
+    const meta      = isStudio ? (studioMeta || '—') : (metaParts.join(' · ') || sourceStr || '—')
     const recLabel  = artistName || artist || ''
 
     // Filter out non-music tracks when the skip toggle is on
@@ -15670,6 +16044,10 @@ const App = (() => {
     '#/venue/new', '#/artist/new', '#/musician/new',
     '#/genre/new', '#/event/new',
     '#/bulk-ingest',        // Bulk Ingest
+    '#/archive/lma',        // Live Music Archive catalog
+    '#/downloads',          // Downloads folder
+    '#/workshop',           // Workshop folder (2026-10-01)
+    '#/backlog',            // Backlog folder (2026-10-01)
   ]
   const isAdminOnlyHash = h => ADMIN_ONLY_HASHES.includes((h || '').split('?')[0])
 
@@ -15905,6 +16283,7 @@ const App = (() => {
   let _biTableRunId = null
   let _biOpenRows = new Set()    // ids whose expand panel is open
   let _biReviewFilter = false    // header "Review"/"Show all" toggle (2026-09-27)
+  let _biTab = 'queue'           // 'queue' | 'live' | 'album' (2026-10-01)
 
   // Rolling rate/ETA window -- unrelated to the table above, kept across
   // polls the same way.
@@ -15923,6 +16302,7 @@ const App = (() => {
     _biTableRunId = null
     _biOpenRows = new Set()
     _biReviewFilter = false
+    _biTab = 'queue'
   }
 
   // Integers, largest unit, minimum "1 minute" (spec).
@@ -15963,26 +16343,47 @@ const App = (() => {
   const _BI_REVIEW_REASON_PHRASE = {
     needs_artist:       'without an artist',
     needs_date:         'without a date',
+    needs_month:        'with only the year known',
+    needs_day:          'missing the day',
     unsupported_format: 'unsupported format',
-  }
-  // Hover-box labels for the row's needs-review chip; the same three strings
-  // Review & Ingest and Batch Import already use for the same conditions.
-  const _BI_REVIEW_REASON_LABEL = {
-    needs_artist:       'No artist found',
-    needs_date:         'No date found',
-    unsupported_format: 'Unsupported format',
   }
   const _BI_SKIPPED_REASON_PHRASE = {
     already_in_library: 'already in your library',
     rejected:           'rejected earlier',
+    duplicate_content:  'exact duplicate',
+  }
+
+  // BulkIngestItem.reason is one String(32) column (app/models/bulk_ingest.py)
+  // -- several resolver reasons land in it comma-joined, same as the one
+  // other reader, app/api/quality.py's _bulk_ingest_review_reasons, already
+  // splits apart. The run summary's counts (run.reasons / run.skipped_reasons)
+  // are grouped server-side on that same raw column, so a composite key like
+  // "needs_artist,needs_day" arrives as ONE count under that whole string --
+  // split it back into its codes and re-bucket before reading it here.
+  function _biSplitReasonCounts(reasons) {
+    const out = {}
+    for (const [key, n] of Object.entries(reasons || {})) {
+      for (const code of key.split(',')) {
+        if (code) out[code] = (out[code] || 0) + n
+      }
+    }
+    return out
   }
 
   // "<N> without an artist, <N> without a date, ..." -- inline, after a
   // colon, only the reasons that actually have a count (spec chunk 5e).
+  // conflict:<field> reasons are one field each but read as one aggregate
+  // count here -- a per-field breakdown would overflow this one-line summary
+  // (the row-level chip, _biBuildIqRow below, still lists each field).
   function _biReasonInline(reasons, phraseMap) {
+    const counts = _biSplitReasonCounts(reasons)
     const parts = Object.entries(phraseMap)
-      .map(([key, phrase]) => reasons[key] ? `${reasons[key]} ${phrase}` : null)
+      .map(([key, phrase]) => counts[key] ? `${counts[key]} ${phrase}` : null)
       .filter(Boolean)
+    const conflictN = Object.entries(counts)
+      .filter(([k]) => k.startsWith('conflict:'))
+      .reduce((sum, [, n]) => sum + n, 0)
+    if (conflictN) parts.push(`${conflictN} with conflicting sources`)
     return parts.length ? `: ${parts.join(', ')}` : ''
   }
 
@@ -15997,7 +16398,7 @@ const App = (() => {
   }
 
   function _biKindLabel(it) {
-    return it.kind === 'studio' ? 'Studio' : (it.kind === 'live' ? 'Live' : '')
+    return it.kind === 'studio' ? 'Album' : (it.kind === 'live' ? 'Live' : '')
   }
 
   // Normalizes one GET .../items row into the shared ingest-queue-table row
@@ -16007,26 +16408,52 @@ const App = (() => {
     const inProgress = it.status === 'in_progress'
     const status = pending ? 'pending' : inProgress ? 'ingesting' : it.status // ingested|review|skipped|failed
     const needsReview = it.status === 'review'
-    const reviewLabel = needsReview ? (_BI_REVIEW_REASON_LABEL[it.reason] || 'Needs review') : null
+    // it.reason may hold several resolver codes comma-joined (see
+    // _biSplitReasonCounts above) -- _ingestReasonLabels splits and maps all
+    // of them, so a row needing both an artist and a day shows both, not
+    // just the first.
+    const reviewIssues = needsReview ? _ingestReasonLabels(it.reason) : []
+    if (needsReview && !reviewIssues.length) reviewIssues.push('Needs review')
+    const reviewLabel = reviewIssues[0] || null
+    // Same fragment-map style as before ("Skipped already in your library"),
+    // extended to every reason code it.reason might now hold comma-joined.
+    const skippedCodes = it.status === 'skipped' ? String(it.reason || '').split(',').filter(Boolean) : []
+    const skippedPhrases = skippedCodes.map(c => _BI_SKIPPED_REASON_PHRASE[c]).filter(Boolean)
     const statusText = it.status === 'skipped'
-      ? `Skipped${_BI_SKIPPED_REASON_PHRASE[it.reason] ? ' ' + _BI_SKIPPED_REASON_PHRASE[it.reason] : ''}`
+      ? `Skipped${skippedPhrases.length ? ' ' + skippedPhrases.join(', ') : ''}`
       : it.status === 'failed' ? (it.detail || 'Could not be read') : null
     const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
       ? '' : _biMetaLine(it)
     const basename = (it.rel_path || '').split('/').pop()
+    // Completed tabs (2026-10-01): the recording's own name leads and the
+    // folder name drops to the grey line. Live: Artist - date - venue, place.
+    // Album: Artist - Title.
+    const imported = _biTab !== 'queue' && it.status === 'ingested'
+    let title = basename, sub = meta
+    if (imported) {
+      const place = it.venue && it.location && !String(it.venue).includes(it.location)
+        ? `${it.venue}, ${it.location}` : (it.venue || it.location)
+      const parts = it.kind === 'studio' ? [it.artist, it.title] : [it.artist, it.date_text, place]
+      const joined = parts.filter(Boolean).join(' - ')
+      if (joined) { title = joined; sub = esc(basename) }
+    }
     return {
       id: it.id,
-      name: basename,
-      meta,
+      name: title,
+      meta: sub,
       format: it.format || null,
       kind: it.kind || null,
       sound_band: null,
       meta_band: it.meta_band || null,
       needs_review: needsReview,
       review_reason: reviewLabel,
-      review_issues: reviewLabel ? [reviewLabel] : [],
+      review_issues: reviewIssues,
       status,
       recording_id: it.recording_id,
+      // Completed tabs only: the recording's image at the left (2026-10-01).
+      thumb: _biTab !== 'queue' && it.status === 'ingested'
+        ? { url: it.image_url || null, initials: String(it.title || it.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() }
+        : null,
       status_text: statusText,
       detail: {
         artist: it.artist, date: it.date_text, venue: it.venue,
@@ -16064,7 +16491,7 @@ const App = (() => {
     _biTableLoading = true
     const page = Math.floor(_biLoadedCount / 100) + 1
     let body
-    try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', page) }
+    try { body = await API.bulkIngest.items(_biTableRunId, _biItemsFilter(), page) }
     catch (e) { _biTableLoading = false; return }
     const items = body.items || []
     for (const it of items) _biRowsCache.set(it.id, it)
@@ -16076,39 +16503,99 @@ const App = (() => {
     _biSetupTableSentinel()
   }
 
-  // Routine 3s poll while running: patch only the rows whose status changed
-  // (never rebuild the table -- spec), then append any rows discovered since
-  // the last check, at the end, once every already-loaded page has been
-  // re-checked.
+  // Which slice of the run the table shows: the active tab, narrowed to
+  // needs-review rows when the Needs Review toggle is on (Queue only).
+  function _biItemsFilter() {
+    if (_biTab === 'queue') return _biReviewFilter ? 'review' : 'queue'
+    return _biTab
+  }
+
+  // Routine 3s poll while running. Rows now move between tabs (a Queue row
+  // that finishes ingesting leaves it for Live Recordings or Albums, 2026-
+  // 10-01), so this re-fetches every loaded page and reconciles by id: rows
+  // gone from the slice are removed, changed rows replaced in place, new
+  // rows inserted in order. Unchanged rows are left alone, so an open
+  // expand panel or scroll position survives.
   async function _biTableRefresh() {
     if (!_biTableRunId) return
     const pages = Math.max(1, Math.ceil(_biLoadedCount / 100))
-    let lastTotal = 0
+    const all = []
+    let total = 0
     for (let p = 1; p <= pages; p++) {
       let body
-      try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', p) }
-      catch (e) { continue }
-      lastTotal = body.total || lastTotal
-      for (const it of (body.items || [])) {
-        const prev = _biRowsCache.get(it.id)
-        if (prev && prev.status === it.status) continue
-        _biRowsCache.set(it.id, it)
-        const rowEl = document.querySelector(`.iq-row[data-id="${it.id}"]`)
-        if (rowEl) rowEl.outerHTML = _biRowHtml(it)
-      }
+      try { body = await API.bulkIngest.items(_biTableRunId, _biItemsFilter(), p) }
+      catch (e) { return }
+      total = body.total || 0
+      all.push(...(body.items || []))
+      if ((body.items || []).length < 100) break
     }
-    if (!_biTableExhausted || _biLoadedCount >= lastTotal) return
-    let body
-    try { body = await API.bulkIngest.items(_biTableRunId, _biReviewFilter ? 'review' : 'all', pages + 1) }
-    catch (e) { return }
-    const items = body.items || []
-    if (!items.length) return
-    for (const it of items) _biRowsCache.set(it.id, it)
-    const listEl = document.getElementById('bi-rows')
-    if (listEl) listEl.insertAdjacentHTML('beforeend', items.map(_biRowHtml).join(''))
-    _biLoadedCount += items.length
-    _biTableExhausted = items.length < 100 || _biLoadedCount >= (body.total || 0)
+    _biReconcile(all)
+    _biTableExhausted = all.length >= total
     _biSetupTableSentinel()
+  }
+
+  function _biReconcile(items) {
+    const listEl = document.getElementById('bi-rows')
+    if (!listEl) return
+    const keep = new Set(items.map(i => String(i.id)))
+    Array.from(listEl.children).forEach(el => {
+      if (!el.classList.contains('iq-row') || !keep.has(el.dataset.id)) {
+        if (el.dataset.id) _biRowsCache.delete(Number(el.dataset.id))
+        el.remove()
+      }
+    })
+    let prevEl = null
+    for (const it of items) {
+      let el = listEl.querySelector(`:scope > .iq-row[data-id="${it.id}"]`)
+      const prev = _biRowsCache.get(it.id)
+      if (!el || !prev || prev.status !== it.status) {
+        const tmp = document.createElement('div')
+        tmp.innerHTML = _biRowHtml(it).trim()
+        const fresh = tmp.firstElementChild
+        if (el) el.replaceWith(fresh)
+        el = fresh
+      }
+      _biRowsCache.set(it.id, it)
+      const want = prevEl ? prevEl.nextElementSibling : listEl.firstElementChild
+      if (want !== el) {
+        if (prevEl) prevEl.after(el); else listEl.prepend(el)
+      }
+      prevEl = el
+    }
+    _biLoadedCount = items.length
+  }
+
+  // Tab strip above the table, with live counts from the run summary.
+  function _biTabCounts(run) {
+    const c = run.counts || {}
+    const total = Object.values(c).reduce((a, b) => a + b, 0)
+    const ingested = c.ingested || 0
+    const album = run.studio || 0
+    return { queue: total - ingested, live: ingested - album, album }
+  }
+
+  function _biTabsHtml(run) {
+    const n = _biTabCounts(run)
+    const tabs = [['queue', 'Queue'], ['live', 'Imported - Live Recordings'], ['album', 'Imported - Albums']]
+    return tabs.map(([id, label]) => `
+      <button type="button" class="pp-tab bi-tab--${id}${_biTab === id ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
+  }
+
+  // Line above the rows: the review note on Queue only. The completed tabs'
+  // View buttons were removed (Ryan, 2026-10-01).
+  function _biTabNoteHtml(run) {
+    if (_biTab === 'queue') {
+      const review = (run.counts && run.counts.review) || 0
+      return review ? `<p class="bi-tab-note">Check the ${icon('alert', 'bi-note-ic')} for issues, then manually "Review", or "Ingest" to import it anyway</p>` : ''
+    }
+    return ''
+  }
+
+  function _biPaintTabs(run) {
+    const tabsEl = document.getElementById('bi-tabs')
+    if (tabsEl) tabsEl.innerHTML = _biTabsHtml(run)
+    const noteEl = document.getElementById('bi-tab-note')
+    if (noteEl) noteEl.innerHTML = _biTabNoteHtml(run)
   }
 
   async function _biTableInit(runId) {
@@ -16176,24 +16663,16 @@ const App = (() => {
 
   // Primary action, top-right of the header -- Pause/Resume while running or
   // paused; Review (primary) + Scan again + Go to library once done.
+  // Top-right of the header (2026-10-01): Pause/Resume while running,
+  // Scan again once done. Needs Review and Go to library were removed.
   function _biHeaderActionsHtml(run) {
-    if (run.status !== 'done') {
-      const btns = []
-      if (canEditLibrary()) {
-        if (run.status === 'running') btns.push('<button class="btn btn-ghost btn-sm" id="bi-pause">Pause</button>')
-        if (run.status === 'paused')  btns.push('<button class="btn btn-ghost btn-sm" id="bi-resume">Resume</button>')
-      }
-      return btns.join('')
-    }
-    const review = (run.counts && run.counts.review) || 0
-    const btns = []
-    if (review > 0) btns.push(
-      `<button type="button" class="btn btn-sm${_biReviewFilter ? ' btn-ghost' : ' btn-primary'}" id="bi-review">${
-        _biReviewFilter ? 'Show all' : 'Needs Review'}</button>`)
-    if (canEditLibrary()) btns.push('<button class="btn btn-ghost btn-sm" id="bi-again">Scan again</button>')
-    btns.push('<a class="btn btn-ghost btn-sm" href="#/" id="bi-golibrary">Go to library</a>')
-    return btns.join('')
+    if (!canEditLibrary()) return ''
+    if (run.status === 'running') return '<button class="btn btn-ghost btn-sm" id="bi-pause">Pause</button>'
+    if (run.status === 'paused')  return '<button class="btn btn-ghost btn-sm" id="bi-resume">Resume</button>'
+    if (run.status === 'done')    return '<button class="btn btn-ghost btn-sm" id="bi-again">Scan again</button>'
+    return ''
   }
+
 
   // Subtitle area -- "<N> folders found" while running/paused; once done,
   // the summary, one small line each (spec chunk 5e).
@@ -16234,7 +16713,7 @@ const App = (() => {
     const parts = [
       `${found} folder${found === 1 ? '' : 's'}`,
       added   > 0 ? `${added} added` : null,
-      studio  > 0 ? `${studio} studio` : null,
+      studio  > 0 ? `${studio} album${studio === 1 ? '' : 's'}` : null,
       review  > 0 ? `${review} need review${_biReasonInline(reasons, _BI_REVIEW_REASON_PHRASE)}` : null,
       skipped > 0 ? `${skipped} skipped${_biReasonInline(skippedReasons, _BI_SKIPPED_REASON_PHRASE)}` : null,
       failed  > 0 ? `${failed} could not be read` : null,
@@ -16288,6 +16767,8 @@ const App = (() => {
     // only the rows already loaded on screen.
     document.getElementById('bi-review')?.addEventListener('click', async () => {
       _biReviewFilter = !_biReviewFilter
+      _biTab = 'queue'
+      _biPaintTabs(run)
       const actionsEl = document.getElementById('bi-header-actions')
       if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
       await _biTableInit(run.id)
@@ -16316,6 +16797,7 @@ const App = (() => {
       if (subEl) subEl.innerHTML = _biSubtitleHtml(run)
       const progEl = document.getElementById('bi-progress-wrap')
       if (progEl) progEl.innerHTML = _biProgressHtml(run)
+      _biPaintTabs(run)
       if (!done) await _biTableRefresh()
       return
     }
@@ -16326,7 +16808,7 @@ const App = (() => {
       <div class="batch-shell lq-shell">
         <div class="lq-header">
           <div style="min-width:0">
-            <h2>Adding your recordings</h2>
+            <h2>Importing Recordings from ${esc(String(run.root || '').replace(/\/+$/, '').split('/').pop() || '')}</h2>
             <div id="bi-subtitle">${_biSubtitleHtml(run)}</div>
           </div>
           <div class="lq-header-actions" id="bi-header-actions">${_biHeaderActionsHtml(run)}</div>
@@ -16342,6 +16824,10 @@ const App = (() => {
 
         <div id="bi-progress-wrap">${_biProgressHtml(run)}</div>
 
+        <h3 class="bi-queue-head">Import Queue</h3>
+        <div class="pp-tabs bi-tabs" id="bi-tabs" role="tablist">${_biTabsHtml(run)}</div>
+        <div class="bi-tab-note-wrap" id="bi-tab-note">${_biTabNoteHtml(run)}</div>
+
         <div class="lq-cards lq-cards--compact" id="bi-table">
           <div class="lq-brow-head iq-brow iq-brow--nosq">
             <span></span><span>Recording</span>
@@ -16356,10 +16842,975 @@ const App = (() => {
     _biWireHeaderActions(run)
     _wireFhStrip('bi-fh-strip')
     document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
+    document.getElementById('bi-tabs')?.addEventListener('click', async e => {
+      const t = e.target.closest('[data-bitab]')
+      if (!t || t.dataset.bitab === _biTab) return
+      _biTab = t.dataset.bitab
+      if (_biTab !== 'queue') _biReviewFilter = false
+      _biPaintTabs(state.bulkIngest || run)
+      const actionsEl = document.getElementById('bi-header-actions')
+      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(state.bulkIngest || run); _biWireHeaderActions(state.bulkIngest || run) }
+      await _biTableInit((state.bulkIngest || run).id)
+    })
     await _biTableInit(run.id)
   }
 
 
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Archive Downloads (spec "Archive Downloads v1", sections 2, 6, 7, 8)
+  //
+  // Three surfaces share one piece of state, DL:
+  //   - the Live Music Archive catalog at #/archive/lma (+ its drawer),
+  //   - the queue tab and panel, mounted once on the content column so they
+  //     exist on every page,
+  //   - the Downloads page at #/downloads.
+  //
+  // One queue per install, one download at a time; the server worker does the
+  // work and this file only mirrors it. DL.jobs is the last /queue answer and
+  // everything painted here is derived from it, so there is no second copy to
+  // drift. The poll runs only while something is queued or active.
+  //
+  // Every user-visible string below is a proposal pending Ryan's approval
+  // (spec section 8); labels come from the approved mockups.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  const DL = {
+    jobs: [],            // last /api/downloads/queue answer
+    paused: false,
+    loaded: false,       // true once a /queue answer has been applied
+    byKey: new Map(),    // 'source:id' -> job, queued or active only
+    booted: false,
+    refused: false,      // the server said 403 once: do not ask again this session
+    tabShown: false,     // latched: a Download click this session, or live jobs at launch
+    panelOpen: false,
+    timer: null,
+    polling: false,
+    folder: null,        // last /api/downloads/folder answer
+    folderCount: null,
+    dragging: false,
+    dragStart: [],
+    chromeReady: false,
+    docWired: false,
+  }
+  // The server is admin-only on every Archive Downloads route, and
+  // canEditLibrary() is also true for the archivist role, so both must hold.
+  const _dlAllowed = () => isAdmin() && canEditLibrary()
+  const _dlIsLive = j => j.status === 'queued' || j.status === 'active'
+
+  // Set by the Downloads page's Ingest button, consumed once by
+  // renderIngestView(): the folder to hand to the Add Recordings analysis.
+  let _ingestHandoffDir = null
+
+  const ARC_SORTS = [['newest', 'Newest'], ['date', 'Show date'], ['az', 'A–Z']]
+  const ARC_SRC_CLASSES = new Set(['sbd', 'aud', 'mtx', 'fm'])
+
+  const _arc = {
+    sort: 'newest', q: '', page: 0, hasMore: false, loading: false, seq: 0,
+    items: [], byId: new Map(), io: null, qTimer: null,
+    openId: null, tab: 'tracks', detail: null, detailErr: '', detailSeq: 0,
+  }
+
+  // ── Small formatters ───────────────────────────────────────────────────────
+
+  // "2h", "3d" -- how long ago an item reached the archive.
+  function _arcAgo(iso) {
+    const t = Date.parse(iso)
+    if (!iso || isNaN(t)) return ''
+    const mins = Math.max(0, Math.floor((Date.now() - t) / 60000))
+    if (mins < 60) return `${mins}m`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h`
+    const days = Math.floor(hrs / 24)
+    if (days < 30) return `${days}d`
+    if (days < 365) return `${Math.floor(days / 30)}mo`
+    return `${Math.floor(days / 365)}y`
+  }
+
+  // h:mm:ss for a whole show, m:ss under an hour.
+  function _arcClock(secs) {
+    if (!secs) return ''
+    const h = Math.floor(secs / 3600)
+    const m = Math.floor((secs % 3600) / 60)
+    const s = Math.floor(secs % 60)
+    const ss = String(s).padStart(2, '0')
+    return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
+  }
+
+  // Downloads page "Modified": Today / Yesterday / Sep 28.
+  function _dlModified(v) {
+    if (v == null || v === '') return ''
+    const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)
+    if (isNaN(d.getTime())) return String(v)
+    const today = new Date()
+    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+    const diff = Math.round((day(today) - day(d)) / 86400000)
+    if (diff === 0) return 'Today'
+    if (diff === 1) return 'Yesterday'
+    const opts = d.getFullYear() === today.getFullYear()
+      ? { month: 'short', day: 'numeric' }
+      : { month: 'short', day: 'numeric', year: 'numeric' }
+    return d.toLocaleDateString('en-US', opts)
+  }
+
+  const _dlPct = j => (j && j.total_bytes)
+    ? Math.max(0, Math.min(100, Math.round(j.done_bytes * 100 / j.total_bytes))) : 0
+
+  // ── Shared state, poll ─────────────────────────────────────────────────────
+
+  function _dlRebuildKeys() {
+    DL.byKey = new Map()
+    DL.jobs.forEach(j => { if (_dlIsLive(j)) DL.byKey.set(`${j.source}:${j.source_id}`, j) })
+  }
+
+  // Returns true when a job moved to done since the last answer, which means
+  // the Downloads folder changed on disk.
+  function _dlApplyQueue(res) {
+    const prev = new Map(DL.jobs.map(j => [j.id, j.status]))
+    DL.jobs = (res && res.jobs) || []
+    DL.paused = !!(res && res.paused)
+    DL.loaded = true
+    _dlRebuildKeys()
+    // Any job that WAS live and no longer is (done, failed, or cancelled and
+    // therefore gone from the list) means the folder list changed: a cancel
+    // deletes its folder server-side (Ryan, 2026-10-01), and nothing else
+    // would tell the Downloads page, because polling stops once idle.
+    const now = new Map(DL.jobs.map(j => [j.id, j]))
+    return [...prev].some(([id, st]) =>
+      (st === 'queued' || st === 'active') && !(now.has(id) && _dlIsLive(now.get(id))))
+  }
+
+  function _dlUpsert(job) {
+    const i = DL.jobs.findIndex(j => j.id === job.id)
+    if (i >= 0) DL.jobs[i] = job
+    else DL.jobs.push(job)
+    _dlRebuildKeys()
+  }
+
+  function _dlSetFolder(res) {
+    DL.folder = res
+    DL.folderCount = ((res && res.folders) || []).length
+    document.querySelectorAll('[data-dl-count]').forEach(el => {
+      el.textContent = DL.folderCount || ''
+    })
+  }
+
+  async function _dlRefreshFolder() {
+    if (!_dlAllowed()) return null
+    try { _dlSetFolder(await API.downloads.folder()) } catch (_) { /* keep the last answer */ }
+    return DL.folder
+  }
+
+  async function _dlRefreshQueue() {
+    if (!_dlAllowed()) return
+    let res
+    try { res = await API.downloads.queue() } catch (_) { return }
+    const finished = _dlApplyQueue(res)
+    const onPage = (window.location.hash || '').split('?')[0] === '#/downloads'
+    if (finished || (onPage && DL.jobs.some(_dlIsLive))) await _dlRefreshFolder()
+    _dlAfterChange()
+  }
+
+  // Everything that mirrors the queue repaints from here.
+  function _dlAfterChange() {
+    _dlPaintChrome()
+    _dlPaintPanel()
+    _arcRepaintActions()
+    _dlRepaintDownloadsPage()
+    _dlSchedule()
+  }
+
+  function _dlSchedule() {
+    // Nothing to watch while paused with nothing active, nor when this
+    // session may not use the feature (Playback, archivist). Resume and a new
+    // enqueue both refresh the queue, which re-evaluates this.
+    const active = DL.jobs.some(j => j.status === 'active')
+    const busy = _dlAllowed() && DL.jobs.some(_dlIsLive) && !(DL.paused && !active)
+    if (busy && !DL.timer) {
+      DL.timer = setInterval(async () => {
+        if (DL.polling) return
+        DL.polling = true
+        try { await _dlRefreshQueue() } finally { DL.polling = false }
+      }, 2000)
+    } else if (!busy && DL.timer) {
+      clearInterval(DL.timer)
+      DL.timer = null
+    }
+  }
+
+  // Once per session, from renderSidebar: the queue's launch state decides
+  // whether the tab shows, and the folder answer feeds the sidebar count.
+  async function _dlBoot() {
+    if (DL.booted || DL.refused || !_dlAllowed()) return
+    DL.booted = true
+    _dlEnsureChrome()
+    try { _dlApplyQueue(await API.downloads.queue()) } catch (e) { if (e && e.status === 403) DL.refused = true; else DL.booted = false; return }
+    if (DL.jobs.some(_dlIsLive)) DL.tabShown = true
+    _dlAfterChange()
+    _dlRefreshFolder()
+  }
+
+  function _dlSidebarSync() {
+    _dlPaintChrome()
+    _dlPaintPanel()
+    _dlSchedule()
+    _dlBoot()
+  }
+
+  // ── Queue tab and panel ────────────────────────────────────────────────────
+
+  function _dlLayout() {
+    const col = document.querySelector('.content-column')
+    if (col) col.style.setProperty('--dlq-top', mainContent.offsetTop + 'px')
+  }
+
+  function _dlEnsureChrome() {
+    if (DL.chromeReady) return
+    const col = document.querySelector('.content-column')
+    if (!col) return
+    DL.chromeReady = true
+    col.insertAdjacentHTML('beforeend', `
+      <button type="button" class="dlq-tab" id="dlq-tab" aria-controls="dlq-panel" aria-expanded="false" hidden></button>
+      <aside class="dlq-panel" id="dlq-panel" aria-label="Downloads" aria-hidden="true"></aside>`)
+    const tab = document.getElementById('dlq-tab')
+    const panel = document.getElementById('dlq-panel')
+    tab.addEventListener('click', () => {
+      DL.panelOpen = !DL.panelOpen
+      if (DL.panelOpen && !DL.folder) _dlRefreshFolder().then(() => _dlPaintPanel())
+      _dlPaintPanel()
+    })
+    window.addEventListener('resize', _dlLayout)
+
+    panel.addEventListener('click', async e => {
+      const b = e.target.closest('[data-dlq]')
+      if (!b) return
+      const act = b.dataset.dlq
+      const id = parseInt(b.dataset.id)
+      try {
+        if (act === 'close') { DL.panelOpen = false; _dlPaintPanel(); return }
+        if (act === 'pause') await API.downloads.pause()
+        else if (act === 'resume') await API.downloads.resume()
+        else if (act === 'cancel') {
+          await API.downloads.cancel(id)
+          // The worker deletes an active job's folder a moment AFTER the
+          // cancel returns, so look again once it has had time to.
+          setTimeout(() => _dlRefreshFolder().then(_dlAfterChange), 2500)
+        }
+        else if (act === 'retry') await API.downloads.retry(id)
+        else if (act === 'remove') await API.downloads.remove(id)
+        else if (act === 'clear') {
+          const gone = DL.jobs.filter(j => j.status === 'done' || j.status === 'failed')
+          for (const j of gone) await API.downloads.remove(j.id)
+        }
+      } catch (err) {
+        alert(err.message)
+      }
+      await _dlRefreshQueue()
+    })
+
+    // Drag to reorder Up next. Native drag and drop on the rows; the poll
+    // leaves the panel alone while a drag is in flight (_dlPaintPanel).
+    panel.addEventListener('dragstart', e => {
+      const row = e.target.closest('.dlq-q')
+      if (!row) return
+      DL.dragging = true
+      DL.dragStart = [...panel.querySelectorAll('.dlq-q')].map(r => parseInt(r.dataset.id))
+      row.classList.add('dragging')
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', row.dataset.id)
+    })
+    panel.addEventListener('dragover', e => {
+      const list = e.target.closest('.dlq-list')
+      const dragged = panel.querySelector('.dlq-q.dragging')
+      if (!DL.dragging || !list || !dragged) return
+      e.preventDefault()
+      const rows = [...list.querySelectorAll('.dlq-q:not(.dragging)')]
+      const after = rows.find(r => {
+        const box = r.getBoundingClientRect()
+        return e.clientY < box.top + box.height / 2
+      })
+      if (after) list.insertBefore(dragged, after)
+      else list.appendChild(dragged)
+    })
+    panel.addEventListener('dragend', async () => {
+      const order = [...panel.querySelectorAll('.dlq-q')].map(r => parseInt(r.dataset.id))
+      DL.dragging = false
+      panel.querySelectorAll('.dlq-q.dragging').forEach(r => r.classList.remove('dragging'))
+      if (order.length && order.some((id, i) => id !== DL.dragStart[i])) {
+        try { await API.downloads.reorder(order) } catch (err) { alert(err.message) }
+      }
+      await _dlRefreshQueue()
+    })
+  }
+
+  // Ring + "n of m". m counts the live jobs plus the ones finished since the
+  // oldest live job was queued, so yesterday's finished downloads do not
+  // inflate it.
+  function _dlTabState() {
+    const live = DL.jobs.filter(_dlIsLive)
+    const active = DL.jobs.find(j => j.status === 'active')
+    let label = ''
+    if (live.length) {
+      const t0 = Math.min(...live.map(j => Date.parse(j.created_at) || Infinity))
+      const done = DL.jobs.filter(j => j.status === 'done'
+        && (Date.parse(j.finished_at) || 0) >= t0).length
+      label = `${done + 1} of ${done + live.length}`
+    }
+    const frac = active ? _dlPct(active) / 100 : (live.length ? 0 : 1)
+    return { frac, label }
+  }
+
+  function _dlPaintChrome() {
+    const tab = document.getElementById('dlq-tab')
+    const hash = (window.location.hash || '').split('?')[0]
+    document.body.classList.toggle('archive-on', hash === '#/archive/lma')
+    if (!tab) return
+    const show = _dlAllowed() && DL.tabShown
+    tab.hidden = !show
+    document.body.classList.toggle('dlq-on', show)
+    if (show) {
+      const { frac, label } = _dlTabState()
+      const html = `
+        <svg viewBox="0 0 36 36" width="18" height="18" aria-hidden="true">
+          <circle class="dlq-ring-track" cx="18" cy="18" r="15" fill="none" stroke-width="4"></circle>
+          <circle class="dlq-ring-arc" cx="18" cy="18" r="15" fill="none" stroke-width="4"
+                  stroke-dasharray="${(frac * 94.25).toFixed(1)} 94.25" transform="rotate(-90 18 18)"></circle>
+        </svg>
+        <span>Downloads</span>${label ? `<span class="dlq-tab-n">${esc(label)}</span>` : ''}`
+      if (tab._html !== html) { tab._html = html; tab.innerHTML = html }
+    }
+    _dlLayout()
+  }
+
+  function _dlPanelHtml() {
+    const active = DL.jobs.find(j => j.status === 'active')
+    const queued = DL.jobs.filter(j => j.status === 'queued')
+      .sort((a, b) => (a.position || 0) - (b.position || 0))
+    const finished = DL.jobs.filter(j => j.status === 'done' || j.status === 'failed')
+      .sort((a, b) => String(b.finished_at || '').localeCompare(String(a.finished_at || '')))
+    const meta = j => [j.date, j.venue].filter(Boolean).join(' · ')
+    const bytes = j => j.total_bytes
+      ? `${fmtBytes(j.done_bytes)} of ${fmtBytes(j.total_bytes)}`
+      : (j.done_bytes ? fmtBytes(j.done_bytes) : '')
+    const dated = j => [j.date, j.total_bytes ? fmtBytes(j.total_bytes) : ''].filter(Boolean).join(' · ')
+
+    const now = active ? `
+      <div class="dlq-sec">
+        <div class="dlq-h">Now</div>
+        <div class="dlq-now">
+          <div class="dlq-now-top">
+            <span class="dlq-name">${esc(active.artist || '')}</span>
+            <button type="button" class="dlq-btn dlq-btn--flat" data-dlq="cancel" data-id="${active.id}">Cancel</button>
+          </div>
+          <span class="dlq-sub">${esc(meta(active))}</span>
+          <div class="dlq-bar"><div class="dlq-bar-fill" style="width:${_dlPct(active)}%"></div></div>
+          <span class="dlq-sub dlq-sub--dim">${esc(bytes(active))}</span>
+        </div>
+      </div>` : ''
+
+    const next = queued.length ? `
+      <div class="dlq-sec">
+        <div class="dlq-h">Up next</div>
+        <div class="dlq-list">${queued.map(j => `
+          <div class="dlq-q" draggable="true" data-id="${j.id}">
+            ${icon('grip-vertical', 'dlq-grip')}
+            <span class="dlq-col">
+              <span class="dlq-name">${esc(j.artist || '')}</span>
+              <span class="dlq-sub dlq-sub--dim">${esc(dated(j))}</span>
+            </span>
+            <button type="button" class="dlq-btn" data-dlq="remove" data-id="${j.id}" aria-label="Remove from queue">${icon('x')}</button>
+          </div>`).join('')}
+        </div>
+      </div>` : ''
+
+    const done = finished.length ? `
+      <div class="dlq-sec">
+        <div class="dlq-h dlq-h--row">Done
+          <button type="button" class="dlq-btn dlq-btn--flat" data-dlq="clear">Clear</button>
+        </div>
+        ${finished.map(j => j.status === 'failed' ? `
+          <div class="dlq-r">
+            <span class="dlq-col">
+              <span class="dlq-name">${esc(j.artist || '')}</span>
+              <span class="dlq-sub dlq-sub--bad">${esc(j.error || '')}</span>
+            </span>
+            <button type="button" class="dlq-btn dlq-btn--acc" data-dlq="retry" data-id="${j.id}">Retry</button>
+          </div>` : `
+          <div class="dlq-r">
+            <span class="dlq-col">
+              <span class="dlq-name">${esc(j.artist || '')}</span>
+              <span class="dlq-sub dlq-sub--dim">${esc(dated(j))}</span>
+            </span>
+            <a class="dlq-link" href="#/downloads">Downloads</a>
+          </div>`).join('')}
+      </div>` : ''
+
+    return `
+      <div class="dlq-head">
+        <span class="dlq-title">Downloads</span>
+        <button type="button" class="dlq-btn" data-dlq="${DL.paused ? 'resume' : 'pause'}">${DL.paused ? 'Resume' : 'Pause'}</button>
+        <button type="button" class="dlq-btn" data-dlq="close" aria-label="Close">${icon('x')}</button>
+      </div>
+      <div class="dlq-body">${now}${next}${done}</div>
+      <div class="dlq-foot"><span class="dlq-path">${esc((DL.folder && DL.folder.path) || '')}</span></div>`
+  }
+
+  function _dlPaintPanel() {
+    const panel = document.getElementById('dlq-panel')
+    const tab = document.getElementById('dlq-tab')
+    if (!panel) return
+    const open = DL.panelOpen && DL.tabShown && _dlAllowed()
+    if (!open) DL.panelOpen = false
+    panel.classList.toggle('open', open)
+    panel.setAttribute('aria-hidden', open ? 'false' : 'true')
+    if (tab) {
+      tab.setAttribute('aria-expanded', open ? 'true' : 'false')
+      tab.classList.toggle('on', open)
+    }
+    if (!open || DL.dragging) return
+    const html = _dlPanelHtml()
+    if (panel._html === html) return
+    const prev = panel.querySelector('.dlq-body')
+    const top = prev ? prev.scrollTop : 0
+    panel._html = html
+    panel.innerHTML = html
+    const body = panel.querySelector('.dlq-body')
+    if (body) body.scrollTop = top
+  }
+
+  // ── Catalog: #/archive/lma ─────────────────────────────────────────────────
+
+  function _arcJob(it) {
+    const j = DL.byKey.get(`${it.source || 'lma'}:${it.id}`) || (DL.loaded ? null : it.job)
+    return j && _dlIsLive(j) ? j : null
+  }
+
+  function _arcActionHtml(it) {
+    const own = (it.in_library && it.in_library.length) ? '<span class="arc-owned">In library</span>' : ''
+    if (it.stream_only) return `${own}<span class="arc-note">Stream only</span>`
+    const j = _arcJob(it)
+    if (j) return `${own}<span class="arc-state">${j.status === 'active' ? 'Downloading' : 'Queued'}</span>`
+    return `${own}<button type="button" class="arc-act" data-act="dl" data-id="${esc(it.id)}">Download</button>`
+  }
+
+  function _arcRowHtml(it) {
+    const st = String(it.source_type || '').toLowerCase()
+    return `
+      <div class="brow arc-row${_arc.openId === it.id ? ' sel' : ''}" data-id="${esc(it.id)}">
+        <span class="brow-perf">${esc(it.artist || '')}</span>
+        <span class="brow-date">${esc(it.date || '')}</span>
+        <span class="brow-venue">${esc(it.venue || '')}</span>
+        <span class="brow-loc">${esc(it.location || '')}</span>
+        <span class="arc-fmt">${esc(it.format || '')}</span>
+        <span class="brow-srccell">${st ? `<span class="arc-src arc-src--${ARC_SRC_CLASSES.has(st) ? st : 'other'}">${esc(it.source_type)}</span>` : ''}</span>
+        <span class="arc-num">${esc(it.size_bytes ? fmtBytes(it.size_bytes) : '')}</span>
+        <span class="arc-num arc-num--dim">${esc(_arcAgo(it.added))}</span>
+        <span class="arc-actcell">${_arcActionHtml(it)}</span>
+      </div>`
+  }
+
+  function _arcMore(has) {
+    const moreEl = document.getElementById('arc-more')
+    if (!moreEl) return
+    _arc.io?.disconnect()
+    if (!has) { moreEl.innerHTML = ''; return }
+    moreEl.innerHTML = '<div class="browse-sentinel" id="arc-sentinel"></div>'
+    _arc.io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) _arcLoad(false)
+    }, { root: mainContent, rootMargin: '400px' })
+    _arc.io.observe(document.getElementById('arc-sentinel'))
+  }
+
+  const _arcSay = text => {
+    const el = document.getElementById('arc-msg')
+    if (el) el.innerHTML = text ? `<div class="arc-err">${esc(text)}</div>` : ''
+  }
+
+  async function _arcLoad(reset) {
+    const rowsEl = () => document.getElementById('arc-rows')
+    if (!rowsEl()) return
+    if (reset) {
+      _arc.seq++
+      _arc.loading = false
+      _arc.page = 0
+      _arc.hasMore = false
+      _arc.items = []
+      _arc.byId = new Map()
+      rowsEl().innerHTML = ''
+      _arcMore(false)
+      _arcSay('')
+    }
+    if (_arc.loading) return
+    const seq = _arc.seq
+    _arc.loading = true
+    let res
+    try {
+      res = _arc.q
+        ? await API.archive.lma.search(_arc.q, _arc.page + 1, _arc.sort)
+        : await API.archive.lma.recent(_arc.page + 1, _arc.sort)
+    } catch (e) {
+      if (seq !== _arc.seq) return
+      _arc.loading = false
+      _arcMore(false)
+      _arcSay(e.message)
+      return
+    }
+    if (seq !== _arc.seq || !rowsEl()) return
+    _arc.loading = false
+    const fresh = ((res && res.items) || []).filter(it => it && it.id != null && !_arc.byId.has(it.id))
+    _arc.page = (res && res.page) || _arc.page + 1
+    _arc.hasMore = !!(res && res.has_more)
+    fresh.forEach(it => { _arc.items.push(it); _arc.byId.set(it.id, it) })
+    rowsEl().insertAdjacentHTML('beforeend', fresh.map(_arcRowHtml).join(''))
+    _arcMore(_arc.hasMore)
+  }
+
+  function _arcRepaintActions() {
+    const list = document.getElementById('arc-rows')
+    if (list) {
+      list.querySelectorAll('.arc-row').forEach(row => {
+        const it = _arc.byId.get(row.dataset.id)
+        const cell = row.querySelector('.arc-actcell')
+        if (!it || !cell) return
+        const html = _arcActionHtml(it)
+        if (cell.innerHTML !== html) cell.innerHTML = html
+      })
+    }
+    if (_arc.openId != null) _arcPaintDrawer()
+  }
+
+  async function _arcEnqueue(it) {
+    try {
+      const job = await API.downloads.enqueue(it.source || 'lma', it.id)
+      if (job && job.id != null) _dlUpsert(job)
+      DL.tabShown = true
+      _dlAfterChange()
+    } catch (e) {
+      // 409: already queued or active, which the refresh below resolves.
+      if (e.status !== 409) { alert(e.message); return }
+    }
+    await _dlRefreshQueue()
+  }
+
+  async function renderArchiveLmaView() {
+    setActiveNav('archive-lma')
+    setActiveArtist(null)
+    setNavCurrent('Live Music Archive')
+    _arcCloseDrawer()
+    _arc.sort = 'newest'
+    _arc.q = ''
+    _arc.openId = null
+    _arc.seq++
+
+    setMainHTML(`
+      <div class="archive-space" id="arc-page">
+        <div class="arc-sticky">
+          <div class="arc-head">
+            <h1 class="arc-title">Live Music Archive</h1>
+            <label class="arc-search">${icon('search')}<input type="text" id="arc-q" aria-label="Search the archive" placeholder="Artist, venue or date" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <div class="arc-bar">
+            <div class="browse-sorts" id="arc-sorts">
+              ${ARC_SORTS.map(([k, label]) =>
+                `<button type="button" class="sortb${k === _arc.sort ? ' on' : ''}" data-sort="${k}">${esc(label)}</button>`).join('')}
+            </div>
+          </div>
+          <div class="brow arc-row arc-cols">
+            <span class="arc-hd">Artist</span><span class="arc-hd">Date</span><span class="arc-hd">Venue</span><span class="arc-hd">Location</span>
+            <span class="arc-hd arc-hd--r">Fmt</span><span class="arc-hd arc-hd--r">Src</span><span class="arc-hd arc-hd--r">Size</span><span class="arc-hd arc-hd--r">Added</span><span></span>
+          </div>
+        </div>
+        <div class="arc-rows" id="arc-rows"></div>
+        <div class="arc-msg" id="arc-msg"></div>
+        <div class="arc-more" id="arc-more"></div>
+      </div>`)
+
+    const input = document.getElementById('arc-q')
+    input.addEventListener('input', () => {
+      clearTimeout(_arc.qTimer)
+      _arc.qTimer = setTimeout(() => {
+        const q = input.value.trim()
+        if (q !== _arc.q) { _arc.q = q; _arcLoad(true) }
+      }, 300)
+    })
+    input.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return
+      clearTimeout(_arc.qTimer)
+      const q = input.value.trim()
+      if (q !== _arc.q) { _arc.q = q; _arcLoad(true) }
+    })
+    document.getElementById('arc-sorts').addEventListener('click', e => {
+      const b = e.target.closest('.sortb')
+      if (!b || b.dataset.sort === _arc.sort) return
+      _arc.sort = b.dataset.sort
+      document.querySelectorAll('#arc-sorts .sortb').forEach(x => x.classList.toggle('on', x === b))
+      _arcLoad(true)
+    })
+    document.getElementById('arc-rows').addEventListener('click', e => {
+      const row = e.target.closest('.arc-row')
+      if (!row) return
+      const it = _arc.byId.get(row.dataset.id)
+      if (!it) return
+      if (e.target.closest('[data-act="dl"]')) { _arcEnqueue(it); return }
+      _arcOpenDrawer(it)
+    })
+    _arcLoad(true)
+  }
+
+  // ── Drawer ─────────────────────────────────────────────────────────────────
+
+  function _arcCloseDrawer() {
+    _arc.openId = null
+    _arc.detail = null
+    _arc.detailErr = ''
+    _arc.detailSeq++
+    document.getElementById('arc-drawer')?.remove()
+    document.querySelectorAll('#arc-rows .arc-row.sel').forEach(r => r.classList.remove('sel'))
+  }
+
+  function _arcDrawerHtml(it, d) {
+    const x = d ? Object.assign({}, it, d) : it
+    const tracks = (d && d.tracks) || []
+    const secs = tracks.reduce((n, t) => n + (t.length_s || 0), 0)
+    const prov = [['Source', d && d.source_text], ['Lineage', d && d.lineage],
+                  ['Taper', d && d.taper], ['Transferer', d && d.transferer]].filter(([, v]) => v)
+    const size = (d && d.audio_bytes) || it.size_bytes
+    const facts = [
+      tracks.length ? `${tracks.length} track${tracks.length === 1 ? '' : 's'}` : '',
+      _arcClock(secs),
+      it.format || '',
+      size ? fmtBytes(size) : '',
+    ].filter(Boolean).join(' · ')
+    const own = (x.in_library && x.in_library.length) ? '<span class="arc-owned">In library</span>' : ''
+    const j = _arcJob(it)
+    const btn = it.stream_only
+      ? '<button type="button" class="arc-primary" disabled>Stream only</button>'
+      : j
+        ? `<button type="button" class="arc-primary" disabled>${j.status === 'active' ? 'Downloading' : 'Queued'}</button>`
+        : `<button type="button" class="arc-primary" data-act="dl" data-id="${esc(it.id)}">Download</button>`
+    const url = (d && d.url) || `https://archive.org/details/${encodeURIComponent(it.id)}`
+    const tabs = [['tracks', 'Tracks'], ['info', 'Info File']]
+    if (d && Array.isArray(d.files)) tabs.push(['files', 'Files'])
+    if (!tabs.some(([k]) => k === _arc.tab)) _arc.tab = 'tracks'
+
+    let body = ''
+    if (_arc.detailErr) body = `<div class="arc-err">${esc(_arc.detailErr)}</div>`
+    else if (_arc.tab === 'tracks') {
+      body = tracks.map(t => `
+        <div class="arc-tr">
+          <span class="arc-tr-n">${esc(String(t.n).padStart(2, '0'))}</span>
+          <span class="arc-tr-t">${esc(t.title || '')}</span>
+          <span class="arc-tr-l">${esc(t.length_s ? fmtDuration(t.length_s) : '')}</span>
+        </div>`).join('')
+    } else if (_arc.tab === 'info') {
+      body = `<pre class="info-file-content">${esc((d && d.info_text) || '')}</pre>`
+    } else if (_arc.tab === 'files') {
+      body = d.files.map(f => `
+        <div class="arc-tr arc-tr--file">
+          <span class="arc-tr-t">${esc(f.name || '')}</span>
+          <span class="arc-tr-l">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
+        </div>`).join('')
+    }
+
+    return `
+      <div class="arc-dr-head">
+        <div class="arc-dr-top">
+          <h2 class="arc-dr-title">${esc(it.artist || '')}</h2>
+          <button type="button" class="arc-dr-x" data-act="close" aria-label="Close">${icon('x')}</button>
+        </div>
+        <div class="arc-dr-date">${esc(it.date || '')}</div>
+        <div class="arc-dr-venue">${esc([it.venue, it.location].filter(Boolean).join(' · '))}</div>
+        ${prov.length ? `<div class="arc-prov">${prov.map(([k, v]) =>
+          `<span class="arc-lb">${esc(k)}</span><span class="arc-vl">${esc(v)}</span>`).join('')}</div>` : ''}
+        <div class="arc-dr-act">
+          ${btn}${own}
+          <span class="arc-facts">${esc(facts)}</span>
+          <span class="arc-dr-gap"></span>
+          <a class="arc-ext" href="${esc(url)}" target="_blank" rel="noopener noreferrer">archive.org</a>
+        </div>
+      </div>
+      <div class="arc-tabs">${tabs.map(([k, label]) =>
+        `<button type="button" class="arc-tab${k === _arc.tab ? ' on' : ''}" data-tab="${k}">${esc(label)}</button>`).join('')}</div>
+      <div class="arc-dr-body">${body}</div>`
+  }
+
+  function _arcPaintDrawer() {
+    const el = document.getElementById('arc-drawer')
+    const it = _arc.byId.get(_arc.openId)
+    if (!el || !it) return
+    const html = _arcDrawerHtml(it, _arc.detail)
+    if (el._html === html) return
+    const prev = el.querySelector('.arc-dr-body')
+    const top = prev ? prev.scrollTop : 0
+    el._html = html
+    el.innerHTML = html
+    const body = el.querySelector('.arc-dr-body')
+    if (body) body.scrollTop = top
+  }
+
+  async function _arcOpenDrawer(it) {
+    const col = document.querySelector('.content-column')
+    if (!col) return
+    _dlLayout()
+    document.getElementById('arc-drawer')?.remove()
+    _arc.openId = it.id
+    _arc.tab = 'tracks'
+    _arc.detail = null
+    _arc.detailErr = ''
+    const seq = ++_arc.detailSeq
+    document.querySelectorAll('#arc-rows .arc-row').forEach(r =>
+      r.classList.toggle('sel', r.dataset.id === it.id))
+    col.insertAdjacentHTML('beforeend',
+      `<aside class="arc-drawer" id="arc-drawer" aria-label="${esc(it.artist || '')}"></aside>`)
+    const el = document.getElementById('arc-drawer')
+    el.addEventListener('click', e => {
+      const t = e.target.closest('[data-tab]')
+      if (t) { _arc.tab = t.dataset.tab; _arcPaintDrawer(); return }
+      const a = e.target.closest('[data-act]')
+      if (!a) return
+      if (a.dataset.act === 'close') _arcCloseDrawer()
+      else if (a.dataset.act === 'dl') {
+        const cur = _arc.byId.get(_arc.openId)
+        if (cur) _arcEnqueue(cur)
+      }
+    })
+    _arcPaintDrawer()
+    try {
+      const d = await API.archive.lma.item(it.id)
+      if (seq !== _arc.detailSeq) return
+      _arc.detail = d
+    } catch (e) {
+      if (seq !== _arc.detailSeq) return
+      _arc.detailErr = e.message
+    }
+    _arcPaintDrawer()
+  }
+
+  // ── Downloads page: #/downloads ────────────────────────────────────────────
+
+  // Checksum verdict from the server: 'verified', 'failed' (with the file
+  // names in checksum_errors) or null. Same fingerprint glyph, tip box and
+  // green/red tokens as the checksum verdicts elsewhere in the app.
+  function _dlChecksumHtml(f) {
+    if (f.checksums !== 'verified' && f.checksums !== 'failed') return '<span></span>'
+    const bad = f.checksums === 'failed'
+    const heading = bad ? 'Checksums failed' : 'Checksums verified'
+    const files = bad ? (f.checksum_errors || []).join(', ') : ''
+    return `<span class="lq-brow-fp lq-tip dl-fp dl-fp--${bad ? 'bad' : 'ok'}" role="img"
+                  aria-label="${esc(files ? `${heading}: ${files}` : heading)}">
+      ${icon('fingerprint', 'lq-fp-ic')}
+      <span class="lq-tipbox">
+        <div class="tt">${esc(heading)}</div>
+        ${files ? `<div class="ab">${esc(files)}</div>` : ''}
+      </span></span>`
+  }
+
+  function _dlRowHtml(f) {
+    let job = f.downloading ? DL.jobs.find(j => j.id === f.job_id) : null
+    // Progress shows only for a download that is genuinely running: the
+    // server's flag, and a job that has not since been cancelled or failed.
+    const busy = f.downloading === true && (!job || _dlIsLive(job))
+    if (!busy) job = null
+    const dests = (DL.folder && DL.folder.destinations) || []
+    const order = ['workshop', 'backlog']
+    const sorted = dests.slice().sort((a, b) => {
+      const ia = order.indexOf(a), ib = order.indexOf(b)
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+    })
+    const actions = busy
+      ? `<span class="dl-prog"><span class="dl-bar"><span class="dl-bar-fill" style="width:${_dlPct(job)}%"></span></span>${_dlPct(job)}%</span>`
+      : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Ingest</button>
+         ${sorted.length ? `
+         <div class="lq-move-wrap">
+           <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
+           <div class="lq-move-menu" hidden>
+             ${sorted.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
+           </div>
+         </div>` : ''}`
+    return `
+      <div class="brow dl-row" data-name="${esc(f.name)}">
+        <span class="arc-name">${esc(f.name)}</span>
+        ${_dlChecksumHtml(f)}
+        <span class="arc-num">${esc(f.files != null ? f.files : '')}</span>
+        <span class="arc-num">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
+        <span class="arc-num">${esc(f.format || '')}</span>
+        <span class="arc-num arc-num--dim">${esc(busy ? 'Now' : _dlModified(f.modified))}</span>
+        <span class="dl-acts">${actions}</span>
+      </div>`
+  }
+
+  function _dlRepaintDownloadsPage() {
+    const rows = document.getElementById('dl-rows')
+    if (!rows || !DL.folder) return
+    if (rows.querySelector('.lq-move-menu:not([hidden])')) return   // a menu is open
+    const html = (DL.folder.folders || []).map(_dlRowHtml).join('')
+    if (rows._html === html) return
+    rows._html = html
+    rows.innerHTML = html
+    const path = document.getElementById('dl-path')
+    if (path) path.textContent = DL.folder.path || ''
+  }
+
+  function _dlCloseMenus() {
+    document.querySelectorAll('#dl-rows .lq-move-menu').forEach(m => { m.hidden = true })
+  }
+
+  async function renderDownloadsView() {
+    setActiveNav('downloads')
+    setActiveArtist(null)
+    setNavCurrent('Downloads')
+    setLoading()
+    try {
+      _dlSetFolder(await API.downloads.folder())
+    } catch (e) {
+      setMainHTML(`
+        <div class="empty-state">
+          <div class="empty-title">Could not open this page</div>
+          <div class="empty-sub" style="color:var(--red)">${esc((e && e.message) || String(e))}</div>
+        </div>`)
+      return
+    }
+    const f = DL.folder
+    setMainHTML(`
+      <div class="dl-page">
+        <div class="arc-head">
+          <h1 class="arc-title">Downloads</h1>
+          <span class="dl-path" id="dl-path">${esc(f.path || '')}</span>
+        </div>
+        <div class="dl-list">
+          <div class="brow dl-row dl-cols">
+            <span class="arc-hd">Name</span><span></span><span class="arc-hd arc-hd--r">Files</span><span class="arc-hd arc-hd--r">Size</span>
+            <span class="arc-hd arc-hd--r">Format</span><span class="arc-hd arc-hd--r">Modified</span><span></span>
+          </div>
+          <div class="dl-rows" id="dl-rows"></div>
+        </div>
+      </div>`)
+    _dlRepaintDownloadsPage()
+
+    if (!DL.docWired) {
+      DL.docWired = true
+      document.addEventListener('click', _dlCloseMenus)
+    }
+    const dir = name => `${String(DL.folder.path || '').replace(/\/+$/, '')}/${name}`
+    document.getElementById('dl-rows').addEventListener('click', async e => {
+      const ingest = e.target.closest('.dl-ingest')
+      if (ingest) {
+        _ingestHandoffDir = dir(ingest.dataset.name)
+        window.location.hash = '#/ingest'
+        return
+      }
+      const mv = e.target.closest('.dl-move')
+      if (mv) {
+        e.stopPropagation()
+        const menu = mv.nextElementSibling
+        const wasHidden = menu.hidden
+        _dlCloseMenus()
+        menu.hidden = !wasHidden
+        return
+      }
+      const opt = e.target.closest('.lq-move-opt')
+      if (!opt) return
+      const name = opt.dataset.name
+      _dlCloseMenus()
+      // No Delete on any working-folder page (Ryan, 2026-10-01): Move only.
+      try { await API.quality.move(dir(name), opt.dataset.dest) }
+      catch (err) { alert(`Move failed: ${err.message}`); return }
+      await _dlRefreshFolder()
+      _dlRepaintDownloadsPage()
+    })
+  }
+
+
+  // ── Workshop / Backlog pages: #/workshop, #/backlog (2026-10-01) ─────────
+  // The Downloads page design for the other two working folders: the same
+  // folder rows, Ingest, and Move to the other working folder. No Delete:
+  // Trellis deletes nothing from a working folder (2026-10-01).
+  function _wfRowHtml(f, dests) {
+    return `
+      <div class="brow dl-row" data-name="${esc(f.name)}">
+        <span class="arc-name">${esc(f.name)}</span>
+        <span></span>
+        <span class="arc-num">${esc(f.files != null ? f.files : '')}</span>
+        <span class="arc-num">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
+        <span class="arc-num">${esc(f.format || '')}</span>
+        <span class="arc-num arc-num--dim">${esc(_dlModified(f.modified))}</span>
+        <span class="dl-acts">
+          <button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Ingest</button>
+          ${dests.length ? `
+          <div class="lq-move-wrap">
+            <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
+            <div class="lq-move-menu" hidden>
+              ${dests.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
+            </div>
+          </div>` : ''}
+        </span>
+      </div>`
+  }
+
+  async function renderWorkingFolderView(which) {
+    const label = TRIAGE_LABELS[which]
+    setActiveNav(which)
+    setActiveArtist(null)
+    setNavCurrent(label)
+    setLoading()
+    let data
+    const load = async () => { data = await API.downloads.folder(which) }
+    try { await load() } catch (e) {
+      setMainHTML(`
+        <div class="empty-state">
+          <div class="empty-title">Could not open this page</div>
+          <div class="empty-sub" style="color:var(--red)">${esc((e && e.message) || String(e))}</div>
+        </div>`)
+      return
+    }
+    const paint = () => {
+      const rows = document.getElementById('wf-rows')
+      if (rows) rows.innerHTML = (data.folders || []).map(f => _wfRowHtml(f, data.destinations || [])).join('')
+    }
+    setMainHTML(`
+      <div class="dl-page">
+        <div class="arc-head">
+          <h1 class="arc-title">${esc(label)}</h1>
+          <span class="dl-path">${esc(data.path || '')}</span>
+        </div>
+        <div class="dl-list">
+          <div class="brow dl-row dl-cols">
+            <span class="arc-hd">Name</span><span></span><span class="arc-hd arc-hd--r">Files</span><span class="arc-hd arc-hd--r">Size</span>
+            <span class="arc-hd arc-hd--r">Format</span><span class="arc-hd arc-hd--r">Modified</span><span></span>
+          </div>
+          <div class="dl-rows" id="wf-rows"></div>
+        </div>
+      </div>`)
+    paint()
+    const closeMenus = () => document.querySelectorAll('#wf-rows .lq-move-menu').forEach(m => { m.hidden = true })
+    document.addEventListener('click', closeMenus, { once: true })
+    const dir = name => `${String(data.path || '').replace(/\/+$/, '')}/${name}`
+    document.getElementById('wf-rows').addEventListener('click', async e => {
+      const ingestBtn = e.target.closest('.dl-ingest')
+      if (ingestBtn) {
+        _ingestHandoffDir = dir(ingestBtn.dataset.name)
+        window.location.hash = '#/ingest'
+        return
+      }
+      const mv = e.target.closest('.dl-move')
+      if (mv) {
+        e.stopPropagation()
+        const menu = mv.nextElementSibling
+        const wasHidden = menu.hidden
+        closeMenus()
+        menu.hidden = !wasHidden
+        document.addEventListener('click', closeMenus, { once: true })
+        return
+      }
+      const opt = e.target.closest('.lq-move-opt')
+      if (!opt) return
+      closeMenus()
+      try { await API.quality.move(dir(opt.dataset.name), opt.dataset.dest) }
+      catch (err) { alert(`Move failed: ${err.message}`); return }
+      try { await load() } catch (_) {}
+      paint()
+    })
+  }
 
   function route() {
     const hash = window.location.hash || '#/'
@@ -16367,7 +17818,9 @@ const App = (() => {
     // Bounce out of an admin-only view when there is no edit permission in
     // force — Playback mode, or a listener who was sent the URL. The library is
     // the honest destination: it is the one page everybody can use.
-    if (!canEditLibrary() && isAdminOnlyHash(hash)) {
+    const archiveHash = hash === '#/archive/lma' || hash === '#/downloads'
+                     || hash === '#/workshop' || hash === '#/backlog'
+    if ((!canEditLibrary() || (archiveHash && !isAdmin())) && isAdminOnlyHash(hash)) {
       // The Back/Forward step that landed here is ABANDONED, so clear the flag
       // marking it as ours (2026-08-28). Left set, _navRecord treated the
       // bounce as our own move and recorded nothing: navPos stayed pointing at
@@ -16392,6 +17845,12 @@ const App = (() => {
     // know it has been navigated away from, so every route dispatch clears it
     // unconditionally. Harmless when nothing is running.
     _stopBulkIngestPoll()
+    // The archive drawer and its scroll observer belong to the page we are
+    // leaving; the queue tab and panel are global and stay.
+    _arcCloseDrawer()
+    _arc.io?.disconnect()
+    clearTimeout(_arc.qTimer)
+    _dlPaintChrome()
 
     // Snapshot "where we're coming from" for the destination page's Back
     // link (state.navCurrent/navBack) — but only on a genuine navigation.
@@ -16437,6 +17896,9 @@ const App = (() => {
     } else if (hash === '#/recent') {
       renderRecentView()
 
+    } else if (hash === '#/albums') {
+      renderAlbumsView()
+
     } else if (hash === '#/batch') {
       renderBatchImportView()
 
@@ -16445,6 +17907,14 @@ const App = (() => {
 
     } else if (hash === '#/bulk-ingest') {
       renderBulkIngestView()
+
+    } else if (hash === '#/archive/lma') {
+      renderArchiveLmaView()
+
+    } else if (hash === '#/downloads') {
+      renderDownloadsView()
+    } else if (hash === '#/workshop' || hash === '#/backlog') {
+      renderWorkingFolderView(hash.slice(2))
 
     } else if (hash === '#/venues') {
       renderVenuesPage()
@@ -17052,10 +18522,9 @@ const App = (() => {
       })
     })
 
-    // Working folders of an ingested library (2026-09-26). First run no longer
-    // asks for them, so they are set here. Desktop only: the folder dialog
-    // is PyWebView's, and a created library's working folders are fixed, so
-    // the block renders only when run.py says they are editable.
+    // Working folders (2026-09-26; every library since 2026-10-01). First run
+    // no longer asks for most of them, so they are set here. Desktop only:
+    // the folder dialog is PyWebView's.
     ;(async () => {
       const host = $('set-folders')
       const api  = window.pywebview && window.pywebview.api
@@ -17068,7 +18537,7 @@ const App = (() => {
         <div class="set-field">
           <span class="set-label">${label}</span>
           <div class="set-actions">
-            <span class="set-hint" id="wf-${key}">${esc(wf[key] || 'not set')}</span>
+            <span class="set-hint" id="wf-${key}">${esc(wf[key] || (key === 'import_dir' && wf.effective_import_dir) || 'not set')}</span>
             <button class="btn btn-ghost btn-sm" data-wf="${key}">Choose…</button>
             <span class="set-flash" id="wf-${key}-flash"></span>
           </div>
@@ -17083,6 +18552,9 @@ const App = (() => {
         if (res && res.ok) {
           $('wf-' + key).textContent = res.path
           _settingsSaved($('wf-' + key + '-flash'))
+          // A newly set Workshop/Backlog gets its nav entry right away.
+          appPrefs = null
+          renderSidebar()
         } else {
           _settingsSaved($('wf-' + key + '-flash'), (res && res.error) || 'Could not save')
         }
@@ -17180,6 +18652,15 @@ const App = (() => {
       return `<span class="search-item-date">${esc(item.date || '—')}</span>
               <span class="search-item-name">${esc(item.artist || 'Unknown')}</span>
               <span class="search-item-meta">${esc(where)}</span>`
+    }
+    if (item.type === 'album') {
+      // Studio Records spec v1, section 7 — an album row leads with its
+      // title, never a date/venue slot it does not have. No title: the
+      // name slot already falls back to the artist, so the meta line is
+      // the year alone -- repeating the artist there would read as an echo.
+      const meta = item.title ? [item.artist, item.year].filter(Boolean).join(' · ') : (item.year || '')
+      return `<span class="search-item-name">${esc(item.title || item.artist || 'Unknown')}</span>
+              <span class="search-item-meta">${esc(meta)}</span>`
     }
     if (item.type === 'venue') {
       const where = [item.city, item.state].filter(Boolean).join(', ')
@@ -17359,6 +18840,16 @@ const App = (() => {
       searchInput.focus()
       searchInput.select()
     })
+
+    // Cmd-R (Ctrl-R elsewhere) reloads the UI (Ryan, 2026-10-01). The desktop
+    // window has no browser menu, so nothing else provides it. The hash route
+    // survives the reload, so the same page comes back.
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'r' || e.key === 'R') && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        window.location.reload()
+      }
+    })
   }
 
   // ── Results page ───────────────────────────────────────────────────────────
@@ -17383,6 +18874,21 @@ const App = (() => {
                   <div class="search-row-meta">${esc(where || 'No venue recorded')}</div>
                 </div>
                 <div class="search-row-right">${sourceBadge(item.source)}</div>
+              </div>`
+    }
+    if (item.type === 'album') {
+      // Studio Records spec v1, section 7 — title leads, then artist and
+      // year; never a venue slot (a studio record has none). No title: the
+      // name slot falls back to the artist, so the meta line is the year
+      // alone -- repeating the artist there would read as an echo.
+      const thumb = item.image_url ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">` : ''
+      const meta = item.title ? [item.artist, item.year].filter(Boolean).join(' · ') : (item.year || '')
+      return `<div class="search-row" data-hash="${esc(item.hash)}">
+                ${thumb}
+                <div class="search-row-main">
+                  <div class="search-row-name">${esc(item.title || item.artist || 'Unknown')}</div>
+                  <div class="search-row-meta">${esc(meta)}</div>
+                </div>
               </div>`
     }
     if (item.type === 'venue') {

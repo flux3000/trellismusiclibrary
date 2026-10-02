@@ -10,7 +10,7 @@ Adds (all additive, idempotent, safe to re-run):
   performance_personnel table (new) — show-level lineup rows.
 
 Nothing is backfilled and no existing row changes meaning. See
-"Context Library/Per-Show Personnel — Design Plan (DRAFT).md" §4 ("Why the
+"Context Library/2026-07-17 - Per-Show Personnel — Design Plan (DRAFT).md" §4 ("Why the
 migration is safe") and §7 (decisions).
 
 Run once from the repo root:

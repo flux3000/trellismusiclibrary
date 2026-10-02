@@ -183,6 +183,13 @@ def create_app(config_class=Config):
     app.register_blueprint(naming_bp,       url_prefix="/api/naming")
     app.register_blueprint(bulk_ingest_bp,     url_prefix="/api/bulk-ingest")
 
+    # Archive Downloads (2026-10-01): catalog browsing + the download queue.
+    # After the SERVER_MODE return above, so a share node never has them.
+    from app.api.archive   import bp as archive_bp
+    from app.api.downloads import bp as downloads_bp
+    app.register_blueprint(archive_bp,   url_prefix="/api/archive")
+    app.register_blueprint(downloads_bp, url_prefix="/api/downloads")
+
     # ── Bulk Ingest: pick a run left running back up (2026-09-26) ────────
     # Never in SERVER_MODE (that branch already returned above) -- a share
     # node has no bulk_ingest surface at all. A run left 'paused' is left
@@ -191,6 +198,9 @@ def create_app(config_class=Config):
     # what happens to its in-progress item).
     from app.utils.bulk_ingest_run import resume_on_boot
     resume_on_boot(app)
+
+    # The download queue is resumed by run.py / run_headless.py instead, after
+    # the Downloads config has been patched (see download_queue.resume_on_boot).
 
     # ── Auto-login as the owner ───────────────────────────────
     # Two quite different reasons land here:

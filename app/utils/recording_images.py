@@ -335,3 +335,46 @@ def ingest_recording_images(rec, library_root):
 
     db.session.flush()
     return len(created)
+
+
+def add_cover_art_if_missing(rec):
+    """
+    Cover Art Archive front cover for a recording with a matched MusicBrainz
+    release and no artwork at all (Ryan, 2026-10-01). Becomes primary, since
+    it is the only image. Returns 1 if added, else 0. Never raises; flushes,
+    does not commit.
+    """
+    from app.models.recording_image import RecordingImage
+    from app.utils import musicbrainz as _mb
+
+    if not rec.mb_release_id or not _mb.enabled():
+        return 0
+    has_any = (db.session.query(RecordingImage.id)
+               .filter_by(recording_id=rec.id).first() is not None)
+    if has_any:
+        return 0
+    try:
+        data = _mb.fetch_cover_art(rec.mb_release_id, rec.mb_release_group_id)
+        ext = _sniff_ext(data) if data else None
+        if not ext:
+            return 0
+        images_dir = image_dir("recordings", str(rec.id))
+        images_dir.mkdir(parents=True, exist_ok=True)
+        fname = f"img_{secrets.token_hex(6)}.{ext}"
+        (images_dir / fname).write_bytes(data)
+        img = RecordingImage(
+            recording_id=rec.id,
+            filename=fname,
+            ext=f".{ext}",
+            origin="coverartarchive",
+            source_ref=f"caa:{rec.mb_release_id}",
+            sort_order=0,
+        )
+        db.session.add(img)
+        db.session.flush()
+        set_primary(img)
+        db.session.flush()
+        return 1
+    except Exception:  # noqa: BLE001
+        logger.exception("recording artwork: cover art fetch failed for recording %s", rec.id)
+        return 0

@@ -88,3 +88,9 @@ _to_delete/
 
 # Install epoch — per-install record, written at first launch.
 install.json
+
+# Per-machine data written under DATA_DIR. From source, DATA_DIR is the repo
+# itself (config._default_data_dir), so these land here on a dev checkout.
+# Installed builds write them to Application Support instead.
+/images/
+/trellis_root.json

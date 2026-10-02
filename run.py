@@ -40,7 +40,8 @@ TRELLIS_ROOT_MARKER     = Config.DATA_DIR / "trellis_root.json"
 # The folder name a person sees in Finder, chosen 2026-08-26 (Ryan): the
 # short "Trellis" collided visually with the code repo of the same name.
 TRELLIS_ROOT_FOLDER_NAME = "Trellis Music Library"
-TRELLIS_SUBFOLDERS       = ("Library", "Download", "Backlog", "Workshop")
+# "Downloads", not "Download" (2026-10-01): matches the page and nav name.
+TRELLIS_SUBFOLDERS       = ("Library", "Downloads", "Backlog", "Workshop")
 
 
 def _read_trellis_root_marker():
@@ -51,7 +52,7 @@ def _read_trellis_root_marker():
     question (2026-09-17):
 
       {"mode": "created",  "trellis_root": "..."}
-          Trellis laid the folder out itself: <root>/{Library, Download,
+          Trellis laid the folder out itself: <root>/{Library, Downloads,
           Backlog, Workshop}. The original and still the default.
 
       {"mode": "imported", "library_root": "...",
@@ -103,7 +104,14 @@ def _looks_reachable(path):
         return False
 
 
-def _apply_trellis_root(root):
+def _paths_overlap(a, b):
+    """True when a equals, contains, or sits inside b (realpaths)."""
+    a, b = a.rstrip(os.sep) or os.sep, b.rstrip(os.sep) or os.sep
+    return (a == b or a.startswith(b + os.sep) or b.startswith(a + os.sep)
+            or a == os.sep or b == os.sep)
+
+
+def _apply_trellis_root(root, import_dir=None, backlog_dir=None, workshop_dir=None):
     """
     Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS/IMPORT_ROOTS at <root>'s four
     folders.
@@ -116,18 +124,24 @@ def _apply_trellis_root(root):
     time. Patching the other three keys without this one means "Add
     Recordings" (and playback) rejects every folder under a freshly chosen
     root as "outside the permitted import roots," having never heard of it.
-    Set to the whole Trellis root, not just Library, since Download/Backlog/
+    Set to the whole Trellis root, not just Library, since Downloads/Backlog/
     Workshop all need to pass this same check. "/Volumes" is kept for parity
     with the original default -- browsing in from an external drive should
     still work.
     """
     app.config["LIBRARY_ROOT"] = str(root / "Library")
-    app.config["IMPORT_DIR"]   = str(root / "Download")
+    # The three working folders default to <root>'s own subfolders, but any
+    # of them can be pointed elsewhere from Settings (Ryan, 2026-10-01: always
+    # editable, created library or imported). An override is stored in the
+    # marker under the same keys an imported library uses.
+    app.config["IMPORT_DIR"]   = str(import_dir or (root / "Downloads"))
     app.config["TRIAGE_DIRS"]  = {
-        "backlog":  str(root / "Backlog"),
-        "workshop": str(root / "Workshop"),
+        "backlog":  str(backlog_dir or (root / "Backlog")),
+        "workshop": str(workshop_dir or (root / "Workshop")),
     }
-    app.config["IMPORT_ROOTS"] = [str(root), "/Volumes"]
+    roots = [str(root), "/Volumes"]
+    roots += [str(d) for d in (import_dir, backlog_dir, workshop_dir) if d]
+    app.config["IMPORT_ROOTS"] = roots
 
 
 def _apply_imported_library(library_root, import_dir=None,
@@ -162,12 +176,20 @@ def _apply_imported_library(library_root, import_dir=None,
         triage["workshop"] = str(workshop_dir)
     app.config["TRIAGE_DIRS"] = triage
 
-    # No Download folder means "Add Recordings" simply opens at the library
-    # itself, which is where an ingesting collector's material already is.
-    app.config["IMPORT_DIR"] = str(import_dir) if import_dir else library_root
+    # No Downloads folder set means ~/Downloads/Trellis (2026-10-01). It used
+    # to be the library root, which made Add Recordings open on the whole
+    # collection and gave archive downloads nowhere to land. Not created here:
+    # a permission prompt for ~/Downloads at launch is bad; downloads_dir.
+    # ensure_downloads_dir() creates it on first need.
+    if import_dir:
+        eff_import = str(import_dir)
+    else:
+        from app.utils.downloads_dir import default_downloads_dir
+        eff_import = default_downloads_dir()
+    app.config["IMPORT_DIR"] = eff_import
 
-    roots = [library_root, "/Volumes"]
-    roots += [str(d) for d in (import_dir, backlog_dir, workshop_dir) if d]
+    roots = [library_root, "/Volumes", eff_import]
+    roots += [str(d) for d in (import_dir, backlog_dir, workshop_dir) if d and str(d) != eff_import]
     app.config["IMPORT_ROOTS"] = roots
 
 
@@ -205,7 +227,12 @@ def _apply_marker(data):
             workshop_dir = data.get("workshop_dir"),
         )
     else:
-        _apply_trellis_root(Path(data["trellis_root"]))
+        _apply_trellis_root(
+            Path(data["trellis_root"]),
+            import_dir   = data.get("import_dir"),
+            backlog_dir  = data.get("backlog_dir"),
+            workshop_dir = data.get("workshop_dir"),
+        )
 
 
 def resolve_trellis_root_and_patch_config():
@@ -252,7 +279,6 @@ def _setup_html():
     on this page was approved by Ryan; do not add any without him.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
-    default_parent = str(Path.home() / "Music")
     home_str = str(Path.home())
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>
@@ -274,19 +300,33 @@ def _setup_html():
     color: #e8e6e1; font-family: inherit;
   }}
   input.field:focus {{ outline: none; border-color: #d98f4e; }}
-  .opt {{
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    padding: 12px 14px; border: 1px solid #3a3d43; border-radius: 6px;
-    margin-bottom: 8px; cursor: pointer; font-size: 14px;
+  .opt-box {{
+    border: 1px solid #3a3d43; border-radius: 6px; margin-bottom: 8px;
   }}
-  .opt.on {{ border-color: #d98f4e; background: rgba(217,143,78,.12); }}
+  .opt-box.on {{ border-color: #d98f4e; background: rgba(217,143,78,.12); }}
+  .opt, .opt-sub {{
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    padding: 12px 14px; font-size: 14px;
+  }}
+  .opt {{ cursor: pointer; }}
   .opt input[type=radio] {{ margin: 0; accent-color: #d98f4e; flex-shrink: 0; }}
   .opt-label {{ flex: 1 1 auto; min-width: 160px; }}
-  .opt button {{ flex-shrink: 0; }}
-  .path {{
-    margin: 6px 0 8px 26px; font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 12px; color: #b8b5ae; word-break: break-all;
+  .opt button, .opt-sub button {{ flex-shrink: 0; }}
+  /* Second row of an expanded option, text aligned with the label above:
+     14px box padding + 13px radio + 10px gap. */
+  .opt-sub {{ padding-top: 0; padding-left: 37px; }}
+  .opt-note {{ padding: 0 14px 14px 37px; font-size: 13px; color: #b8b5ae; line-height: 1.5; }}
+  .opt-note p {{ margin: 0 0 6px; }}
+  .opt-note ul {{ margin: 0 0 6px; padding-left: 18px; }}
+  [hidden] {{ display: none !important; }}
+  button.ghost.picked {{ box-shadow: inset 0 0 0 1px #d98f4e; }}
+  /* The chosen folder, left of its button (Ryan, 2026-10-01). */
+  .opt-path {{
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+    color: #b8b5ae; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
   }}
+  .opt-path:empty {{ display: none; }}
   button {{
     font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
     background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
@@ -307,20 +347,35 @@ def _setup_html():
   </div>
 
   <div class="field-block">
-    <label class="lbl">Choose your library location</label>
+    <label class="lbl">Select Library Location:</label>
 
-    <label class="opt on" id="opt-existing">
-      <input type="radio" name="kind" value="existing" checked>
-      <span class="opt-label">Use a folder I already have</span>
-      <button class="ghost" id="pick-existing" type="button">Choose Folder…</button>
-    </label>
-    <div class="path" id="existing-path"></div>
+    <div class="opt-box" id="box-existing">
+      <label class="opt">
+        <input type="radio" name="kind" value="existing">
+        <span class="opt-label">Import an Existing Library</span>
+        <span class="opt-path" id="path-existing"></span>
+        <button class="ghost" id="pick-existing" type="button">Select Location</button>
+      </label>
+      <div class="opt-sub" id="sub-existing" hidden>
+        <span class="opt-label">Select Downloads Folder</span>
+        <span class="opt-path" id="path-downloads"></span>
+        <button class="ghost" id="pick-downloads" type="button">Select Location</button>
+      </div>
+    </div>
 
-    <label class="opt" id="opt-new">
-      <input type="radio" name="kind" value="new">
-      <span class="opt-label" id="new-label"></span>
-      <button class="ghost" id="pick-new" type="button">Choose Location…</button>
-    </label>
+    <div class="opt-box" id="box-new">
+      <label class="opt">
+        <input type="radio" name="kind" value="new">
+        <span class="opt-label">Create a New Library</span>
+        <span class="opt-path" id="path-new"></span>
+        <button class="ghost" id="pick-new" type="button">Select Location</button>
+      </label>
+      <div class="opt-note" id="sub-new" hidden>
+        <p>Trellis will create four folders:</p>
+        <ul><li>Library</li><li>Downloads</li><li>Backlog</li><li>Workshop</li></ul>
+        <p>You can change these locations in Settings.</p>
+      </div>
+    </div>
   </div>
 
   <div id="start-row"><button id="start" disabled>Start Trellis and Build Library</button></div>
@@ -330,46 +385,46 @@ def _setup_html():
   const $ = id => document.getElementById(id)
   const status = $('status')
   const uname  = $('username')
-  const FOLDER_NAME = {TRELLIS_ROOT_FOLDER_NAME!r}
+  // Nothing selected until the person picks (Ryan, 2026-10-01). Paths are
+  // never shown; a chosen location only marks its button.
+  let kind = null
   const HOME = {home_str!r}
-  let kind = 'existing'
-  let existingFolder = null
-  let newParent = {default_parent!r}
-
-  function clearStatus() {{ status.className = ''; status.textContent = '' }}
-  function fail(msg) {{ status.className = 'err'; status.textContent = msg }}
-
-  // The marker path sent to the API is always the absolute newParent -- this
-  // only shortens what the person reads.
-  function displayParent(p) {{
+  // Shown path only: ~ for the home folder. The full path is what is sent.
+  function shortPath(p) {{
     if (p === HOME) return '~'
     if (p.startsWith(HOME + '/')) return '~' + p.slice(HOME.length)
     return p
   }}
+  function showPath(id, p) {{ const el = $(id); el.textContent = shortPath(p); el.title = p }}
+  let existingFolder = null
+  let downloadsFolder = null
+  let newParent = null
 
-  function renderNewLabel() {{
-    $('new-label').textContent = `Create a new library in ${{displayParent(newParent)}}/${{FOLDER_NAME}}`
-  }}
-  renderNewLabel()
+  function clearStatus() {{ status.className = ''; status.textContent = '' }}
+  function fail(msg) {{ status.className = 'err'; status.textContent = msg }}
 
   function syncOpts() {{
-    $('opt-existing').classList.toggle('on', kind === 'existing')
-    $('opt-new').classList.toggle('on', kind === 'new')
+    $('box-existing').classList.toggle('on', kind === 'existing')
+    $('box-new').classList.toggle('on', kind === 'new')
+    $('sub-existing').hidden = kind !== 'existing'
+    $('sub-new').hidden = kind !== 'new'
     $('start').textContent = kind === 'existing' ? 'Start Trellis and Build Library' : 'Start Trellis'
   }}
   syncOpts()
 
   function refreshStart() {{
-    const folderResolved = kind === 'existing' ? !!existingFolder : !!newParent
+    const folderResolved = kind === 'existing' ? !!existingFolder : kind === 'new' ? !!newParent : false
     $('start').disabled = !uname.value.trim() || !folderResolved
   }}
 
-  document.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener('change', () => {{
-    kind = r.value
+  function choose(k) {{
+    document.querySelector(`input[name="kind"][value="${{k}}"]`).checked = true
+    kind = k
     syncOpts()
     refreshStart()
-  }}))
+  }}
 
+  document.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener('change', () => choose(r.value)))
   uname.addEventListener('input', refreshStart)
 
   // Picking a folder for one answer also selects its radio -- the picker is
@@ -379,11 +434,18 @@ def _setup_html():
     const f = await window.pywebview.api.pick_folder()
     if (!f) return
     existingFolder = f
-    $('existing-path').textContent = f
-    document.querySelector('input[name="kind"][value="existing"]').checked = true
-    kind = 'existing'
-    syncOpts()
-    refreshStart()
+    showPath('path-existing', f)
+    $('pick-existing').classList.add('picked')
+    choose('existing')
+  }})
+
+  $('pick-downloads').addEventListener('click', async e => {{
+    e.preventDefault()
+    const f = await window.pywebview.api.pick_folder()
+    if (!f) return
+    downloadsFolder = f
+    showPath('path-downloads', f)
+    $('pick-downloads').classList.add('picked')
   }})
 
   $('pick-new').addEventListener('click', async e => {{
@@ -391,11 +453,9 @@ def _setup_html():
     const f = await window.pywebview.api.pick_folder()
     if (!f) return
     newParent = f
-    renderNewLabel()
-    document.querySelector('input[name="kind"][value="new"]').checked = true
-    kind = 'new'
-    syncOpts()
-    refreshStart()
+    showPath('path-new', f)
+    $('pick-new').classList.add('picked')
+    choose('new')
   }})
 
   $('start').addEventListener('click', async e => {{
@@ -406,7 +466,7 @@ def _setup_html():
     try {{
       const api = window.pywebview.api
       const result = kind === 'existing'
-        ? await api.confirm_existing_library(existingFolder, username, null, null, null, null, null)
+        ? await api.confirm_existing_library(existingFolder, username, downloadsFolder, null, null, null, null)
         : await api.confirm_trellis_root(newParent, username, null, null)
       if (result && result.ok) {{ window.location.href = {app_url!r}; return }}
       fail((result && result.error) || 'Something went wrong. Try again.')
@@ -602,7 +662,7 @@ class FluxAPI:
         """
         First-run only. The user picked a parent folder via pick_folder() and
         typed a name for themselves; this creates
-        <parent>/Trellis Music Library/{Library,Download,Backlog,Workshop},
+        <parent>/Trellis Music Library/{Library,Downloads,Backlog,Workshop},
         remembers the folder choice for next launch, patches the already-
         running app's config -- Flask started before this could possibly be
         known -- creates the owner account under the chosen name, and applies
@@ -692,21 +752,39 @@ class FluxAPI:
 
     def get_working_folders(self):
         data = _read_trellis_root_marker() or {}
-        out = {"editable": data.get("mode") == "imported"}
+        # Editable for every library (Ryan, 2026-10-01), not just imported.
+        out = {"editable": bool(data)}
+        triage = app.config.get("TRIAGE_DIRS") or {}
+        effective = {"import_dir":   app.config.get("IMPORT_DIR"),
+                     "backlog_dir":  triage.get("backlog"),
+                     "workshop_dir": triage.get("workshop")}
         for k in self._WORKING_FOLDER_KEYS:
-            out[k] = data.get(k)
+            out[k] = data.get(k) or effective[k]
+        # The folder downloads actually land in, set or not (2026-10-01), so
+        # Settings can show ~/Downloads/Trellis rather than a blank.
+        out["effective_import_dir"] = app.config.get("IMPORT_DIR")
         return out
 
     def set_working_folder(self, which, path):
         """Store one working folder in the marker and apply it to the running
         app, exactly as first run did. Returns {"ok": ...}."""
         data = _read_trellis_root_marker()
-        if not data or data.get("mode") != "imported":
+        if not data:
             return {"ok": False, "error": "Not available for this library."}
         if which not in self._WORKING_FOLDER_KEYS:
             return {"ok": False, "error": "Unknown folder."}
         if not path or not Path(path).is_dir():
             return {"ok": False, "error": "That folder could not be opened."}
+        if which == "import_dir":
+            # Downloads must never overlap the library or a working folder
+            # (2026-10-01): Ingest and Move act on its folders as loose material.
+            real = os.path.realpath(path)
+            lib = os.path.realpath(app.config["LIBRARY_ROOT"])
+            if _paths_overlap(real, lib):
+                return {"ok": False, "error": "That folder overlaps your library."}
+            for k in ("backlog_dir", "workshop_dir"):
+                if data.get(k) and os.path.realpath(data[k]) == real:
+                    return {"ok": False, "error": "That folder is already used for something else."}
         data[which] = str(path)
         try:
             _write_marker(data)
@@ -864,6 +942,11 @@ if __name__ == "__main__":
     # The default owner account is only created here when the setup page
     # isn't about to ask for a name instead -- see confirm_trellis_root().
     first_run_setup(create_default_user=trellis_root_ready)
+
+    # Config is final and the schema exists: only now is it safe to put a
+    # download left active at quit back in the queue and restart the worker.
+    from app.utils.download_queue import resume_on_boot as _resume_downloads
+    _resume_downloads(app)
 
     # Flask runs in a daemon thread — dies when the window closes
     flask_thread = threading.Thread(target=start_flask, daemon=True)
