@@ -51,11 +51,11 @@ _WORKER_LOCK = threading.Lock()
 _WORKER = [None]
 # Job ids whose cancel was requested while the worker was inside them.
 _CANCEL = set()
-# The job the worker is inside right now; the delete guard reads it.
+# The job the worker is inside right now; is_busy_folder reads it.
 _CURRENT = [None]
-# Held across the delete guard + rmtree (api/downloads.py) and around the
-# worker's makedirs of a job folder, so a delete cannot interleave with an
-# enqueue-then-start of the same folder (2026-10-01 review).
+# Held around the worker's makedirs of a job folder, a cancel's cleanup, and
+# the Move guard in api/quality.py (check + move), so a Move cannot interleave
+# with a job creating or removing the same folder (2026-10-02).
 FS_LOCK = threading.RLock()
 
 
@@ -265,6 +265,19 @@ def is_busy_folder(target):
             pass
     return False
 
+
+
+def downloading_here(path):
+    """True when `path` is a folder directly inside Downloads that a queued or
+    active download owns. Guards Move and Ingest of a working-folder row
+    (Ryan, 2026-10-02): a folder moved mid-download is recreated by the worker
+    and the show ends up split across two places. Scoped to Downloads so a
+    same-named folder in Workshop or Backlog is never refused."""
+    from app.utils.downloads_dir import downloads_dir
+    parent = os.path.dirname(os.path.realpath(path.rstrip(os.sep)))
+    if parent != os.path.realpath(downloads_dir()):
+        return False
+    return is_busy_folder(path)
 
 # -- worker ------------------------------------------------------------------
 

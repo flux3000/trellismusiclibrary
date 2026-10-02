@@ -109,6 +109,16 @@ def dl(app, tmp_path, monkeypatch):
     dq._CURRENT[0] = None
 
 
+@pytest.fixture()
+def runmod(app, monkeypatch):
+    """run.py as a module, wired to the test app. webview is stubbed so the
+    import works headless (same pattern as test_first_run_owner_account)."""
+    sys.modules.setdefault("webview", types.ModuleType("webview"))
+    import run
+    monkeypatch.setattr(run, "app", app)
+    return run
+
+
 def _login(client, username="admin"):
     user = _db.session.query(User).filter_by(username=username).first()
     with client.session_transaction() as sess:
@@ -571,8 +581,10 @@ def test_get_working_folders_reports_effective(runmod, app, tmp_path, monkeypatc
                         lambda: {"mode": "imported", "library_root": str(tmp_path)})
     runmod._apply_imported_library(tmp_path)
     out = runmod.FluxAPI().get_working_folders()
-    assert out["import_dir"] is None
-    assert out["effective_import_dir"] == str(tmp_path / "Downloads" / "Trellis")
+    # Unset folders report their effective path (2026-10-01, every library).
+    want = str(tmp_path / "Downloads" / "Trellis")
+    assert out["import_dir"] == want
+    assert out["effective_import_dir"] == want
 
 
 def test_add_recordings_browse_opens_at_downloads(dl, app, tmp_path, monkeypatch):
@@ -598,6 +610,7 @@ def test_set_working_folder_rejects_library_overlap(runmod, app, tmp_path, monke
     bk.mkdir()
     other = tmp_path / "other"
     other.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)   # the running app's root is what the guard reads
     marker = {"mode": "imported", "library_root": str(lib), "backlog_dir": str(bk)}
     monkeypatch.setattr(runmod, "_read_trellis_root_marker", lambda: dict(marker))
     monkeypatch.setattr(runmod, "_write_marker", lambda d: None)
@@ -680,3 +693,45 @@ def test_failure_commit_error_does_not_strand_job(dl, monkeypatch):
     # Not left in a state that only a manual DB edit can clear: boot resume heals it.
     dq.resume_on_boot(dl.client.application)
     assert _db.session.get(DownloadJob, jid).status in ("queued", "failed")
+
+
+# -- Move / Ingest refuse a folder still downloading (2026-10-02) -------------
+
+def test_move_refuses_folder_still_downloading(dl):
+    _login(dl.client)
+    _enqueue(dl, "busyshow")
+    (dl.root / "busyshow").mkdir()
+    r = dl.client.post("/api/quality/move",
+                       json={"folder_path": str(dl.root / "busyshow"), "destination": "backlog"})
+    assert r.status_code == 409
+    assert (dl.root / "busyshow").is_dir()
+
+
+def test_move_allows_folder_not_downloading(dl):
+    _login(dl.client)
+    (dl.root / "idle").mkdir()
+    r = dl.client.post("/api/quality/move",
+                       json={"folder_path": str(dl.root / "idle"), "destination": "backlog"})
+    assert r.status_code == 200
+    assert (dl.tmp / "Backlog" / "idle").is_dir()
+
+
+def test_busy_name_outside_downloads_is_not_refused(dl):
+    _login(dl.client)
+    _enqueue(dl, "samename")
+    other = dl.tmp / "Workshop" / "samename"
+    other.mkdir(parents=True)
+    assert dq.downloading_here(str(other)) is False
+    assert dq.downloading_here(str(dl.root / "samename")) is True
+
+
+def test_ingest_refuses_folder_still_downloading(dl):
+    _login(dl.client)
+    _enqueue(dl, "busyingest")
+    (dl.root / "busyingest").mkdir()
+    folder = str(dl.root / "busyingest")
+    r = dl.client.post("/api/ingest/confirm",
+                       json={"source_folder_path": folder, "artist_name": "X"})
+    assert r.status_code == 409
+    r = dl.client.post("/api/ingest/auto-confirm", json={"path": folder})
+    assert r.status_code == 409

@@ -1137,6 +1137,9 @@ def auto_confirm_route():
     path = (data.get("path") or "").strip()
     if not path or not os.path.isdir(path):
         return jsonify({"error": f"Folder not found: {path!r}"}), 400
+    from app.utils.download_queue import downloading_here
+    if downloading_here(path):
+        return jsonify({"error": "This folder is still downloading."}), 409
 
     job_id = uuid.uuid4().hex
     _INGEST_JOBS[job_id] = {
@@ -1167,6 +1170,9 @@ def confirm_ingest():
     artist_name   = (data.get("artist_name") or "").strip()
     if not source_folder or not os.path.isdir(source_folder):
         return jsonify({"error": f"Source folder not found: {source_folder!r}"}), 400
+    from app.utils.download_queue import downloading_here
+    if downloading_here(source_folder):
+        return jsonify({"error": "This folder is still downloading."}), 409
     if not artist_name:
         return jsonify({"error": "artist_name is required"}), 400
     # R3 (review, 2026-09-25): the Add Recording shnid field is free text.

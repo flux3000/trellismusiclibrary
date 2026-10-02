@@ -83,7 +83,11 @@ VERSION=$(python3 -c 'from version import __version__; print(__version__)')
 APP="dist/${APP_NAME}.app"
 ENTITLEMENTS="tools/entitlements.plist"
 
-BASE="${APP_NAME// /}-${VERSION}-macOS"     # TrellisMusicLibrary-0.1.2-macOS
+# An Intel build (Python running under Rosetta) gets its own file names so it
+# cannot overwrite the Apple Silicon DMG. The arm64 names stay as they were.
+ARCH_SUFFIX=""
+[[ "$(python3 -c 'import platform; print(platform.machine())')" == "x86_64" ]] && ARCH_SUFFIX="-intel"
+BASE="${APP_NAME// /}-${VERSION}-macOS${ARCH_SUFFIX}"     # TrellisMusicLibrary-0.1.2-macOS[-intel]
 DMG="dist/${BASE}.dmg"
 ZIP="dist/${BASE}.zip"
 

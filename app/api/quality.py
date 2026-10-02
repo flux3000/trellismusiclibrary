@@ -1369,10 +1369,16 @@ def move_out_of_queue():
         n += 1
 
     import shutil
-    try:
-        shutil.move(src, target)
-    except OSError as e:
-        return jsonify({"error": f"Move failed: {e}"}), 500
+    from app.utils import download_queue as dq
+    # Check and move under one lock, so the download worker cannot create
+    # the folder between the two (2026-10-02).
+    with dq.FS_LOCK:
+        if dq.downloading_here(src):
+            return jsonify({"error": "This folder is still downloading."}), 409
+        try:
+            shutil.move(src, target)
+        except OSError as e:
+            return jsonify({"error": f"Move failed: {e}"}), 500
 
     # Keep the analysis, repointed at the new location: re-scanning Backlog or
     # Working later shows the existing score instead of paying to redo it.
