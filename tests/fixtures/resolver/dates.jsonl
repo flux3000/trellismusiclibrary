@@ -1,0 +1,18 @@
+{"id": "date_july_nospace", "info_text": "BLUES ALLEY,WASH.D.C. JULY 11,1981\n", "folder_name": "", "gold": {"date": {"y": 1981, "m": 7, "d": 11}}}
+{"id": "date_month_year", "info_text": "August 1974\n", "folder_name": "", "gold": {"date": {"y": 1974, "m": 8, "d": null}}}
+{"id": "date_year_only", "info_text": "1962\n", "folder_name": "", "gold": {"date": {"y": 1962, "m": null, "d": null}}}
+{"id": "date_estimate", "info_text": "Date of 1971 is an estimate\n", "folder_name": "", "gold": {"date": {"y": 1971, "m": null, "d": null}}}
+{"id": "date_month_year_2", "info_text": "October 1975\n", "folder_name": "", "gold": {"date": {"y": 1975, "m": 10, "d": null}}}
+{"id": "date_zero_pad_nospace", "info_text": "July 09,1991\n", "folder_name": "", "gold": {"date": {"y": 1991, "m": 7, "d": 9}}}
+{"id": "date_nospace_2", "info_text": "September 16,1993\n", "folder_name": "", "gold": {"date": {"y": 1993, "m": 9, "d": 16}}}
+{"id": "date_unknown_day", "info_text": "1996-12-??\n(dec, 1996)\n", "folder_name": "", "gold": {"date": {"y": 1996, "m": 12, "d": null}}}
+{"id": "date_unknown_day_dmy", "info_text": "01-??-1953\n", "folder_name": "", "gold": {"date": {"y": 1953, "m": 1, "d": null}}, "note": "month first, day unknown"}
+{"id": "date_range_dash", "info_text": "September 7-8, 1979\n", "folder_name": "", "gold": {"date": {"y": 1979, "m": 9, "d": 7}}, "note": "range: start day, tentative"}
+{"id": "date_range_iso", "info_text": "1965-03-14 thru 1965-03-16\n", "folder_name": "", "gold": {"date": {"y": 1965, "m": 3, "d": 14}}, "note": "range: start day, tentative"}
+{"id": "date_alternatives", "info_text": "February 6th or 7th, 2004\n", "folder_name": "", "gold": {"date": {"y": 2004, "m": 2, "d": null}}, "note": "ambiguous day stays empty"}
+{"id": "date_year_first", "info_text": "1976 September 18 [although announcer says 1977 November 20, Jarrett experts\nsay the performance date was September 18, 1976]\n", "folder_name": "", "gold": {"date": {"y": 1976, "m": 9, "d": 18}}}
+{"id": "date_dotted_month", "info_text": "Stratford, Canada, 29.August 1979\n", "folder_name": "", "gold": {"date": {"y": 1979, "m": 8, "d": 29}}, "note": "the library row says 1977; this fixture tests the grammar on the text as written"}
+{"id": "date_us_dotted", "info_text": "5.30.2002\n", "folder_name": "", "gold": {"date": {"y": 2002, "m": 5, "d": 30}}, "note": "30 cannot be a month"}
+{"id": "date_us_dashed", "info_text": "06-30-1970\n", "folder_name": "", "gold": {"date": {"y": 1970, "m": 6, "d": 30}}}
+{"id": "date_transfer_distractor", "info_text": "Transferred FEB 18,2002\nJanuary 22, 1975 (7 items, 1:21:58)\n", "folder_name": "", "gold": {"date": {"y": 1975, "m": 1, "d": 22}}, "note": "transfer date is never the show date"}
+{"id": "date_eac_distractor", "info_text": "Exact Audio Copy extraction logfile from 26. September 2001\nJune 18, 1983\n", "folder_name": "", "gold": {"date": {"y": 1983, "m": 6, "d": 18}}, "note": "EAC log date is never the show date"}

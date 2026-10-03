@@ -1,0 +1,16 @@
+{
+  "id": "guitar_trio",
+  "folder_name": "",
+  "gold": {
+    "artist": "Al Di Meola, John McLaughlin and Paco de Lucía",
+    "date": {
+      "y": 1983,
+      "m": 6,
+      "d": 18
+    },
+    "venue": "Hammersmith Odeon",
+    "city": "London",
+    "country": "UK",
+    "source": "SBD"
+  }
+}

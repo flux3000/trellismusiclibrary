@@ -9015,320 +9015,107 @@ const App = (() => {
   }
 
   // ── Stage 1: Source ────────────────────────────────────────────────────────
-  // Rebuilt 2026-08-02. The navigator IS the page (Ryan's call). What was here
-  // before showed the same path twice — once in a text input, once in the
-  // breadcrumbs — behind three buttons with overlapping jobs: Browse (toggle a
-  // panel that was already open), Analyze (top right), and Use this folder
-  // (which also analysed). Now there is one location, shown in the breadcrumbs,
-  // and one primary action in the footer.
-  //
-  // Reworked again 2026-08-22 (Ryan) to read as a standard navigation pane
-  // rather than a port of the standalone quality tool:
-  //   - The "Jump to" shortcut row is gone. A single Browse button opens
-  //     PyWebView's native folder dialog (`pick_folder()`, defined in run.py
-  //     since the app's early days but never wired to anything) — falls back
-  //     to "Type a path" in headless/server mode, where that API is absent.
-  //   - The "audio" tag and the static ▸/· marker are gone; the marker was
-  //     never clickable and read as an expand caret it wasn't.
-  //   - Each row now shows the REAL thing: a caret that expands/collapses that
-  //     folder's children in place, plus a subfolder count and a size column.
-  //     Both are shallow (that folder's direct contents only) — see
-  //     `_probe_folder`'s docstring for why a recursive walk is off the table.
+  // The empty Add Recordings page: the import page's own header, tab strip,
+  // button row and table header with nothing in it (Ryan, 2026-10-02). The
+  // folder navigator, Up button and listing table are gone; Browse opens the
+  // native folder dialog and the two mode buttons start a run on the path.
   async function renderIngestSource() {
-    // Title now matches the sidebar button that gets you here. It previously
-    // said "Listening Quality" — the name of the engine, not the task.
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
-    // "Trellis" (Ryan, 2026-08-23) — the NAS folder was renamed from
-    // "Flux Audio"; mirrors config.py's IMPORT_DIR default. Only a fallback —
-    // getPrefs().import_dir wins whenever the backend actually has one.
-    const defaultDir = (await getPrefs()).import_dir
+    // Only a fallback: getPrefs().import_dir wins whenever the backend has one.
+    // After Reset Queue the picker reopens on the folder that was reset.
+    const defaultDir = _biPickerPath
+                       || (await getPrefs()).import_dir
                        || '/Volumes/music/Trellis/Downloads'
+    _biPickerPath = null
+    let here = defaultDir
+    // Picks the remembered mode for a source inside vs outside the library.
+    let inLibrary = false
+    let mode = _biMode(inLibrary)
 
-    // No explanatory paragraph (Ryan, 2026-08-28). The page lists the folder
-    // and offers a Browse button; a sentence telling you that a folder is a
-    // folder is not carrying its weight.
+    // The strip below always shows Queue; a tab left over from an earlier run
+    // must not leave it unselected.
+    _biTab = 'queue'
     setMainHTML(`
-      <div class="lq-wrap">
-        <h1 class="lq-h1">Add Recordings</h1>
-        <div id="lq-picker" class="lq-picker"></div>
+      <div class="batch-shell lq-shell">
+        <div class="lq-header">
+          <div style="min-width:0">${_biSrcHeaderHtml(here)}</div>
+        </div>
+        <div id="bi-scan" class="bi-scan">${_biScanControlsHtml({ run: null, mode })}</div>
         <div id="lq-msg"></div>
+        <!-- No Queue tab or table header until a scan exists (Ryan, 2026-10-03). -->
       </div>`)
 
-    const pickerEl = document.getElementById('lq-picker')
-    const msgEl    = document.getElementById('lq-msg')
-    // `say('')` clears. Every caller that can SUCCEED must call it, or the
-    // message outlives the condition that produced it — see openPicker.
+    const msgEl  = document.getElementById('lq-msg')
+    const wrapEl = document.getElementById('bi-scan')
+    // `say('')` clears. Every path that can SUCCEED must call it, or the
+    // message outlives the condition that produced it.
     const say = t => { msgEl.innerHTML = t ? `<div class="lq-err">${esc(t)}</div>` : '' }
-
-    // Where the navigator currently is. Was previously read back out of the
-    // text input on every action, which is why the two could drift apart.
-    let here = defaultDir
-    let busy = false
-    // The last folder listing: its in_library flag picks which remembered
-    // mode the start buttons use.
-    let pickerJ = null
-
-    // Browsing a NAS folder is not instant even after the scandir rework, and
-    // the old page gave no sign anything was happening — hence "I click Browse
-    // and nothing happens". Paint the destination and a spinner immediately, so
-    // the click is always acknowledged before the network is.
-    function paintLoading(path) {
-      pickerEl.innerHTML = `
-        <div class="lq-nav-loading">
-          <span class="lq-spin"></span>
-          <span>Reading <code>${esc(path)}</code>…</span>
-        </div>`
+    const paintButtons = () => { wrapEl.innerHTML = _biScanControlsHtml({ run: null, mode }) }
+    const paintPath = () => {
+      const el = document.querySelector('.bi-src-path')
+      if (!el) return
+      el.textContent = _lqShortPath(here)
+      el.title = here
     }
+    _wireBiFileHandling()
 
-    async function openPicker(path) {
-      if (busy) return
-      const target = path || here
-      busy = true
-      paintLoading(target)
-      // A timeout, because "the spinner never stopped" is not an acceptable
-      // failure mode however fast the server usually is (Ryan, 2026-08-28).
-      // The underlying cause is fixed server-side, but a folder on a sleeping
-      // NAS can still take longer than anyone will wait, and a stuck spinner
-      // tells the user nothing and offers them nothing.
+    // Validates a chosen path with the server: it climbs to the nearest
+    // surviving ancestor, rejects folders outside the permitted import roots,
+    // and says whether the folder is inside the library.
+    async function choose(path) {
       let j
       try {
         j = await Promise.race([
-          API.quality.browse(target),
+          API.quality.browse(path),
           new Promise((_, reject) => setTimeout(
             () => reject(new Error('That folder is taking too long to read. '
                                  + 'It may be very large, or the drive may be asleep.')),
             15000)),
         ])
-      }
-      catch (e) { busy = false; say(e.message); paint(null); return }
-      finally { busy = false }
-      if (j.error) { say(j.error); paint(null); return }
-      // ⚠ CLEAR ON SUCCESS. Nothing did, so a message written by a failed
-      // navigation ("Outside the permitted import roots") stayed on screen for
-      // the rest of the session — the user browsed to a folder that IS
-      // permitted, the listing beside the message updated correctly, and the
-      // red line went on telling them they were somewhere forbidden (Ryan,
-      // 2026-09-01). An error that outlives its cause is worse than no error:
-      // it is a confident, wrong statement about the current state.
-      //
-      // Cleared HERE, on the success, rather than at the top of openPicker:
-      // clearing on click would blink the message off and back on for a
-      // navigation that fails again, which reads as a flicker rather than as
-      // an answer.
+      } catch (e) { say(e.message); return }
+      if (j.error) { say(j.error); return }
       say('')
       here = j.path
-      // The server climbs to the nearest surviving ancestor when a remembered
-      // path has gone (routinely: ingesting an act's last show moves its folder
-      // into the library and the empty-parent cleanup removes the act folder).
-      // Used to say so here in red — removed 2026-08-26 (Ryan): this is
-      // expected, routine behavior, not something worth alarming the user
-      // about every time it happens.
-      paint(j)
+      inLibrary = !!j.in_library
+      mode = _biMode(inLibrary)
+      paintPath()
+      paintButtons()
     }
 
-    const fmtFolders = n => n === 1 ? '1 folder' : `${n || 0} folders`
-
-    // One row. `depth` only controls indentation — the caret and the count/size
-    // columns are the same at every level, so an expanded child looks like a
-    // row, not a demotion.
-    // The "In library" / "New artist" badges are GONE (Ryan, 2026-08-28).
-    // "New artist" went on 2026-08-27 for adding noise without information;
-    // "In library" followed for the same reason once it was the only one left.
-    // A folder in the download directory is there to be added, and a badge on
-    // most of the rows is wallpaper rather than a signal. The duplicate check
-    // that actually matters still runs at triage, per recording, where it can
-    // name the specific show — see _lqConcerns.
-
-    function dirRowHtml(d, depth) {
-      const caret = d.subdirs
-        ? `<span class="lq-dir-caret" data-expand="${esc(d.path)}" role="button" tabindex="0"
-                 aria-label="Expand ${esc(d.name)}">${chevronIcon()}</span>`
-        : `<span class="lq-dir-caret lq-dir-caret--spacer"></span>`
-      return `
-        <div class="lq-dir-row" data-depth="${depth}">
-          <div class="lq-dir" data-go="${esc(d.path)}" role="button" tabindex="0"
-               style="padding-left:${depth * 18}px">
-            ${caret}
-            <span class="nm">${esc(d.name)}</span>
-            <span class="lq-dir-count">${fmtFolders(d.subdir_count)}</span>
-            <span class="lq-dir-size">${fmtBytes(d.size_bytes)}</span>
-          </div>
-          <div class="lq-dir-children"></div>
-        </div>`
-    }
-
-    // A plain file — no caret, no drill-down. Same row shape as a folder
-    // (spacer, name, right-hand pair) so a mixed listing of dirs and files
-    // still lines up as one table. "Contents" becomes the extension here,
-    // the closest a file has to that column's meaning for a folder.
-    function fileRowHtml(fl, depth) {
-      return `
-        <div class="lq-dir-row" data-depth="${depth}">
-          <div class="lq-dir lq-file" style="padding-left:${depth * 18}px">
-            <span class="lq-dir-caret lq-dir-caret--spacer"></span>
-            <span class="nm">${esc(fl.name)}</span>
-            <span class="lq-dir-count">${esc(fl.ext || '—')}</span>
-            <span class="lq-dir-size">${fmtBytes(fl.size_bytes)}</span>
-          </div>
-        </div>`
-    }
-
-    // Expands/collapses one row's children IN PLACE — the folder you're
-    // looking at ("here") does not change, unlike clicking the row itself.
-    // Fetches via the same /browse endpoint openPicker() uses. `kids.loaded`
-    // is the only cache this needs: the DOM node it's set on lives exactly as
-    // long as its content is valid, and gets torn down (along with everything
-    // else in .lq-dirs) the moment `paint()` draws a genuinely new listing —
-    // so a second Map tracking the same lifetime would just be two sources of
-    // truth for one fact.
-    async function toggleExpand(caretEl) {
-      const row = caretEl.closest('.lq-dir-row')
-      const kids = row.querySelector('.lq-dir-children')
-      const path = caretEl.dataset.expand
-      const depth = Number(row.dataset.depth || 0)
-      const opening = !row.classList.contains('lq-dir-row--open')
-      row.classList.toggle('lq-dir-row--open', opening)
-      caretEl.classList.toggle('open', opening)
-      if (!opening || kids.dataset.loaded) return
-      kids.innerHTML = `<div class="lq-nav-loading lq-nav-loading--sm"><span class="lq-spin"></span></div>`
-      try {
-        const j = await API.quality.browse(path)
-        const kidsHtml = (j.dirs || []).map(d => dirRowHtml(d, depth + 1)).join('')
-                       + (j.files || []).map(fl => fileRowHtml(fl, depth + 1)).join('')
-        kids.innerHTML = kidsHtml
-          || `<div class="lq-dir-row lq-dir--empty" style="padding-left:${(depth + 1) * 18}px">This folder is empty</div>`
-        kids.dataset.loaded = '1'
-      } catch (e) {
-        kids.innerHTML = `<div class="lq-err lq-err--sm">Could not read that folder.</div>`
-      }
-    }
-
-    // `j === null` repaints the shell after a failure so the user is not left
-    // staring at a spinner that will never resolve.
-    function paint(j) {
-      pickerJ = j
-      if (!j) {
-        pickerEl.innerHTML = `<div class="lq-nav-loading">
-          <span>Could not read that folder.</span>
-          <button class="btn btn-ghost btn-sm" data-go="${esc(here)}">Retry</button>
-          <button class="btn btn-ghost btn-sm" id="lq-browse">Browse…</button>
-          <button class="btn btn-ghost btn-sm" data-go="${esc(defaultDir)}">Back to Downloads</button>
-          </div>`
-        return
-      }
-
-      // Breadcrumbs DELETED (Ryan, 2026-08-28). They were a full path
-      // navigator: every ancestor was a link, up to and including "/". Nobody
-      // adds recordings from the filesystem root, and one stray click on
-      // /Volumes/music landed on a 2,233-folder iTunes library that took 45
-      // seconds to describe. What replaces them is what a normal app has —
-      // the folder you are in, a Browse button, and an Up that stops at the
-      // Download folder.
-      const atRoot = !j.parent
-      // Shown relative to the browsing root (the app folder), so a NAS path
-      // that is longer than the row does not push the controls around.
-      const base = j.nav_root || j.root
-      const shown = base && j.path.startsWith(base + '/')
-        ? j.path.slice(base.length + 1)
-        : (j.path === base ? j.path.split('/').pop() : j.path)
-
-      const dirsHtml  = j.dirs.map(d => dirRowHtml(d, 0)).join('')
-      const filesHtml = (j.files || []).map(fl => fileRowHtml(fl, 0)).join('')
-      const dirs = dirsHtml + filesHtml
-        || '<div class="lq-dir-row lq-dir--empty">This folder is empty</div>'
-
-      pickerEl.innerHTML = `
-        <div class="lq-nav-addr">
-          <button class="btn btn-ghost btn-sm lq-browse-btn" id="lq-browse"
-                  title="Choose a folder anywhere on this computer">
-            ${icon('folder-open', 'lq-browse-ic')} Browse…</button>
-          <button class="lq-nav-up" ${atRoot ? 'disabled' : `data-go="${esc(j.parent)}"`}
-                  title="${atRoot ? 'This is the top of your download folder'
-                                  : 'Up one folder'}">${icon('arrow-left', 'lq-browse-ic')} Up</button>
-          <span class="lq-nav-here" title="${esc(j.path)}">${esc(shown)}</span>
-        </div>
-        <div class="lq-dirs-head">
-          <span class="lq-dirs-head-sp"></span>
-          <span class="lq-dirs-head-nm">Name</span>
-          <span class="lq-dirs-head-count">Contents</span>
-          <span class="lq-dirs-head-size">Size</span>
-        </div>
-        <div class="lq-dirs">${dirs}</div>
-        <div class="lq-pick-foot">
-          ${_biModeButtonsHtml(!!j.in_library, j.path)}
-          ${j.here_has_audio
-            ? '<span>This folder holds audio, so it will be treated as one recording.</span>'
-            : ''}
-        </div>`
-    }
-
-    // No longer a button. Kept as the fallback for browseNative() when there
-    // is no PyWebView to open a native dialog (headless / server mode), where
-    // otherwise Browse would be a control that does nothing.
-    function openTypePath() {
-      const addr = pickerEl.querySelector('.lq-nav-addr')
-      if (!addr) return
-      addr.innerHTML = `<input type="text" id="lq-path" class="lq-path-input"
-             spellcheck="false" value="${esc(here)}">
-        <button class="btn btn-ghost btn-sm" id="lq-path-go">Go</button>`
-      const inp = addr.querySelector('#lq-path')
-      inp.focus(); inp.select()
-      const go = () => { const v = inp.value.trim(); if (v) openPicker(v) }
-      addr.querySelector('#lq-path-go').addEventListener('click', go)
-      inp.addEventListener('keydown', e => {
-        if (e.key === 'Enter') go()
-        else if (e.key === 'Escape') openPicker(here)
-      })
-    }
-
-    // Browse opens PyWebView's native folder dialog — `pick_folder()` has
-    // existed in run.py since early on but nothing called it. In headless/
-    // server mode `window.pywebview` doesn't exist at all, so this falls back
-    // to the same in-place path input Type a path already offers, rather than
-    // showing a button that does nothing when clicked.
+    // Browse opens PyWebView's native folder dialog. In headless/server mode
+    // there is no `window.pywebview`, so it falls back to a path prompt rather
+    // than a button that does nothing.
     async function browseNative() {
       const api = window.pywebview && window.pywebview.api
-      if (!api || !api.pick_folder) { openTypePath(); return }
+      if (!api || !api.pick_folder) {
+        const v = (window.prompt('Source Folder', here) || '').trim()
+        if (v) choose(v)
+        return
+      }
       let picked
       try { picked = await api.pick_folder() }
       catch (e) { say('Could not open the folder dialog: ' + e.message); return }
-      if (picked) openPicker(picked)
+      if (picked) choose(picked)
     }
 
-    pickerEl.addEventListener('click', e => {
-      if (e.target.closest('#lq-browse')) { browseNative(); return }
-      // S15 "My library folder" (spec 7c) — a third source alongside the
-      // folder navigator and native Browse: start (or rejoin) Bulk Ingest
-      // over LIBRARY_ROOT and hand off to its own page. bulkIngest.start()
-      // returns the already-active run untouched when one exists, so this
-      // is exactly as safe to click mid-run as it is on a fresh library.
-      if (e.target.closest('[data-ingest]')) {
-        _biStartAndOpen(null, _biMode(true)).catch(err => say(err.message))
+    document.getElementById('bi-browse')?.addEventListener('click', browseNative)
+    wrapEl.addEventListener('click', e => {
+      const m = e.target.closest('[data-bi-mode]')
+      if (m) {
+        mode = m.dataset.biMode
+        _biRememberMode(inLibrary, mode)
+        paintButtons()
         return
       }
-      const expand = e.target.closest('[data-expand]')
-      if (expand) { toggleExpand(expand); return }
-      const go  = e.target.closest('[data-go]')
-      const start = e.target.closest('[data-start-mode]')
-      if (go) openPicker(go.dataset.go)
-      else if (start) {
-        const inLib = !!(pickerJ && pickerJ.in_library)
-        _biRememberMode(inLib, start.dataset.startMode)
-        _biStartAndOpen(start.dataset.use, start.dataset.startMode).catch(err => say(err.message))
+      if (e.target.closest('[data-scan="start"]')) {
+        _biStartAndOpen(here, mode).catch(err => say(err.message))
       }
     })
-    // Folder rows and expand carets are real controls, so they answer the
-    // keyboard too.
-    pickerEl.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' && e.key !== ' ') return
-      const caret = e.target.closest('.lq-dir-caret[data-expand]')
-      if (caret) { e.preventDefault(); toggleExpand(caret); return }
-      const row = e.target.closest('.lq-dir[data-go]')
-      if (row) { e.preventDefault(); openPicker(row.dataset.go) }
-    })
 
-    openPicker(here)
+    paintButtons()
+    // Resolve the default folder too, so inLibrary is right before a click.
+    choose(here)
   }
 
   // ── Listening Quality colours ──────────────────────────────────────────────
@@ -11545,11 +11332,11 @@ const App = (() => {
           <div class="slide-panel-main">
             <div class="slide-tabrow">
             <div class="slide-tabs" id="ingest-tab-rail">
-              <button class="slide-tab active" data-ipane="isp-info">Info File</button>
+              ${resolverPaneHtml ? `<button class="slide-tab" data-ipane="isp-resolver">Resolver</button>` : ''}
+              <button class="slide-tab" data-ipane="isp-info">Info File</button>
               <button class="slide-tab" data-ipane="isp-quality">Quality</button>
               <button class="slide-tab" data-ipane="isp-filetags">File Tags</button>
               <button class="slide-tab" data-ipane="isp-checksums">Checksums</button>
-              ${resolverPaneHtml ? `<button class="slide-tab" data-ipane="isp-resolver">Resolver</button>` : ''}
               <button class="slide-tab slide-tab--ai" data-ipane="isp-ai">AI Assist</button>
             </div>
             <!-- Same three info-file controls, in the same order, as View
@@ -12553,12 +12340,14 @@ const App = (() => {
         if (panel.classList.contains('open')) _ingestPanelOpen(false)
         else switchIngestPane(document.getElementById(state.ingestLastPane) ? state.ingestLastPane : 'isp-info')
       })
-      // Default open on Info File (Ryan, 2026-08-28), or wherever the reviewer
-      // was last — a deliberate collapse survives moving between recordings,
-      // same rule as recPanelOpen on View Recording.
+      // Default open on the Resolver when adding a recording (Ryan, 2026-10-03:
+      // it is the first tab here), else Info File. A deliberate collapse
+      // survives moving between recordings, same rule as recPanelOpen on
+      // View Recording. switchIngestPane sets the active tab and pane.
       _ingestQualityLoaded = false
+      const _firstPane = document.getElementById('isp-resolver') ? 'isp-resolver' : 'isp-info'
       if (state.ingestPanelOpen === false) _ingestPanelOpen(false)
-      else switchIngestPane(document.getElementById(state.ingestLastPane) ? state.ingestLastPane : 'isp-info')
+      else switchIngestPane(_firstPane)
     })()
 
     const _submitReview = async (ev) => {
@@ -14046,15 +13835,37 @@ const App = (() => {
     } catch (e) { /* best effort */ }
   }
 
-  // Two start buttons; the remembered (or default) mode is the primary one.
-  function _biModeButtonsHtml(inLibrary, path) {
-    // Equal-weight pair (Ryan, 2026-10-02): Import Automatically carries a
-    // light accent tint as the usual choice; Review First is a plain ghost.
-    // The remembered choice no longer lights one up as a primary.
-    const btn = (mode, label) => `<button class="btn ${mode === 'auto' ? 'btn-ingest-secondary' : 'btn-ghost'}"
-            data-start-mode="${mode}" data-use="${esc(path)}">${label}</button>`
-    return btn('auto', 'Import Automatically') + btn('hold', 'Review First')
+  // The row under the header on both Add Recordings pages: the mode toggle
+  // with a line describing it, then the scan button and Reset Queue. `run` is
+  // null on the picker (nothing scanned yet). The toggle is locked while the
+  // run is running or paused and applies to the next scan once it is done.
+  function _biScanControlsHtml({ run, mode }) {
+    const status = run && run.status
+    const locked = status === 'running' || status === 'paused'
+    const seg = (m, label) => `<button type="button" class="${mode === m ? 'on' : ''}" data-bi-mode="${m}"${locked ? ' disabled' : ''}>${label}</button>`
+    const desc = mode === 'auto'
+      ? 'Recordings with no issues are imported as soon as they are scanned. Anything that needs attention waits in the queue.'
+      : 'Every recording waits in the queue for you to review and import.'
+    // Start, Pause and Resume share the one tinted style; Rescan Folder is
+    // the quieter ghost.
+    const scan = !run ? ['start', 'Start Scan', 'btn-ingest-secondary']
+      : status === 'running' ? ['pause', 'Pause Scan', 'btn-ingest-secondary']
+      : status === 'paused' ? ['resume', 'Resume Scan', 'btn-ingest-secondary']
+      : ['rescan', 'Rescan Folder', 'btn-ghost']
+    const c = (run && run.counts) || {}
+    const queued = (c.ready || 0) + (c.review || 0) + (c.pending || 0)
+    return `<div class="bi-scan-mode">
+        <div class="seg" role="group" aria-label="Import mode">${seg('auto', 'Import Automatically')}${seg('hold', 'Review First')}</div>
+        <span class="bi-scan-desc">${desc}</span>
+      </div>
+      <div class="bi-scan-row">
+        <button type="button" class="btn ${scan[2]}" data-scan="${scan[0]}">${scan[1]}</button>
+        ${queued ? '<button type="button" class="btn btn-ghost" data-scan="reset">Reset Queue</button>' : ''}
+      </div>`
   }
+
+  // Where the picker opens after Reset Queue (one-shot).
+  let _biPickerPath = null
 
   // Start a run on `path` and open its import page. Shared by the Add
   // Recordings picker and the Downloads / Workshop / Backlog Ingest buttons.
@@ -14998,18 +14809,6 @@ const App = (() => {
     if (it && rowEl) rowEl.outerHTML = _biRowHtml(it)
   }
 
-  // Primary action, top-right of the header -- Pause/Resume while running or
-  // paused; Review (primary) + Scan again + Go to library once done.
-  // Top-right of the header (2026-10-01): Pause/Resume while running,
-  // Scan again once done. Needs Review and Go to library were removed.
-  function _biHeaderActionsHtml(run) {
-    if (!canEditLibrary()) return ''
-    if (run.status === 'running') return '<button class="btn btn-ghost btn-sm" id="bi-pause">Pause</button>'
-    if (run.status === 'paused')  return '<button class="btn btn-ghost btn-sm" id="bi-resume">Resume</button>'
-    if (run.status === 'done')    return '<button class="btn btn-ghost btn-sm" id="bi-again">Scan Again</button>'
-    return ''
-  }
-
   // Notices above the queue table, shown once the run is done: the
   // scoring-continues line and the Possible Duplicates list. The counts and
   // elapsed line this block used to lead with were removed (Ryan, 2026-10-02).
@@ -15038,10 +14837,25 @@ const App = (() => {
   // link to where it is changed. Page-specific so the shared strip used on
   // the other ingest screens stays as it was.
   function _biFileHandlingHtml(fh) {
-    const text = fh && fh.file_handling_mode === 'organize'
+    const text = (fh && fh.file_handling_mode === 'organize'
       ? 'File Handling set to move/organize into Trellis folders'
-      : 'File Handling set to keep files as-is (do not move or copy)'
+      : 'File Handling set to keep files as-is (do not move or copy)')
+      + (fh && fh.write_tags_on_ingest ? ' and write tags on import' : '')
     return `${esc(text)} <a href="#/settings">Change in Settings</a>`
+  }
+
+  // The page title and Source Folder block shared by the import page and the
+  // empty Add Recordings page, so the two cannot drift apart.
+  function _biSrcHeaderHtml(root) {
+    return `<h2>Add Recordings</h2>
+            <div class="bi-src">
+              <div class="bi-src-line">
+                <span class="bi-src-label">Source Folder</span>
+                <span class="bi-src-path" title="${esc(root || '')}">${esc(_lqShortPath(root))}</span>
+                ${canEditLibrary() ? `<button type="button" class="btn btn-ghost btn-sm" id="bi-browse">Browse…</button>` : ''}
+              </div>
+              <div class="bi-src-line" id="bi-fh-line"></div>
+            </div>`
   }
 
   async function _wireBiFileHandling() {
@@ -15076,34 +14890,58 @@ const App = (() => {
       </div>`
   }
 
-  function _biWireHeaderActions(run) {
-    document.getElementById('bi-pause')?.addEventListener('click', async () => {
-      try { await API.bulkIngest.pause(run.id) } catch (e) {}
-      await refreshBulkIngestStatus()
-      renderBulkIngestView(run.id)
-    })
-    document.getElementById('bi-resume')?.addEventListener('click', async () => {
-      try { await API.bulkIngest.resume(run.id) } catch (e) {}
-      await refreshBulkIngestStatus()
-      renderBulkIngestView(run.id)
-    })
-    // In place (2026-09-27 unified table), not a navigation to Review &
-    // Ingest any more: toggles the SAME table down to just its needs-review
-    // rows, re-fetched filtered so the toggle acts on the whole run, not
-    // only the rows already loaded on screen.
-    document.getElementById('bi-review')?.addEventListener('click', async () => {
-      _biReviewFilter = !_biReviewFilter
-      _biTab = 'queue'
-      _biPaintTabs(run)
-      const actionsEl = document.getElementById('bi-header-actions')
-      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
-      await _biTableInit(run.id)
-    })
-    document.getElementById('bi-again')?.addEventListener('click', async () => {
-      let again = null
-      try { again = await API.bulkIngest.start(run.root) } catch (e) {}
-      await refreshBulkIngestStatus()
-      renderBulkIngestView(again && again.id)
+  // The mode the import page's toggle shows. Follows the run while it runs
+  // or is paused; once done the person's choice applies to the next scan.
+  let _biScanMode = 'hold'
+  let _biScanHtml = ''
+
+  // Repaint the toggle/scan row from the polled run, only when it changed so a
+  // poll never rebuilds a control under the pointer.
+  function _biPaintScan(run) {
+    const el = document.getElementById('bi-scan')
+    if (!el) return
+    if (!canEditLibrary()) { el.innerHTML = ''; _biScanHtml = ''; return }
+    if (run.status === 'running' || run.status === 'paused') _biScanMode = run.mode
+    const html = _biScanControlsHtml({ run, mode: _biScanMode })
+    if (html === _biScanHtml) return
+    _biScanHtml = html
+    el.innerHTML = html
+  }
+
+  function _biWireScan() {
+    document.getElementById('bi-scan')?.addEventListener('click', async e => {
+      const run = _biRun
+      if (!run) return
+      const m = e.target.closest('[data-bi-mode]')
+      if (m) {
+        if (m.disabled) return
+        _biScanMode = m.dataset.biMode
+        _biRememberMode(run.placement === 'in_place', _biScanMode)
+        _biPaintScan(run)
+        return
+      }
+      const b = e.target.closest('[data-scan]')
+      if (!b) return
+      const act = b.dataset.scan
+      if (act === 'reset') {
+        _confirmDialog('Remove every recording from the queue? Your files are not touched.', 'Reset Queue', async () => {
+          try { await API.bulkIngest.resetQueue(run.id) } catch (err) {}
+          await refreshBulkIngestStatus()
+          _biPickerPath = run.root
+          window.location.hash = '#/ingest?new=1'
+        })
+        return
+      }
+      if (act === 'pause' || act === 'resume') {
+        try { await API.bulkIngest[act](run.id) } catch (err) {}
+        await refreshBulkIngestStatus()
+        renderBulkIngestView(run.id)
+      } else if (act === 'rescan') {
+        let again = null
+        try { again = await API.bulkIngest.start(run.root, _biScanMode) } catch (err) {}
+        await refreshBulkIngestStatus()
+        renderBulkIngestView(again && again.id)
+      }
     })
   }
 
@@ -15118,8 +14956,7 @@ const App = (() => {
     // header body and the progress bar are repainted wholesale; the table
     // itself is patched by id, never rebuilt (spec).
     if (!isFreshBuild) {
-      const actionsEl = document.getElementById('bi-header-actions')
-      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
+      _biPaintScan(run)
       const noticesEl = document.getElementById('bi-notices')
       if (noticesEl) noticesEl.innerHTML = _biNoticesHtml(run)
       const progEl = document.getElementById('bi-progress-wrap')
@@ -15142,18 +14979,10 @@ const App = (() => {
       <div class="batch-shell lq-shell">
         <div class="lq-header">
           <div style="min-width:0">
-            <h2>Add Recordings</h2>
-            <div class="bi-src">
-              <div class="bi-src-line">
-                <span class="bi-src-label">Source Folder</span>
-                <span class="bi-src-path" title="${esc(run.root || '')}">${esc(_lqShortPath(run.root))}</span>
-                ${canEditLibrary() ? `<button type="button" class="btn btn-ghost btn-sm" id="bi-browse">Browse…</button>` : ''}
-              </div>
-              <div class="bi-src-line" id="bi-fh-line"></div>
-            </div>
+            ${_biSrcHeaderHtml(run.root)}
           </div>
-          <div class="lq-header-actions" id="bi-header-actions">${_biHeaderActionsHtml(run)}</div>
         </div>
+        <div id="bi-scan" class="bi-scan"></div>
 
         <div id="bi-progress-wrap">${_biProgressHtml(run)}</div>
 
@@ -15178,7 +15007,10 @@ const App = (() => {
       if (c) _biConvertAll(c)
     })
 
-    _biWireHeaderActions(run)
+    _biScanMode = run.mode
+    _biScanHtml = ''
+    _biPaintScan(run)
+    _biWireScan()
     _wireBiFileHandling()
     document.getElementById('bi-browse')?.addEventListener('click', () => { location.hash = '#/ingest?new=1' })
     document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
@@ -15189,8 +15021,6 @@ const App = (() => {
       if (_biTab !== 'queue') _biReviewFilter = false
       _biPaintTabs(_biRun || run)
       _biPaintApplyAll()
-      const actionsEl = document.getElementById('bi-header-actions')
-      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(_biRun || run); _biWireHeaderActions(_biRun || run) }
       await _biTableInit((_biRun || run).id)
     })
     await _biTableInit(run.id)

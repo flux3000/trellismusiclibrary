@@ -581,6 +581,7 @@ const API = (() => {
       setApplied:    (runId, values) => put(`/api/bulk-ingest/runs/${runId}/applied`, values || {}),
       pause:   (runId) => post(`/api/bulk-ingest/${runId}/pause`, {}),
       resume:  (runId) => post(`/api/bulk-ingest/${runId}/resume`, {}),
+      resetQueue: (runId) => post(`/api/bulk-ingest/runs/${runId}/reset`, {}),
       // Just these rows (the poll's cheap path).
       itemsByIds: (runId, ids) => get(`/api/bulk-ingest/${runId}/items?ids=${ids.join(',')}`),
       items:   (runId, status, page) => {

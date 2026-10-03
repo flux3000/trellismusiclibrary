@@ -1036,6 +1036,30 @@ def resume_run(run):
     _start_worker()
 
 
+def reset_queue(run):
+    """
+    Empty a run's Queue and close the run. Removes every item that did not
+    become a recording (and was not sent to Backlog/Workshop); files on disk
+    are never touched. Idempotent.
+
+    The run is marked done first, so the worker stops picking it between
+    items. An item that is 'in_progress' right now is mid-ingest inside the
+    worker: deleting its row would break that commit, so it is left to finish
+    (it ends as ingested or flagged, like any other item). Returns the number
+    of rows removed.
+    """
+    if run.status != "done":
+        run.status = "done"
+        run.finished_at = datetime.now(timezone.utc)
+    removed = (db.session.query(BulkIngestItem)
+               .filter(BulkIngestItem.run_id == run.id,
+                       BulkIngestItem.status.notin_(("ingested", "moved", "in_progress")))
+               .delete(synchronize_session=False))
+    _REDISCOVER.discard(run.id)
+    db.session.commit()
+    return removed
+
+
 def reset_in_progress(run):
     """
     Any item still 'in_progress' on `run` was mid-bulk_ingest at whatever moment

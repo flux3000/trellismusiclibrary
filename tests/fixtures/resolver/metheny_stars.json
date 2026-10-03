@@ -1,0 +1,18 @@
+{
+  "id": "metheny_stars",
+  "folder_name": "Pat Metheny Group - 1979-06-14 - Stars - Philadelphia, PA (SBD)",
+  "n_audio": 5,
+  "gold": {
+    "artist": "Pat Metheny Group",
+    "date": {
+      "y": 1979,
+      "m": 6,
+      "d": 14
+    },
+    "venue": "Stars",
+    "city": "Philadelphia",
+    "state": "PA",
+    "country": "US",
+    "source": "SBD"
+  }
+}

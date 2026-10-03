@@ -20,11 +20,10 @@ from mutagen.flac import FLAC
 from mutagen import MutagenError
 from mutagen.mp3 import MP3
 from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX
-from dateutil import parser as _dateutil_parser
-from dateutil.parser import ParserError as _ParserError
 import geonamescache as _geonamescache
 
 from app.utils.format import format_partial_date
+from app.utils.reader.dates import best_show_date as _best_show_date
 from app.utils.health import compute_health
 from app.utils.folder_naming import unique_folder_name, unique_file_name
 from app.utils.file_naming import rename_plan, flattens
@@ -940,8 +939,10 @@ def _loose_tag_date(value):
         if d and not 1 <= d <= 31:
             return None
         return format_partial_date(y, mo, d)
-    parsed = _parse_date(str(value))
-    return format_partial_date(parsed[0], parsed[1], parsed[2]) if parsed else None
+    # Routed through the strict grammar (2026-10-03): a tag that writes only a
+    # month and year stays "YYYY-MM"; nothing is filled from today's date.
+    best, _ = _best_show_date(str(value))
+    return format_partial_date(best.year, best.month, best.day) if best else None
 
 
 def _first_tag(tags, keys):
@@ -1929,28 +1930,18 @@ def _looks_like_date_line(line):
 
 def _parse_date(line):
     """
-    Try to extract a date from a line via dateutil.
-    Only attempts lines with a strong date signal.
-    Returns (year, month, day, raw_str) or None.
+    Extract a date from a block of header text with the strict grammar.
+    Returns (year, month, day, raw_str) or None. A component the text did not
+    write is None -- the old dateutil fuzzy path filled it from today's date
+    (2026-10-03). raw_str is the line the leading mention sits on.
     """
-    low       = line.lower()
-    has_4yr   = bool(re.search(r"\b(19|20)\d{2}\b", line))
-    has_2yr   = bool(re.search(r"\b\d{1,2}[-./]\d{1,2}[-./]\d{2}\b", line))
-    has_month = any(m in low.split() for m in _MONTH_NAMES)
-
-    if not (has_4yr or has_2yr or has_month):
+    best, _ = _best_show_date(line)
+    if not best or best.year is None:
         return None
-
-    try:
-        dt   = _dateutil_parser.parse(line, fuzzy=True, dayfirst=False)
-        year = dt.year
-        if year > _CURRENT_YEAR:       # 2-digit year fix: "89" → 1989
-            year -= 100
-        if not (1900 <= year <= _CURRENT_YEAR):
-            return None
-        return year, dt.month, dt.day, line.strip()
-    except (_ParserError, ValueError, OverflowError):
-        return None
+    s = line.rfind("\n", 0, best.span[0]) + 1
+    e = line.find("\n", best.span[1])
+    raw = line[s:len(line) if e < 0 else e].strip()
+    return best.year, best.month, best.day, raw
 
 
 def _parse_location_plain(line):
@@ -2313,13 +2304,6 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
             result["artist_match"] = _fuzzy_match(line, known_artists or [])
             break
 
-    # Date — first header line with a strong date signal
-    for line in header_lines:
-        parsed = _parse_date(line)
-        if parsed:
-            result["year"], result["month"], result["day"], result["date_str"] = parsed
-            break
-
     # Venue — keyword scan then positional fallback
     venue_raw = _extract_venue(header_lines)
     if venue_raw:
@@ -2334,6 +2318,12 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
             result["state"]   = state
             result["country"] = country
             break
+
+    # Date — every mention in the header is read together (strict grammar, no
+    # defaults).
+    parsed = _parse_date("\n".join(header_lines))
+    if parsed:
+        result["year"], result["month"], result["day"], result["date_str"] = parsed
 
     # Source type — labelled lines first, then the whole file. See detect_source.
     result["source"] = detect_source(raw)

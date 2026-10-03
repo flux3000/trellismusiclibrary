@@ -7132,6 +7132,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-act--lg { padding: 7px 18px; font-size: 13px; min-width: 0; }
 .bi-ingest-all-wrap { margin: 0 0 12px; }
 .bi-ingest-all-wrap:empty { display: none; }
+.bi-ingest-all-wrap .btn + .btn { margin-left: 8px; }
 /* .lq-act-failed removed 2026-08-28 — the message is a hover now, not a
    paragraph wedged into the actions column. See .lq-errchip. */
 .lq-errchip {
@@ -9423,6 +9424,11 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .bi-src-label { color: var(--t2); }
 .bi-src-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bi-src .btn-sm { font-size: 12px; }
+.bi-scan { margin: 0 0 16px; }
+.bi-scan-mode { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 24px; }
+.bi-scan-desc { color: var(--t2); font-size: 13px; }
+.bi-scan-row { display: flex; align-items: center; gap: 8px; }
+.seg button:disabled { cursor: default; opacity: .6; }
 
 /* The apply-values block sits in the page itself, above the action buttons:
    no frame, no fill. */

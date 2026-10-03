@@ -15,6 +15,9 @@ Routes:
                                           Now/Up next/Recently added rows)
     POST /api/bulk-ingest/<id>/pause      pause a running run
     POST /api/bulk-ingest/<id>/resume     resume a paused run
+    POST /api/bulk-ingest/runs/<id>/reset empty the run's Queue (everything not
+                                          yet imported) and close the run;
+                                          files are never touched
     GET  /api/bulk-ingest/<id>/items      paged item list, filterable by
                                           status; status=all is every item
                                           including pending/in_progress, id
@@ -361,6 +364,18 @@ def resume(run_id):
     if run.status == "paused":
         bulk_ingest_run.resume_run(run)
     return jsonify(_serialize_run(run))
+
+
+@bp.route("/runs/<int:run_id>/reset", methods=["POST"])
+@admin_required
+def reset(run_id):
+    """Reset Queue: drop every not-yet-imported item and close the run, so it
+    is no longer listed and is not resumed on boot. Never touches files."""
+    run, err = _get_run_or_404(run_id)
+    if err:
+        return err
+    removed = bulk_ingest_run.reset_queue(run)
+    return jsonify({"removed": removed, "run": _serialize_run(run)})
 
 
 @bp.route("/<int:run_id>/items", methods=["GET"])
