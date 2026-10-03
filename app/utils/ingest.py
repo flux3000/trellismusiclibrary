@@ -24,6 +24,7 @@ import geonamescache as _geonamescache
 
 from app.utils.format import format_partial_date
 from app.utils.reader.dates import best_show_date as _best_show_date
+from app.utils.reader.place import peel as _peel_place
 from app.utils.health import compute_health
 from app.utils.folder_naming import unique_folder_name, unique_file_name
 from app.utils.file_naming import rename_plan, flattens
@@ -1948,55 +1949,22 @@ def _parse_location_plain(line):
     """
     Extract (city, state, country) from a location line, positionally.
 
-    Recognises the country and/or US state from the END of the line, then the
-    remaining last comma-part is the city (any earlier parts are venue text and
-    are ignored). Handles:
+    A wrapper over reader.place.peel(): country, then region, then city are
+    peeled from the RIGHT of the line (see that module). Handles:
         "New York, NY"                  -> ("New York", "NY", "US")
         "New York, NY, USA"             -> ("New York", "NY", "US")
         "Fillmore East, New York, NY"   -> ("New York", "NY", "US")   (drops venue)
         "Osaka, Japan"                  -> ("Osaka", None, "Japan")
         "Ann Arbor MI"                  -> ("Ann Arbor", "MI", "US")   (no comma)
-    Returns (None, None, None) when no state/country is recognised — i.e. the
-    line is not a location. City is NOT validated against the gazetteer, so
-    multi-word cities are never truncated (the old "New York"->"York" bug).
+        "Toronto, ON"                   -> ("Toronto", None, "Canada")
+    state stays US-only (non-US regions are not stored as state). Returns
+    (None, None, None) when no region or country is recognised, i.e. the line
+    is not a location; a bare city is not enough here.
     """
-    line = line.strip()
-    if not line:
+    r = _peel_place((line or "").strip(), city_only=False)
+    if not r.has_region_or_country:
         return None, None, None
-
-    parts = [p.strip() for p in line.split(",") if p.strip()]
-
-    # No comma but "City ST" / "City Country" — peel the trailing region token.
-    if len(parts) == 1 and " " in parts[0]:
-        head, tail = parts[0].rsplit(" ", 1)
-        if (tail.upper() in _US_STATE_CODES or tail.lower() in _US_STATE_NAMES
-                or tail.lower() in _COUNTRY_NAMES or tail.lower() in _COUNTRY_ALIASES):
-            parts = [head.strip(), tail.strip()]
-
-    state = country = None
-
-    # Country from the last part (known alias, or a gazetteer country name).
-    if parts:
-        ll = parts[-1].lower()
-        if ll in _COUNTRY_ALIASES:
-            country = _COUNTRY_ALIASES[ll]; parts.pop()
-        elif ll in _COUNTRY_NAMES:
-            country = parts[-1].title(); parts.pop()
-
-    # US state from the (new) last part — 2-letter code or full name.
-    if parts:
-        last = parts[-1]
-        if last.upper() in _US_STATE_CODES:
-            state, country = last.upper(), "US"; parts.pop()
-        elif last.lower() in _US_STATE_NAMES:
-            state, country = _US_STATE_NAMES[last.lower()], "US"; parts.pop()
-
-    # Not a location line unless we recognised a state or country.
-    if state is None and country is None:
-        return None, None, None
-
-    city = parts[-1].title() if parts else None
-    return city, state, country
+    return (r.city or None), (r.state or None), (r.country or None)
 
 
 # ── Venue/location dash-split (parser fix, spec section 7) ─────────────────
@@ -2059,6 +2027,18 @@ def venue_plausible(candidate):
     return True
 
 
+_VENUE_LEAD_RE = re.compile(r"^(?:recorded\s+live\s+at|recorded\s+at|live\s+at|live\s+in)(?:\s+|$)", re.IGNORECASE)
+
+
+def _place_venue(peeled):
+    """Venue text from a peeled line: "Live at"/"Recorded at" lead-ins removed,
+    and never the city peeled from the same line."""
+    v = _VENUE_LEAD_RE.sub("", peeled.venue_candidate().strip()).strip()
+    if v and peeled.city and v.lower() == peeled.city.lower():
+        return ""
+    return v
+
+
 def _extract_venue(header_lines):
     """
     Two-pass venue extraction:
@@ -2086,6 +2066,29 @@ def _extract_venue(header_lines):
             # line only, same as any other, and keep scanning.
             skipped_date_loc.append(line)
             continue
+
+        # A place peeled off the right of the line: what stands left of it (or
+        # the clause joined by " @ ") is this line's venue candidate. Fixes
+        # "Venue, City ST" being skipped whole, or swallowing the city.
+        peeled = _peel_place(line, city_only=False)
+        if peeled.has_region_or_country:
+            vcand = _place_venue(peeled)
+            first = vcand.lower().split()[0] if vcand.split() else ""
+            if (vcand and venue_plausible(vcand) and first not in _SOURCE_KEYWORDS
+                    and not any(lbl in vcand.lower() for lbl in _LINEAGE_LABELS)
+                    and not _looks_like_date_line(vcand)):
+                return vcand
+            skipped_date_loc.append(line)
+            continue
+        # "Venue, City" with no region or country: a gazetteer city at the
+        # right still separates the venue from it.
+        if not is_date:
+            cpeel = _peel_place(line, city_only=True)
+            vcand = _place_venue(cpeel) if cpeel.city else ""
+            first = vcand.lower().split()[0] if vcand.split() else ""
+            if (vcand and venue_plausible(vcand) and first not in _SOURCE_KEYWORDS
+                    and not any(lbl in vcand.lower() for lbl in _LINEAGE_LABELS)):
+                return vcand
 
         # Save date and location lines for keyword fallback, but skip them here
         city, state, country = _parse_location(line)
@@ -2298,8 +2301,10 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
     }
 
     # Artist — first non-blank, non-filename line in the first 3 lines
-    for line in header_lines[:3]:
+    artist_idx = None
+    for ai, line in enumerate(header_lines[:3]):
         if not _is_filename_line(line) and not _looks_like_date_line(line):
+            artist_idx = ai
             result["artist"]       = title_case(line)
             result["artist_match"] = _fuzzy_match(line, known_artists or [])
             break
@@ -2310,14 +2315,29 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         result["venue"]       = title_case(venue_raw)
         result["venue_match"] = _fuzzy_match(venue_raw, known_venues or [])
 
-    # City / State / Country — first header line that validates
-    for line in header_lines:
+    # City / State / Country — first header line that validates. The artist
+    # line gives no region/country without a city ("Kansas | Live"), and no
+    # bare city ("Boston", "Phoenix").
+    for li, line in enumerate(header_lines):
         city, state, country = _parse_location(line)
+        if li == artist_idx and not city:
+            continue          # a region word alone on the artist line is not a place
         if city or state or country:
             result["city"]    = city
             result["state"]   = state
             result["country"] = country
             break
+    else:
+        # No line names a region or country: a bare city of the gazetteer
+        # ("Old Town School of Folk Music, Chicago") still gives the city, but
+        # never from the first header line or the artist line.
+        for li, line in enumerate(header_lines):
+            if li == 0 or li == artist_idx:
+                continue
+            pr = _peel_place(line, city_only=True)
+            if pr.city and not pr.has_region_or_country:
+                result["city"] = pr.city
+                break
 
     # Date — every mention in the header is read together (strict grammar, no
     # defaults).
