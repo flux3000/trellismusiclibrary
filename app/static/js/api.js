@@ -50,7 +50,7 @@ const API = (() => {
     // DELETE against MY database (/api/remotes/<id>) and must still work while
     // that remote is the one on screen.
     if (method !== 'GET' && contextualise(path) !== path) {
-      throw new Error('This library is read-only — you are viewing a shared library.')
+      throw new Error('This library is read-only. You are viewing a shared library.')
     }
 
     const opts = {
@@ -63,7 +63,18 @@ const API = (() => {
     const res = await fetch(contextualise(path), opts)
     if (res.status === 204) return null
 
-    const data = await res.json()
+    // A server crash answers with an HTML error page, and res.json() on it
+    // throws WebKit's "The string did not match the expected pattern" -- which
+    // hid a missing-column 500 on 2026-10-02. Report the HTTP status instead;
+    // the traceback is in the server log.
+    let data
+    try {
+      data = await res.json()
+    } catch (_) {
+      const err = new Error(`${res.status} ${res.statusText}`.trim())
+      err.status = res.status
+      throw err
+    }
 
     // The library drive vanished mid-request. The banner poll would notice
     // within 30s, but the user is looking at the consequence RIGHT NOW, so
@@ -507,15 +518,7 @@ const API = (() => {
     // ── Ingest ───────────────────────────────────────────────────────────────
     ingest: {
       confirm:       (data)  => post('/api/ingest/confirm', data),
-      // Batch Import's auto-ingest (spec section 4) -- one POST of the source
-      // path; the resolver does the rest server-side. Same job/poll shape as
-      // confirm -- poll with confirmStatus, same as confirm's job id.
-      autoConfirm:   (path)   => post('/api/ingest/auto-confirm', { path }),
       confirmStatus: (jobId) => get(`/api/ingest/confirm/${jobId}`),
-      // Cooperative cancel. The worker stops between files, undoes its own
-      // filesystem work and rolls back its uncommitted DB session. Recordings
-      // already finished earlier in a queue are untouched.
-      confirmCancel: (jobId) => post(`/api/ingest/confirm/${jobId}/cancel`, {}),
       aiAssist:          (payload) => post('/api/ingest/ai-assist', payload),
       aiAssistRecording: (recId, body) => post(`/api/ingest/ai-assist-recording/${recId}`, body || {}),
       aiAssistStatus:    (jobId)   => get(`/api/ingest/ai-assist/${jobId}`),
@@ -528,7 +531,6 @@ const API = (() => {
         return get(`/api/ingest/check-existing?${p.toString()}`)
       },
       health:         (scan)    => post('/api/ingest/health', scan),
-      batchScan:  (source_dir) => post('/api/ingest/batch-scan', { source_dir }),
     },
 
     // ── Naming engine preview (app/utils/file_naming.py) ───────────────────────
@@ -546,12 +548,6 @@ const API = (() => {
     // Stage 1+2 of the unified ingestion flow (2026-07-30). See
     // app/api/quality.py for the endpoint contracts.
     quality: {
-      analyze: (source_dir, reanalyze) => post('/api/quality/analyze', { source_dir, reanalyze: !!reanalyze }),
-      analyzeStatus: (jobId, sourceDir) =>
-        get(`/api/quality/analyze/${jobId}?source_dir=${encodeURIComponent(sourceDir)}`),
-      triage:     (folder_path, status) => post('/api/quality/triage', { folder_path, status }),
-      triageBulk: (folder_paths, status) => post('/api/quality/triage-bulk', { folder_paths, status }),
-      staging:         (sourceDir)  => get(`/api/quality/staging?source_dir=${encodeURIComponent(sourceDir)}`),
       stagingFeatures: (folderPath) => get(`/api/quality/staging/features?folder_path=${encodeURIComponent(folderPath)}`),
       // features=1 also returns the plain-English `interpretation` block (group
       // verdicts + advanced metric rows), which is what the View Recording
@@ -563,10 +559,6 @@ const API = (() => {
       // guards (allowlisted destinations, import-root check, never overwrites).
       move: (folder_path, destination) => post('/api/quality/move', { folder_path, destination }),
       browse: (path) => get(`/api/quality/browse?path=${encodeURIComponent(path || '')}`),
-      // The DEEP fingerprint pass — hashes whole files, so it is explicit and
-      // per-folder. Triage verifies FFP/ST5 for free; MD5 waits for this.
-      verifyFingerprints: (folder_path) =>
-        post('/api/quality/verify-fingerprints', { folder_path }),
       // Shorten / WAV → FLAC, in place (2026-09-02). Background job: start
       // returns a job_id; poll until the status is not 'running'.
       convert:       (folder_path) => post('/api/quality/convert', { folder_path }),
@@ -576,10 +568,21 @@ const API = (() => {
 
     // ── Bulk Ingest (spec 1.9/4) ──────────────────────────────────────────
     bulkIngest: {
-      start:   () => post('/api/bulk-ingest/start', {}),
-      current: () => get('/api/bulk-ingest/current'),
+      start:   (path, mode) => post('/api/bulk-ingest/start', { path, mode }),
+      runs:    () => get('/api/bulk-ingest/runs'),
+      current: (runId) => get(`/api/bulk-ingest/current${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),
+      // Review First / queue actions. The three item routes answer 202 and
+      // work happens on the server's worker, so callers poll the run.
+      ingestItem:    (itemId) => post(`/api/bulk-ingest/items/${itemId}/ingest`, {}),
+      ingestReady:   (runId) => post(`/api/bulk-ingest/runs/${runId}/ingest-ready`, {}),
+      convertUnsupported: (runId) => post(`/api/bulk-ingest/runs/${runId}/convert-unsupported`, {}),
+      reanalyzeItem: (itemId) => post(`/api/bulk-ingest/items/${itemId}/reanalyze`, {}),
+      moveItem:      (itemId, dest) => post(`/api/bulk-ingest/items/${itemId}/move`, { dest }),
+      setApplied:    (runId, values) => put(`/api/bulk-ingest/runs/${runId}/applied`, values || {}),
       pause:   (runId) => post(`/api/bulk-ingest/${runId}/pause`, {}),
       resume:  (runId) => post(`/api/bulk-ingest/${runId}/resume`, {}),
+      // Just these rows (the poll's cheap path).
+      itemsByIds: (runId, ids) => get(`/api/bulk-ingest/${runId}/items?ids=${ids.join(',')}`),
       items:   (runId, status, page) => {
         const params = []
         if (status) params.push(`status=${encodeURIComponent(status)}`)

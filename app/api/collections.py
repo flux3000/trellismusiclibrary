@@ -26,7 +26,7 @@ def _reject_system(c, what):
     """
     if c is not None and c.is_system:
         return jsonify({
-            "error": f"{c.name} is a system collection — {what}.",
+            "error": f"{c.name} is a system collection: {what}.",
         }), 409
     return None
 

@@ -3,7 +3,7 @@ app/utils/bulk_ingest_followup.py -- Bulk Ingest follow-up queue (spec chunk 6).
 
 Thin wrapper: the actual implementation lives beside the follow-up queue
 itself in app/api/ingest.py (enqueue_followups(), _enqueue(), _handle_item()
-and friends), because that is where _ANALYSIS_Q, the single worker thread and
+and friends), because that is where the follow-up lanes, their worker threads and
 the /api/ingest/pipeline reporting already live -- splitting the queue logic
 across two modules would only invite the two copies to drift.
 

@@ -263,7 +263,7 @@ def delete_event(event_id):
         return jsonify({"error": "Not found"}), 404
     n = len(e.performances)
     if n:
-        return jsonify({"error": f"Event has {n} performance(s) — reassign or "
+        return jsonify({"error": f"Event has {n} performance(s). Reassign or "
                                  "delete those recordings first."}), 409
     db.session.delete(e)
     db.session.commit()

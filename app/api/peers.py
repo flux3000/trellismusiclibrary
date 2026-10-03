@@ -324,8 +324,8 @@ def delete_invite(peer_id, invite_id):
 
     if invite.consumed_at is not None:
         return jsonify({
-            "error": "That invite was used to join. Remove the device instead — "
-                     "deleting this would erase the record of an access that "
+            "error": "That invite was used to join. Remove the device instead. "
+                     "Deleting this would erase the record of an access that "
                      "still works.",
             "code":  "invite_consumed",
         }), 409

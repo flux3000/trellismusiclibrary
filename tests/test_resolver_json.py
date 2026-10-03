@@ -9,8 +9,36 @@ from app.extensions import db as _db
 from app.models.recording import Recording
 from app.models.user import User
 
-from tests.test_ingest_auto_confirm import _flac_with_tags, _INFO, _login_as
 from tests.test_studio_sharing import _recording, _peer_granted_junction, _auth
+
+import numpy as np
+import soundfile as sf
+from mutagen.flac import FLAC
+
+
+def _flac_with_tags(path, **tags):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(path), np.zeros(4410, dtype="int16"), 44100, format="FLAC")
+    audio = FLAC(str(path))
+    for k, v in tags.items():
+        audio[k] = v
+    audio.save()
+
+
+_INFO = '''Pat Metheny Group
+June 14, 1979
+Stars - Philadelphia, Pennsylvania, USA
+Soundboard Recording
+'''
+
+
+def _login_as(client, username="admin"):
+    user = _db.session.query(User).filter_by(username=username).first()
+    assert user is not None, f"no such user: {username}"
+    with client.session_transaction() as sess:
+        sess["_user_id"] = str(user.id)
+        sess["_fresh"] = True
+    return user
 
 
 def _date_conflict_show(tmp_path):

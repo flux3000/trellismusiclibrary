@@ -161,7 +161,7 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
         # unpatched, that background thread keeps running after the test (and
         # its session/engine) tear down, and has intermittently logged a
         # swallowed OperationalError on a later test's stderr.
-        monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id: True)
+        monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id, run_id=None: True)
         bulk_ingest_run.discover(run)
         bulk_ingest_run.process(run, _never_stop)
     finally:
@@ -260,7 +260,7 @@ def test_staging_endpoint_tolerates_null_scores(app, tmp_path, seeded_ids, monke
     # unpatched, that background thread keeps running after the test (and
     # its session/engine) tear down, and has intermittently logged a
     # swallowed OperationalError on a later test's stderr.
-    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id: True)
+    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id, run_id=None: True)
     bulk_ingest_run.discover(run)
     bulk_ingest_run.process(run, _never_stop)
 
@@ -308,7 +308,7 @@ def test_do_confirm_promote_error_is_not_masked_by_pendingrollback(app, tmp_path
     }
 
     with pytest.raises(Exception) as exc_info:
-        _do_confirm(payload, None, bulk=True)
+        _do_confirm(payload, None)
     _db.session.rollback()
 
     message = str(exc_info.value)
@@ -359,7 +359,7 @@ def test_bulk_ingest_never_writes_tags_even_with_switch_on(app, tmp_path, seeded
     # unpatched, that background thread keeps running after the test (and
     # its session/engine) tear down, and has intermittently logged a
     # swallowed OperationalError on a later test's stderr.
-    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id: True)
+    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id, run_id=None: True)
     bulk_ingest_run.discover(run)
     bulk_ingest_run.process(run, _never_stop)
 

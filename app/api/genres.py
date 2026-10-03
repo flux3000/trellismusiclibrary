@@ -204,7 +204,7 @@ def delete_genre(genre_id):
         return jsonify({"error": "Not found"}), 404
     n = db.session.query(Artist).filter_by(genre_id=genre_id).count()
     if n:
-        return jsonify({"error": f"Genre has {n} artist(s) — reassign or "
+        return jsonify({"error": f"Genre has {n} artist(s). Reassign or "
                                  "clear those first."}), 409
     db.session.delete(g)
     db.session.commit()

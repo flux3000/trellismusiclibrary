@@ -219,7 +219,7 @@ def _seed_recording(app, tmp_path, folder_rel, hexhash):
         "is_complete": True,
         "skip_analysis": True,
     }
-    result = _do_confirm(payload, user.id, bulk=True)
+    result = _do_confirm(payload, user.id)
     return result["recording_id"]
 
 

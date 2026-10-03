@@ -164,7 +164,7 @@ def compute_health(scan):
             exts = sorted({u.get("ext", "") for u in unsupported if u.get("ext")})
             factors.append(_f(
                 "Audio", 0,
-                "%d file%s found in an unsupported format (%s) — not readable yet"
+                "%d file%s found in an unsupported format (%s), not readable yet"
                 % (len(unsupported), "" if len(unsupported) == 1 else "s",
                    ", ".join(exts)),
                 False,

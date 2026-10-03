@@ -8,16 +8,28 @@ or a skipped/failed BulkIngestItem. Both the walk and the work are driven off
 BulkIngestItem rows in the DB rather than in-memory state, so an app restart
 mid-run loses nothing but a progress bar (resume_on_boot below).
 
-Every source folder here is already inside LIBRARY_ROOT -- this is bulk_ingest
-of an existing collection, not ingest of new material -- so _do_confirm's
-in-root-source path applies unconditionally: nothing is ever moved, renamed,
-flattened or deduped on disk. A folder that becomes a Recording keeps
-sitting exactly where discover() found it, and its Recording.folder_path
-ends up equal to the BulkIngestItem's own rel_path (see move_to_library's
-"in-root bulk_ingest" note in app/utils/ingest.py). That equality is what lets
-discover() recognise "already in the library" and what lets process() find
-a just-ingested item's own fingerprints back out of RecordingFingerprint by
-recording_id, without having to re-derive a path.
+Placement is derived from where the run's root sits, never chosen:
+
+  * a root equal to or inside LIBRARY_ROOT is cataloged IN PLACE --
+    _do_confirm's in-root-source path applies: nothing is ever moved,
+    renamed, flattened, deduped on disk or retagged. A folder that becomes a
+    Recording keeps sitting exactly where discover() found it, and its
+    Recording.folder_path ends up equal to the BulkIngestItem's own rel_path
+    (see move_to_library's "in-root bulk_ingest" note in
+    app/utils/ingest.py). For that equality rel_path is relative to
+    LIBRARY_ROOT even when the run was pointed at a subfolder of it. That
+    equality is what lets discover() recognise "already in the library" and
+    what lets process() find a just-ingested item's own fingerprints back
+    out of RecordingFingerprint by recording_id.
+  * any other root is BROUGHT IN: rel_path is relative to the run root and
+    each folder goes through _do_confirm's normal move/copy path per File
+    Handling. Content dedup (find_duplicates) is the only duplicate check.
+
+Several runs can exist at once (e.g. a one-folder Downloads run started while
+a library run is mid-flight). ONE worker thread serves them all and, between
+every item, picks the next from the running run with the fewest pending
+items, so small runs jump ahead of a big backlog and the big run resumes
+afterwards.
 """
 
 import json
@@ -26,28 +38,56 @@ import threading
 import time
 import traceback
 import unicodedata
+from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
+
+from flask import current_app
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
 from app.models.recording import Recording, RecordingFingerprint
 from app.models.quality import QualityAnalysis
 from app.models.user import User
-from app.utils.ingest import resolve_shows_in_dir
+from app.utils.ingest import resolve_shows_in_dir, is_show_root
 from app.utils.health import compute_health
 from app.utils.checksums import parse_checksum_file
 from app.utils.format import format_partial_date
 from app.utils.resolve import DEDUP_FP_TYPES
+from app.utils.paths import is_within
 
-# One worker thread per process, same shape as _analysis_worker/_ANALYSIS_Q
-# in app/api/ingest.py: a module-level flag under a lock rather than a
-# thread object, since all this needs to know is "has one been started."
+# ONE worker thread per process serves every run (small-runs-first queue).
+# _WORKER_THREAD is protected by _WORKER_LOCK and lets _start_worker refuse to
+# start a second thread while one is alive (S3/S9): Pause then Resume within
+# one item used to always start a fresh thread, so the old thread (still
+# inside its slow _do_confirm call) and the new one both worked the same
+# items at once.
 _WORKER_LOCK = threading.Lock()
-# run_id -> Thread, protected by _WORKER_LOCK. Lets _start_worker refuse to
-# start a second worker for a run that already has one alive (S3/S9):
-# Pause then Resume within one item used to always start a fresh thread,
-# so the old thread (still inside its slow _do_confirm call) and the new
-# one both worked the same run's items at once.
-_ACTIVE_WORKERS = {}
+_WORKER_THREAD = None
+
+# The worker's FFP/ST5 -> recording_id map, built once per worker lifetime
+# (it picks one item at a time across runs, so rebuilding per item would
+# re-parse every stored fingerprint for every folder). process() falls back to
+# building its own when this is None, i.e. when called directly.
+_dedup_cache = {"map": None}
+
+# Run ids whose folder walk must be repeated even though the worker already
+# did it once: a finished Review First run started again over the same folder
+# (see start_run) may hold new folders. discover() is idempotent.
+_REDISCOVER = set()
+
+# A folder that is still downloading is skipped, left pending and not looked
+# at again for this long, so the worker moves on to other items instead of
+# spinning on it.
+_DOWNLOAD_RETRY_SECS = 15
+_DOWNLOADING = "downloading"
+_CONVERTING = "converting"
+# Reasons that mean "busy elsewhere, look again after the retry window".
+_COOLING = (_DOWNLOADING, _CONVERTING)
+
+# Set by _start_worker when the worker is already alive, so an idle worker
+# backing off for _DOWNLOAD_RETRY_SECS wakes at once for new work.
+_WAKE = threading.Event()
 
 # Canonical DEDUP_FP_TYPES now lives in app.utils.resolve (spec section 6).
 # "md5" is deliberately excluded there too: two different recordings of the
@@ -65,6 +105,39 @@ def _norm_rel(path):
     folder_path both use."""
     p = unicodedata.normalize("NFC", str(path)).replace(os.sep, "/")
     return p.strip("/")
+
+
+def _library_root():
+    return os.path.realpath(str(current_app.config["LIBRARY_ROOT"]))
+
+
+def is_in_library(root):
+    """True when a run rooted at `root` catalogs in place: root is
+    LIBRARY_ROOT or somewhere inside it."""
+    return is_within(root, _library_root())
+
+
+def item_base(root):
+    """The directory BulkIngestItem.rel_path is relative to for a run rooted
+    at `root`: LIBRARY_ROOT for an in-library run (so rel_path equals
+    Recording.folder_path even for a library-subfolder run), else the run
+    root itself."""
+    return _library_root() if is_in_library(root) else os.path.realpath(root)
+
+
+def item_abs_path(item):
+    """The folder an item points at on disk. rel_path "." (an outside
+    single-show source) is the run root itself."""
+    return os.path.normpath(_on_disk_path(item_base(item.run.root), item.rel_path))
+
+
+def _abs_key(base, rel):
+    """NFC absolute path of an item -- the identity used across runs, since
+    the same rel_path under two different bases is two different folders."""
+    # normpath: an outside single-show run's item is rel "." -- without it
+    # "Downloads/Show/." and a Downloads run's "Downloads/Show" would be two keys
+    # for one folder.
+    return unicodedata.normalize("NFC", os.path.normpath(os.path.join(base, rel)))
 
 
 def _on_disk_path(root, rel):
@@ -115,27 +188,94 @@ def _owner_user_id():
     return user.id if user else None
 
 
-def _active_run():
-    """The run still in flight, if any -- running or paused, most recent
-    first. One at a time: a second start_run() while one is active returns
-    this one rather than starting a competing walk of the same tree."""
+# Item statuses that make up a hold run's Queue once the worker has finished
+# with it: a person still has something to do with them.
+_QUEUE_WAITING = ("ready", "review")
+
+
+def _has_waiting_queue(run):
+    return (db.session.query(BulkIngestItem.id)
+            .filter(BulkIngestItem.run_id == run.id,
+                    BulkIngestItem.status.in_(_QUEUE_WAITING))
+            .first()) is not None
+
+
+def _active_run_for_root(root):
+    """The unfinished run pointed at `root`, if any: running or paused, else a
+    finished run (either mode) whose Queue still holds ready/review items (the
+    queue persists, so starting the same folder again resumes it rather than
+    creating a second queue for the same folders). A second start_run() for
+    the same root returns it; a different root queues a new run."""
+    run = (db.session.query(BulkIngestRun)
+           .filter(BulkIngestRun.status.in_(("running", "paused")),
+                   BulkIngestRun.root == root)
+           .order_by(BulkIngestRun.id.desc())
+           .first())
+    if run:
+        return run
+    for run in (db.session.query(BulkIngestRun)
+                .filter(BulkIngestRun.status == "done", BulkIngestRun.root == root)
+                .order_by(BulkIngestRun.id.desc()).all()):
+        if _has_waiting_queue(run):
+            return run
+    return None
+
+
+def active_runs():
+    """Every unfinished run, oldest first."""
     return (db.session.query(BulkIngestRun)
             .filter(BulkIngestRun.status.in_(("running", "paused")))
-            .order_by(BulkIngestRun.id.desc())
-            .first())
+            .order_by(BulkIngestRun.id.asc())
+            .all())
 
 
-def _ingested_rel_paths_all_runs():
+def listed_runs():
+    """Runs the UI should list: every unfinished run, plus finished runs of
+    either mode whose Queue still has ready/review items (unfinished from the
+    person's point of view, so review work is never orphaned). Oldest first."""
+    out = list(active_runs())
+    seen = {r.id for r in out}
+    for run in (db.session.query(BulkIngestRun)
+                .filter(BulkIngestRun.status == "done")
+                .all()):
+        if run.id not in seen and _has_waiting_queue(run):
+            out.append(run)
+    return sorted(out, key=lambda r: r.id)
+
+
+def applied_values(run):
+    """The run's staged blanket values as a dict ({} when none or unreadable)."""
+    if not run.applied_json:
+        return {}
+    try:
+        v = json.loads(run.applied_json)
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def _ingested_paths_all_runs():
     """
-    Every rel_path any earlier run already turned into a Recording, across
-    ALL runs -- not just the most recent one. Re-run's discover() uses this
-    so a folder ingested two runs ago is never re-offered even though its own
-    run finished long since (spec 5b "Re-run").
+    The absolute path of every item any earlier run already turned into a
+    Recording, across ALL runs -- not just the most recent one. Re-run's
+    discover() uses this so a folder ingested two runs ago is never re-offered
+    even though its own run finished long since (spec 5b "Re-run").
+
+    Keyed by absolute path, not rel_path: with outside sources a rel_path is
+    only meaningful against its own run's base, and "Show1" under Downloads is
+    not the "Show1" already in the library.
     """
-    rows = (db.session.query(BulkIngestItem.rel_path)
+    rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestRun.root)
+            .join(BulkIngestRun, BulkIngestRun.id == BulkIngestItem.run_id)
             .filter(BulkIngestItem.status == "ingested")
             .all())
-    return {_norm_rel(r) for (r,) in rows}
+    bases = {}
+    out = set()
+    for rel, root in rows:
+        if root not in bases:
+            bases[root] = item_base(root)
+        out.add(_abs_key(bases[root], _norm_rel(rel)))
+    return out
 
 
 def discover(run):
@@ -152,6 +292,12 @@ def discover(run):
     adds folders that are genuinely new since the last call.
     """
     root = run.root
+    in_library = is_in_library(root)
+    base = item_base(root)
+    # For an in-library run pointed at a subfolder, rel_path still has to be
+    # relative to LIBRARY_ROOT (== Recording.folder_path): prefix every
+    # root-relative path with where the root sits under the base.
+    prefix = os.path.relpath(os.path.realpath(root), base) if in_library else "."
 
     # A 'review' item (this run's or an earlier one's) may have been
     # accepted through Review & Ingest since it was written -- reconcile it
@@ -162,25 +308,43 @@ def discover(run):
     # that finished long ago.
     _reconcile_review_items(run=None)
 
-    already_ingested = _ingested_rel_paths_all_runs()
-    existing_folder_paths = {
+    already_ingested = _ingested_paths_all_runs()
+    # Only an in-library source can already BE a Recording by location; an
+    # outside source is judged by content (find_duplicates) at process time.
+    existing_folder_paths = set() if not in_library else {
         _norm_rel(fp) for (fp,) in
         db.session.query(Recording.folder_path).filter(Recording.folder_path.isnot(None)).all()
     }
+
+    def _rel_of(abs_path):
+        r = os.path.relpath(abs_path, root)
+        if r == ".":
+            # The root is itself the show (single-folder run). In-library it
+            # is its own path under LIBRARY_ROOT, so it equals folder_path;
+            # outside it stays "." against the run root, which keeps the item
+            # path and the absolute dedup key stable after the folder moves.
+            return _norm_rel(prefix)
+        return _norm_rel(r if prefix == "." else os.path.join(prefix, r))
     existing_items = {
         r for (r,) in
         db.session.query(BulkIngestItem.rel_path).filter(BulkIngestItem.run_id == run.id).all()
     }
 
     unreadable_paths = []
-    show_paths = resolve_shows_in_dir(root, unreadable=unreadable_paths)
+    # The library root is a container by definition, never a show (and a
+    # library with folders named like discs would otherwise read as one).
+    if os.path.realpath(root) != _library_root() and is_show_root(root):
+        # One folder, one run: the root is the show, nothing to walk.
+        show_paths = [root]
+    else:
+        show_paths = resolve_shows_in_dir(root, unreadable=unreadable_paths)
 
     pending_writes = 0
     for abs_path in show_paths:
-        rel = _norm_rel(os.path.relpath(abs_path, root))
+        rel = _rel_of(abs_path)
         if rel in existing_items:
             continue
-        if rel in already_ingested:
+        if _abs_key(base, rel) in already_ingested:
             # Ingested by an earlier run -- never re-offered, even on a fresh
             # run over the same root (spec 5b "Re-run").
             continue
@@ -199,7 +363,7 @@ def discover(run):
     # never silently dropped the way resolve_shows_in_dir drops a folder
     # that is merely empty of audio.
     for abs_path, message in unreadable_paths:
-        rel = _norm_rel(os.path.relpath(abs_path, root))
+        rel = _rel_of(abs_path)
         if rel in existing_items:
             continue
         db.session.add(BulkIngestItem(run_id=run.id, rel_path=rel,
@@ -262,156 +426,303 @@ def process(run, stop_flag):
     recorded on that item as 'failed', and the run moves on -- one bad
     folder must not stop a whole-library pass.
     """
-    from app.api.ingest import auto_confirm
-
-    library_root = run.root
+    # `base` is what rel_path is relative to (LIBRARY_ROOT for an in-library
+    # run, the run root otherwise); `in_library` decides in-place vs bring-in.
+    in_library = is_in_library(run.root)
+    base = item_base(run.root)
     user_id = _owner_user_id()
-    hash_to_recording = _build_dedup_map()
+    hash_to_recording = (_dedup_cache["map"] if _dedup_cache["map"] is not None
+                         else _build_dedup_map())
 
     while True:
         if stop_flag():
             return
-        item = (db.session.query(BulkIngestItem)
-                .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "pending")
-                .order_by(BulkIngestItem.id.asc())
-                .first())
+        # A pending item flagged 'downloading' is passed over until the retry
+        # window lapses, so a still-downloading folder cannot starve (or
+        # spin) the rest of the queue.
+        # Items a person asked to ingest (Review First's Ingest / Ingest all
+        # ready) come first: they are explicit requests, and there are only as
+        # many as the person pressed.
+        requested = _requested_query(run.id).order_by(BulkIngestItem.id.asc()).first()
+        item = requested
+        if item is None:
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=_DOWNLOAD_RETRY_SECS)
+            item = (db.session.query(BulkIngestItem)
+                    .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "pending",
+                            or_(BulkIngestItem.reason.is_(None),
+                                BulkIngestItem.reason.notin_(_COOLING),
+                                BulkIngestItem.updated_at < cutoff))
+                    .order_by(BulkIngestItem.id.asc())
+                    .first())
         if item is None:
             break
-
-        item.status = "in_progress"
-        db.session.commit()
 
         # R2-2: item.rel_path is deliberately NFC (the dedup key), but the
         # bytes actually on disk can be NFD -- resolve the real path to
         # scan/open rather than the one that merely LOOKS right.
-        folder_abs = _on_disk_path(library_root, item.rel_path)
+        # normpath: an outside single-show item is rel "." and "<root>/." has
+        # basename "." -- the resolver would lose the folder name (its date,
+        # artist, source) and the staging row would be keyed apart from the
+        # real path the per-item Review and promote_to_recording use.
+        folder_abs = os.path.normpath(_on_disk_path(base, item.rel_path))
 
-        try:
-            # A folder that became a Recording under a DIFFERENT rel_path
-            # between discover() and now (e.g. a resumed item whose folder
-            # was ingested some other way in the meantime) is simply not
-            # re-ingested.
-            already = (db.session.query(Recording.id)
-                      .filter(Recording.folder_path == item.rel_path)
-                      .first())
-            if already:
-                item.status = "skipped"
-                item.reason = "already_in_library"
+        # A bring-in item still being written by the download queue must not
+        # be moved (the worker would recreate the folder and split the show).
+        # The check and the move share FS_LOCK, as quality.py's Move does, so
+        # a download cannot start between them. Only a Downloads folder can
+        # be busy, so the lock is not taken for anything else.
+        check_downloading = (not in_library and _in_downloads(folder_abs)
+                             and requested is None)
+        # A folder being converted (SHN/WAV to FLAC) is skipped the same way,
+        # for a requested item too (its endpoint already refused one converting
+        # at request time). Only an item that may be moved (bring-in, and
+        # either an auto run or a person's request) takes FS_LOCK, for the
+        # check and the ingest together, as convert_folder_start registers its
+        # job under it. Review First's analyze/score path never moves files,
+        # so it must not hold the lock through a long decode.
+        from app.utils import download_queue
+        from app.api.quality import converting_here
+        will_move = not in_library and (run.mode != "hold" or requested is not None)
+        with (download_queue.FS_LOCK if will_move else nullcontext()):
+            busy = None
+            if check_downloading and download_queue.downloading_here(folder_abs):
+                busy = _DOWNLOADING
+            elif requested is None and converting_here(folder_abs):
+                busy = _CONVERTING
+            if busy:
+                item.reason = busy
+                item.updated_at = datetime.now(timezone.utc)
                 db.session.commit()
                 continue
-
-            # The one server function that turns a folder into an ingested
-            # (or reviewed, or skipped) recording, via the resolver -- Batch
-            # Import's auto-confirm endpoint calls the exact same function
-            # (spec section 4), so a bulk-ingested and an auto-ingested-from-
-            # Batch-Import recording can never come out different.
-            outcome = auto_confirm(folder_abs, user_id, bulk=True,
-                                   hash_cache=hash_to_recording)
-            status   = outcome["status"]
-            reasons  = outcome["reasons"]
-            resolved = outcome["resolved"]
-            item.format = outcome.get("format")
-
-            # meta_band (2026-09-27 unified ingest queue table): the same
-            # High/Medium/Low read compute_health() gives triage, computed
-            # here at extraction time -- cheaper than a per-row recompute at
-            # serialization, and needs no schema change (it rides inside the
-            # existing `meta` JSON blob rather than a new column). A row
-            # that needs review is always "red" regardless of the computed
-            # band, same rule the shared table applies everywhere else.
-            meta_band = "red"
-            if resolved is not None and resolved.scan:
-                try:
-                    meta_band = compute_health(resolved.scan)["band"]
-                except Exception:
-                    meta_band = "red"
-            if status == "review":
-                meta_band = "red"
-
-            date = (resolved.date.value if resolved else None) or {}
-            # 2026-09-27 progress/log redesign: the log's expand panel needs
-            # these fields without a per-item re-scan -- stash whatever the
-            # resolver found, win or lose (a review/failed item still has
-            # partial data worth showing).
-            item.meta = json.dumps({
-                "artist":    resolved.artist.value if resolved else None,
-                "date_text": format_partial_date(date.get("year"), date.get("month"),
-                                                 date.get("day")),
-                "venue":     resolved.venue.value if resolved else None,
-                "city":      resolved.city.value if resolved else None,
-                "state":     resolved.state.value if resolved else None,
-                "country":   resolved.country.value if resolved else None,
-                "source":    resolved.source.value if resolved else None,
-                "lineage":   resolved.lineage.value if resolved else None,
-                "title":     resolved.album.value if resolved else None,
-                "meta_band": meta_band,
-            })
-
-            # BulkIngestItem.reason is a single String(32) column -- there is
-            # no list-of-reasons column to add without a migration framework
-            # (out of scope here), so several reasons are stored comma-joined
-            # and split back apart by the one reader (app/api/quality.py's
-            # _bulk_ingest_review_reasons).
-            reason_str = ",".join(reasons) if reasons else None
-
-            if status == "ingested":
-                recording_id = outcome["result"]["recording_id"]
-                item.status = "ingested"
-                item.reason = None
-                item.kind = resolved.kind if resolved else None
-                item.recording_id = recording_id
-                _record_hashes(recording_id, hash_to_recording)
-            elif status == "review":
-                item.status = "review"
-                item.reason = reason_str
-                item.kind = resolved.kind if resolved else None
-                _write_review_staging(folder_abs, library_root, item)
-            elif status == "skipped":
-                # Exact content duplicate (spec section 9, resolved
-                # question 1) -- never ingested a second time.
-                item.status = "skipped"
-                item.reason = reason_str or "duplicate_content"
-                item.duplicate_of = outcome.get("duplicate_of")
-            else:  # "failed" -- no_audio / unreadable
-                item.status = "failed"
-                item.reason = reason_str
-                # R2-N2: detail is supposed to be a human-readable message,
-                # not the reason word itself.
-                item.detail = outcome.get("detail") or reason_str
-            db.session.commit()
-        except OSError as e:
-            # R2-1: a folder that became unreadable between discover() and
-            # here (an NFS mount that dropped, a chmod that landed mid-run)
-            # is reported the same way discover()'s own top-level check
-            # reports one, not folded into the generic 'failed' bucket
-            # below with no reason at all.
-            db.session.rollback()
-            item = db.session.get(BulkIngestItem, item.id)
-            item.status = "failed"
-            item.reason = "unreadable"
-            item.detail = str(e)
-            db.session.commit()
-        except Exception as e:  # noqa: BLE001
-            db.session.rollback()
-            item = db.session.get(BulkIngestItem, item.id)
-            item.status = "failed"
-            item.detail = str(e)
-            db.session.commit()
-            traceback.print_exc()
+            _process_item(run, item, folder_abs, base, in_library, user_id,
+                          hash_to_recording)
 
     # No pending items left -- the run is done, unless it was paused out from
     # under us between the last item and this check.
+    _finish_if_drained(run)
+
+
+def _requested_query(run_id):
+    """Ready/review items a person asked to ingest and the worker has not yet
+    done."""
+    return (db.session.query(BulkIngestItem)
+            .filter(BulkIngestItem.run_id == run_id,
+                    BulkIngestItem.ingest_requested.is_(True),
+                    BulkIngestItem.status.in_(_QUEUE_WAITING)))
+
+
+def _in_downloads(folder_abs):
+    """True when the folder sits directly inside the Downloads folder (the
+    only place downloading_here can say yes)."""
+    from app.utils.downloads_dir import downloads_dir
+    parent = os.path.dirname(os.path.realpath(folder_abs.rstrip(os.sep)))
+    return parent == os.path.realpath(downloads_dir())
+
+
+def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_recording):
+    """
+    Work one item: gate -> resolve -> dedup -> verdict, then ingest it (auto
+    run, or a person's request) or park it as 'ready' (hold run).
+
+    A requested item (ingest_requested) always ingests. A flagged one is
+    forced past the verdict ("Ingest anyway"); a ready one is not, so a verdict
+    that has turned bad since analysis (e.g. a duplicate ingested meanwhile)
+    sends it back to review instead of importing it.
+    """
+    from app.api.ingest import auto_confirm, MoveFailed
+
+    library_root = base
+    requested = bool(item.ingest_requested)
+    force = requested and item.status in ("review", "pending")
+    hold = run.mode == "hold" and not requested
+    applied = applied_values(run)
+    item.status = "in_progress"
+    db.session.commit()
+
+    try:
+        # A folder that became a Recording under a DIFFERENT rel_path
+        # between discover() and now (e.g. a resumed item whose folder
+        # was ingested some other way in the meantime) is simply not
+        # re-ingested. Location only means anything for an in-library
+        # source; an outside one is judged by content in auto_confirm.
+        already = (in_library and
+                   db.session.query(Recording.id)
+                   .filter(Recording.folder_path == item.rel_path)
+                   .first())
+        if already:
+            item.status = "skipped"
+            item.reason = "already_in_library"
+            item.ingest_requested = False
+            db.session.commit()
+            return
+
+        # The one server function that turns a folder into an ingested
+        # (or reviewed, or skipped) recording, via the resolver -- Batch
+        # Import's auto-confirm endpoint calls the exact same function
+        # (spec section 4), so a bulk-ingested and an auto-ingested-from-
+        # Batch-Import recording can never come out different.
+        outcome = auto_confirm(folder_abs, user_id,
+                               hash_cache=hash_to_recording,
+                               hold=hold, force=force, applied=applied)
+        status   = outcome["status"]
+        reasons  = outcome["reasons"]
+        resolved = outcome["resolved"]
+        item.format = outcome.get("format")
+
+        # Review First: live folders are scored now, before anything enters
+        # the library, so the person sees the number while deciding. Ingest
+        # promotes this staging row (promote_to_recording), and the audio
+        # pass then skips scoring. Albums are never scored.
+        # An in-place (library) run never scores here: scanning a whole
+        # library's audio before anything is catalogued would take hours, and
+        # the background audio pass scores it after ingest anyway.
+        quality = None
+        if (status == "ready" and resolved is not None and resolved.kind != "studio"
+                and not in_library):
+            quality = _score_before_ingest(folder_abs, base)
+
+        # meta_band (2026-09-27 unified ingest queue table): the same
+        # High/Medium/Low read compute_health() gives triage, computed
+        # here at extraction time -- cheaper than a per-row recompute at
+        # serialization, and needs no schema change (it rides inside the
+        # existing `meta` JSON blob rather than a new column). A row
+        # that needs review is always "red" regardless of the computed
+        # band, same rule the shared table applies everywhere else.
+        meta_band = "red"
+        if resolved is not None and resolved.scan:
+            try:
+                meta_band = compute_health(resolved.scan)["band"]
+            except Exception:
+                meta_band = "red"
+        if status == "review":
+            meta_band = "red"
+
+        date = (resolved.date.value if resolved else None) or {}
+        # 2026-09-27 progress/log redesign: the log's expand panel needs
+        # these fields without a per-item re-scan -- stash whatever the
+        # resolver found, win or lose (a review/failed item still has
+        # partial data worth showing).
+        item.meta = json.dumps({
+            "artist":    resolved.artist.value if resolved else None,
+            "date_text": format_partial_date(date.get("year"), date.get("month"),
+                                             date.get("day")),
+            "venue":     resolved.venue.value if resolved else None,
+            "city":      resolved.city.value if resolved else None,
+            "state":     resolved.state.value if resolved else None,
+            "country":   resolved.country.value if resolved else None,
+            "source":    resolved.source.value if resolved else None,
+            "lineage":   resolved.lineage.value if resolved else None,
+            "title":     resolved.album.value if resolved else None,
+            "meta_band": meta_band,
+            "listening_quality": quality,
+        })
+
+        # BulkIngestItem.reason is a single String(32) column -- there is
+        # no list-of-reasons column to add without a migration framework
+        # (out of scope here), so several reasons are stored comma-joined
+        # and split back apart by the one reader (app/api/quality.py's
+        # _bulk_ingest_review_reasons).
+        reason_str = ",".join(reasons) if reasons else None
+
+        if status == "ingested":
+            recording_id = outcome["result"]["recording_id"]
+            item.status = "ingested"
+            item.reason = None
+            item.kind = resolved.kind if resolved else None
+            item.recording_id = recording_id
+            _record_hashes(recording_id, hash_to_recording)
+        elif status == "ready":
+            item.status = "ready"
+            item.reason = None
+            item.kind = resolved.kind if resolved else None
+        elif status == "review":
+            item.status = "review"
+            item.reason = reason_str
+            item.kind = resolved.kind if resolved else None
+            _write_review_staging(folder_abs, library_root, item)
+        elif status == "skipped":
+            # Exact content duplicate (spec section 9, resolved
+            # question 1) -- never ingested a second time.
+            item.status = "skipped"
+            item.reason = reason_str or "duplicate_content"
+            item.duplicate_of = outcome.get("duplicate_of")
+        else:  # "failed" -- no_audio / unreadable
+            item.status = "failed"
+            item.reason = reason_str
+            # R2-N2: detail is supposed to be a human-readable message,
+            # not the reason word itself.
+            item.detail = outcome.get("detail") or reason_str
+        item.ingest_requested = False
+        db.session.commit()
+    except MoveFailed as e:
+        # move_to_library failed partway (a bring-in item; part of the show
+        # may already be in the library). Retrying blindly would re-ingest
+        # whatever is left in the source, so a person looks at it. The run
+        # carries on with its other items.
+        db.session.rollback()
+        item = db.session.get(BulkIngestItem, item.id)
+        item.status = "review"
+        item.reason = "move_failed"
+        item.detail = str(e)
+        item.ingest_requested = False
+        db.session.commit()
+    except OSError as e:
+        # R2-1: a folder that became unreadable between discover() and
+        # here (an NFS mount that dropped, a chmod that landed mid-run)
+        # is reported the same way discover()'s own top-level check
+        # reports one, not folded into the generic 'failed' bucket
+        # below with no reason at all.
+        db.session.rollback()
+        item = db.session.get(BulkIngestItem, item.id)
+        item.status = "failed"
+        item.reason = "unreadable"
+        item.detail = str(e)
+        item.ingest_requested = False
+        db.session.commit()
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        item = db.session.get(BulkIngestItem, item.id)
+        item.status = "failed"
+        item.reason = None
+        item.detail = str(e)
+        item.ingest_requested = False
+        db.session.commit()
+        traceback.print_exc()
+
+
+def _score_before_ingest(folder_abs, base):
+    """
+    Listening Quality for a folder that is not in the library yet, through the
+    same scorer and staging cache Review & Ingest uses: a current analysis for
+    the folder is reused, never recomputed. Returns the 0-100 score or None
+    (unreadable audio records its error on the staging row and the audio pass
+    scores the recording after ingest instead).
+    """
+    from app.api.quality import _analyse_one, _is_current
+    from app.utils import quality_store as qs
+
+    if not _is_current(folder_abs):
+        _analyse_one(folder_abs, qs.norm_path(base))
+    row = qs.get_staging(folder_abs)
+    return row.listening_quality if row is not None else None
+
+
+def _finish_if_drained(run):
+    """Mark `run` done once nothing is pending, unless it was paused out from
+    under us between the last item and this check. Items still waiting on a
+    download count as pending, so such a run stays open."""
     run = db.session.get(BulkIngestRun, run.id)
     if run.status != "running":
         return
     remaining = (db.session.query(BulkIngestItem.id)
                 .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "pending")
                 .first())
-    if remaining:
+    if remaining or _requested_query(run.id).first():
         return
     run.status = "done"
-    from datetime import datetime, timezone
     run.finished_at = datetime.now(timezone.utc)
+    # A hold run's ready items are NOT outstanding work for the worker: they
+    # wait for a person (see listed_runs for how they stay visible).
     db.session.commit()
 
     # Chunk 6 adds the follow-up queue (non-music signal / analysis / tag
@@ -478,13 +789,14 @@ def _reconcile_review_items(run=None):
 
     q = (db.session.query(BulkIngestItem, BulkIngestRun)
          .join(BulkIngestRun, BulkIngestRun.id == BulkIngestItem.run_id)
-         .filter(BulkIngestItem.status == "review"))
+         .filter(BulkIngestItem.status.in_(_QUEUE_WAITING)))
     if run is not None:
         q = q.filter(BulkIngestItem.run_id == run.id)
 
     reconciled = 0
     for item, item_run in q.all():
-        folder_path = norm_path(os.path.join(item_run.root, item.rel_path))
+        folder_path = norm_path(os.path.normpath(
+            os.path.join(item_base(item_run.root), item.rel_path)))
         staging = (db.session.query(QualityAnalysis)
                    .filter(QualityAnalysis.folder_path == folder_path)
                    .first())
@@ -509,112 +821,207 @@ def _reconcile_review_items(run=None):
     return reconciled
 
 
-def _start_worker(run_id, app=None):
+def _pick_run(discovered):
+    """
+    The running run the worker should serve next, or None.
+
+    Small runs first: among running runs that still have workable pending
+    items, the one with the FEWEST pending items wins (ties: oldest). A run
+    not yet discovered is discovered here first -- cheap for a single outside
+    folder, a real walk for a big library. A running run with nothing pending
+    at all is returned at once so process() can mark it done. Runs whose only
+    pending items are cooling down after a 'downloading' skip are passed over
+    (they come back after _DOWNLOAD_RETRY_SECS).
+    """
+    runs = (db.session.query(BulkIngestRun)
+            .filter(BulkIngestRun.status == "running")
+            .order_by(BulkIngestRun.id.asc())
+            .all())
+    for r in runs:
+        if r.id not in discovered or r.id in _REDISCOVER:
+            discover(r)
+            discovered.add(r.id)
+            _REDISCOVER.discard(r.id)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=_DOWNLOAD_RETRY_SECS)
+    best, best_n = None, None
+    for r in runs:
+        if _requested_query(r.id).first():
+            return r
+        pending = (db.session.query(BulkIngestItem.id)
+                   .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.status == "pending")
+                   .count())
+        if pending == 0:
+            return r
+        workable = (db.session.query(BulkIngestItem.id)
+                    .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.status == "pending",
+                            or_(BulkIngestItem.reason.is_(None),
+                                BulkIngestItem.reason.notin_(_COOLING),
+                                BulkIngestItem.updated_at < cutoff))
+                    .count())
+        if workable and (best is None or pending < best_n):
+            best, best_n = r, pending
+    return best
+
+
+def _pending_anywhere():
+    """True when some running run still has pending items (e.g. ones waiting
+    on a download) or a person's ingest request, so the worker must stay alive
+    for them."""
+    return (db.session.query(BulkIngestItem.id)
+            .join(BulkIngestRun, BulkIngestRun.id == BulkIngestItem.run_id)
+            .filter(BulkIngestRun.status == "running",
+                    or_(BulkIngestItem.status == "pending",
+                        (BulkIngestItem.ingest_requested.is_(True)
+                         & BulkIngestItem.status.in_(_QUEUE_WAITING))))
+            .first()) is not None
+
+
+def _one_item_flag(run_id):
+    """stop_flag for process(): False for the first poll (unless the run
+    was paused), True afterwards -- so process() does exactly one item and
+    the worker re-picks, letting a smaller run jump the queue."""
+    calls = {"n": 0}
+
+    def flag():
+        calls["n"] += 1
+        if calls["n"] > 1:
+            return True
+        r = db.session.get(BulkIngestRun, run_id)
+        return r is None or r.status != "running"
+    return flag
+
+
+def _start_worker(run_id=None, app=None):
+    """Start THE worker thread unless one is already alive. run_id is accepted
+    for the callers that still pass it; the worker serves every running run."""
+    global _WORKER_THREAD
     if app is None:
-        from flask import current_app
         app = current_app._get_current_object()
 
-    def _stop_flag():
-        with app.app_context():
-            r = db.session.get(BulkIngestRun, run_id)
-            return r is None or r.status != "running"
-
-    def _leaving(run_id):
+    def _leaving():
         """
-        R2-3: called whenever this worker is about to stop because the run
-        no longer reads 'running' -- right after process() returns (paused
-        mid-item) or when the top-of-loop check finds it so. The thread is
-        still `is_alive()` for as long as this function's caller takes to
-        actually return (context-teardown, GC, whatever the interpreter is
-        doing), and a Resume landing in that window used to see an "alive"
-        worker and refuse to start a new one, even though this one had
-        already committed to leaving.
+        R2-3: called when no run is workable. The thread is still
+        `is_alive()` for as long as it takes to actually return, and a Resume
+        landing in that window used to see an "alive" worker and refuse to
+        start a new one, even though this one had already committed to
+        leaving.
 
-        Pops this thread from _ACTIVE_WORKERS and re-reads status under the
-        SAME lock _start_worker's own is_alive() check uses, so a concurrent
-        Resume either lands before this runs (sees 'running', the loop below
-        just continues) or after the pop (nothing looks alive, so a fresh
-        worker starts). Returns True when the worker should actually stop;
-        False means the run went back to 'running' while we were mid-exit,
-        and this same thread re-registers itself and keeps going instead of
-        leaving a run with no one driving it.
+        Re-checks for running work and clears _WORKER_THREAD under the SAME
+        lock _start_worker's own is_alive() check uses, so a concurrent
+        Resume/start either commits before this runs (work is seen, the loop
+        continues) or after the clear (nothing looks alive, a fresh worker
+        starts). Returns True when the worker should actually stop.
         """
+        global _WORKER_THREAD
         with _WORKER_LOCK:
-            _ACTIVE_WORKERS.pop(run_id, None)
-            r = db.session.get(BulkIngestRun, run_id)
-            if r is not None and r.status == "running":
-                _ACTIVE_WORKERS[run_id] = threading.current_thread()
+            if _pending_anywhere():
                 return False
+            _WORKER_THREAD = None
             return True
 
+    def _pause_with_error(run_id):
+        # R2-N5: leave the run 'paused', not 'running', so the page offers
+        # Resume instead of showing a run nobody is driving and polling
+        # forever with no worker to catch up to. Only the run that failed;
+        # the other runs keep going.
+        db.session.rollback()
+        r = db.session.get(BulkIngestRun, run_id)
+        if r is not None:
+            r.last_error = traceback.format_exc()
+            r.status = "paused"
+            db.session.commit()
+
     def _work():
+        global _WORKER_THREAD
         with app.app_context():
-            r = db.session.get(BulkIngestRun, run_id)
-            if r is None:
-                return
+            discovered = set()
             try:
-                discover(r)
-                # process() returns as soon as stop_flag() is True (paused),
-                # so a resume needs a NEW call to process() -- see resume().
+                _dedup_cache["map"] = _build_dedup_map()
                 while True:
-                    r = db.session.get(BulkIngestRun, run_id)
-                    if r is None:
-                        with _WORKER_LOCK:
-                            _ACTIVE_WORKERS.pop(run_id, None)
-                        return
-                    if r.status != "running":
-                        if _leaving(run_id):
-                            return
+                    _WAKE.clear()
+                    try:
+                        r = _pick_run(discovered)
+                    except Exception:  # noqa: BLE001
+                        # discover() of one run failed; pause the first run
+                        # that is not yet discovered (the one it was walking).
+                        traceback.print_exc()
+                        bad = (db.session.query(BulkIngestRun)
+                               .filter(BulkIngestRun.status == "running",
+                                       ~BulkIngestRun.id.in_(discovered or {0}))
+                               .order_by(BulkIngestRun.id.asc()).first())
+                        if bad is None:
+                            raise
+                        _pause_with_error(bad.id)
                         continue
-                    process(r, _stop_flag)
-                    if _leaving(run_id):
-                        return
-                    remaining = (db.session.query(BulkIngestItem.id)
-                                .filter(BulkIngestItem.run_id == run_id,
-                                        BulkIngestItem.status == "pending")
-                                .first())
-                    if not remaining:
-                        with _WORKER_LOCK:
-                            _ACTIVE_WORKERS.pop(run_id, None)
-                        return
+                    if r is None:
+                        if _leaving():
+                            return
+                        # Only downloading/converting folders are left: back off
+                        # for the retry window (they are skipped until then
+                        # anyway), but wake early for new work.
+                        _WAKE.wait(_DOWNLOAD_RETRY_SECS)
+                        continue
+                    run_id = r.id
+                    try:
+                        process(r, _one_item_flag(run_id))
+                    except Exception:  # noqa: BLE001
+                        traceback.print_exc()
+                        _pause_with_error(run_id)
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 with _WORKER_LOCK:
-                    _ACTIVE_WORKERS.pop(run_id, None)
-                r = db.session.get(BulkIngestRun, run_id)
-                if r is not None:
-                    # R2-N5: leave the run 'paused', not 'running', so the
-                    # page offers Resume instead of showing a run nobody is
-                    # driving and polling forever with no worker to catch up
-                    # to.
-                    r.last_error = traceback.format_exc()
-                    r.status = "paused"
-                    db.session.commit()
+                    _WORKER_THREAD = None
+                # Nobody is left to drive the running runs: pause them all.
+                for r in (db.session.query(BulkIngestRun)
+                          .filter(BulkIngestRun.status == "running").all()):
+                    _pause_with_error(r.id)
+            finally:
+                # Not if a fresh worker has already started and built its own.
+                with _WORKER_LOCK:
+                    if _WORKER_THREAD in (None, threading.current_thread()):
+                        _dedup_cache["map"] = None
 
     with _WORKER_LOCK:
-        existing = _ACTIVE_WORKERS.get(run_id)
-        if existing is not None and existing.is_alive():
-            # A worker for this run is already running (e.g. Resume called
-            # while the paused run's own thread was still mid-item) --
-            # never start a second one on the same run.
+        if _WORKER_THREAD is not None and _WORKER_THREAD.is_alive():
+            # The worker already serves every running run (e.g. Resume called
+            # while it is still mid-item) -- never start a second one.
+            _WAKE.set()
             return
         t = threading.Thread(target=_work, daemon=True)
-        _ACTIVE_WORKERS[run_id] = t
+        _WORKER_THREAD = t
         t.start()
 
 
-def start_run(library_root):
+def default_mode(root):
+    """Import Automatically for the library folder, Review First for
+    anywhere else (Downloads and other folders)."""
+    return "auto" if is_in_library(root) else "hold"
+
+
+def start_run(root, mode=None):
     """
-    Return the active run (running or paused) if one exists, else create one
-    (status running) and start its worker thread.
+    Return the unfinished run already pointed at `root` (keeping ITS mode),
+    else create a new one (status running) and make sure the worker is going.
+    A run for a different root while another is active simply queues behind
+    the worker's small-runs-first picking; nothing is refused or replaced.
+    `mode` is 'auto' or 'hold'; None picks default_mode(root).
     """
-    run = _active_run()
+    run = _active_run_for_root(root)
     if run:
+        if run.status == "done":
+            # A Review First queue being picked up again: look for new
+            # folders and let the worker take it from there.
+            run.status = "running"
+            run.finished_at = None
+            db.session.commit()
+            _REDISCOVER.add(run.id)
+            _start_worker()
         return run
-    run = BulkIngestRun(root=library_root, status="running")
+    run = BulkIngestRun(root=root, status="running", mode=mode or default_mode(root))
     db.session.add(run)
     db.session.commit()
-    _start_worker(run.id)
+    _start_worker()
     return run
 
 
@@ -626,7 +1033,7 @@ def pause_run(run):
 def resume_run(run):
     run.status = "running"
     db.session.commit()
-    _start_worker(run.id)
+    _start_worker()
 
 
 def reset_in_progress(run):
@@ -638,9 +1045,15 @@ def reset_in_progress(run):
     scratch. Split out from resume_on_boot() so a test can exercise exactly
     this reset without needing a live app/thread around it.
     """
-    (db.session.query(BulkIngestItem)
-     .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "in_progress")
-     .update({"status": "pending"}, synchronize_session=False))
+    q = (db.session.query(BulkIngestItem)
+         .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "in_progress"))
+    if is_in_library(run.root):
+        # In place: nothing was moved, so trying again is safe.
+        q.update({"status": "pending"}, synchronize_session=False)
+    else:
+        # Bring-in: move_to_library moves file by file, so the source may be
+        # half emptied. A person looks before anything is re-ingested.
+        q.update({"status": "review", "reason": "interrupted"}, synchronize_session=False)
     db.session.commit()
 
 
@@ -648,9 +1061,9 @@ def resume_on_boot(app):
     """
     Called from create_app (never in SERVER_MODE): if a run was left
     'running' when the process last stopped, reset its in-progress item (see
-    reset_in_progress) and restart its worker. A run that was 'paused' is
-    left exactly as it was; only the caller pressing Resume restarts its
-    worker.
+    reset_in_progress) and start the worker. Every unfinished running run is
+    resumed. A run that was 'paused' is left exactly as it was; only the
+    caller pressing Resume puts it back in the queue.
 
     create_app() runs before the schema exists on a genuinely fresh install
     (run.py's first_run_setup() -- db.create_all() -- runs AFTER create_app()
@@ -662,17 +1075,18 @@ def resume_on_boot(app):
     """
     with app.app_context():
         try:
-            run = (db.session.query(BulkIngestRun)
-                  .filter(BulkIngestRun.status == "running")
-                  .order_by(BulkIngestRun.id.desc())
-                  .first())
+            runs = (db.session.query(BulkIngestRun)
+                    .filter(BulkIngestRun.status == "running")
+                    .order_by(BulkIngestRun.id.asc())
+                    .all())
         except Exception:  # noqa: BLE001
             db.session.rollback()
             return
-        if run is not None:
+        # Every unfinished run resumes; the single worker sorts out the order.
+        for run in runs:
             reset_in_progress(run)
-            run_id = run.id
-            _start_worker(run_id, app=app)
+        if runs:
+            _start_worker(app=app)
 
         # Chunk 6: pending follow-up work (scoring, MusicBrainz lookups) must
         # survive a process restart too, not just a running run's own worker.

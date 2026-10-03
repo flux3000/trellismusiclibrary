@@ -48,7 +48,7 @@ def _no_real_followup_thread(monkeypatch):
     DB via a background thread. Left unpatched, that thread can still be
     running when the test's fixture drops the DB out from under it, which
     prints a swallowed OperationalError on some other test's watch."""
-    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id: True)
+    monkeypatch.setattr("app.api.ingest._enqueue", lambda app, kind, item_id, run_id=None: True)
 
 
 # ── R2-1: nested unreadable folders must not vanish ─────────────────────────
@@ -265,8 +265,11 @@ def test_worker_exception_leaves_run_paused_with_last_error(app, tmp_path):
 
     assert r.status == "paused"
     assert r.last_error and "simulated unmounted root" in r.last_error
-    worker = bulk_ingest_run._ACTIVE_WORKERS.get(run.id)
-    assert worker is None or not worker.is_alive()
+    # One shared worker now; it must have wound down once nothing is runnable.
+    deadline = time.time() + 5
+    while bulk_ingest_run._WORKER_THREAD is not None and time.time() < deadline:
+        time.sleep(0.1)
+    assert bulk_ingest_run._WORKER_THREAD is None
 
 
 # ── N6: a rejected review row reconciles to skipped, not left dangling ─────

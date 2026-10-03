@@ -213,8 +213,8 @@ def delete_musician(musician_id):
         return jsonify({"error": "Not found"}), 404
     n = len(a.memberships)
     if n:
-        return jsonify({"error": f"Musician is a member of {n} artist(s) — "
-                                 "remove them from those acts first."}), 409
+        return jsonify({"error": f"Musician is a member of {n} artist(s). "
+                                 "Remove them from those acts first."}), 409
     db.session.delete(a)
     db.session.commit()
     return jsonify({"ok": True})

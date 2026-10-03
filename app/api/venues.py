@@ -184,7 +184,7 @@ def delete_venue(venue_id):
         return jsonify({"error": "Not found"}), 404
     n = len(v.performances)
     if n:
-        return jsonify({"error": f"Venue has {n} performance(s) — reassign or "
+        return jsonify({"error": f"Venue has {n} performance(s). Reassign or "
                                  "delete those recordings first."}), 409
     db.session.delete(v)
     db.session.commit()

@@ -331,7 +331,7 @@ def rename_recording_folder(recording, library_root, rename_folders=None):
     # so the metadata save itself still goes through. 2026-09-01.
     shared = _other_recordings_in_folder(recording, old_rel)
     if shared:
-        return (f"Folder not renamed — {shared} other recording"
+        return (f"Folder not renamed: {shared} other recording"
                 f"{'' if shared == 1 else 's'} share this folder, and renaming "
                 f"it would move their files too: {old_rel}")
 

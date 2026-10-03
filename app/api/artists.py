@@ -636,8 +636,8 @@ def fetch_artist_image(artist_id):
     if not p:
         return jsonify({"error": "Not found"}), 404
     if not p.mbid:
-        return jsonify({"error": "Match this act on MusicBrainz first — "
-                                 "the photo lookup follows its Wikidata link."}), 400
+        return jsonify({"error": "Match this act on MusicBrainz first. "
+                                 "The photo lookup follows its Wikidata link."}), 400
 
     # Skip Commons files already imported for this act, so clicking a second
     # time returns a DIFFERENT photo rather than the same one again.
@@ -889,7 +889,7 @@ def delete_stint(stint_id):
     remaining = db.session.query(Membership).filter_by(
         artist_id=m.artist_id, musician_id=m.musician_id).count()
     if remaining <= 1:
-        return jsonify({"error": "This is the member's only stint — remove them from "
+        return jsonify({"error": "This is the member's only stint. Remove them from "
                                  "the roster instead of deleting their last stint."}), 409
     remove_membership_stint(stint_id)
     db.session.commit()
@@ -922,8 +922,8 @@ def delete_artist(artist_id):
         return jsonify({"error": "Not found"}), 404
     n_perf = db.session.query(Performance).filter_by(artist_id=artist_id).count()
     if n_perf:
-        return jsonify({"error": f"Artist has {n_perf} performance(s) — "
-                                 "delete or reassign its recordings first."}), 409
+        return jsonify({"error": f"Artist has {n_perf} performance(s). "
+                                 "Delete or reassign its recordings first."}), 409
     member_ids = [a.id for a in p.musicians]
     db.session.delete(p)          # memberships cascade
     db.session.flush()

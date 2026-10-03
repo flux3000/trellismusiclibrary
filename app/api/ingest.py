@@ -14,6 +14,7 @@ import re
 import os
 import json
 import queue
+import collections
 import threading
 import time
 from pathlib import Path
@@ -40,8 +41,9 @@ from app.models.track import Track
 from app.utils.ingest import (move_to_library, compute_audio_rename_map,
                               resolve_ingest_file_path, write_flac_tags,
                               IngestCancelled, scan_folder, build_scan_payload)
-from app.utils.bulk_ingest import folder_format, _READABLE_AUDIO_EXTS
-from app.utils.resolve import resolve, find_duplicates, verdict
+from app.utils.bulk_ingest import (folder_format, _READABLE_AUDIO_EXTS,
+                                   CONVERTIBLE_AUDIO_EXTS)
+from app.utils.resolve import resolve, find_duplicates, verdict, Field as ResolvedField
 from app.utils.file_naming import flattens
 from app.utils.folder_naming import build_folder_name
 from app.utils.ai_assist import run_ai_assist, AiAssistError
@@ -395,142 +397,283 @@ PHASES = {
 # A single worker does not make the analysis faster. It makes it FINITE, keeps
 # it off the critical path of the next copy, and — because the queue is now a
 # real object — makes it reportable, which is what the debug pane needs.
-_ANALYSIS_Q = queue.Queue()
-# N9: guards the check-and-start of the single follow-up worker thread below
-# (_ANALYSIS_STATE["worker"]) -- _enqueue() used to read-then-set that flag
-# with no lock, so two calls racing (e.g. two bulk_ingest items' follow-ups
-# enqueued from different request threads at once) could both see it False
-# and start a second worker thread.
-_WORKER_START_LOCK = threading.Lock()
-_ANALYSIS_STATE = {
-    "current": None,      # {recording_id, name, started, tracks_done, tracks_total}
-    "worker":  False,     # has the worker thread been started
-    "done":    0,
-    "failed":  0,
-    "skipped": 0,         # recordings ingested in Quick Add, never enqueued
-}
-
-# Follow-up queue kinds (Bulk Ingest spec chunk 6): the single worker below
-# now drains (kind, id) tuples rather than bare recording ids.
-#   "analysis"   the Librosa pass above -- unchanged behaviour, unchanged UI.
-#   "score"      Listening Quality + non-music signal for one
-#                already-ingested recording that never went through triage.
+# Follow-up kinds. The queue is in memory (every kind is re-derived from DB
+# state by enqueue_followups(), so nothing needs to survive a restart).
+#   "audio"      ONE audio pass for a recording: Listening Quality score +
+#                non-music signal + Full (librosa) analysis. Live only when
+#                enqueued automatically; see run_audio_pass().
 #   "mb_artist"  a MusicBrainz lookup for one artist still at "never looked
 #                up", deferred off the interactive ingest path.
 #   "mb_release" a MusicBrainz release lookup for one studio recording
 #                still at "never looked up" (mb_release_status IS NULL).
 #                Never enqueued for a live recording.
+#   "images"     artwork scan for a recording never scanned for it.
 #
-# _QUEUED_KEYS / _PENDING_BY_KIND exist purely to answer "what's in the queue
-# right now" without draining it -- queue.Queue has no peek -- and to dedupe a
-# repeat enqueue_followups() call against work that is already sitting there.
+# Two lanes, one worker thread each: "audio" (CPU/disk-bound decode) and
+# "net" (MusicBrainz + artwork). They are independent, so a slow decode never
+# holds up MusicBrainz and vice versa; "net" being a single thread is what keeps
+# MusicBrainz's rate limit respected.
+#
+# Small runs first: inside a lane, pending work is grouped by the Bulk Ingest
+# run it belongs to (None = single-folder ingest / no run) and the group with
+# the fewest outstanding items is served next, FIFO inside a group. Work with
+# no run always goes first. That way one folder ingested while a 2000-show run
+# is draining is not stuck behind that run's backlog.
+#
+# _QUEUED_KEYS / _PENDING_BY_KIND answer "what's in the queue right now" and
+# dedupe a repeat enqueue_followups() call against work already waiting.
+_Q_LOCK = threading.Lock()   # guards _QUEUED_KEYS / _PENDING_BY_KIND (two workers + request threads)
+
+
+class _Lane:
+    """A blocking queue ordered by run size (see above) instead of arrival."""
+
+    def __init__(self):
+        self._cv = threading.Condition()
+        self._by_run = {}    # run_key (run id or None) -> deque of (kind, id)
+
+    def put(self, key, run_key=None):
+        with self._cv:
+            self._by_run.setdefault(run_key, collections.deque()).append(key)
+            self._cv.notify()
+
+    def _pop(self):
+        if None in self._by_run:
+            rk = None
+        else:
+            rk = min(self._by_run, key=lambda r: (len(self._by_run[r]), r))
+        dq = self._by_run[rk]
+        item = dq.popleft()
+        if not dq:
+            del self._by_run[rk]
+        return item
+
+    def get(self):
+        with self._cv:
+            while not self._by_run:
+                self._cv.wait()
+            return self._pop()
+
+    def get_nowait(self):
+        with self._cv:
+            if not self._by_run:
+                raise queue.Empty
+            return self._pop()
+
+    def discard(self, key):
+        """Drop a queued (not yet started) key. True if it was there."""
+        with self._cv:
+            for rk, dq in list(self._by_run.items()):
+                if key in dq:
+                    dq.remove(key)
+                    if not dq:
+                        del self._by_run[rk]
+                    return True
+        return False
+
+    def qsize(self):
+        with self._cv:
+            return sum(len(d) for d in self._by_run.values())
+
+
+_LANES = {"audio": _Lane(), "net": _Lane()}
+# N9: guards the check-and-start of the worker threads (_ANALYSIS_STATE["worker"]).
+_WORKER_START_LOCK = threading.Lock()
+_ANALYSIS_STATE = {
+    "current": None,      # {recording_id, name, started, tracks_total} -- audio lane
+    "worker":  False,     # have the worker threads been started
+    "done":    0,
+    "failed":  0,
+}
 _QUEUED_KEYS = set()
-_PENDING_BY_KIND = {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0,
-                    "images": 0, "signals": 0}
+_PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+
+# Kinds an older build queued. Folded into "audio" so nothing crashes on them.
+_LEGACY_AUDIO_KINDS = ("analysis", "score", "signals")
 
 
-def _enqueue(app, kind, item_id):
+def _normalize_kind(kind):
+    return "audio" if kind in _LEGACY_AUDIO_KINDS else kind
+
+
+def _lane_name(kind):
+    return "audio" if kind == "audio" else "net"
+
+
+def _enqueue(app, kind, item_id, run_id=None):
     """
-    Put one (kind, item_id) item on the follow-up queue, starting the single
-    worker thread on first use. Deduped against whatever is already queued
-    (popped items clear their key in the worker below), so a repeat
-    enqueue_followups() call never double-queues the same piece of work.
+    Put one (kind, item_id) item on its lane, starting the worker threads on
+    first use. Deduped against whatever is already queued (a legacy kind is
+    folded into "audio" first, so it dedupes per recording).
+
+    `run_id` is the Bulk Ingest run the item belongs to (None for none); it
+    only decides ordering, see the lane comment above.
 
     Returns True if the item was newly queued, False if it was already there.
     """
+    kind = _normalize_kind(kind)
     key = (kind, item_id)
-    if key in _QUEUED_KEYS:
-        return False
-    _QUEUED_KEYS.add(key)
-    _PENDING_BY_KIND[kind] = _PENDING_BY_KIND.get(kind, 0) + 1
+    with _Q_LOCK:
+        if key in _QUEUED_KEYS:
+            return False
+        _QUEUED_KEYS.add(key)
+        _PENDING_BY_KIND[kind] = _PENDING_BY_KIND.get(kind, 0) + 1
     with _WORKER_START_LOCK:
         if not _ANALYSIS_STATE["worker"]:
             _ANALYSIS_STATE["worker"] = True
-            threading.Thread(target=_analysis_worker, args=(app,), daemon=True).start()
-    _ANALYSIS_Q.put(key)
+            for lane_name in ("audio", "net"):
+                threading.Thread(target=_followup_worker, args=(app, lane_name),
+                                 daemon=True).start()
+    _LANES[_lane_name(kind)].put(key, run_id)
     return True
 
 
-def _handle_analysis(recording_id):
-    """The Librosa analysis pass -- body unchanged from before chunk 6."""
+class MoveFailed(RuntimeError):
+    """move_to_library hit an OSError (possibly after moving some files)."""
+
+
+# One audio pass per recording at a time: the audio lane and Analyze Audio
+# (/reprocess) could otherwise decode and write the same recording's rows
+# concurrently. Locks are created on demand and never removed (one small
+# object per recording ever analysed).
+_AUDIO_LOCKS = {}
+_AUDIO_LOCKS_GUARD = threading.Lock()
+
+
+def _audio_lock(recording_id):
+    with _AUDIO_LOCKS_GUARD:
+        return _AUDIO_LOCKS.setdefault(recording_id, threading.Lock())
+
+
+def drop_queued_audio(recording_id):
+    """Remove a queued, not-yet-started audio follow-up for `recording_id`
+    (Analyze Audio just did the work). A no-op when nothing is queued."""
+    key = ("audio", recording_id)
+    if _LANES["audio"].discard(key):
+        with _Q_LOCK:
+            _QUEUED_KEYS.discard(key)
+            _PENDING_BY_KIND["audio"] = max(0, _PENDING_BY_KIND.get("audio", 0) - 1)
+
+
+def run_audio_pass(recording_id, score=True, reanalyze=False):
+    """Serialised per recording; see _run_audio_pass for what it does."""
+    with _audio_lock(recording_id):
+        return _run_audio_pass(recording_id, score=score, reanalyze=reanalyze)
+
+
+def _run_audio_pass(recording_id, score=True, reanalyze=False):
+    """
+    The whole audio pass for one recording: Listening Quality score, non-music
+    signal, Full (librosa) analysis. Callable for ANY recording; the live-only
+    rule belongs to enqueue_followups()/_handle_audio, not here (the Analyze
+    Audio button runs it on albums too, with score forced).
+
+    score=False skips only the Listening Quality part (it already exists).
+    reanalyze=True redoes tracks that already have a current analysis.
+
+    The three parts are independent: a failure in one is recorded and the
+    rest still run. Returns {"score", "signals", "analysis", "errors"}; each
+    part is "ok" / "skipped" / "failed", errors is a list of strings.
+    """
     import traceback as _tb
-    try:
-        from app.models.recording import Recording
-        from app.utils.analysis import analyse_recording
-        rec = db.session.get(Recording, recording_id)
-        if not rec:
-            return
-        _ANALYSIS_STATE["current"] = {
-            "recording_id": recording_id,
-            "name": os.path.basename(rec.folder_path or "") or str(recording_id),
-            "started": time.time(),
-            "tracks_total": len(rec.tracks or []),
-        }
-        log_step(f"analysis:{recording_id}", "analyzing",
-                 f"{len(rec.tracks or [])} tracks", force=True)
-        library_root = current_app.config.get("LIBRARY_ROOT", "")
-        n_ok, errors = analyse_recording(rec, library_root, db.session)
-        _ANALYSIS_STATE["done"] += 1
-        if errors:
-            _ANALYSIS_STATE["failed"] += len(errors)
-        print("[ingest] auto-analysis for recording %s: %d ok, %d error(s)"
-              % (recording_id, n_ok, len(errors)), flush=True)
-    except Exception:
-        _ANALYSIS_STATE["failed"] += 1
-        _tb.print_exc()
-    finally:
-        _ANALYSIS_STATE["current"] = None
-
-
-def _handle_score(recording_id):
-    """
-    Listening Quality + non-music signal for one recording that
-    was bulk-ingested (so it never went through the interactive triage/ingest
-    passes that normally produce these).
-
-    Reuses the SAME scorer chain as manual triage (_analyse_one in
-    app/api/quality.py): extract_recording_features() then score_recording(),
-    written straight onto the permanent RecordingQuality row since there is
-    no staging row to promote from. If the folder's audio cannot be read
-    (moved, deleted, on an unmounted volume), extract_recording_features()
-    returns an {"error": ...} dict and no row is written -- the recording
-    stays "unscored" and a later enqueue_followups() run will retry it.
-    """
     from app.models.recording import Recording
-    from app.utils.quality_store import get_for_recording, upsert_for_recording
+    from app.models.track_analysis import TrackAnalysis
 
+    out = {"score": "skipped", "signals": "skipped", "analysis": "skipped", "errors": []}
     rec = db.session.get(Recording, recording_id)
     if not rec:
-        return
-    if rec.kind == "studio":
-        return  # studio recordings are never scored (2026-09-27)
-    if get_for_recording(recording_id) is not None:
-        return  # already scored by something else in the meantime
-
-    from app.utils.quality import (extract_recording_features, score_recording,
-                                   guess_source_from_name)
+        return out
     library_root = current_app.config.get("LIBRARY_ROOT", "")
     folder_path = rec.folder_path or ""
-    folder_abs = os.path.join(library_root, folder_path)
-    name = os.path.basename(folder_path.rstrip("/"))
 
-    features = extract_recording_features(folder_abs)
-    if "error" not in features:
-        scored = score_recording(features, source=guess_source_from_name(name))
-        upsert_for_recording(recording_id, scored, features)
+    # 1. Listening Quality. Same scorer chain as manual triage; unreadable
+    # audio returns an {"error"} dict and no row is written, so the recording
+    # stays unscored and a later enqueue_followups() retries it.
+    if score:
+        try:
+            from app.utils.quality import (extract_recording_features, score_recording,
+                                           guess_source_from_name)
+            from app.utils.quality_store import upsert_for_recording
+            features = extract_recording_features(os.path.join(library_root, folder_path))
+            if "error" in features:
+                out["score"] = "failed"
+                out["errors"].append(f"score: {features['error']}")
+            else:
+                name = os.path.basename(folder_path.rstrip("/"))
+                scored = score_recording(features, source=guess_source_from_name(name))
+                upsert_for_recording(recording_id, scored, features)
+                out["score"] = "ok"
+        except Exception as e:  # noqa: BLE001 -- parts must not block each other
+            db.session.rollback()
+            _tb.print_exc()
+            out["score"] = "failed"
+            out["errors"].append(f"score: {e}")
 
-    # Non-music signal -- decoupled into its OWN follow-up kind, "signals"
-    # (spec section 8): it's the one audio-bound addition (~0.15s/track), so
-    # it runs after the catalog pass, not bundled into "score" -- a
-    # recording that already had a Listening Quality row from somewhere
-    # else (and so is never enqueued here) can still be missing its signal
-    # row, and enqueue_followups() catches that case directly now.
+    # 2. Non-music signal (cheap, windowed, librosa-free). Skipped when a
+    # track already carries one, unless re-analysing.
+    try:
+        has_signal = (db.session.query(TrackAnalysis.id)
+                      .join(Track, Track.id == TrackAnalysis.track_id)
+                      .filter(Track.recording_id == recording_id,
+                              TrackAnalysis.non_music_score.isnot(None))
+                      .first())
+        if reanalyze or not has_signal:
+            _store_non_music_signal(rec.tracks, library_root, folder_path)
+            db.session.commit()   # the helper only flushes
+            out["signals"] = "ok"
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        _tb.print_exc()
+        out["signals"] = "failed"
+        out["errors"].append(f"signals: {e}")
 
-    # MD5 verification is NEVER run here (Ryan, 2026-09-27: "MD5 never
-    # automatic" -- it runs only from the manual Re-validate / verify-
-    # checksums action on View Recording). This follow-up only ever did the
-    # score and the non-music signal; the automatic checksum re-verify that
-    # used to sit here has been removed entirely.
+    # 3. Full analysis. Re-fetch rec: a rollback above expires it.
+    try:
+        from app.utils.analysis import analyse_recording
+        rec = db.session.get(Recording, recording_id)
+        n_ok, errors = analyse_recording(rec, library_root, db.session,
+                                         reanalyze=reanalyze)
+        out["analysis"] = "failed" if errors and n_ok == 0 else "ok"
+        out["errors"].extend(f"analysis: {f}: {m}" for f, m in errors)
+    except Exception as e:  # noqa: BLE001
+        db.session.rollback()
+        _tb.print_exc()
+        out["analysis"] = "failed"
+        out["errors"].append(f"analysis: {e}")
+    return out
+
+
+def _handle_audio(recording_id):
+    """
+    Follow-up handler for "audio": live recordings only (an album is never
+    auto-scored or analysed). Scoring is skipped when a Listening Quality
+    result already exists, which is the case after a Review First run scored
+    the folder before ingest; signals and Full analysis still run.
+    """
+    from app.models.recording import Recording
+    from app.utils.quality_store import get_for_recording
+
+    rec = db.session.get(Recording, recording_id)
+    if not rec or rec.kind == "studio":
+        return
+    row = get_for_recording(recording_id)
+    has_score = row is not None and row.listening_quality is not None
+    _ANALYSIS_STATE["current"] = {
+        "recording_id": recording_id,
+        "name": os.path.basename(rec.folder_path or "") or str(recording_id),
+        "started": time.time(),
+        "tracks_total": len(rec.tracks or []),
+    }
+    log_step(f"audio:{recording_id}", "analyzing",
+             f"{len(rec.tracks or [])} tracks", force=True)
+    try:
+        res = run_audio_pass(recording_id, score=not has_score)
+        _ANALYSIS_STATE["done"] += 1
+        if res["errors"]:
+            _ANALYSIS_STATE["failed"] += len(res["errors"])
+        print("[ingest] audio pass for recording %s: %s" % (recording_id, res), flush=True)
+    finally:
+        _ANALYSIS_STATE["current"] = None
 
 
 def _handle_mb_artist(artist_id):
@@ -603,46 +746,11 @@ def _handle_images(recording_id):
     db.session.commit()
 
 
-def _handle_signals(recording_id):
-    """
-    The non-music (chatter/tuning) signal for one recording that has no
-    signal row yet. Split out of "score" into its own follow-up kind (spec
-    section 8) -- the one audio-bound addition the resolver's extra rigor
-    brought in (~0.15s/track), so it runs after the cheap catalog pass, not
-    bundled with it. Also covers a recording that got its Listening Quality
-    row some other way (so "score" never enqueued it) but still has no
-    signal measurement -- this checks the signal itself, not the score.
-    """
-    from app.models.recording import Recording
-    from app.models.track_analysis import TrackAnalysis
-
-    rec = db.session.get(Recording, recording_id)
-    if not rec:
-        return
-    if rec.kind == "studio":
-        return  # studio recordings are never scored (2026-09-27)
-    has_signal = (db.session.query(TrackAnalysis.id)
-                 .join(Track, Track.id == TrackAnalysis.track_id)
-                 .filter(Track.recording_id == recording_id,
-                         TrackAnalysis.non_music_score.isnot(None))
-                 .first())
-    if has_signal:
-        return
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    try:
-        _store_non_music_signal(rec.tracks, library_root, rec.folder_path or "")
-    except Exception:  # noqa: BLE001 -- a suggestion must never break the worker
-        import traceback as _tb
-        _tb.print_exc()
-
-
 _HANDLERS = {
-    "analysis":   _handle_analysis,
-    "score":      _handle_score,
+    "audio":      _handle_audio,
     "mb_artist":  _handle_mb_artist,
     "mb_release": _handle_mb_release,
     "images":     _handle_images,
-    "signals":    _handle_signals,
 }
 
 
@@ -652,11 +760,11 @@ def _handle_item(kind, item_id):
     so tests can drain the queue synchronously with no thread involved.
 
     Each kind's own failure is logged and swallowed here -- one bad recording
-    or artist must never take the worker thread down, the same guarantee the
-    analysis pass already had.
+    or artist must never take the worker thread down. A legacy kind
+    ("analysis"/"score"/"signals") runs through the "audio" handler.
     """
     import traceback as _tb
-    handler = _HANDLERS.get(kind)
+    handler = _HANDLERS.get(_normalize_kind(kind))
     if handler is None:
         print(f"[ingest] unknown follow-up kind {kind!r}", flush=True)
         return
@@ -666,141 +774,112 @@ def _handle_item(kind, item_id):
         _tb.print_exc()
 
 
-def _analysis_worker(app):
-    """Drain the follow-up queue forever, one item at a time."""
+def _followup_worker(app, lane_name):
+    """Drain one lane forever, one item at a time."""
+    lane = _LANES[lane_name]
     while True:
-        kind, item_id = _ANALYSIS_Q.get()
-        _QUEUED_KEYS.discard((kind, item_id))
-        _PENDING_BY_KIND[kind] = max(0, _PENDING_BY_KIND.get(kind, 0) - 1)
-        try:
-            with app.app_context():
-                _handle_item(kind, item_id)
-        finally:
-            _ANALYSIS_Q.task_done()
-
-
-def _enqueue_analysis(app, recording_id):
-    """Hand a freshly ingested recording to the single follow-up worker."""
-    _enqueue(app, "analysis", recording_id)
+        kind, item_id = lane.get()
+        with _Q_LOCK:
+            _QUEUED_KEYS.discard((kind, item_id))
+            _PENDING_BY_KIND[kind] = max(0, _PENDING_BY_KIND.get(kind, 0) - 1)
+        with app.app_context():
+            _handle_item(kind, item_id)
 
 
 def enqueue_followups():
     """
-    Queue the two kinds of derived-from-state follow-up work (Bulk Ingest
-    spec section 1.6, chunk 6):
+    Queue every follow-up that the current DB state says is still owed, for
+    every ingest path alike:
 
-      (a) every LIVE recording with no RecordingQuality row yet -- covers a
-          bulk-ingested recording, which never went through triage; studio
-          recordings are never scored (2026-09-27) and are excluded here;
-      (b) every artist whose MusicBrainz status is still "never looked up"
-          (mb_status IS NULL) -- covers an artist created with lookup=False
-          during bulk ingest;
-      (c) every STUDIO recording whose release status is still "never
-          looked up" (mb_release_status IS NULL) -- Studio Records spec v1
-          section 2. Never for a live recording.
+      audio       every LIVE recording with no Listening Quality row OR no
+                  track carrying a non_music_score. Never a studio recording.
+                  Re-derived from state rather than "everything": a library
+                  already scored and signalled is not re-analysed at boot.
+      mb_artist   every artist whose MusicBrainz status is "never looked up".
+      mb_release  every STUDIO recording whose release status is "never
+                  looked up". Never a live recording.
+      images      every recording (any kind) with no recording_image rows and
+                  images_checked_at still null.
 
-    Never "analysis" -- a whole-library bulk_ingest run must never schedule the
-    Librosa pass (spec chunk 5/6). Deduped against whatever is already
-    queued via _enqueue(), so calling this twice in a row (e.g. once at run
-    completion and once at the next boot) enqueues nothing new.
+    Deduped against what is already queued, so calling this twice enqueues
+    nothing new. Each item is tagged with its Bulk Ingest run (via
+    BulkIngestItem.recording_id) so small runs are served first.
 
-      (d) every recording (any kind) with zero recording_image rows and
-          `images_checked_at` still null -- the artwork backfill (S8,
-          independent review v1). Never re-enqueued once checked, whether
-          or not it found anything, so this never re-scans a library that
-          already has been.
-      (e) every LIVE recording with no track carrying a non_music_score yet
-          -- the "signals" follow-up (Ingest Field Resolver spec v1,
-          section 8). Independent of (a): a recording that already has a
-          RecordingQuality row from somewhere else is not in `unscored_ids`
-          above and so never gets "score" enqueued, but can still be
-          missing its signal measurement -- this is what catches that.
-
-    Returns {"score": n, "mb_artist": n, "mb_release": n, "images": n,
-    "signals": n} -- the counts newly enqueued.
+    Returns the counts newly enqueued per kind.
     """
+    from sqlalchemy import or_
     from app.models.recording import Recording
     from app.models.recording_image import RecordingImage
     from app.models.artist import Artist
     from app.models.quality import RecordingQuality
     from app.models.track_analysis import TrackAnalysis
     from app.models.track import Track as _Track
+    from app.models.bulk_ingest import BulkIngestItem
 
     app = current_app._get_current_object()
 
-    # Studio recordings are never scored (2026-09-27) -- excluded here so
-    # nothing ever lands on the queue for one; _handle_score's own guard is
-    # the backstop for anything that got queued before this existed.
-    unscored_ids = [rid for (rid,) in (
-        db.session.query(Recording.id)
-        .outerjoin(RecordingQuality, RecordingQuality.recording_id == Recording.id)
-        .filter(RecordingQuality.id.is_(None), Recording.kind == "live")
-        .order_by(Recording.id)
-        .all())]
-    scored_n = sum(1 for rid in unscored_ids if _enqueue(app, "score", rid))
+    # recording id / artist id -> newest run it belongs to (absent = no run).
+    run_of_rec = dict(db.session.query(BulkIngestItem.recording_id,
+                                       func.max(BulkIngestItem.run_id))
+                      .filter(BulkIngestItem.recording_id.isnot(None))
+                      .group_by(BulkIngestItem.recording_id).all())
+    run_of_artist = dict(db.session.query(Performance.artist_id,
+                                          func.max(BulkIngestItem.run_id))
+                         .join(Recording, Recording.performance_id == Performance.id)
+                         .join(BulkIngestItem, BulkIngestItem.recording_id == Recording.id)
+                         .group_by(Performance.artist_id).all())
 
-    never_looked_up_ids = [aid for (aid,) in (
-        db.session.query(Artist.id)
-        .filter(Artist.mb_status.is_(None))
-        .order_by(Artist.id)
-        .all())]
-    mb_n = sum(1 for aid in never_looked_up_ids if _enqueue(app, "mb_artist", aid))
-
-    # (c) studio recordings never looked up for a release. Excluded from
-    # the query outright rather than relying only on _handle_mb_release's
-    # own guard, same reasoning as the studio exclusion in (a) above.
-    never_looked_up_release_ids = [rid for (rid,) in (
-        db.session.query(Recording.id)
-        .filter(Recording.kind == "studio", Recording.mb_release_status.is_(None))
-        .order_by(Recording.id)
-        .all())]
-    mb_release_n = sum(1 for rid in never_looked_up_release_ids
-                      if _enqueue(app, "mb_release", rid))
-
-    # (d) artwork backfill -- any kind, unlike (a)/(c) above. Excluded
-    # outright the same way: a recording already carrying at least one
-    # RecordingImage row is scanned, checked_at or not (an upload before the
-    # column existed), and a recording already stamped checked has nothing
-    # left to do.
-    never_scanned_for_images_ids = [rid for (rid,) in (
-        db.session.query(Recording.id)
-        .outerjoin(RecordingImage, RecordingImage.recording_id == Recording.id)
-        .filter(RecordingImage.id.is_(None), Recording.images_checked_at.is_(None))
-        .order_by(Recording.id)
-        .all())]
-    images_n = sum(1 for rid in never_scanned_for_images_ids
-                  if _enqueue(app, "images", rid))
-
-    # (e) live recordings with no signal row on any track yet.
     signalled_recording_ids = (
         db.session.query(_Track.recording_id)
         .join(TrackAnalysis, TrackAnalysis.track_id == _Track.id)
         .filter(TrackAnalysis.non_music_score.isnot(None))
         .distinct()
     )
-    never_signalled_ids = [rid for (rid,) in (
+    audio_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
+        .outerjoin(RecordingQuality, RecordingQuality.recording_id == Recording.id)
         .filter(Recording.kind == "live",
-               ~Recording.id.in_(signalled_recording_ids))
-        .order_by(Recording.id)
-        .all())]
-    signals_n = sum(1 for rid in never_signalled_ids if _enqueue(app, "signals", rid))
+                or_(RecordingQuality.id.is_(None),
+                    ~Recording.id.in_(signalled_recording_ids)))
+        .order_by(Recording.id).all())]
+    audio_n = sum(1 for rid in audio_ids
+                  if _enqueue(app, "audio", rid, run_of_rec.get(rid)))
 
-    return {"score": scored_n, "mb_artist": mb_n, "mb_release": mb_release_n,
-            "images": images_n, "signals": signals_n}
+    artist_ids = [aid for (aid,) in (
+        db.session.query(Artist.id).filter(Artist.mb_status.is_(None))
+        .order_by(Artist.id).all())]
+    mb_n = sum(1 for aid in artist_ids
+               if _enqueue(app, "mb_artist", aid, run_of_artist.get(aid)))
+
+    release_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .filter(Recording.kind == "studio", Recording.mb_release_status.is_(None))
+        .order_by(Recording.id).all())]
+    mb_release_n = sum(1 for rid in release_ids
+                       if _enqueue(app, "mb_release", rid, run_of_rec.get(rid)))
+
+    image_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .outerjoin(RecordingImage, RecordingImage.recording_id == Recording.id)
+        .filter(RecordingImage.id.is_(None), Recording.images_checked_at.is_(None))
+        .order_by(Recording.id).all())]
+    images_n = sum(1 for rid in image_ids
+                   if _enqueue(app, "images", rid, run_of_rec.get(rid)))
+
+    return {"audio": audio_n, "mb_artist": mb_n, "mb_release": mb_release_n,
+            "images": images_n}
 
 
 def analysis_snapshot():
     """Queue state for the debug pane. Never raises — it is a debug surface."""
     cur = _ANALYSIS_STATE.get("current")
     return {
-        "pending": _ANALYSIS_Q.qsize(),
+        "pending": sum(l.qsize() for l in _LANES.values()),
         "pending_by_kind": dict(_PENDING_BY_KIND),
         "current": (dict(cur, elapsed=round(time.time() - cur["started"], 1))
                     if cur else None),
         "done":    _ANALYSIS_STATE["done"],
         "failed":  _ANALYSIS_STATE["failed"],
-        "skipped": _ANALYSIS_STATE["skipped"],
     }
 
 
@@ -843,25 +922,17 @@ def _run_ingest_job(job_id, app, data, user_id):
             job["status"] = "done"
             job["phase"] = "done"
             job["phase_label"] = PHASES["done"]
-        # Hand Librosa analysis to the single background worker once the
-        # recording exists — decoupled from this job so it can't hold up
-        # reporting "done".
-        #
-        # Quick Add (`skip_analysis`) simply does not enqueue. Nothing else
-        # about the ingest changes: the same files are copied, the same tracks
-        # and checksums are written, and the listening-quality score still
-        # travels across in _do_confirm step 11. Only waveform/BPM/spectral are
-        # deferred, and Re-Analyze fills them in later against the same rows —
-        # which is exactly what makes this safe to skip (Ryan, 2026-08-28).
-        rec_id = (job.get("result") or {}).get("recording_id")
-        if rec_id:
-            if data.get("skip_analysis"):
-                _ANALYSIS_STATE["skipped"] += 1
-                log_step(f"ingest:{job_id}", "analysis-skipped",
-                         "Quick Add — waveform/BPM deferred to Re-Analyze",
-                         force=True)
-            else:
-                _enqueue_analysis(app, rec_id)
+        # Follow-ups (audio pass, MusicBrainz, artwork) for the new recording
+        # go to the follow-up lanes once it exists -- decoupled from this job
+        # so they can't hold up reporting "done".
+        # The bulk_ingest_followup wrapper, not enqueue_followups() directly: it
+        # also reconciles a run's ready/review item that this confirm just
+        # ingested (the import page's per-item Review), so the row leaves the
+        # Queue instead of still offering Ingest for a folder already imported.
+        if (job.get("result") or {}).get("recording_id"):
+            with app.app_context():
+                from app.utils.bulk_ingest_followup import enqueue_followups as _followups
+                _followups()
     except Exception as e:  # noqa: BLE001
         _tb.print_exc()
         job["error"]  = str(e)
@@ -945,7 +1016,6 @@ def _confirm_payload_from_resolved(resolved, scan):
         "info_file_content":  scan.get("info_file_content"),
         "fingerprints":       scan.get("fingerprints"),
         "is_complete":        True,
-        "skip_analysis":      True,
         "tracks":             resolved.tracks,
         "title":              resolved.album.value,
         "kind":               resolved.kind,
@@ -965,8 +1035,50 @@ def resolver_json_for_storage(resolver_result):
     return json.dumps({k: v for k, v in resolver_result.items() if k != "tracks"})
 
 
-def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
-                  progress_cb=None, cancel_cb=None, phase_cb=None):
+# Blanket ("applies to every recording below") keys -> where they land.
+_BLANKET_FIELDS = ("artist", "venue", "city", "state", "country", "source",
+                   "source_tag", "lineage")
+
+
+def apply_blanket_values(resolved, payload, applied):
+    """
+    Overwrite the scan's inference with staged blanket values (Review & Ingest
+    precedence: a value the person typed beats whatever the tags or info file
+    said). Resolved fields are replaced before the verdict so a staged artist
+    clears needs_artist; event/notes/ids have no Resolved field and go
+    straight onto the confirm payload (payload may be None before it exists).
+    """
+    if not applied:
+        return
+    for key in _BLANKET_FIELDS:
+        v = applied.get(key)
+        if v:
+            setattr(resolved, key, ResolvedField(value=v, source="applied",
+                                                  candidates={}, conflict=False))
+    if payload is None:
+        return
+    if applied.get("artist"):
+        payload["artist_name"] = applied["artist"]
+    for key, dest in (("city", "city"), ("state", "state"), ("country", "country"),
+                      ("source", "source"), ("source_tag", "source_tag"),
+                      ("lineage", "lineage")):
+        if applied.get(key):
+            payload[dest] = applied[key]
+    if applied.get("venue"):
+        # Id and name must move together, or the server files the show under
+        # the inferred venue's id while the name says something else.
+        payload["venue_name"] = applied["venue"]
+        payload["venue_id"] = applied.get("venue_id") or None
+    if applied.get("event"):
+        payload["event_name"] = applied["event"]
+        payload["event_id"] = None
+    if applied.get("notes"):
+        payload["notes"] = applied["notes"]
+
+
+def auto_confirm(folder_abs, user_id, *, hash_cache=None,
+                  progress_cb=None, cancel_cb=None, phase_cb=None,
+                  hold=False, force=False, applied=None):
     """
     The one server function that turns a folder into an ingested (or
     reviewed, or skipped) recording via the resolver -- spec section 4.
@@ -977,7 +1089,7 @@ def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
     progress_cb/cancel_cb/phase_cb are passed straight through to _do_confirm
     (same signature as /api/ingest/confirm's background job) -- only used
     when status ends up "ingested", since that's the only outcome that
-    copies/moves any files. bulk=True (the worker's own direct call) never
+    copies/moves any files. Bulk Ingest's worker (its own direct call) never
     passes these; it is already on its own thread with nothing polling it.
 
     Returns a dict:
@@ -989,6 +1101,13 @@ def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
                    all files unreadable -- nothing to resolve)
       result       _do_confirm()'s result dict, only when status=="ingested"
       duplicate_of a recording_id, only when status=="skipped"
+
+    hold=True (Review First) stops after the verdict: a clean folder comes back
+    status "ready" with nothing copied, moved or written. force=True (the
+    person chose "Ingest anyway") ingests a folder the verdict flagged for
+    review, but still refuses what cannot be ingested at all: no artist (it
+    stays "review") and an exact content duplicate (stays "skipped").
+    applied is the run's blanket values (see apply_blanket_values).
 
     The has_audio / unsupported-format / all-unreadable gate that used to
     live in bulk_ingest.extract() runs here first, same as before -- a
@@ -1009,7 +1128,11 @@ def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
         return {"status": "failed", "reasons": ["no_audio"], "format": fmt,
                 "detail": "no_audio", "resolved": None, "result": None,
                 "duplicate_of": None}
-    if not readable_files:
+    # WAV/AIFF/SHN/APE/WV are never imported, alone or mixed with FLAC, and
+    # not even by force: the person converts the folder first.
+    blocked = any(_Path(f["filename"]).suffix.lower() in CONVERTIBLE_AUDIO_EXTS
+                  for f in scan_raw["unsupported_audio"])
+    if not readable_files or blocked:
         return {"status": "review", "reasons": ["unsupported_format"], "format": fmt,
                 "detail": None, "resolved": None, "result": None, "duplicate_of": None}
 
@@ -1030,6 +1153,7 @@ def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
                 "duplicate_of": None}
 
     resolved = resolve(scan, library_root=library_root, placement=placement)
+    apply_blanket_values(resolved, None, applied)
     resolved.duplicates = find_duplicates(resolved, library_root=library_root,
                                           hash_cache=hash_cache)
     status, reasons = verdict(resolved)
@@ -1041,121 +1165,21 @@ def auto_confirm(folder_abs, user_id, *, bulk=False, hash_cache=None,
                 "resolved": resolved, "result": None,
                 "duplicate_of": dup.recording_id if dup else None}
 
-    if status == "review":
+    if status == "review" and not (force and "needs_artist" not in reasons):
         return {"status": "review", "reasons": reasons, "format": fmt, "detail": None,
                 "resolved": resolved, "result": None, "duplicate_of": None}
 
+    if hold:
+        return {"status": "ready", "reasons": reasons, "format": fmt, "detail": None,
+                "resolved": resolved, "result": None, "duplicate_of": None}
+
     payload = _confirm_payload_from_resolved(resolved, scan)
+    apply_blanket_values(resolved, payload, applied)
     payload["resolver_result"] = resolved.to_dict()
     result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
-                         phase_cb=phase_cb, bulk=bulk)
+                         phase_cb=phase_cb)
     return {"status": "ingested", "reasons": reasons, "format": fmt, "detail": None,
             "resolved": resolved, "result": result, "duplicate_of": None}
-
-
-def _run_auto_confirm_job(job_id, app, folder_abs, user_id):
-    """
-    Background worker for /api/ingest/auto-confirm -- the same job shape as
-    _run_ingest_job above, just wrapping auto_confirm() instead of
-    _do_confirm() directly, because auto_confirm() has FOUR terminal
-    outcomes (ingested/review/skipped/failed) where a plain confirm job only
-    ever has one (done, with an error/cancelled path for exceptions). Rather
-    than invent a second status vocabulary for the poller, auto_confirm()'s
-    whole result dict is stashed on job["result"] and handed back verbatim
-    by the existing confirm_status "done" branch -- review/skipped/failed
-    are just as readable to the poller as ingested is, they simply carry a
-    different result["status"].
-    """
-    import traceback as _tb
-    job = _INGEST_JOBS[job_id]
-    try:
-        with app.app_context():
-            def prog(copied, total):
-                job["copied"] = copied
-                job["total"]  = total
-
-            def phase(key, detail=None):
-                job["phase"] = key
-                job["phase_label"] = PHASES.get(key, key)
-                job["phase_at"] = time.time()
-                job["phase_detail"] = detail
-                log_step(f"ingest:{job_id}", key, detail or PHASES.get(key, key),
-                         force=True)
-
-            def cancelled():
-                return bool(job.get("cancel"))
-
-            phase("resolving")
-            result = auto_confirm(folder_abs, user_id, bulk=False,
-                                  progress_cb=prog, cancel_cb=cancelled,
-                                  phase_cb=phase)
-            # `resolved` is a Resolved dataclass -- not JSON-serialisable and
-            # not something the poller needs (Batch Import's UI reads
-            # status/reasons/format/detail/result/duplicate_of, same as the
-            # old synchronous response did); drop it before it lands on the
-            # job dict.
-            result = {k: v for k, v in result.items() if k != "resolved"}
-            job["result"] = result
-            job["status"] = "done"
-            job["phase"] = "done"
-            job["phase_label"] = PHASES["done"]
-        rec_id = ((result.get("result") or {}) or {}).get("recording_id")
-        if rec_id:
-            _enqueue_analysis(app, rec_id)
-    except Exception as e:  # noqa: BLE001
-        _tb.print_exc()
-        job["error"]  = str(e)
-        job["status"] = "error"
-
-
-@bp.route("/auto-confirm", methods=["POST"])
-@login_required
-def auto_confirm_route():
-    """
-    POST /api/ingest/auto-confirm {"path": "/absolute/source/folder"}
-    -> 202 {"job_id": "..."}
-
-    Batch Import's one-POST auto-ingest (spec section 4) -- _batchIngestOne
-    used to build the confirm body itself; now it just posts a path and
-    polls for a verdict. Background job, NOT synchronous: Batch Import's
-    sources live under IMPORT_DIR (config.py), outside LIBRARY_ROOT, so an
-    "ingested" verdict here still runs _do_confirm's full copy/move of the
-    source folder into the library -- the exact same file-copy work
-    /api/ingest/confirm does, and just as able to outrun the webview's fetch
-    timeout on a large show or a slow (NAS/USB) import source.
-
-    Runs the *same* job/poll pattern /api/ingest/confirm uses, not a second
-    one: this reuses _INGEST_JOBS, the same PHASES labels (auto_confirm()'s
-    resolve/find_duplicates/verdict step reports itself as "resolving", same
-    as confirm's job does before its own copy phase), and the existing
-    GET /api/ingest/confirm/<job_id> to poll -- there is no separate
-    auto-confirm poll route. See _run_auto_confirm_job for how a
-    review/skipped/failed verdict (not just ingested) reaches that poller.
-    """
-    import uuid
-    data = request.get_json() or {}
-    path = (data.get("path") or "").strip()
-    if not path or not os.path.isdir(path):
-        return jsonify({"error": f"Folder not found: {path!r}"}), 400
-    from app.utils.download_queue import downloading_here
-    if downloading_here(path):
-        return jsonify({"error": "This folder is still downloading."}), 409
-
-    job_id = uuid.uuid4().hex
-    _INGEST_JOBS[job_id] = {
-        "status": "running", "copied": 0, "total": 0,
-        "phase": "resolving", "phase_label": PHASES["resolving"],
-        "started": time.time(), "phase_at": time.time(),
-        "folder": os.path.basename(path.rstrip("/")),
-        "artist": None,
-        "quick": False,
-    }
-    threading.Thread(
-        target=_run_auto_confirm_job,
-        args=(job_id, current_app._get_current_object(), path, current_user.id),
-        daemon=True,
-    ).start()
-    return jsonify({"job_id": job_id}), 202
 
 
 @bp.route("/confirm", methods=["POST"])
@@ -1196,7 +1220,6 @@ def confirm_ingest():
         "started": time.time(), "phase_at": time.time(),
         "folder": os.path.basename(source_folder.rstrip("/")),
         "artist": artist_name,
-        "quick": bool(data.get("skip_analysis")),
     }
     threading.Thread(
         target=_run_ingest_job,
@@ -1258,7 +1281,6 @@ def pipeline_status():
             "detail":  j.get("phase_detail"),
             "copied":  j.get("copied", 0),
             "total":   j.get("total", 0),
-            "quick":   bool(j.get("quick")),
             "elapsed": round(now - j.get("started", now), 1),
             "in_phase": round(now - j.get("phase_at", now), 1),
         })
@@ -1338,7 +1360,7 @@ def _store_non_music_signal(tracks, library_root, folder_path):
              force=True)
 
 
-def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, bulk=False):
+def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     """
     Resolve or create the full object chain, then ingest the recording.
     Runs inside an app context (background thread). Returns a result dict;
@@ -1373,18 +1395,14 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
       ]
     }
 
-    bulk=True (Bulk Ingest, chunk 5): the same object-creation chain runs,
-    with three things deferred rather than done inline, because a
-    whole-library pass cannot afford them per show —
-      - the synchronous MusicBrainz lookup on a brand-new artist
-        (resolve_or_create_artist(..., lookup=False)) -- picked up later by
-        the "mb_artist" follow-up
-      - the non-music (chatter/tuning) signal pass -- picked up later by the
-        "signals" follow-up (spec section 8), not skipped altogether
-      - the ingest tag write (step 12), regardless of write_tags_on_ingest.
-    The tag write (step 12) is also skipped whenever the source is in-root
-    (R2-N7) -- not only under bulk=True -- since an in-root source's files
-    are the collector's own, wherever the confirm call came from.
+    MusicBrainz and the non-music signal never run inline, bulk or not: the
+    new artist is created with lookup=False and everything audio/network is a
+    follow-up (enqueue_followups(): "audio", "mb_artist", "mb_release",
+    "images").
+    The tag write (step 12) follows write_tags_on_ingest for a source brought
+    in from outside, bulk or not, and is skipped whenever the source is in-root
+    (R2-N7) -- since an in-root source's files are the collector's own,
+    wherever the confirm call came from.
 
     MD5 checksum verification (a full re-hash per file) is NEVER run here,
     bulk or interactive alike (Ryan, 2026-09-27: "MD5 never automatic" --
@@ -1479,7 +1497,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     guest_names_sync  = data.get("guests")
     member_names = member_names_sync or []
     guest_names  = guest_names_sync  or []
-    artist = resolve_or_create_artist(artist_name, member_names, lookup=not bulk)
+    artist = resolve_or_create_artist(artist_name, member_names, lookup=False)
 
     # ── 2. Genre, on the ARTIST (2026-09-01) ───────────────────────────────
     _apply_artist_genre(artist, data)
@@ -1687,6 +1705,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
         raise
     except Exception as e:
         db.session.rollback()
+        # An OS-level failure of the move gets its own type so Bulk Ingest can
+        # park the folder for review; it is still a RuntimeError for every
+        # other caller.
+        if isinstance(e, OSError):
+            raise MoveFailed(f"File operation failed: {e}")
         raise RuntimeError(f"File operation failed: {e}")
 
     # move_to_library() may have deduped folder_name against a same-named
@@ -1875,31 +1898,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     #
     # A no-op when the folder was never analysed — ingest does not require a
     # quality pass, and never failing an ingest over a score is deliberate.
-    # ── 9.5. Non-music signal ────────────────────────────────────────────────
-    # Runs HERE, inside the ingest, and not in the Librosa analysis pass, for
-    # one reason: Quick Add is the default and Quick Add never runs that pass.
-    # A signal that only exists in the mode nobody uses is not a feature.
-    #
-    # Affordable because it is windowed and librosa-free — measured at 0.15 s
-    # per track, ~1.8 s for a 12-track show, against a copy that takes minutes.
-    # Files are already in the library at this point (step 6 moved them), so it
-    # reads the copy it will be describing, not the source that may be gone.
-    #
-    # Never fatal: an ingest must not fail over a suggestion.
-    # bulk=True skips this pass HERE (spec chunk 5): a whole-library run
-    # cannot afford a librosa-adjacent measurement per track across
-    # thousands of shows the way one interactive ingest can. It is not
-    # skipped altogether -- the "signals" follow-up (spec section 8) picks
-    # up every bulk-ingested recording afterward, off the interactive path
-    # entirely, so the catalog pass finishes first and the measurement
-    # still happens.
-    if not bulk:
-        _phase("signals", f"{len(created_tracks)} tracks")
-        try:
-            _store_non_music_signal(created_tracks, library_root, new_folder_path)
-        except Exception:  # noqa: BLE001
-            import traceback as _tb3
-            _tb3.print_exc()
+    # ── 9.5. Non-music signal: NOT here ───────────────────────────────────────
+    # It, the Listening Quality score and Full analysis are the "audio"
+    # follow-up now, for every ingest path (bulk or not), so the ingest
+    # itself stays I/O-only and finishes first.
 
     _phase("saving")
     # N5: promote_to_recording's own flush can raise (e.g. no admin user for
@@ -1926,6 +1928,9 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     # rolled back; the ingest itself already succeeded. Step 9's stored
     # checksum status is not recomputed.
     tag_errors = []
+    # Unified import (2026-10-02): bulk no longer suppresses this. A source
+    # brought in from outside is ours to tag (when write_tags_on_ingest);
+    # only an in-root source, cataloged in place, is never touched.
     # R2-N7: any in-root source skips the ingest tag write, not only a bulk
     # (bulk=True) bulk_ingest run. in_root_source already means "this folder
     # sits inside the collector's own library, exactly where discover()
@@ -1936,7 +1941,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None, 
     # collector's own file directly contradicts that. A source arriving from
     # OUTSIDE the root still follows the write_tags_on_ingest switch exactly
     # as before, whether bulk or not.
-    if file_handling["write_tags_on_ingest"] and not bulk and not in_root_source:
+    if file_handling["write_tags_on_ingest"] and not in_root_source:
         _phase("tags", f"{len(created_tracks)} tracks")
         n_written, tag_errors = write_flac_tags(rec, library_root)
         if n_written > 0:
@@ -2059,7 +2064,7 @@ def _audit_incoming_folder(folder_path):
         labels = '/'.join(e.lstrip('.').upper() for e in sorted(lossy))
         issues.append({"severity": "warn", "msg": f"Lossy format ({labels})"})
     elif wavs and not flacs:
-        issues.append({"severity": "warn", "msg": "WAV/AIFF — not FLAC"})
+        issues.append({"severity": "warn", "msg": "WAV/AIFF, not FLAC"})
     elif wavs and flacs:
         issues.append({"severity": "warn", "msg": "Mixed FLAC + WAV"})
     elif len(exts_present & _LOSSLESS_EXTS) > 1:

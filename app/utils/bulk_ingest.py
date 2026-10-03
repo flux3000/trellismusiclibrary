@@ -21,18 +21,21 @@ from pathlib import Path
 
 from app.utils.ingest import FOLDER_DATE_RE
 
-# scan_folder() puts every recognised-but-unreadable audio format (SHN,
-# APE, ...) in "unsupported_audio", but .wav is deliberately in
-# AUDIO_EXTENSIONS (it's a recognised container) even though open_tags()
-# can't read tags from one. Only these two formats yield readable tag data.
+# scan_folder() puts every recognised-but-unreadable audio format (WAV, SHN,
+# APE, ...) in "unsupported_audio". Only these two formats are imported and
+# yield readable tag data.
 _READABLE_AUDIO_EXTS = {".flac", ".mp3"}
 
-# Labels for the log's Format column (2026-09-27 progress/log redesign):
-# every readable AUDIO_EXTENSIONS format, plus SHN specifically -- the one
-# recognised-but-unreadable format worth naming (scan_folder() puts SHN in
-# "unsupported_audio" alongside APE etc., but only SHN is common enough here
-# to call out by name).
-_FORMAT_LABELS = {".flac": "FLAC", ".mp3": "MP3", ".wav": "WAV", ".shn": "SHN"}
+# Formats that block an import and that Convert to FLAC can fix. A folder
+# holding any of these is never imported (even mixed with FLAC), because the
+# import would silently leave those files behind. Other recognised audio
+# (m4a, ogg) keeps the older behaviour: ignored beside readable files.
+CONVERTIBLE_AUDIO_EXTS = {".wav", ".aiff", ".aif", ".shn", ".ape", ".wv"}
+
+# Labels for the log's Format column, including the unsupported formats so a
+# blocked row says what is wrong with it.
+_FORMAT_LABELS = {".flac": "FLAC", ".mp3": "MP3", ".wav": "WAV", ".shn": "SHN",
+                  ".aiff": "AIFF", ".aif": "AIFF", ".ape": "APE", ".wv": "WV"}
 
 
 def folder_format(scan):
@@ -51,7 +54,7 @@ def folder_format(scan):
             labels.add(_FORMAT_LABELS[ext])
     for f in scan.get("unsupported_audio", []):
         ext = Path(f["filename"]).suffix.lower()
-        if ext == ".shn":
+        if ext in CONVERTIBLE_AUDIO_EXTS:
             labels.add(_FORMAT_LABELS[ext])
     return ", ".join(sorted(labels)) if labels else None
 

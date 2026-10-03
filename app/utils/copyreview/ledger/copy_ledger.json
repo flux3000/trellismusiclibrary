@@ -431,6 +431,19 @@
       "previous_text": ""
     },
     {
+      "id": "1936b13900b53e18",
+      "text": "Analyze Audio",
+      "verdict": "approve",
+      "section": "Shared AI Assist results template — Add Recording + View Recording",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
+      "previous_text": ""
+    },
+    {
       "id": "19d8592ac8f69c05",
       "text": "Members, genre and photos are edited on the artist’s page. A MusicBrainz lookup runs automatically when the artist is created.",
       "verdict": "approve",
@@ -714,6 +727,19 @@
       "applied_commit": null,
       "last_seen": "2026-09-17T21:40:34+00:00",
       "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "2b95d0bec33ed63f",
+      "text": "Ingest all ready",
+      "verdict": "approve",
+      "section": "several resolver reasons land in it comma-joined, same as the one",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
       "previous_text": ""
     },
     {
@@ -1549,6 +1575,19 @@
       "previous_text": ""
     },
     {
+      "id": "6a4f2514b1b77fa1",
+      "text": "Import Automatically",
+      "verdict": "approve",
+      "section": "Bulk Ingest (spec 1.9/4, chunk 7b)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
+      "previous_text": ""
+    },
+    {
       "id": "6b19c74454b7c155",
       "text": "Ingest",
       "verdict": "approve",
@@ -2368,6 +2407,19 @@
       "previous_text": ""
     },
     {
+      "id": "9821c217622a1ef0",
+      "text": "Ready",
+      "verdict": "approve",
+      "section": "several resolver reasons land in it comma-joined, same as the one",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
+      "previous_text": ""
+    },
+    {
       "id": "98825b29815be1d9",
       "text": "Listing",
       "verdict": "approve",
@@ -2859,6 +2911,19 @@
       "applied_commit": null,
       "last_seen": "2026-09-17T21:42:19+00:00",
       "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "ad3aca7f7b196a92",
+      "text": "Review First",
+      "verdict": "approve",
+      "section": "Bulk Ingest (spec 1.9/4, chunk 7b)",
+      "scenario": "ui",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
       "previous_text": ""
     },
     {
@@ -3834,6 +3899,19 @@
       "applied_commit": null,
       "last_seen": "2026-09-18T17:54:02+00:00",
       "note": "",
+      "previous_text": ""
+    },
+    {
+      "id": "e7c6ea390d3ae494",
+      "text": "Analyze Audio",
+      "verdict": "approve",
+      "section": "Shared AI Assist results template — Add Recording + View Recording",
+      "scenario": "error",
+      "replacement": null,
+      "decided_at": "2026-10-02T17:54:25+00:00",
+      "applied_commit": null,
+      "last_seen": "2026-10-02T17:54:25+00:00",
+      "note": "Ryan approved 2026-10-01 (Unified Import labels)",
       "previous_text": ""
     },
     {

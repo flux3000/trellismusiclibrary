@@ -929,6 +929,13 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .empty-state .empty-title { font-size: 15px; color: var(--t1); }
 .empty-state .empty-sub { font-size: 12px; }
 
+/* New-library welcome (2026-10-02): top of the page, larger than empty-state. */
+.welcome-empty { max-width: 640px; padding: 48px 32px 0; color: var(--t2); }
+.welcome-empty-title { font-size: 28px; color: var(--t1); margin: 0 0 16px; }
+.welcome-empty-body { font-size: 16px; line-height: 1.6; margin: 0 0 12px; }
+.welcome-empty-body a { color: var(--t1); }
+.welcome-empty-ic { width: 1em; height: 1em; vertical-align: -0.15em; margin-right: 4px; }
+
 .loading-spinner {
   display: inline-block;
   width: 18px; height: 18px;
@@ -986,19 +993,18 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
    column -- narrower than .lq-brow's own 7-column grid, so it is overridden
    with an extra class the same way .bi-brow used to. */
 .lq-brow-head.iq-brow, .lq-brow.iq-brow {
-  grid-template-columns: 3px minmax(0, 1fr) 56px 52px 92px 62px 214px 30px;
+  grid-template-columns: minmax(0, 1fr) 56px 52px 92px 62px 150px 214px 30px;
+  /* Wider than .lq-brow's 10px: air between Metadata and the row buttons. */
+  gap: 18px;
 }
-/* No status spine on the import table (Ryan, 2026-10-01): the first cell
-   (spine on a row, empty span on the head) is hidden and its column gone. */
+/* No Sound Quality column (everything but a Review First Queue). */
 .lq-brow-head.iq-brow.iq-brow--nosq, .lq-brow.iq-brow.iq-brow--nosq {
-  grid-template-columns: minmax(0, 1fr) 56px 52px 62px 214px 30px;
+  grid-template-columns: minmax(0, 1fr) 56px 52px 62px 150px 214px 30px;
 }
-.lq-brow-head.iq-brow.iq-brow--nosq > :first-child,
-.lq-brow.iq-brow.iq-brow--nosq > .lq-brow-spine { display: none; }
 
 .lq-brow.iq-brow { min-height: 46px; }
-.lq-brow-head.iq-brow > :nth-child(3),
-.lq-brow-head.iq-brow > :nth-child(4) { text-align: center; }
+.lq-brow-head.iq-brow > * { text-align: center; }
+.lq-brow-head.iq-brow > :first-child { text-align: left; }
 .iq-col-format, .iq-col-type { text-align: center; }
 .iq-pill {
   display: inline-block; font-size: 10.5px; font-weight: 600;
@@ -1027,9 +1033,6 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .iq-expand-val { font-size: 12px; color: var(--t1); }
 .iq-expand-mono { font-family: var(--font-mono); font-size: 10px; color: var(--t3); word-break: break-all; }
 .iq-tracklist { display: flex; flex-direction: column; gap: 2px; }
-.iq-tracklist-row { display: flex; align-items: baseline; gap: 8px; font-size: 11px; }
-.iq-tracklist-num { color: var(--t3); width: 18px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.iq-tracklist-title { color: var(--t1); }
 
 /* ── Entity pages (Artist / Venue / Musician / Genre / Collection) ───────────
    .artist-head and .pp-name-row were removed 2026-08-07 when every one of
@@ -1091,24 +1094,13 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .create-form-actions { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
 
 /* "Added this session" — the receipt for shows that have left the queue. */
-.lq-donestrip {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 8px 14px; margin: 0 0 12px;
-  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
-  font-size: 11.5px;
-}
-.lq-donestrip-n { color: var(--t0); font-weight: 600; }
+
 /* Verdict on the run as a whole. Only rendered once nothing is still going —
    a green "completed without errors" beside a queue that is still copying is
    a lie the strip used to be capable of telling. */
-.lq-donestrip-verdict, .lq-done-verdict { font-weight: 500; }
-.lq-done-verdict.is-ok   { color: var(--green); }
-.lq-done-verdict.is-bad  { color: var(--red); }
-.lq-done-verdict.is-warn { color: var(--amber); }
+.lq-donestrip-verdict{ font-weight: 500; }
+
 /* Named recording, not the run-together list of folder names this replaced. */
-.lq-donestrip-last { color: var(--t2); margin-left: auto; }
-.lq-donestrip-last a { color: var(--t1); text-decoration: none; }
-.lq-donestrip-last a:hover { color: var(--accent-lit); text-decoration: underline; }
 
 .gn-swatch {
   width: 104px; height: 104px; border-radius: 50%;
@@ -1862,7 +1854,6 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   font-family: inherit;
 }
 
-
 /* Clickable venue name in date line */
 .venue-link {
   color: var(--t1);
@@ -1973,7 +1964,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .venue-result-loc { color: var(--t3); font-size: 11px; margin-left: 6px; }
 
 /* Add-to-library copy progress (background ingest job) */
-.confirm-progress { margin: 12px 0 4px; }
+.confirm-progress { margin: 0; padding: 10px 20px 12px; } /* 20px matches .ingest-actions */
 .confirm-progress-bar {
   height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
 }
@@ -2083,7 +2074,6 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   overflow: hidden;
 }
 .slide-pane.active { display: flex; }
-
 
 .dbg-popout-btn {
   margin-left: auto;
@@ -3288,30 +3278,10 @@ input[type="range"].progress-bar {
   max-width: 960px;
 }
 
-.batch-header h2 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--t1);
-}
-
 .batch-subtitle {
   margin: 0 0 24px;
   font-size: 13px;
   color: var(--t2);
-}
-
-.batch-dir-label {
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--t3);
-  background: var(--bg-2);
-  border-radius: 4px;
-  padding: 2px 7px;
-  max-width: 420px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* Picker form */
@@ -3357,22 +3327,10 @@ input[type="range"].progress-bar {
 }
 
 /* Tier pills */
-.batch-tier-pills { display: flex; gap: 6px; flex-wrap: wrap; }
-
-.batch-tier-pill {
-  font-size: 11px;
-  font-weight: 700;
-  border-radius: 10px;
-  padding: 2px 10px;
-  letter-spacing: 0.03em;
-}
 
 .batch-tier-green  { background: rgba(80,200,100,0.15); color: var(--green); }
 .batch-tier-yellow { background: rgba(230,180,50,0.15);  color: var(--amber); }
 .batch-tier-red    { background: rgba(220,60,60,0.15);   color: var(--red); }
-.batch-tier-done   { background: var(--bg-3); color: var(--t3); }
-.batch-tier-total  { background: var(--bg-2); color: var(--t2); }
-
 
 /* ── Review top bar (full-width; AI Assist button far top-right) ─────────────── */
 
@@ -4162,6 +4120,11 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .nav-add-btn:hover { background: var(--bg-4); border-color: var(--accent-lit); color: var(--t0); }
 .nav-add-plus { font-size: 15px; line-height: 1; color: var(--accent); }
+.nav-add-count {
+  min-width: 18px; padding: 1px 6px; border-radius: 9px; text-align: center;
+  font-size: 10.5px; font-weight: 600; line-height: 1.4;
+  background: var(--accent-dim); color: var(--accent-lit);
+}
 
 /* Add Recording page top bar (Batch Import shortcut) */
 .ingest-topbar { display: flex; margin-bottom: 14px; }
@@ -5119,16 +5082,19 @@ a.member-chip-name:hover { color: var(--accent); }
 
 /* Compact input sizes for ingest form */
 .ingest-review-form-body .ingest-field input,
-.ingest-review-form-body .ingest-field select {
+.ingest-review-form-body .ingest-field select,
+.lq-applyall .ingest-field input {
   padding: 4px 8px;
   font-size: 12px;
 }
 
-.ingest-review-form-body .ingest-field label {
+.ingest-review-form-body .ingest-field label,
+.lq-applyall .ingest-field label {
   font-size: 10px;
 }
 
-.ingest-review-form-body .ingest-field {
+.ingest-review-form-body .ingest-field,
+.lq-applyall .ingest-field {
   gap: 3px;
 }
 
@@ -5251,7 +5217,6 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 /* One size for the AI glyph wherever the button appears. */
 .pane-act .tic, .iq-ai-btn .tic { width: 12px; height: 12px; flex: none; }
-
 
 /* Purple input borders mark fields the completeness scorer (app/utils/paula.py)
    is confident enough in to have pre-filled — see paulaCls() in app.js. The
@@ -5481,7 +5446,6 @@ a.member-chip-name:hover { color: var(--accent); }
   background: var(--accent); color: #fff; border-color: var(--accent);
 }
 .info-file-btn:hover:not(.active) { background: var(--bg-4); }
-
 
 .rev-info-text {
   font-size: 11px;
@@ -5920,7 +5884,6 @@ a.member-chip-name:hover { color: var(--accent); }
 .success-icon { font-size: 32px; color: var(--green); }
 .success-title { font-size: 16px; font-weight: 500; color: var(--t0); }
 .success-sub { font-size: 12px; color: var(--t1); }
-
 
 /* ── Debug panel — inline in slide pane ──────────────────────────────────────── */
 
@@ -6429,7 +6392,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-progress-current { color: var(--t2); flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Ingest button moved into .lq-header-actions, top-right of the page header
    (Ryan, 2026-08-31) — .lq-runbar's own divider bar is gone with it. */
-.lq-run-note { font-size: 12.5px; color: var(--t2); }
+
 /* Tier chips — one-click filter into Sound Quality's own High/Medium/Low
    bands, feeding both the visible card list and "Ingest N" (Ryan, 2026-08-27,
    Direction A from the ingest-redesign specimen). */
@@ -6472,14 +6435,7 @@ a.member-chip-name:hover { color: var(--accent); }
    row of settings. Quieter than the path button (no folder icon weight, no
    border until hover) because the path is the thing you read and this is the
    thing you occasionally press. */
-.lq-setbar-re {
-  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
-  background: transparent; border: 1px solid transparent; color: var(--t3);
-  border-radius: var(--r-sm); padding: 3px 7px; margin-left: 4px;
-  font-family: inherit; font-size: 11px; white-space: nowrap;
-}
-.lq-setbar-re:hover { color: var(--accent-lit); border-color: var(--accent); }
-.lq-setbar-re:disabled { opacity: .45; cursor: default; }
+
 .lq-setbar-path {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
   font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0;
@@ -6527,7 +6483,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-applyall {
   display: flex; flex-direction: column; gap: 12px;
   padding: 12px 13px 14px; margin-bottom: 12px;
-  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-sm);
+  border: 1px solid var(--bd-0); border-radius: var(--r-sm);
 }
 /* Collapsed, the block is a header and nothing else, so the bottom padding
    built for a form underneath just reads as a fat empty bar. */
@@ -6595,15 +6551,13 @@ a.member-chip-name:hover { color: var(--accent); }
    the Add Recording form's own rows rather than invented fresh. Notes spans
    the full width underneath — the one field long enough to want its own line. */
 .lq-applyall-grid {
-  display: grid; gap: 10px 14px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: flex; flex-direction: column; gap: 6px; max-width: 720px;
 }
+/* City / State / Country, as on the Add Recording form (State is narrow). */
+.ingest-row-loc { grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr); gap: 10px; }
 .lq-applyall-grid .ingest-field label { color: var(--t2); }
 .lq-applyall-notes { grid-column: 1 / -1; }
 .lq-applyall-notes textarea { min-height: 44px; }
-@media (max-width: 900px) {
-  .lq-applyall-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
 
 /* ── Row drill-in (rebuilt 2026-08-28) ───────────────────────────────────── */
 /* The density toggle is GONE — compact is the only mode, so there is nothing to
@@ -6618,13 +6572,7 @@ a.member-chip-name:hover { color: var(--accent); }
   display: flex; align-items: stretch; gap: 2px;
   padding: 0 12px; border-bottom: 1px solid var(--bd-1); background: var(--bg-2);
 }
-.lq-dtab {
-  background: none; border: 0; border-bottom: 2px solid transparent;
-  padding: 9px 12px 8px; margin-bottom: -1px; cursor: pointer;
-  font-family: inherit; font-size: 12px; color: var(--t2);
-}
-.lq-dtab:hover { color: var(--t0); }
-.lq-dtab.on { color: var(--accent-lit); border-bottom-color: var(--accent); }
+
 .lq-pane { padding: 14px 16px 16px; background: var(--bg-2); }
 .lq-detailwrap { border-top: 1px solid var(--bd-0); }
 
@@ -6698,7 +6646,6 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-brow-head .lq-tip:hover { color: var(--t1); }
 .lq-brow:hover { background: var(--bg-4); }
 .lq-brow--pending { opacity: .6; }
-.lq-brow-spine { align-self: stretch; border-radius: 2px; min-height: 26px; }
 .lq-brow-main { min-width: 0; }
 .lq-brow-name {
   font-size: 12.5px; font-weight: 600; color: var(--t0); line-height: 1.3;
@@ -6732,26 +6679,14 @@ a.member-chip-name:hover { color: var(--accent); }
 /* The confirm job has always reported copied/total on every poll and nothing
    read it — a queue run showed one sentence above the list and rows that
    vanished when they finished (Ryan, 2026-08-28). */
-.lq-copybar { display: flex; align-items: center; gap: 9px; margin-top: 5px; }
-.lq-copybar-track {
-  flex: 1; max-width: 260px; height: 3px; background: var(--bg-5);
-  border-radius: 2px; overflow: hidden;
-}
-.lq-copybar-track i {
-  display: block; height: 100%; border-radius: 2px; background: var(--accent);
-  transition: width .25s linear;
-}
-.lq-copybar-n {
-  font-size: 10.5px; color: var(--t2); font-variant-numeric: tabular-nums; flex: none;
-}
 
 /* Queued / Ingesting — the two states before "Complete". Deliberately not
    buttons: a row the queue owns must not look clickable. */
-.lq-act-queued, .lq-act-running {
+ .lq-act-running {
   display: inline-flex; align-items: center; gap: 7px; white-space: nowrap;
   font-size: 11.5px; padding: 4px 10px; border-radius: var(--r-sm);
 }
-.lq-act-queued  { color: var(--t3); border: 1px dashed var(--bd-1); }
+
 .lq-act-running { color: var(--accent-lit); border: 1px solid var(--accent); }
 /* Bigger and more prominent than the app's other chevrons (Ryan, 2026-08-31)
    — this is the main, farthest-right control on every row, the one thing
@@ -6773,7 +6708,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-brow .lq-actions { max-width: none; flex-wrap: nowrap; gap: 4px; }
 .lq-brow .lq-act { padding: 3px 9px; font-size: 11.5px; }
 /* Concerns still show — they are the one thing that can change the decision. */
-.lq-brow .lq-concerns { margin-top: 4px; }
+
 /* The card's verdict pill is sized for a card. In a row it is the tallest
    thing present and would set the row height on its own. */
 /* Both are buttons now (Ryan, 2026-08-31) — click either to open the row's
@@ -6786,7 +6721,6 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .lq-brow .lq-verdict:hover { filter: brightness(1.18); }
 .lq-brow .lq-verdict:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
 
 /* Under ~900px the numbers and the facts line lose their columns before the
    name or the actions do. */
@@ -6861,11 +6795,6 @@ a.member-chip-name:hover { color: var(--accent); }
    carrying a value, not a label, and at 400 inside a tinted box it goes soft.
    .lq-verdict's own metrics are untouched — the Add Recording page and the
    recording view both use it at its original size. */
-.lq-brow-pill {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 5px 12px; font-size: 12px; line-height: normal;
-  font-family: inherit; white-space: nowrap; cursor: pointer;
-}
 
 /* ── Tabs / detail ───────────────────────────────────────────────────────────
    Two half-width tabs replace the old full-width "Show details" bar
@@ -7012,13 +6941,10 @@ a.member-chip-name:hover { color: var(--accent); }
    markup, so this inherits the app's play button, its range track and thumb,
    and its tabular time readout, and follows all three if they are ever
    restyled. Only the layout and the smaller play button are local. */
-.lq-mini { display: flex; align-items: center; gap: 9px; width: 100%; }
+
 /* 24px against the bar's 32: this sits in a panel header beside an 11px
    heading, not in a window-wide transport. */
-.lq-mini .lq-mini-play { width: 24px; height: 24px; flex: none; }
-.lq-mini .lq-mini-play svg { width: 11px; height: 11px; }
-.lq-mini input[type="range"].progress-bar { flex: 1; min-width: 60px; }
-.lq-mini .player-time { min-width: 30px; }
+
 /* Scaffolding, not UI — the element is what actually plays; .lq-mini is what
    you look at. */
 #lq-preview-player audio { display: none; }
@@ -7086,15 +7012,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .lq-fptrk--pend .st { color: var(--t3); }
 
 /* ── Concerns line ───────────────────────────────────────────────────────── */
-.lq-concerns { display: flex; flex-direction: column; gap: 5px; margin: 8px 0 0; }
-.lq-concern {
-  display: flex; align-items: baseline; gap: 8px; font-size: 12px;
-  padding: 5px 10px; border-radius: var(--r-sm); border: 1px solid transparent;
-}
-.lq-concern .ic { flex: none; font-size: 11px; }
-.lq-concern .tx { flex: 1; min-width: 0; }
-.lq-concern .lk { flex: none; font-size: 11px; color: inherit; opacity: .8; }
-.lq-concern .lk:hover { opacity: 1; }
+
 .lq-concern--warn {
   background: color-mix(in srgb, var(--amber) 12%, transparent);
   color: var(--amber); border-color: color-mix(in srgb, var(--amber) 30%, transparent);
@@ -7204,9 +7122,16 @@ a.member-chip-name:hover { color: var(--accent); }
    for its ellipsis, which would swallow the hover box. */
 .iq-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .iq-name-row .lq-brow-name { min-width: 0; }
-.iq-reviewchip { color: var(--amber); }
-.iq-reviewchip .lq-errchip-ic { width: 13px; height: 13px; }
-.iq-reviewchip:hover { color: var(--amber); }
+/* Status column: "Ready", or the review issues, in their own cell. */
+.iq-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.3; }
+.iq-status--ready { color: var(--green); }
+.iq-status--issue { color: var(--amber); }
+.iq-status-ic { width: 13px; height: 13px; flex: none; }
+/* Rows that need a look sit on a faint amber wash over the row fill. */
+/* Ingest All Ready: the row Ingest button one size up. */
+.lq-act--lg { padding: 7px 18px; font-size: 13px; min-width: 0; }
+.bi-ingest-all-wrap { margin: 0 0 12px; }
+.bi-ingest-all-wrap:empty { display: none; }
 /* .lq-act-failed removed 2026-08-28 — the message is a hover now, not a
    paragraph wedged into the actions column. See .lq-errchip. */
 .lq-errchip {
@@ -7219,7 +7144,6 @@ a.member-chip-name:hover { color: var(--accent); }
    300px wide, which runs off the window when the thing being hovered sits in
    the last column of the row. */
 .lq-tipbox--right { left: auto; right: 0; }
-.lq-act-cancelled{ font-size: 12px; color: var(--t3);    padding: 4px 0; white-space: nowrap; }
 
 .lq-move-wrap { position: relative; }
 .lq-move-menu {
@@ -7252,9 +7176,7 @@ a.member-chip-name:hover { color: var(--accent); }
    be a whole sentence ("Ingesting <show name>…") and the header is not the
    place for a second line. */
 .lq-header-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.lq-header-actions .lq-run-note {
-  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
+
 /* Review is a real choice, not a fallback (Ryan, 2026-08-28: "too dark").
    It sat at --t2, the same weight as Move, which read as disabled next to
    Ingest — and Review is the button you WANT someone reaching for when the
@@ -7280,8 +7202,7 @@ a.member-chip-name:hover { color: var(--accent); }
 /* Retry on a row whose ANALYSIS failed. Accent, not green: it is not the
    action that files the recording, it is the one that gets the row back to a
    state where filing is even possible. */
-.lq-act--retry { color: var(--accent-lit); border-color: var(--accent); }
-.lq-act--retry:hover { background: var(--accent-dim); }
+
 .lq-act--cancel { color: var(--t3); }
 .lq-act--cancel:hover { border-color: var(--red); color: var(--red); }
 .lq-act--move { color: var(--t2); }
@@ -8046,7 +7967,6 @@ body.drive-offline img[src*="/api/venues/images/"] {
   filter: grayscale(1);
 }
 
-
 /* ══════════════════════════════════════════════════════════════════════════
    RESPONSIVE — first pass, 2026-08-21
    ══════════════════════════════════════════════════════════════════════════
@@ -8146,7 +8066,6 @@ body.drive-offline img[src*="/api/venues/images/"] {
 
   .slide-panel.open { width: 100%; }
 }
-
 
 /* ══════════════════════════════════════════════════════════════════════════
    PLAYBACK MODE — belt to the JS braces
@@ -8819,7 +8738,6 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   .col-strip { grid-template-columns: repeat(2, 1fr); }
 }
 
-
 /* ── Settings page ───────────────────────────────────────────────────────────
    Was a modal until 2026-08-25 (Ryan: "too small and strange"). Settings had
    outgrown a box — profile, appearance, ingest behaviour, AI, sharing and About
@@ -8914,11 +8832,7 @@ select.set-input { max-width: 480px; }
    Bulk Import and Review & Ingest all show the same read-only summary with a
    link back to Settings, so a screen mid-ingest never lies about what will
    happen to the files. */
-.setbar {
-  background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: 6px;
-  padding: 8px 12px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
-  font-size: 12.5px;
-}
+
 .fh-strip { display: inline-flex; align-items: center; gap: 10px; color: var(--t1); font-size: 12.5px; }
 .fh-strip b { color: var(--t0); font-weight: 600; }
 .fh-strip .sep { color: var(--t3); }
@@ -9119,7 +9033,6 @@ select.set-input { max-width: 480px; }
   background: var(--bg-2); border: 1px solid var(--bd-1); border-radius: var(--r-sm);
 }
 .cf-color input[type="text"] { flex: 1; font-family: var(--font-mono); }
-
 
 /* ── Collection page: add search + per-card remove (Ryan, 2026-09-03) ──────
    The page could show a collection and delete it, but not change what was in
@@ -9485,11 +9398,8 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
   box-shadow: 0 -6px 16px rgba(0,0,0,.16);
 }
 
-/* Import Queue heading and tab brightness (Ryan, 2026-10-01): the tabs read
-   brighter than the default profile tabs, Live a step above Albums. */
-.bi-queue-head {
-  font-size: 13px; font-weight: 600; color: var(--t0); margin: 4px 0 6px;
-}
+/* Import tab brightness (Ryan, 2026-10-01): the tabs read brighter than the
+   default profile tabs, Live a step above Albums. */
 .bi-tabs .pp-tab.bi-tab--queue,
 .bi-tabs .pp-tab.bi-tab--live   { color: var(--t1); }
 .bi-tabs .pp-tab.bi-tab--album  { color: var(--t2); }
@@ -9506,3 +9416,15 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 #bi-table .lq-brow { background: var(--bg-2); }
 #bi-table .lq-row.is-open .lq-brow { background: var(--bg-3); }
 #bi-rows > .lq-row + .lq-row { border-top: 1px solid var(--bd-1); }
+
+/* Add Recordings header (2026-10-02): muted label, plain value. */
+.bi-src { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 24px; font-size: 13px; color: var(--t1); }
+.bi-src-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bi-src-label { color: var(--t2); }
+.bi-src-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bi-src .btn-sm { font-size: 12px; }
+
+/* The apply-values block sits in the page itself, above the action buttons:
+   no frame, no fill. */
+#bi-applyall .lq-applyall { border: 0; padding: 4px 0 8px; margin-bottom: 4px; }
+#bi-applyall .lq-applyall.is-closed { padding: 4px 0; }

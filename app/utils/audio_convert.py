@@ -1,105 +1,88 @@
 """
-utils/audio_convert.py — Shorten (.shn) and WAV → FLAC, in place.
+utils/audio_convert.py -- unsupported audio (SHN, WAV, AIFF, APE, WV) to FLAC.
 
-Why this exists at all: a lot of the good early trading material is Shorten,
-and Trellis could see those folders but not read them.  `.shn` has been in
-RESOLVE_AUDIO_EXTS since 2026-08-26 purely so a folder of it would say
-"6 .shn files — not supported yet" instead of vanishing.  This is the other
-half: offer to convert, then triage the result (Ryan, 2026-09-02).
-
-WAV is here for a different reason.  It IS ingestable, so nothing is broken —
-but a WAV set is roughly twice the size of the same audio as FLAC, losslessly,
-and a library that stores its own copy should not carry that.  So WAV is an
-OFFER on a folder that works, where SHN is the fix for one that does not.
+Only FLAC and MP3 are ever imported (Ryan, 2026-10-02), so every other
+lossless container is "unsupported" and Convert to FLAC is how it becomes
+importable.
 
 ## The rules that are not obvious
 
 **Bit depth is preserved, never forced.**  A 24-bit taper's master converted
 to "FLAC 16-bit" has quietly lost a third of its resolution, and FLAC is
-lossless at either depth — there is nothing to gain by choosing.  ffmpeg's
-default for FLAC output is to keep the source's sample format, so the encode
-passes no `-sample_fmt` at all rather than passing one that happens to match.
-Shorten is always 16-bit, so this only ever bites WAV.
+lossless at either depth.  ffmpeg keeps the source's sample format for FLAC
+output, so the encode passes no `-sample_fmt` at all.
 
-**Originals are kept, in `_originals/`.**  Not deleted (a bad conversion would
-mean re-downloading a show that may not be seedable any more) and not left
-where they were — `resolve_shows`/`scan_folder` only look at audio in the
-folder ROOT, so moving them one level down makes them invisible to ingest
-while leaving them on the collector's disk.  It also matters for WAV
-specifically: `.wav` is in AUDIO_EXTENSIONS, so a folder holding both the
-WAVs and the new FLACs would ingest every track TWICE.
+**Compression level 8**, fixed (Ryan, 2026-10-02): smallest files, and the
+encode time is irrelevant next to reading the source.
 
-**Nothing is destroyed before it is replaced.**  Each file is encoded to a
-temporary name, verified non-empty, renamed into place, and only then is the
-original moved aside.  A failure part-way through leaves the folder holding
-some FLACs and the rest of its originals still where they were — which is a
-resumable state, not a broken one, because a re-run skips what it already did.
+**Originals are deleted, but only once their FLAC is proven.**  Each file is
+encoded to a `.part` name, checked (ffmpeg exited cleanly and the output is
+non-empty), renamed into place, and only then is the source removed.  A file
+that fails keeps its original and is reported; a re-run skips what is done.
 
-**A folder with any FLAC in it is not a conversion candidate.**  That is the
-one thing that tells "this show needs converting" apart from "this show has
-already been converted, or shipped mixed."  Checked by the caller
-(`detect_convertible`), which is also what the triage row's offer reads.
+**A mixed folder converts only its unsupported files.**  Existing FLAC/MP3
+are never touched.
 """
 
 import os
-import shutil
 import subprocess
 
+# Legacy: earlier versions kept originals here. Still skipped when walking so
+# a folder converted by an old build is not re-offered its own leftovers.
 ORIGINALS_DIRNAME = "_originals"
 
-# What we can convert FROM. Ordered by how much the user gains: SHN cannot be
-# ingested at all, WAV merely costs disk.
-SHN_EXT = ".shn"
-WAV_EXTS = (".wav",)
+# What we can convert FROM: every format Trellis refuses to import.
+CONVERTIBLE_EXTS = (".shn", ".wav", ".aiff", ".aif", ".ape", ".wv")
+FLAC_COMPRESSION_LEVEL = "8"
 
 
 class ConversionUnavailable(RuntimeError):
     """ffmpeg is missing, or cannot decode this format."""
 
 
-def _audio_names(folder_path):
-    """Immediate file names in `folder_path`, lowercased extension included."""
-    try:
-        return [f.name for f in os.scandir(folder_path) if f.is_file()]
-    except OSError:
-        return []
+def _walk_audio(folder_path):
+    """Relative paths of every file under `folder_path` (scan_folder reads
+    subfolders too, e.g. CD1/CD2), skipping hidden and legacy _originals dirs."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(folder_path):
+        dirnames[:] = sorted(d for d in dirnames
+                             if not d.startswith(".") and d != ORIGINALS_DIRNAME)
+        for f in sorted(filenames):
+            out.append(os.path.relpath(os.path.join(dirpath, f), folder_path))
+    return out
 
 
 def detect_convertible(folder_path):
     """
-    Does this folder want converting, and to what?
+    Does this folder hold unsupported audio, and what?
 
-    Returns None, or {"kind": "shn"|"wav", "count": int, "ext": ".shn"}.
-
-    The rule is the same for both: files of ONE convertible format in the
-    folder root, and no FLAC anywhere in that root.  A folder that already has
-    FLAC has either been converted or was mixed to begin with, and in neither
-    case is a bulk convert the right offer — it would either duplicate work or
-    quietly restructure someone's deliberate arrangement.
+    Returns None, or {"kind": "shn"|"wav", "ext": first ext, "exts": [...],
+    "count": n}.  `kind` is "shn" when any Shorten is present (the label the
+    older UI keys on), else "wav" for every other format.  FLAC beside the
+    unsupported files no longer suppresses the offer: a mixed folder is
+    exactly the case that needs it.
     """
-    names = _audio_names(folder_path)
-    if not names:
+    counts = {}
+    for n in _walk_audio(folder_path):
+        e = os.path.splitext(n)[1].lower()
+        if e in CONVERTIBLE_EXTS:
+            counts[e] = counts.get(e, 0) + 1
+    if not counts:
         return None
-    exts = [os.path.splitext(n)[1].lower() for n in names]
-    if ".flac" in exts:
-        return None
-
-    shn = sum(1 for e in exts if e == SHN_EXT)
-    if shn:
-        return {"kind": "shn", "ext": SHN_EXT, "count": shn}
-
-    wav = sum(1 for e in exts if e in WAV_EXTS)
-    if wav:
-        return {"kind": "wav", "ext": ".wav", "count": wav}
-
-    return None
+    exts = [e for e in CONVERTIBLE_EXTS if e in counts]
+    return {"kind": "shn" if ".shn" in counts else "wav", "ext": exts[0],
+            "exts": exts, "count": sum(counts.values())}
 
 
-def convertible_files(folder_path, ext):
-    """The files this conversion will act on, in stable order."""
+def convertible_files(folder_path, exts):
+    """The files this conversion will act on, in stable order (relative
+    paths). `exts` is one extension or an iterable of them."""
+    if isinstance(exts, str):
+        exts = (exts,)
+    exts = {e.lower() for e in exts}
     return sorted(
-        n for n in _audio_names(folder_path)
-        if os.path.splitext(n)[1].lower() == ext
+        n for n in _walk_audio(folder_path)
+        if os.path.splitext(n)[1].lower() in exts
     )
 
 
@@ -123,11 +106,12 @@ def probe_decoder(ffmpeg, ext):
     return codec in (out.stdout or "")
 
 
-def convert_folder(folder_path, ffmpeg, ext, *, on_progress=None,
+def convert_folder(folder_path, ffmpeg, exts, *, on_progress=None,
                    should_cancel=None):
     """
-    Convert every `ext` file in `folder_path` to FLAC beside it, then move the
-    originals into `_originals/`.
+    Convert every unsupported file (`exts`: one extension or several) under
+    `folder_path` to FLAC beside it, deleting each original once its FLAC is
+    verified.  A file that fails keeps its original.
 
     `on_progress(done, total, name)` is called before each file.
     `should_cancel()` is polled between files; a cancelled run leaves whatever
@@ -135,7 +119,7 @@ def convert_folder(folder_path, ffmpeg, ext, *, on_progress=None,
 
     Returns {"converted": [names], "failed": [{name, error}], "cancelled": bool}.
     """
-    files = convertible_files(folder_path, ext)
+    files = convertible_files(folder_path, exts)
     total = len(files)
     converted, failed = [], []
 
@@ -146,31 +130,31 @@ def convert_folder(folder_path, ffmpeg, ext, *, on_progress=None,
             on_progress(i, total, name)
 
         src = os.path.join(folder_path, name)
-        stem = os.path.splitext(name)[0]
-        dst = os.path.join(folder_path, stem + ".flac")
+        dst = os.path.splitext(src)[0] + ".flac"
         # A .part name, so an interrupted encode never looks like a finished
         # track. ffmpeg writes the container header first; a killed process
         # otherwise leaves a plausible-looking .flac that fails much later.
         tmp = dst + ".part"
 
         if os.path.exists(dst):
-            # Already done on an earlier run. Not an error — the whole point of
-            # converting file by file is that a re-run resumes.
-            converted.append(os.path.basename(dst))
-            _retire_original(folder_path, name)
+            # A FLAC with this name that this run did not write: never delete
+            # the original on the strength of it. A person decides, so the
+            # file is reported and the folder stays unsupported.
+            failed.append({"name": name,
+                           "error": "A FLAC with this name already exists."})
             continue
 
         cmd = [
             ffmpeg, "-nostdin", "-y",
             "-i", src,
             # No -sample_fmt: FLAC output inherits the source depth. See the
-            # module docstring — forcing 16-bit would silently downsample a
-            # 24-bit master.
+            # module docstring.
             "-c:a", "flac",
-            "-compression_level", "5",
-            # Tags carry across on their own for WAV; SHN has none. Explicit so
-            # a future ffmpeg default change cannot drop them.
+            "-compression_level", FLAC_COMPRESSION_LEVEL,
+            # Explicit so a future ffmpeg default change cannot drop tags.
             "-map_metadata", "0",
+            # Output name ends in .part, which ffmpeg cannot infer a muxer from.
+            "-f", "flac",
             tmp,
         ]
         try:
@@ -188,36 +172,12 @@ def convert_folder(folder_path, ffmpeg, ext, *, on_progress=None,
             continue
 
         os.replace(tmp, dst)
-        converted.append(os.path.basename(dst))
-        _retire_original(folder_path, name)
+        converted.append(os.path.relpath(dst, folder_path))
+        _unlink(src)
 
     if on_progress:
         on_progress(total, total, None)
     return {"converted": converted, "failed": failed, "cancelled": False}
-
-
-def _retire_original(folder_path, name):
-    """
-    Move one source file into `_originals/`, out of the ingest's sight.
-
-    Failure is swallowed deliberately: the FLAC is already written and correct,
-    and refusing to report a successful conversion because a file could not be
-    tidied away would be the tail wagging the dog. The consequence of a failed
-    move for WAV — a double ingest — is caught by the caller re-scanning, which
-    will see the leftover and decline to offer a second conversion.
-    """
-    src = os.path.join(folder_path, name)
-    if not os.path.isfile(src):
-        return
-    dest_dir = os.path.join(folder_path, ORIGINALS_DIRNAME)
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-        dest = os.path.join(dest_dir, name)
-        if os.path.exists(dest):
-            return          # a previous run already retired this one
-        shutil.move(src, dest)
-    except OSError:
-        pass
 
 
 def _unlink(path):

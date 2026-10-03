@@ -10,7 +10,7 @@ Routes:
   POST /api/recordings/<id>/info-file      save info-file text (DB, + disk if a .txt exists)
   DELETE /api/recordings/<id>[?delete_files=1]  delete the record, optionally the folder too
   POST /api/recordings/<id>/move           move the folder out to Workshop/Backlog (unpublish)
-  POST /api/recordings/<id>/reprocess      re-run Librosa analysis on all tracks
+  POST /api/recordings/<id>/reprocess      Analyze Audio: score + signals + librosa, any recording
   POST /api/recordings/<id>/verify-checksums  (re-)validate fingerprint checksums
 """
 
@@ -37,7 +37,6 @@ from app.utils.folder_naming import rename_recording_folder, unique_file_name
 from app.utils import node_settings
 from app.utils.file_naming import rename_plan, TemplateError
 from app.api.system import require_library
-from app.utils.analysis import analyse_recording
 from app.utils.pruning import prune_after_recording_delete
 from app.utils.serialize import (recording_row, derive_set_track_numbers,
                                  _primary_recording_image_url)
@@ -1305,36 +1304,58 @@ def get_recording_file_tags(recording_id):
 @login_required
 def reprocess_recording(recording_id):
     """
-    Re-run Librosa analysis on every track in the recording.
-    Results are upserted into track_analysis. Safe to call multiple times.
+    Analyze Audio: the whole audio pass (Listening Quality score, non-music
+    signal, Full librosa analysis) for ANY recording, live or album. Albums are
+    never auto-scored at ingest, so this is the only way one gets a score.
+    reanalyze=True: the user asked, so tracks with a current analysis are redone.
+
+    Route name kept (api.js and the endpoint's callers are unchanged); only the
+    work behind it changed from librosa-only to the full pass.
 
     Returns:
-      200  { analysed: n, errors: [(filename, msg), ...] }
+      200  { analysed: n, errors: [str, ...], score, signals, analysis,
+             listening_quality }   (the part fields are "ok"/"skipped"/"failed")
       404  if recording not found
-      500  if librosa is unavailable or all tracks failed
+      500  if no part of the pass succeeded
     """
+    from app.api.ingest import run_audio_pass, drop_queued_audio
+    from app.models.track_analysis import TrackAnalysis
+    from app.utils.quality_store import get_for_recording
+
     rec = db.session.get(Recording, recording_id)
     if not rec:
         return jsonify({"error": "Not found"}), 404
 
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    n_ok, errors = analyse_recording(rec, library_root, db.session)
+    res = run_audio_pass(recording_id, score=True, reanalyze=True)
+    # The audio lane may hold a queued pass for this recording; it would
+    # redo what was just done.
+    drop_queued_audio(recording_id)
+    errors = res["errors"]
+    n_ok = (db.session.query(TrackAnalysis.id)
+            .join(Track, Track.id == TrackAnalysis.track_id)
+            .filter(Track.recording_id == recording_id).count())
+    row = get_for_recording(recording_id)
 
-    # Log the reprocess event
+    # Log the event (same event type as before: history readers key on it)
     db.session.add(RecordingEvent(
-        recording_id = rec.id,
+        recording_id = recording_id,
         user_id      = current_user.id,
         event_type   = "reprocessed",
-        note         = f"{n_ok} track(s) analysed" + (
+        note         = f"audio pass: score {res['score']}, signals {res['signals']}, "
+                       f"analysis {res['analysis']}" + (
             f"; {len(errors)} error(s)" if errors else ""
         ),
     ))
     db.session.commit()
 
-    if n_ok == 0:
-        return jsonify({"error": "Analysis failed for all tracks", "errors": errors}), 500
+    if "ok" not in (res["score"], res["signals"], res["analysis"]):
+        return jsonify({"error": "Analysis failed", "errors": errors}), 500
 
-    return jsonify({"analysed": n_ok, "errors": errors})
+    return jsonify({
+        "analysed": n_ok, "errors": errors,
+        "score": res["score"], "signals": res["signals"], "analysis": res["analysis"],
+        "listening_quality": row.listening_quality if row is not None else None,
+    })
 
 
 # ── POST /api/recordings/<id>/verify-checksums ───────────────────────────────

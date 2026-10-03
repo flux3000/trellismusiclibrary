@@ -169,7 +169,7 @@
           <button class="dev-pane-btn is-on" data-pane="errors">Errors <span class="dev-count" id="dev-c-errors">0</span></button>
           <button class="dev-pane-btn" data-pane="network">Network <span class="dev-count" id="dev-c-network">0</span></button>
           <button class="dev-pane-btn" data-pane="server">Server</button>
-          <button class="dev-pane-btn" data-pane="ingest">Ingest</button>
+          <button class="dev-pane-btn" data-pane="ingest">Import</button>
         </div>
         <div class="dev-head-right">
           <label class="dev-check"><input type="checkbox" id="dev-fails-only"> Failures only</label>
@@ -371,7 +371,7 @@
   let ingestState = null, ingestTimer = null, ingestErr = null
 
   function renderIngest() {
-    if (ingestErr)   return empty('Ingest status unavailable.', esc(ingestErr))
+    if (ingestErr)   return empty('Import status unavailable.', esc(ingestErr))
     if (!ingestState) return empty('Listening…', 'Polling /api/ingest/pipeline.')
     const { jobs = [], analysis = {} } = ingestState
 
@@ -380,13 +380,13 @@
         <span class="dev-time"></span>
         <span class="dev-net-method">${esc(j.quick ? 'QUICK' : 'FULL')}</span>
         <span class="dev-net-status">${esc(j.phase || j.status || '')}</span>
-        <span class="dev-net-url" title="${esc(j.artist || '')}">${esc(j.folder || '')}
-          — ${esc(j.label || '')}${j.detail ? ` (${esc(j.detail)})` : ''}${
+        <span class="dev-net-url" title="${esc(j.artist || '')}">${esc(j.folder || '')}:
+          ${esc(j.label || '')}${j.detail ? ` (${esc(j.detail)})` : ''}${
           j.total ? ` ${j.copied}/${j.total}` : ''}</span>
         <span class="dev-net-ms">${j.in_phase}s / ${j.elapsed}s</span>
       </div>`).join('')
       : `<div class="dev-net-row"><span class="dev-time"></span><span class="dev-net-method"></span>
-           <span class="dev-net-status"></span><span class="dev-net-url">No ingest job in flight.</span></div>`
+           <span class="dev-net-status"></span><span class="dev-net-url">No import job in flight.</span></div>`
 
     const cur = analysis.current
     const anaRows = `
@@ -395,7 +395,7 @@
         <span class="dev-net-method">TRACKS</span>
         <span class="dev-net-status">${cur ? 'running' : 'idle'}</span>
         <span class="dev-net-url">${cur
-          ? `${esc(cur.name)} — ${cur.tracks_total} track${cur.tracks_total === 1 ? '' : 's'}`
+          ? `${esc(cur.name)}: ${cur.tracks_total} track${cur.tracks_total === 1 ? '' : 's'}`
           : 'Worker idle.'}</span>
         <span class="dev-net-ms">${cur ? cur.elapsed + 's' : ''}</span>
       </div>
@@ -404,7 +404,7 @@
         <span class="dev-net-method">QUEUE</span>
         <span class="dev-net-status">${analysis.pending || 0}</span>
         <span class="dev-net-url">waiting · ${analysis.done || 0} analysed ·
-          ${analysis.failed || 0} failed · ${analysis.skipped || 0} skipped (Quick Add)</span>
+          ${analysis.failed || 0} failed</span>
         <span class="dev-net-ms"></span>
       </div>`
 

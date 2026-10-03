@@ -17,6 +17,7 @@ from app.extensions import db
 from app.models.track import Track
 from app.models.recording import Recording
 from app.api.system import require_library
+from app.utils.paths import within_import_roots
 
 bp = Blueprint("stream", __name__)
 
@@ -127,8 +128,7 @@ def stream_ingest_preview():
     # IMPORT_ROOTS — otherwise any logged-in user could read arbitrary files
     # off the server (e.g. ?folder=/etc&file=passwd).
     real_folder  = os.path.realpath(folder)
-    import_roots = [os.path.realpath(root) for root in current_app.config.get("IMPORT_ROOTS", [])]
-    if not any(_path_within(real_folder, root) for root in import_roots):
+    if not within_import_roots(real_folder):
         abort(403)
 
     # Resolve the file and confirm it stays inside the folder (no traversal)

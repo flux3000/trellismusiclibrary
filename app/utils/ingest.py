@@ -32,7 +32,10 @@ from app.utils.file_naming import rename_plan, flattens
 
 # ── File classification ────────────────────────────────────────────────────────
 
-AUDIO_EXTENSIONS    = {".flac", ".mp3", ".wav"}
+# Only FLAC and MP3 are ever imported (Ryan, 2026-10-02). WAV, AIFF, SHN, APE
+# and WV classify as unsupported (see UNSUPPORTED_AUDIO_EXTENSIONS below) and
+# are offered Convert to FLAC instead.
+AUDIO_EXTENSIONS    = {".flac", ".mp3"}
 FINGERPRINT_MARKERS = {"ffp", "md5", "eac", "shntool", "fingerprint", "st5"}
 TEXT_EXTENSION      = ".txt"
 
@@ -207,6 +210,25 @@ def _audio_subdirs(path, unreadable=None):
     return result
 
 
+def _is_multi_disc(subs):
+    """2+ audio-bearing subdirs named for a disc/set: the parent is ONE show.
+    Shared by resolve_shows and is_show_root so they cannot disagree."""
+    return sum(1 for s in subs if _parse_set_dir(s.name)) >= 2
+
+
+def is_show_root(path):
+    """True when `path` ITSELF is a show folder by resolve_shows' own rules
+    (audio at its top level, or a multi-disc show whose set subdirs carry the
+    audio), as opposed to a folder that merely contains shows. Bulk Ingest uses
+    it for a run pointed at a single folder. Cheap: one level, no recursion."""
+    try:
+        if _root_audio_count(path) > 0:
+            return True
+        return _is_multi_disc(_audio_subdirs(path))
+    except OSError:
+        return False
+
+
 def resolve_shows(path, include_empty=True, unreadable=None):
     """
     Recursively resolve a directory to its actual show-level paths.
@@ -252,7 +274,7 @@ def resolve_shows(path, include_empty=True, unreadable=None):
     # is. A stray sibling that also holds audio (an "Extras" folder) does not
     # veto the call: treating one show as two recordings is a worse and less
     # recoverable outcome than one recording carrying an unlabelled extra.
-    if sum(1 for s in subs if _parse_set_dir(s.name)) >= 2:
+    if _is_multi_disc(subs):
         return [path]
 
     result = []

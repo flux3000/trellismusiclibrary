@@ -181,6 +181,12 @@ def _apply_imported_library(library_root, import_dir=None,
     # collection and gave archive downloads nowhere to land. Not created here:
     # a permission prompt for ~/Downloads at launch is bad; downloads_dir.
     # ensure_downloads_dir() creates it on first need.
+    # A saved Downloads folder that is the library itself (or inside it) is a
+    # leftover from before Downloads had its own default: Add Recordings would
+    # open on the collection. Treat it as unset.
+    if import_dir and _paths_overlap(os.path.realpath(str(import_dir)),
+                                     os.path.realpath(library_root)):
+        import_dir = None
     if import_dir:
         eff_import = str(import_dir)
     else:
@@ -214,7 +220,9 @@ def _maybe_start_bulk_ingest_from_marker():
         return
     from app.utils import bulk_ingest_run
     with app.app_context():
-        bulk_ingest_run.start_run(app.config["LIBRARY_ROOT"])
+        # Review First: the first run only scans and waits. A person looks at
+        # the queue and presses Ingest; nothing is catalogued on its own.
+        bulk_ingest_run.start_run(app.config["LIBRARY_ROOT"], "hold")
 
 
 def _apply_marker(data):
@@ -273,9 +281,10 @@ def _setup_html():
     screen: username and library location are both visible and answered in
     any order, Start Trellis is the only action. File handling is no longer
     asked here at all -- confirm_trellis_root()/confirm_existing_library()
-    get null for file_handling_mode/placement, and
-    _apply_file_handling_choice()'s own fallback seeds the safe default
-    (keep/artist); Settings is where that gets changed later. Every string
+    get null for file_handling_mode/placement. The mode follows the answer
+    given: a new library defaults to organize, an existing one to keep
+    (Ryan, 2026-10-02); placement falls back to artist. Settings is where
+    that gets changed later. Every string
     on this page was approved by Ryan; do not add any without him.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
@@ -292,50 +301,54 @@ def _setup_html():
   }}
   .card {{ max-width: 640px; width: 100%; }}
   h1 {{ font-size: 28px; font-weight: 600; margin: 0 0 28px; text-align: center; }}
-  .field-block {{ margin-bottom: 24px; }}
+  .field-block {{ margin-bottom: 24px; text-align: center; }}
   .lbl {{ display: block; font-size: 15px; color: #b8b5ae; margin: 0 0 8px; }}
   input.field {{
-    width: 100%; font-size: 14px; padding: 9px 12px;
+    width: 100%; max-width: 240px; font-size: 14px; padding: 9px 12px;
     border-radius: 6px; border: 1px solid #3a3d43; background: #1e2126;
     color: #e8e6e1; font-family: inherit;
   }}
   input.field:focus {{ outline: none; border-color: #d98f4e; }}
   .opt-box {{
-    border: 1px solid #3a3d43; border-radius: 6px; margin-bottom: 8px;
+    border: 1px solid #3a3d43; border-radius: 6px; margin-bottom: 12px;
   }}
   .opt-box.on {{ border-color: #d98f4e; background: rgba(217,143,78,.12); }}
-  .opt, .opt-sub {{
-    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-    padding: 12px 14px; font-size: 14px;
+  .opt {{
+    display: flex; gap: 12px; align-items: flex-start; cursor: pointer;
+    padding: 16px 18px;
   }}
-  .opt {{ cursor: pointer; }}
-  .opt input[type=radio] {{ margin: 0; accent-color: #d98f4e; flex-shrink: 0; }}
-  .opt-label {{ flex: 1 1 auto; min-width: 160px; }}
-  .opt button, .opt-sub button {{ flex-shrink: 0; }}
-  /* Second row of an expanded option, text aligned with the label above:
-     14px box padding + 13px radio + 10px gap. */
-  .opt-sub {{ padding-top: 0; padding-left: 37px; }}
-  .opt-note {{ padding: 0 14px 14px 37px; font-size: 13px; color: #b8b5ae; line-height: 1.5; }}
-  .opt-note p {{ margin: 0 0 6px; }}
-  .opt-note ul {{ margin: 0 0 6px; padding-left: 18px; }}
+  .opt input[type=radio] {{ margin: 3px 0 0; accent-color: #d98f4e; flex-shrink: 0; }}
+  .opt-head {{ font-size: 16px; font-weight: 600; margin: 0 0 6px; }}
+  .opt-body {{ font-size: 13px; color: #b8b5ae; line-height: 1.55; margin: 0; }}
+  .opt-detail {{ padding: 0 18px 18px 43px; }}
+  /* Folder rows: label, chosen path, select button on one line. */
+  .rows {{ border-top: 1px solid #3a3d43; }}
+  .row {{
+    display: flex; gap: 12px; align-items: center; padding: 10px 0;
+    border-bottom: 1px solid #2a2e35; font-size: 14px;
+  }}
+  .row:last-child {{ border-bottom: none; }}
+  .row-label {{ flex: 0 0 150px; }}
+  .row-label .opt-hint {{ color: #b8b5ae; }}
+  .row .opt-path {{ flex: 1 1 auto; min-width: 0; }}
+  .new-pick {{ display: flex; gap: 12px; align-items: center; padding-top: 4px; }}
+  .new-pick .opt-path {{ flex: 1 1 auto; min-width: 0; }}
   [hidden] {{ display: none !important; }}
   button.ghost.picked {{ box-shadow: inset 0 0 0 1px #d98f4e; }}
-  /* The chosen folder, left of its button (Ryan, 2026-10-01). */
   .opt-path {{
     font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
-    color: #b8b5ae; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+    color: #b8b5ae; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap;
   }}
-  .opt-path:empty {{ display: none; }}
   button {{
     font-size: 14px; padding: 10px 20px; border-radius: 6px; border: none;
     background: #d98f4e; color: #14161a; font-weight: 600; cursor: pointer;
     font-family: inherit;
   }}
-  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; padding: 7px 14px; font-size: 13px; }}
+  button.ghost {{ background: #2a2e35; color: #e8e6e1; font-weight: 500; padding: 7px 14px; font-size: 13px; flex-shrink: 0; }}
   button:disabled {{ opacity: .5; cursor: default; }}
-  #start-row {{ margin-top: 28px; }}
-  #status {{ margin-top: 16px; font-size: 13px; color: #b8b5ae; }}
+  #start-row {{ margin-top: 28px; text-align: center; }}
+  #status {{ margin-top: 16px; font-size: 13px; color: #b8b5ae; text-align: center; }}
   #status.err {{ color: #e0806a; }}
 </style></head>
 <body><div class="card">
@@ -346,47 +359,64 @@ def _setup_html():
     <input id="username" class="field" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" autofocus>
   </div>
 
-  <div class="field-block">
-    <label class="lbl">Select Library Location:</label>
-
-    <div class="opt-box" id="box-existing">
-      <label class="opt">
-        <input type="radio" name="kind" value="existing">
-        <span class="opt-label">Import an Existing Library</span>
-        <span class="opt-path" id="path-existing"></span>
-        <button class="ghost" id="pick-existing" type="button">Select Location</button>
-      </label>
-      <div class="opt-sub" id="sub-existing" hidden>
-        <span class="opt-label">Select Downloads Folder</span>
-        <span class="opt-path" id="path-downloads"></span>
-        <button class="ghost" id="pick-downloads" type="button">Select Location</button>
-      </div>
-    </div>
-
-    <div class="opt-box" id="box-new">
-      <label class="opt">
-        <input type="radio" name="kind" value="new">
-        <span class="opt-label">Create a New Library</span>
-        <span class="opt-path" id="path-new"></span>
-        <button class="ghost" id="pick-new" type="button">Select Location</button>
-      </label>
-      <div class="opt-note" id="sub-new" hidden>
-        <p>Trellis will create four folders:</p>
-        <ul><li>Library</li><li>Downloads</li><li>Backlog</li><li>Workshop</li></ul>
-        <p>You can change these locations in Settings.</p>
+  <div class="opt-box" id="box-existing">
+    <label class="opt">
+      <input type="radio" name="kind" value="existing">
+      <span>
+        <p class="opt-head">I'd like to import an existing library.</p>
+        <p class="opt-body">Trellis will first import your full library into a database, without moving or renaming any files. It will infer as much information as it can from directory names, file tags and text files. Any recordings needing attention will be added to a queue. SHN and WAV recordings wait in the queue until you convert them to FLAC or move them to Backlog or Workshop.</p>
+      </span>
+    </label>
+    <div class="opt-detail" id="sub-existing" hidden>
+      <div class="rows">
+        <div class="row">
+          <span class="row-label">Library</span>
+          <span class="opt-path" id="path-existing"></span>
+          <button class="ghost" id="pick-existing" type="button">Select Location</button>
+        </div>
+        <div class="row">
+          <span class="row-label">Downloads</span>
+          <span class="opt-path" id="path-downloads"></span>
+          <button class="ghost" id="pick-downloads" type="button">Select Location</button>
+        </div>
+        <div class="row">
+          <span class="row-label">Workshop <span class="opt-hint">(optional)</span></span>
+          <span class="opt-path" id="path-workshop"></span>
+          <button class="ghost" id="pick-workshop" type="button">Select Location</button>
+        </div>
+        <div class="row">
+          <span class="row-label">Backlog <span class="opt-hint">(optional)</span></span>
+          <span class="opt-path" id="path-backlog"></span>
+          <button class="ghost" id="pick-backlog" type="button">Select Location</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <div id="start-row"><button id="start" disabled>Start Trellis and Build Library</button></div>
+  <div class="opt-box" id="box-new">
+    <label class="opt">
+      <input type="radio" name="kind" value="new">
+      <span>
+        <p class="opt-head">I'd like to create a new library.</p>
+        <p class="opt-body">Trellis will create a "Trellis Music Library" folder, and then a set of useful subfolders within (Library, Downloads, Backlog, and Workshop). You can modify these later. Then you can import your collection (or start a new one) and keep it organized in Trellis.</p>
+      </span>
+    </label>
+    <div class="opt-detail" id="sub-new" hidden>
+      <div class="new-pick">
+        <span class="opt-path" id="path-new"></span>
+        <button class="ghost" id="pick-new" type="button">Select Location</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="start-row"><button id="start" disabled>Start Trellis</button></div>
   <div id="status"></div>
 </div>
 <script>
   const $ = id => document.getElementById(id)
   const status = $('status')
   const uname  = $('username')
-  // Nothing selected until the person picks (Ryan, 2026-10-01). Paths are
-  // never shown; a chosen location only marks its button.
+  // Nothing selected until the person picks (Ryan, 2026-10-01).
   let kind = null
   const HOME = {home_str!r}
   // Shown path only: ~ for the home folder. The full path is what is sent.
@@ -396,9 +426,9 @@ def _setup_html():
     return p
   }}
   function showPath(id, p) {{ const el = $(id); el.textContent = shortPath(p); el.title = p }}
-  let existingFolder = null
-  let downloadsFolder = null
-  let newParent = null
+  // Library and Downloads are required for an import; Workshop and Backlog
+  // are optional and stay null when skipped.
+  const picked = {{ existing: null, downloads: null, workshop: null, backlog: null, new: null }}
 
   function clearStatus() {{ status.className = ''; status.textContent = '' }}
   function fail(msg) {{ status.className = 'err'; status.textContent = msg }}
@@ -408,12 +438,12 @@ def _setup_html():
     $('box-new').classList.toggle('on', kind === 'new')
     $('sub-existing').hidden = kind !== 'existing'
     $('sub-new').hidden = kind !== 'new'
-    $('start').textContent = kind === 'existing' ? 'Start Trellis and Build Library' : 'Start Trellis'
   }}
   syncOpts()
 
   function refreshStart() {{
-    const folderResolved = kind === 'existing' ? !!existingFolder : kind === 'new' ? !!newParent : false
+    const folderResolved = kind === 'existing' ? !!(picked.existing && picked.downloads)
+                         : kind === 'new' ? !!picked.new : false
     $('start').disabled = !uname.value.trim() || !folderResolved
   }}
 
@@ -427,36 +457,20 @@ def _setup_html():
   document.querySelectorAll('input[name="kind"]').forEach(r => r.addEventListener('change', () => choose(r.value)))
   uname.addEventListener('input', refreshStart)
 
-  // Picking a folder for one answer also selects its radio -- the picker is
-  // the strongest signal of intent there is.
-  $('pick-existing').addEventListener('click', async e => {{
-    e.preventDefault()
-    const f = await window.pywebview.api.pick_folder()
-    if (!f) return
-    existingFolder = f
-    showPath('path-existing', f)
-    $('pick-existing').classList.add('picked')
-    choose('existing')
-  }})
-
-  $('pick-downloads').addEventListener('click', async e => {{
-    e.preventDefault()
-    const f = await window.pywebview.api.pick_folder()
-    if (!f) return
-    downloadsFolder = f
-    showPath('path-downloads', f)
-    $('pick-downloads').classList.add('picked')
-  }})
-
-  $('pick-new').addEventListener('click', async e => {{
-    e.preventDefault()
-    const f = await window.pywebview.api.pick_folder()
-    if (!f) return
-    newParent = f
-    showPath('path-new', f)
-    $('pick-new').classList.add('picked')
-    choose('new')
-  }})
+  // One native folder dialog path for every row.
+  function wirePick(key, kindToSelect) {{
+    $('pick-' + key).addEventListener('click', async e => {{
+      e.preventDefault()
+      const f = await window.pywebview.api.pick_folder()
+      if (!f) return
+      picked[key] = f
+      showPath('path-' + key, f)
+      $('pick-' + key).classList.add('picked')
+      choose(kindToSelect)
+    }})
+  }}
+  ;['existing', 'downloads', 'workshop', 'backlog'].forEach(k => wirePick(k, 'existing'))
+  wirePick('new', 'new')
 
   $('start').addEventListener('click', async e => {{
     const btn = e.target
@@ -466,8 +480,8 @@ def _setup_html():
     try {{
       const api = window.pywebview.api
       const result = kind === 'existing'
-        ? await api.confirm_existing_library(existingFolder, username, downloadsFolder, null, null, null, null)
-        : await api.confirm_trellis_root(newParent, username, null, null)
+        ? await api.confirm_existing_library(picked.existing, username, picked.downloads, picked.backlog, picked.workshop, null, null)
+        : await api.confirm_trellis_root(picked.new, username, null, null)
       if (result && result.ok) {{ window.location.href = {app_url!r}; return }}
       fail((result && result.error) || 'Something went wrong. Try again.')
     }} catch (err) {{
@@ -689,7 +703,7 @@ class FluxAPI:
 
         try:
             self._create_owner_account(username)
-            self._apply_file_handling_choice(file_handling_mode, placement)
+            self._apply_file_handling_choice(file_handling_mode or "organize", placement)
         except Exception as e:
             return {"ok": False, "error": f"Folder created, but account setup failed: {e}"}
 
@@ -719,6 +733,10 @@ class FluxAPI:
                 return {"ok": False,
                         "error": "That folder could not be opened. Pick the "
                                  "folder your recordings are in."}
+            # Downloads must never overlap the library (same rule as Settings).
+            if import_dir and _paths_overlap(os.path.realpath(str(import_dir)),
+                                             os.path.realpath(str(root))):
+                return {"ok": False, "error": "That folder overlaps your library."}
             _write_marker({
                 "mode":         "imported",
                 "library_root": str(root),
@@ -736,7 +754,7 @@ class FluxAPI:
 
         try:
             self._create_owner_account(username)
-            self._apply_file_handling_choice(file_handling_mode, placement)
+            self._apply_file_handling_choice(file_handling_mode or "keep", placement)
             _maybe_start_bulk_ingest_from_marker()
         except Exception as e:
             return {"ok": False, "error": f"Library set, but account setup failed: {e}"}

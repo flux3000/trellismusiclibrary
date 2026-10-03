@@ -147,7 +147,7 @@ def test_folder_images_ingested_and_cover_is_primary(app, db, tmp_path, bulk):
     payload = _confirm_payload(src, f"Folder Image Act {bulk}",
                                 [{"track_number": 1, "title": "One",
                                   "duration": 100, "filename": "t01.flac"}])
-    result = _do_confirm(payload, uid, bulk=bulk)
+    result = _do_confirm(payload, uid)
     assert result["image_errors"] == []
 
     after_hash = _folder_sha256(src)
@@ -197,7 +197,7 @@ def test_reingest_of_same_folder_adds_no_rows(app, db, tmp_path):
     payload = _confirm_payload(src, "Reingest Act",
                                 [{"track_number": 1, "title": "One",
                                   "duration": 100, "filename": "t01.flac"}])
-    result = _do_confirm(payload, uid, bulk=False)
+    result = _do_confirm(payload, uid)
     rec = db.session.get(Recording, result["recording_id"])
 
     n_before = db.session.query(RecordingImage).filter_by(recording_id=rec.id).count()
@@ -233,7 +233,7 @@ def test_flac_embedded_front_picture(app, db, tmp_path):
     payload = _confirm_payload(src, "FLAC Embedded Act",
                                 [{"track_number": 1, "title": "One",
                                   "duration": 100, "filename": "t01.flac"}])
-    result = _do_confirm(payload, uid, bulk=False)
+    result = _do_confirm(payload, uid)
     assert result["image_errors"] == []
     assert _folder_sha256(src) == before_hash
 
@@ -269,7 +269,7 @@ def test_mp3_embedded_apic(app, db, tmp_path):
     payload = _confirm_payload(src, "MP3 Embedded Act",
                                 [{"track_number": 1, "title": "One",
                                   "duration": 100, "filename": "t01.mp3"}])
-    result = _do_confirm(payload, uid, bulk=False)
+    result = _do_confirm(payload, uid)
     assert result["image_errors"] == []
     assert _folder_sha256(src) == before_hash
 
@@ -306,7 +306,7 @@ def test_multidisc_folder_image_only_in_first_disc(app, db, tmp_path):
         {"track_number": 2, "title": "Two", "duration": 100,
          "filename": "CD2/t02.flac", "disc_number": 2},
     ])
-    result = _do_confirm(payload, uid, bulk=False)
+    result = _do_confirm(payload, uid)
     assert result["image_errors"] == []
     assert _folder_sha256(src) == before_hash
 
@@ -338,7 +338,7 @@ def test_no_images_at_all(app, db, tmp_path):
     payload = _confirm_payload(src, "No Image Act",
                                 [{"track_number": 1, "title": "One",
                                   "duration": 100, "filename": "t01.flac"}])
-    result = _do_confirm(payload, uid, bulk=False)
+    result = _do_confirm(payload, uid)
     assert result["image_errors"] == []
     assert _folder_sha256(src) == before_hash
 

@@ -57,31 +57,22 @@ def _folder(tmp_path, *names):
 # ═════════════════════════════════════════════════════════════════════════════
 def test_shn_folder_is_offered_a_conversion(tmp_path):
     got = detect_convertible(_folder(tmp_path, "d1t01.shn", "d1t02.shn"))
-    assert got == {"kind": "shn", "ext": ".shn", "count": 2}
+    assert got == {"kind": "shn", "ext": ".shn", "exts": [".shn"], "count": 2}
 
 
 def test_wav_folder_is_offered_a_conversion(tmp_path):
     got = detect_convertible(_folder(tmp_path, "01.wav", "02.wav", "03.wav"))
-    assert got == {"kind": "wav", "ext": ".wav", "count": 3}
+    assert got == {"kind": "wav", "ext": ".wav", "exts": [".wav"], "count": 3}
 
 
-def test_any_flac_present_means_no_offer(tmp_path):
-    """
-    The one rule that separates "needs converting" from "already converted,
-    or deliberately mixed".  Without it, re-scanning a folder right after a
-    successful conversion would offer to convert it all over again — the
-    originals are still on disk under _originals/, just not in the root.
-    """
-    assert detect_convertible(_folder(tmp_path, "01.flac", "02.shn")) is None
+def test_flac_beside_unsupported_files_still_offers_a_conversion(tmp_path):
+    """Mixed folder: the unsupported files are exactly what needs converting."""
+    got = detect_convertible(_folder(tmp_path, "01.flac", "02.wav"))
+    assert got["count"] == 1 and got["exts"] == [".wav"]
 
 
 def test_originals_subfolder_is_not_counted(tmp_path):
-    """
-    Post-conversion shape: FLACs in the root, sources tucked underneath.
-    detect_convertible only ever looks at the ROOT, which is also the only
-    place resolve_shows/scan_folder look — that alignment is what makes
-    `_originals/` invisible to ingest rather than a second copy of the show.
-    """
+    """Leftovers from an older build's _originals/ are not re-offered."""
     d = _folder(tmp_path, "01.flac")
     sub = os.path.join(d, ORIGINALS_DIRNAME)
     os.makedirs(sub)
@@ -90,9 +81,8 @@ def test_originals_subfolder_is_not_counted(tmp_path):
 
 
 def test_shn_wins_over_wav_in_a_mixed_folder(tmp_path):
-    """SHN cannot be ingested at all; WAV merely costs disk. Fix first."""
     got = detect_convertible(_folder(tmp_path, "a.shn", "b.wav"))
-    assert got["kind"] == "shn"
+    assert got["kind"] == "shn" and got["exts"] == [".shn", ".wav"]
 
 
 def test_ordinary_flac_folder_and_empty_folder_are_both_silent(tmp_path):
@@ -103,20 +93,118 @@ def test_ordinary_flac_folder_and_empty_folder_are_both_silent(tmp_path):
 
 
 def test_convertible_files_is_stable_and_extension_scoped(tmp_path):
-    d = _folder(tmp_path, "b.shn", "a.shn", "notes.txt")
+    d = _folder(tmp_path, "b.shn", "a.shn", "c.wav", "notes.txt")
     assert convertible_files(d, ".shn") == ["a.shn", "b.shn"]
+    assert convertible_files(d, (".shn", ".wav")) == ["a.shn", "b.shn", "c.wav"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# convert_folder: level 8, originals deleted, failures keep their original
+# ═════════════════════════════════════════════════════════════════════════════
+def _fake_ffmpeg(monkeypatch, fail=()):
+    """Stand in for ffmpeg: writes the output file (last arg) unless the input
+    name is in `fail`. Returns the list of recorded argv lists."""
+    import subprocess
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        src = cmd[cmd.index("-i") + 1]
+        if os.path.basename(src) in fail:
+            return subprocess.CompletedProcess(cmd, 1, "", "boom: bad input")
+        with open(cmd[-1], "wb") as f:
+            f.write(b"fLaC" + b"\0" * 8)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr("app.utils.audio_convert.subprocess.run", run)
+    return calls
+
+
+def test_convert_uses_level_8_and_deletes_originals(tmp_path, monkeypatch):
+    from app.utils.audio_convert import convert_folder
+    d = _folder(tmp_path, "01.wav", "02.shn", "03.flac")
+    calls = _fake_ffmpeg(monkeypatch)
+    res = convert_folder(d, "ffmpeg", (".wav", ".shn"))
+    assert res["failed"] == [] and sorted(res["converted"]) == ["01.flac", "02.flac"]
+    for c in calls:
+        assert c[c.index("-compression_level") + 1] == "8"
+        assert "-sample_fmt" not in c
+    assert sorted(os.listdir(d)) == ["01.flac", "02.flac", "03.flac"]
+    assert not os.path.exists(os.path.join(d, ORIGINALS_DIRNAME))
+
+
+def test_mixed_folder_converts_only_the_unsupported_files(tmp_path, monkeypatch):
+    from app.utils.audio_convert import convert_folder
+    d = _folder(tmp_path, "01.flac", "02.wav")
+    flac_before = open(os.path.join(d, "01.flac"), "rb").read()
+    calls = _fake_ffmpeg(monkeypatch)
+    convert_folder(d, "ffmpeg", (".wav",))
+    assert len(calls) == 1
+    assert open(os.path.join(d, "01.flac"), "rb").read() == flac_before
+
+
+def test_a_failed_file_keeps_its_original(tmp_path, monkeypatch):
+    from app.utils.audio_convert import convert_folder
+    d = _folder(tmp_path, "01.wav", "02.wav")
+    _fake_ffmpeg(monkeypatch, fail={"02.wav"})
+    res = convert_folder(d, "ffmpeg", ".wav")
+    assert res["converted"] == ["01.flac"]
+    assert [f["name"] for f in res["failed"]] == ["02.wav"]
+    assert sorted(os.listdir(d)) == ["01.flac", "02.wav"]
+
+
+def test_existing_same_name_flac_keeps_the_original(tmp_path, monkeypatch):
+    from app.utils.audio_convert import convert_folder
+    d = _folder(tmp_path, "song.wav")
+    flac = os.path.join(d, "song.flac")
+    open(flac, "wb").write(b"different")
+    calls = _fake_ffmpeg(monkeypatch)
+    res = convert_folder(d, "ffmpeg", ".wav")
+    assert calls == [] and res["converted"] == []
+    assert [f["name"] for f in res["failed"]] == ["song.wav"]
+    assert os.path.exists(os.path.join(d, "song.wav"))
+    assert open(flac, "rb").read() == b"different"
+
+
+def test_empty_output_counts_as_failure(tmp_path, monkeypatch):
+    import subprocess
+    from app.utils.audio_convert import convert_folder
+    d = _folder(tmp_path, "01.wav")
+
+    def run(cmd, **kw):
+        open(cmd[-1], "wb").close()
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr("app.utils.audio_convert.subprocess.run", run)
+    res = convert_folder(d, "ffmpeg", ".wav")
+    assert res["converted"] == [] and os.path.exists(os.path.join(d, "01.wav"))
+    assert not os.path.exists(os.path.join(d, "01.flac"))
+
+
+def test_convert_is_allowed_for_a_library_folder(app, client, tmp_path, monkeypatch):
+    """No bring-in-only gate server-side: a folder inside LIBRARY_ROOT converts."""
+    import app.api.quality as q
+    lib = tmp_path / "lib"
+    show = lib / "Artist" / "show"
+    show.mkdir(parents=True)
+    (show / "01.wav").write_bytes(b"\0" * 16)
+    app.config["LIBRARY_ROOT"] = str(lib)
+    app.config["IMPORT_ROOTS"] = [str(lib)]
+    monkeypatch.setattr("app.utils.audio_convert.probe_decoder", lambda *a: True)
+    monkeypatch.setattr(q.threading, "Thread",
+                        lambda **kw: type("T", (), {"start": lambda self: None})())
+    r = client.post("/api/quality/convert", json={"folder_path": str(show)})
+    assert r.status_code == 202
+    q._CONVERT_JOBS.clear()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # The endpoint's guards
 # ═════════════════════════════════════════════════════════════════════════════
-def test_convert_refuses_a_folder_outside_the_import_roots(app, client, tmp_path):
+def test_convert_outside_the_import_roots_is_allowed_for_the_admin(app, client, tmp_path):
+    # Ryan, 2026-10-02: IMPORT_ROOTS no longer binds the admin. The answer may
+    # still be 400 (no ffmpeg in the test env) but never a roots refusal.
     d = _folder(tmp_path, "01.shn")
     r = client.post("/api/quality/convert", json={"folder_path": d})
-    # 403 (outside the roots) is the expected answer for a tmp path; what must
-    # NOT happen is a job starting on an arbitrary directory.
-    assert r.status_code in (400, 403)
-    assert "job_id" not in (r.get_json() or {})
+    assert r.status_code != 403
 
 
 def test_convert_refuses_a_missing_folder(app, client):

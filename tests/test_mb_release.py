@@ -492,9 +492,9 @@ def test_enqueue_followups_queues_mb_release_only_for_studio(app, seeded_ids):
     from app.api import ingest as ingest_api
     import queue as _queue
 
-    ingest_api._ANALYSIS_Q = _queue.Queue()
+    ingest_api._LANES = {"audio": ingest_api._Lane(), "net": ingest_api._Lane()}
     ingest_api._QUEUED_KEYS = set()
-    ingest_api._PENDING_BY_KIND = {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0}
+    ingest_api._PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
     orig_worker = ingest_api._ANALYSIS_STATE["worker"]
     ingest_api._ANALYSIS_STATE["worker"] = True
     try:

@@ -20,9 +20,9 @@ from app.utils import musicbrainz as _mb
 @pytest.fixture(autouse=True)
 def _isolate_followup_queue(monkeypatch):
     """
-    _ANALYSIS_Q / _QUEUED_KEYS / _PENDING_BY_KIND are module-level state in
+    _LANES / _QUEUED_KEYS / _PENDING_BY_KIND are module-level state in
     app/api/ingest.py, shared by the whole test process -- including any
-    earlier test that made a REAL _enqueue_analysis() call and left the
+    earlier test that made a REAL _enqueue() call and left the
     single background worker thread running against an app object that
     test's own fixture has since torn down (its sqlite file unlinked). That
     thread is blocked inside a blocking Queue.get() on the OLD queue object;
@@ -36,11 +36,11 @@ def _isolate_followup_queue(monkeypatch):
     spinning up ANOTHER real thread against this test's own (about to be
     torn down) app object.
     """
-    monkeypatch.setattr(ingest_api, "_ANALYSIS_Q", queue.Queue())
+    monkeypatch.setattr(ingest_api, "_LANES",
+                        {"audio": ingest_api._Lane(), "net": ingest_api._Lane()})
     monkeypatch.setattr(ingest_api, "_QUEUED_KEYS", set())
     monkeypatch.setattr(ingest_api, "_PENDING_BY_KIND",
-                        {"analysis": 0, "score": 0, "mb_artist": 0, "mb_release": 0,
-                         "images": 0, "signals": 0})
+                        {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0})
     orig_worker = ingest_api._ANALYSIS_STATE["worker"]
     ingest_api._ANALYSIS_STATE["worker"] = True
     yield
@@ -58,6 +58,33 @@ def _neutralize_seed(seeded_ids):
     artist = _db.session.get(Artist, seeded_ids["artist_id"])
     artist.mb_status = "matched"
     _db.session.commit()
+
+
+def _lane_sizes():
+    return {n: l.qsize() for n, l in ingest_api._LANES.items()}
+
+
+def _fake_score(features, source=None):
+    return {"listening_quality": 55.5, "score_tone": 1.0, "score_noise": 1.0,
+            "score_dynamics": 1.0, "technical_deduction": 0.0,
+            "technical_issues": [], "flags": [], "score_version": "test"}
+
+
+def _drain(lane=None):
+    """Synchronously pop and handle every queued item (no worker thread)."""
+    out = []
+    for name, ln in list(ingest_api._LANES.items()):
+        if lane and name != lane:
+            continue
+        while True:
+            try:
+                kind, item_id = ln.get_nowait()
+            except queue.Empty:
+                break
+            ingest_api._QUEUED_KEYS.discard((kind, item_id))
+            out.append((kind, item_id))
+            ingest_api._handle_item(kind, item_id)
+    return out
 
 
 def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
@@ -80,46 +107,29 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
     _db.session.commit()
 
     counts = ingest_api.enqueue_followups()
-    # "images" (S8, independent review v1): every recording in this test's DB
-    # (rec_scored, rec_a, rec_b, and the neutralized seeded recording) has
-    # zero RecordingImage rows and a null images_checked_at, so all four are
-    # queued for the artwork backfill regardless of their "score" status.
-    # "signals" (Ingest Field Resolver spec v1 section 8): all four are LIVE
-    # recordings with no track carrying a non_music_score yet, so all four
-    # are queued for that too, independent of "score".
-    assert counts == {"score": 2, "mb_artist": 1, "mb_release": 0, "images": 4, "signals": 4}
+    # All four live recordings (rec_scored, rec_a, rec_b, the seeded one) have
+    # no track with a non_music_score yet, so each is owed an audio pass even
+    # though rec_scored already has a score; "images": none was scanned.
+    assert counts == {"audio": 4, "mb_artist": 1, "mb_release": 0, "images": 4}
 
-    queued = set(ingest_api._QUEUED_KEYS)
-    assert queued == {
-        ("score", rec_a.id), ("score", rec_b.id),
-        ("mb_artist", artist_never.id),
-        ("images", rec_scored.id), ("images", rec_a.id), ("images", rec_b.id),
-        ("images", seeded_ids["recording_id"]),
-        ("signals", rec_scored.id), ("signals", rec_a.id), ("signals", rec_b.id),
-        ("signals", seeded_ids["recording_id"]),
-    }
-    assert not any(kind == "analysis" for kind, _ in queued)
-    assert ingest_api._ANALYSIS_Q.qsize() == 11
+    all_recs = [rec_scored, rec_a, rec_b]
+    expected = ({("audio", r.id) for r in all_recs} | {("audio", seeded_ids["recording_id"])}
+                | {("images", r.id) for r in all_recs} | {("images", seeded_ids["recording_id"])}
+                | {("mb_artist", artist_never.id)})
+    assert set(ingest_api._QUEUED_KEYS) == expected
+    assert _lane_sizes() == {"audio": 4, "net": 5}
 
-    # A second call: everything above is still sitting in the queue, so
-    # nothing new gets enqueued.
+    # A second call: everything above is still waiting, nothing new.
     again = ingest_api.enqueue_followups()
-    assert again == {"score": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "signals": 0}
-    assert ingest_api._ANALYSIS_Q.qsize() == 11
+    assert again == {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+    assert _lane_sizes() == {"audio": 4, "net": 5}
 
-    # Stub the scorer chain so this test needs no real audio on disk --
-    # _handle_score imports these two names fresh from app.utils.quality
-    # inside its own body, so patching the module attributes is enough.
-    def _fake_extract(folder_abs):
-        return {"fake": True}
-
-    def _fake_score(features, source=None):
-        return {"listening_quality": 55.5, "score_tone": 1.0, "score_noise": 1.0,
-                "score_dynamics": 1.0, "technical_deduction": 0.0,
-                "technical_issues": [], "flags": [], "score_version": "test"}
-
-    monkeypatch.setattr("app.utils.quality.extract_recording_features", _fake_extract)
+    # Stub the scorer chain and the librosa pass so no real audio is needed.
+    monkeypatch.setattr("app.utils.quality.extract_recording_features",
+                        lambda folder_abs: {"fake": True})
     monkeypatch.setattr("app.utils.quality.score_recording", _fake_score)
+    monkeypatch.setattr("app.utils.analysis.analyse_recording",
+                        lambda rec, root, sess, reanalyze=True: (0, []))
 
     mb_calls = []
     orig_try_match = _mb.try_match_artist
@@ -130,24 +140,8 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
 
     monkeypatch.setattr(_mb, "try_match_artist", _spy_try_match)
 
-    drained = []
-    while True:
-        try:
-            kind, item_id = ingest_api._ANALYSIS_Q.get_nowait()
-        except Exception:
-            break
-        ingest_api._QUEUED_KEYS.discard((kind, item_id))
-        drained.append((kind, item_id))
-        ingest_api._handle_item(kind, item_id)
-
-    assert set(drained) == {
-        ("score", rec_a.id), ("score", rec_b.id),
-        ("mb_artist", artist_never.id),
-        ("images", rec_scored.id), ("images", rec_a.id), ("images", rec_b.id),
-        ("images", seeded_ids["recording_id"]),
-        ("signals", rec_scored.id), ("signals", rec_a.id), ("signals", rec_b.id),
-        ("signals", seeded_ids["recording_id"]),
-    }
+    drained = _drain()
+    assert set(drained) == expected
 
     assert _db.session.query(RecordingQuality).filter_by(recording_id=rec_a.id).first() is not None
     assert _db.session.query(RecordingQuality).filter_by(recording_id=rec_b.id).first() is not None
@@ -161,119 +155,222 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
     assert artist_never.mb_status is None
 
 
-def test_studio_recording_never_enqueued_and_handler_skips_it(app, seeded_ids):
-    """
-    Studio recordings are never scored (2026-09-27) -- enqueue_followups()
-    must never queue "score" for one, and _handle_score() must return
-    immediately (no RecordingQuality row written) even if something else
-    enqueued it anyway.
-    """
+def _live(perf_id, path, kind="live"):
+    rec = Recording(performance_id=perf_id, folder_path=path,
+                    is_complete=True, is_official=False, kind=kind)
+    _db.session.add(rec)
+    _db.session.commit()
+    return rec
+
+
+def test_studio_recording_gets_no_audio_followup_and_handler_skips_it(app, monkeypatch, seeded_ids):
+    """Albums are never auto-scored or analysed: not enqueued, and the handler
+    refuses one even if something queued it anyway."""
     _neutralize_seed(seeded_ids)
     perf_id = seeded_ids["performance_id"]
-
-    studio_rec = Recording(performance_id=perf_id, folder_path="X/StudioAlbum",
-                           is_complete=True, is_official=False, kind="studio")
-    live_rec = Recording(performance_id=perf_id, folder_path="X/LiveShow",
-                         is_complete=True, is_official=False, kind="live")
-    _db.session.add_all([studio_rec, live_rec])
-    _db.session.commit()
+    studio_rec = _live(perf_id, "X/StudioAlbum", kind="studio")
+    live_rec = _live(perf_id, "X/LiveShow")
 
     counts = ingest_api.enqueue_followups()
-    assert counts["score"] == 1
-    assert ("score", studio_rec.id) not in ingest_api._QUEUED_KEYS
-    assert ("score", live_rec.id) in ingest_api._QUEUED_KEYS
+    assert counts["audio"] == 2          # the seeded live recording + live_rec
+    assert ("audio", studio_rec.id) not in ingest_api._QUEUED_KEYS
+    assert ("audio", live_rec.id) in ingest_api._QUEUED_KEYS
+    # The studio recording still gets its MusicBrainz release follow-up.
+    assert ("mb_release", studio_rec.id) in ingest_api._QUEUED_KEYS
 
-    # Even called directly (as if something had queued it anyway), the
-    # handler's own guard must refuse to score a studio recording.
-    ingest_api._handle_score(studio_rec.id)
+    def _boom(*a, **k):
+        raise AssertionError("audio pass must not run for a studio recording")
+    monkeypatch.setattr(ingest_api, "run_audio_pass", _boom)
+    ingest_api._handle_audio(studio_rec.id)
     assert _db.session.query(RecordingQuality).filter_by(recording_id=studio_rec.id).first() is None
 
 
-def test_score_handler_no_audio_reachable_writes_no_row(app, seeded_ids):
-    """
-    A recording whose folder is not on disk (moved, deleted, unmounted
-    volume): extract_recording_features() returns {"error": ...} and
-    _handle_score() must leave the recording unscored rather than writing a
-    junk RecordingQuality row.
-    """
+def test_audio_handler_scores_when_no_current_score(app, monkeypatch, seeded_ids):
     _neutralize_seed(seeded_ids)
-    perf_id = seeded_ids["performance_id"]
-    rec = Recording(performance_id=perf_id, folder_path="Nowhere/Nothing",
-                    is_complete=True, is_official=False)
-    _db.session.add(rec)
+    rec = _live(seeded_ids["performance_id"], "X/NeedsScore")
+    calls = []
+    monkeypatch.setattr(ingest_api, "run_audio_pass",
+                        lambda rid, score=True, reanalyze=False: calls.append((rid, score))
+                        or {"errors": []})
+    ingest_api._handle_audio(rec.id)
+    assert calls == [(rec.id, True)]
+
+
+def test_audio_handler_skips_scoring_but_runs_signals_and_analysis(app, monkeypatch, seeded_ids):
+    """Review First scored the folder pre-ingest: the score part is skipped,
+    the signal and Full analysis still run."""
+    _neutralize_seed(seeded_ids)
+    rec = _live(seeded_ids["performance_id"], "X/AlreadyScored")
+    _db.session.add(RecordingQuality(recording_id=rec.id, listening_quality=71.0))
     _db.session.commit()
 
-    ingest_api._handle_score(rec.id)
+    def _no_score(folder_abs):
+        raise AssertionError("must not rescore a recording with a current score")
+    monkeypatch.setattr("app.utils.quality.extract_recording_features", _no_score)
+    signal_calls, analysis_calls = [], []
+    monkeypatch.setattr(ingest_api, "_store_non_music_signal",
+                        lambda tracks, root, folder: signal_calls.append(folder))
+    monkeypatch.setattr("app.utils.analysis.analyse_recording",
+                        lambda r, root, sess, reanalyze=True: analysis_calls.append(r.id) or (0, []))
 
+    ingest_api._handle_audio(rec.id)
+    assert signal_calls == ["X/AlreadyScored"]
+    assert analysis_calls == [rec.id]
+
+
+def test_audio_pass_one_failing_part_does_not_stop_the_others(app, monkeypatch, seeded_ids):
+    _neutralize_seed(seeded_ids)
+    rec = _live(seeded_ids["performance_id"], "X/PartlyBroken")
+
+    def _boom(folder_abs):
+        raise RuntimeError("decode exploded")
+    monkeypatch.setattr("app.utils.quality.extract_recording_features", _boom)
+    ran = []
+    monkeypatch.setattr(ingest_api, "_store_non_music_signal",
+                        lambda tracks, root, folder: ran.append("signals"))
+    monkeypatch.setattr("app.utils.analysis.analyse_recording",
+                        lambda r, root, sess, reanalyze=True: ran.append("analysis") or (3, []))
+
+    res = ingest_api.run_audio_pass(rec.id, score=True)
+    assert res["score"] == "failed"
+    assert res["signals"] == "ok" and res["analysis"] == "ok"
+    assert ran == ["signals", "analysis"]
+    assert any("decode exploded" in e for e in res["errors"])
+
+    # And the other direction: signals blowing up still lets analysis run.
+    ran.clear()
+    monkeypatch.setattr("app.utils.quality.extract_recording_features",
+                        lambda folder_abs: {"error": "no audio"})
+
+    def _sig_boom(tracks, root, folder):
+        raise RuntimeError("flatness exploded")
+    monkeypatch.setattr(ingest_api, "_store_non_music_signal", _sig_boom)
+    res = ingest_api.run_audio_pass(rec.id, score=True)
+    assert res["signals"] == "failed" and res["analysis"] == "ok"
+    assert ran == ["analysis"]
+
+
+def test_audio_pass_unreachable_audio_writes_no_score_row(app, seeded_ids):
+    """Folder not on disk: no junk RecordingQuality row, nothing raised."""
+    _neutralize_seed(seeded_ids)
+    rec = _live(seeded_ids["performance_id"], "Nowhere/Nothing")
+    ingest_api._handle_audio(rec.id)
     assert _db.session.query(RecordingQuality).filter_by(recording_id=rec.id).first() is None
 
 
-def test_score_handler_never_calls_checksum_verify(app, monkeypatch, seeded_ids):
-    """
-    MD5 is never automatic (Ryan, 2026-09-27): the follow-up "score" handler
-    must do the Listening Quality score and the non-music signal ONLY. It
-    must never reach for app.api.recordings._rematch_and_verify_checksums --
-    that call only exists on the manual Re-validate / verify-checksums
-    action on View Recording.
-    """
+def test_audio_handler_never_calls_checksum_verify(app, monkeypatch, seeded_ids):
+    """MD5 is never automatic (Ryan, 2026-09-27)."""
     _neutralize_seed(seeded_ids)
-    perf_id = seeded_ids["performance_id"]
-    rec = Recording(performance_id=perf_id, folder_path="X/NoChecksumCall",
-                    is_complete=True, is_official=False)
-    _db.session.add(rec)
-    _db.session.commit()
-
-    from app.utils import quality as quality_utils
-    monkeypatch.setattr(quality_utils, "extract_recording_features",
-                        lambda folder_abs: {"error": "no audio on disk"})
-
-    called = []
+    rec = _live(seeded_ids["performance_id"], "X/NoChecksumCall")
+    from app.api import recordings as recordings_api
 
     def _boom(*a, **kw):
-        called.append((a, kw))
-        raise AssertionError("checksum verify must never run from the score handler")
-
-    from app.api import recordings as recordings_api
+        raise AssertionError("checksum verify must never run from the audio pass")
     monkeypatch.setattr(recordings_api, "_rematch_and_verify_checksums", _boom)
+    ingest_api._handle_audio(rec.id)
 
-    ingest_api._handle_score(rec.id)
 
-    assert called == []
+def test_legacy_kinds_dedupe_to_audio_and_do_not_crash(app, monkeypatch, seeded_ids):
+    _neutralize_seed(seeded_ids)
+    rec = _live(seeded_ids["performance_id"], "X/Legacy")
+    app_obj = app
+    for kind in ("analysis", "score", "signals"):
+        ingest_api._enqueue(app_obj, kind, rec.id)
+    assert ingest_api._QUEUED_KEYS == {("audio", rec.id)}
+    assert _lane_sizes() == {"audio": 1, "net": 0}
+
+    calls = []
+    monkeypatch.setattr(ingest_api, "run_audio_pass",
+                        lambda rid, score=True, reanalyze=False: calls.append(rid) or {"errors": []})
+    ingest_api._handle_item("score", rec.id)   # a straggler of an old kind
+    ingest_api._handle_item("nonsense", 1)     # unknown kinds are logged, not raised
+    assert calls == [rec.id]
+
+
+def test_small_run_followups_come_before_a_large_runs_backlog(app, seeded_ids):
+    _neutralize_seed(seeded_ids)
+    perf_id = seeded_ids["performance_id"]
+    big = BulkIngestRun(root="/big", status="running")
+    small = BulkIngestRun(root="/small", status="running")
+    _db.session.add_all([big, small])
+    _db.session.flush()
+    big_recs = [_live(perf_id, f"Big/{i}") for i in range(4)]
+    small_rec = _live(perf_id, "Small/0")
+    for i, r in enumerate(big_recs):
+        _db.session.add(BulkIngestItem(run_id=big.id, rel_path=f"Big/{i}",
+                                       status="ingested", recording_id=r.id))
+    _db.session.add(BulkIngestItem(run_id=small.id, rel_path="Small/0",
+                                   status="ingested", recording_id=small_rec.id))
+    _db.session.commit()
+
+    ingest_api.enqueue_followups()
+    # The small run's recording was ingested LAST (highest id) but is served
+    # first from the audio lane; the big run then drains in arrival order.
+    order = []
+    lane = ingest_api._LANES["audio"]
+    while lane.qsize():
+        order.append(lane.get_nowait()[1])
+    big_ids = [r.id for r in big_recs]
+    # (the seeded recording belongs to no run, so it is first of all)
+    assert order[0] == seeded_ids["recording_id"]
+    assert order[1] == small_rec.id
+    assert [i for i in order if i in big_ids] == big_ids
+
+    # A recording with no run at all goes ahead of everything.
+    ingest_api._enqueue(app, "audio", 999001, run_id=big.id)
+    ingest_api._enqueue(app, "audio", 999002, run_id=None)
+    assert lane.get_nowait() == ("audio", 999002)
+
+
+def test_do_confirm_has_no_inline_musicbrainz_or_signal_call(app, monkeypatch, seeded_ids):
+    """Add Recording's single form (bulk=False) used to run both inline."""
+    import numpy as np
+    import soundfile as sf
+    import tempfile, os
+
+    _neutralize_seed(seeded_ids)
+
+    def _boom(*a, **k):
+        raise AssertionError("must be a follow-up, never inline")
+    monkeypatch.setattr(_mb, "try_match_artist", _boom)
+    monkeypatch.setattr(_mb, "try_match_release", _boom)
+    monkeypatch.setattr(ingest_api, "_store_non_music_signal", _boom)
+    monkeypatch.setattr("app.utils.artists._mb_try_match", _boom, raising=False)
+
+    src = tempfile.mkdtemp()
+    sf.write(os.path.join(src, "01.flac"), np.zeros(4410, dtype="int16"), 44100, format="FLAC")
+    root = tempfile.mkdtemp()
+    app.config["LIBRARY_ROOT"] = root
+    data = {
+        "source_folder_path": src, "artist_name": "Brand New Inline Band",
+        "performance_date": "1977-05-08", "venue_name": "V", "is_complete": True,
+        "tracks": [{"track_number": 1, "title": "T", "filename": "01.flac"}],
+    }
+    result = ingest_api._do_confirm(data, 1)
+    artist = _db.session.get(Artist, result["artist_id"])
+    assert artist.mb_status is None      # left for the mb_artist follow-up
+    ingest_api.enqueue_followups()
+    assert ("mb_artist", artist.id) in ingest_api._QUEUED_KEYS
+    assert ("audio", result["recording_id"]) in ingest_api._QUEUED_KEYS
 
 
 def test_pipeline_reports_pending_by_kind(app, seeded_ids):
     app.config["LOGIN_DISABLED"] = True
     _neutralize_seed(seeded_ids)
-    perf_id = seeded_ids["performance_id"]
-    rec = Recording(performance_id=perf_id, folder_path="X/PipelineCheck",
-                    is_complete=True, is_official=False)
-    _db.session.add(rec)
-    _db.session.commit()
+    _live(seeded_ids["performance_id"], "X/PipelineCheck")
 
     counts = ingest_api.enqueue_followups()
-    assert counts["score"] == 1
-    # "images" (S8): this new recording and the neutralized seeded recording
-    # both have zero RecordingImage rows and a null images_checked_at, so
-    # both are queued for the artwork backfill regardless of "score".
-    assert counts["images"] == 2
-    # "signals" (Ingest Field Resolver spec v1 section 8): both are LIVE
-    # recordings with no track carrying a non_music_score yet.
-    assert counts["signals"] == 2
+    assert counts["audio"] == 2 and counts["images"] == 2
 
-    client = app.test_client()
-    resp = client.get("/api/ingest/pipeline")
-    assert resp.status_code == 200
-    body = resp.get_json()
+    body = app.test_client().get("/api/ingest/pipeline").get_json()
     by_kind = body["analysis"]["pending_by_kind"]
-    assert by_kind["score"] == 1
+    assert by_kind["audio"] == 2
     assert by_kind["mb_artist"] == 0
-    assert by_kind["analysis"] == 0
     assert by_kind["images"] == 2
-    assert by_kind["signals"] == 2
-    assert body["analysis"]["pending"] == 5
+    assert body["analysis"]["pending"] == 4
 
 
-def test_bulk_ingest_run_completion_enqueues_score_for_every_ingested_recording(app, tmp_path, seeded_ids):
+def test_bulk_ingest_run_completion_enqueues_audio_for_every_ingested_recording(app, tmp_path, seeded_ids):
     import numpy as np
     import soundfile as sf
     from mutagen.flac import FLAC
@@ -323,4 +420,4 @@ def test_bulk_ingest_run_completion_enqueues_score_for_every_ingested_recording(
     assert item is not None
     assert item.recording_id is not None
 
-    assert ("score", item.recording_id) in ingest_api._QUEUED_KEYS
+    assert ("audio", item.recording_id) in ingest_api._QUEUED_KEYS

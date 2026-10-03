@@ -10,8 +10,6 @@ there is no point spending it on a recording that is not worth keeping.
 Routes:
     POST /api/quality/analyze          start a background analysis job
     GET  /api/quality/analyze/<job_id> poll progress + results so far
-    POST /api/quality/triage           accept / reject / reset one folder
-    POST /api/quality/triage-bulk      accept or reject many at once
     GET  /api/quality/staging          rows for one scanned directory
     GET  /api/quality/recording/<id>   permanent score for one recording
 
@@ -42,6 +40,7 @@ from app.extensions import db
 from app.models.artist import Artist
 from app.utils import quality_store as qs
 from app.utils.ingest import resolve_shows_in_dir
+from app.utils.paths import within_import_roots
 
 bp = Blueprint("quality", __name__)
 
@@ -663,15 +662,15 @@ def _attach_concerns(results):
             first = errored_fp_files[0]
             more = f" (+{n - 1} more)" if n > 1 else ""
             concerns.append({"level": "error", "kind": "checksum_scan_failed",
-                             "text": f"Could not read checksum file {first}{more} — "
-                                     f"its tracks could not be verified"})
+                             "text": f"Could not read checksum file {first}{more}. "
+                                     f"Its tracks could not be verified"})
 
         # Technical issues are already computed by the engine; surfacing the
         # phase/dead-channel class here means they are visible without opening
         # a tab, which is the whole point of a concerns line.
         for issue in ((r.get("interp") or {}).get("issues") or []):
             concerns.append({"level": "warn", "kind": "technical",
-                             "text": f"{issue.get('issue')} — {issue.get('detail')}"})
+                             "text": f"{issue.get('issue')}: {issue.get('detail')}"})
 
         # Possible duplicate. Needs artist + year; without both there is
         # nothing meaningful to match on and we say nothing rather than guess.
@@ -694,7 +693,7 @@ def _attach_concerns(results):
                         more  = f" (+{len(hits) - 1} more)" if len(hits) > 1 else ""
                         concerns.append({
                             "level": "warn", "kind": "duplicate",
-                            "text": f"Possible duplicate — library already has "
+                            "text": f"Possible duplicate: library already has "
                                     f"{act} on {where}{more}",
                             "recording_id": p.recordings[0].id,
                         })
@@ -749,6 +748,7 @@ def _bulk_ingest_review_reasons():
     stored there comma-joined; this is where it gets split back apart.
     """
     from app.models.bulk_ingest import BulkIngestItem, BulkIngestRun
+    from app.utils import bulk_ingest_run
 
     out = {}
     rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestItem.reason, BulkIngestRun.root)
@@ -757,7 +757,8 @@ def _bulk_ingest_review_reasons():
             .all())
     for rel_path, reason, root in rows:
         reasons = [r for r in (reason or "").split(",") if r]
-        out[qs.norm_path(os.path.join(root, rel_path))] = reasons
+        base = bulk_ingest_run.item_base(root)
+        out[qs.norm_path(os.path.normpath(os.path.join(base, rel_path)))] = reasons
     return out
 
 
@@ -796,35 +797,6 @@ def _attach_convertible(results):
 # ═════════════════════════════════════════════════════════════════════════════
 # Triage
 # ═════════════════════════════════════════════════════════════════════════════
-@bp.route("/verify-fingerprints", methods=["POST"])
-@login_required
-def verify_fingerprints():
-    """
-    POST /api/quality/verify-fingerprints  { "folder_path": "..." }
-
-    The DEEP pass — hashes whole files, so MD5 fingerprints finally get a real
-    verdict. Deliberately explicit and per-folder rather than part of triage:
-    a 400 MB show means reading 400 MB off the NAS, and doing that for every
-    card in a queue would turn a 2-second triage into minutes (Ryan's call,
-    2026-08-02). FFP/ST5 already verified for free during triage.
-
-    Synchronous. One folder's audio is a bounded read, and the UI disables the
-    button while it runs — a background job here would be more machinery than
-    the wait justifies.
-    """
-    data = request.get_json() or {}
-    folder = (data.get("folder_path") or "").strip()
-    if not folder or not os.path.isdir(folder):
-        return jsonify({"error": f"Folder not found: {folder!r}"}), 400
-    if not _within_import_roots(folder):
-        return jsonify({"error": "Outside the permitted import roots"}), 403
-    try:
-        return jsonify(_fingerprint_audit(folder, deep=True))
-    except Exception as e:  # noqa: BLE001
-        _tb.print_exc()
-        return jsonify({"error": str(e)}), 500
-
-
 # ═════════════════════════════════════════════════════════════════════════════
 # Format conversion — SHN / WAV → FLAC
 # ═════════════════════════════════════════════════════════════════════════════
@@ -838,7 +810,27 @@ def verify_fingerprints():
 _CONVERT_JOBS = {}
 
 
-def _run_convert_job(job_id, app, folder, ffmpeg, ext):
+def converting_here(path):
+    """True while a convert job is running over this folder. Callers that
+    must not touch the folder (ingest, move) check it under download_queue
+    .FS_LOCK, the same lock convert_folder_start registers a job under, so a
+    convert cannot start between the check and the move."""
+    key = qs.norm_path(path)
+    return any(j.get("status") == "running" and j.get("folder") == key
+               for j in list(_CONVERT_JOBS.values()))
+
+
+def convert_progress(path):
+    """{done,total,current} of the running convert job on this folder, else None."""
+    key = qs.norm_path(path)
+    for j in list(_CONVERT_JOBS.values()):
+        if j.get("status") == "running" and j.get("folder") == key:
+            return {"done": j.get("done", 0), "total": j.get("total", 0),
+                    "current": j.get("current")}
+    return None
+
+
+def _run_convert_job(job_id, app, folder, ffmpeg, exts):
     job = _CONVERT_JOBS[job_id]
     try:
         with app.app_context():
@@ -848,7 +840,7 @@ def _run_convert_job(job_id, app, folder, ffmpeg, ext):
                 job["done"], job["total"], job["current"] = done, total, name
 
             res = convert_folder(
-                folder, ffmpeg, ext,
+                folder, ffmpeg, exts,
                 on_progress=progress,
                 should_cancel=lambda: job.get("cancel"),
             )
@@ -867,54 +859,81 @@ def _run_convert_job(job_id, app, folder, ffmpeg, ext):
         job["error"] = str(e)
 
 
+class ConvertRefused(Exception):
+    """A convert job cannot start; carries the message and HTTP status."""
+    def __init__(self, message, status):
+        super().__init__(message)
+        self.status = status
+
+
+def register_convert_job(folder):
+    """
+    Validate `folder` and register a running convert job for it.  Returns
+    (job_id, what, ffmpeg); raises ConvertRefused otherwise.  Shared by the
+    row Convert endpoint and Convert All.
+
+    The format is decided HERE, by re-reading the folder, never taken from the
+    client.  The converting/downloading checks and the registration share
+    FS_LOCK, so neither an ingest/move nor a download can slip in between.
+    """
+    from app.utils.audio_convert import detect_convertible, probe_decoder
+    from app.utils.transcode import resolve_ffmpeg
+    from app.utils import download_queue as dq
+
+    if not folder or not os.path.isdir(folder):
+        raise ConvertRefused(f"Folder not found: {folder!r}", 400)
+    if not _within_import_roots(folder):
+        raise ConvertRefused("Outside the permitted import roots", 403)
+
+    what = detect_convertible(folder)
+    if not what:
+        raise ConvertRefused("Nothing in this folder needs converting.", 400)
+
+    ffmpeg = resolve_ffmpeg()
+    for ext in what["exts"]:
+        if not probe_decoder(ffmpeg, ext):
+            # Named precisely, because the two causes need different answers
+            # from the user: no ffmpeg at all is an install, an ffmpeg without
+            # the Shorten decoder is a different build.
+            raise ConvertRefused(
+                f"This copy of ffmpeg ({ffmpeg}) cannot decode "
+                f"{ext} files. Install ffmpeg, or a build with "
+                f"the shorten decoder, and try again.", 503)
+
+    job_id = uuid.uuid4().hex
+    with dq.FS_LOCK:
+        if converting_here(folder):
+            raise ConvertRefused("This folder is still converting.", 409)
+        if dq.downloading_here(folder):
+            raise ConvertRefused("This folder is still downloading.", 409)
+        _CONVERT_JOBS[job_id] = {
+            "status": "running", "done": 0, "total": what["count"],
+            "current": None, "error": None, "folder": qs.norm_path(folder),
+            "kind": what["kind"], "result": None, "cancel": False,
+        }
+    return job_id, what, ffmpeg
+
+
 @bp.route("/convert", methods=["POST"])
 @login_required
 def convert_folder_start():
     """
     POST /api/quality/convert  { "folder_path": "..." }
 
-    Convert a Shorten or WAV folder to FLAC in place, keeping the originals in
-    a `_originals/` subfolder. Returns a job id to poll.
-
-    The format is decided HERE, by re-reading the folder, and never taken from
-    the client — the row's `convertible` field is a rendering hint that may be
-    a minute old, and acting on a stale one would run a WAV job over a folder
-    somebody has since replaced.
+    Convert a folder's unsupported audio (SHN, WAV, AIFF, APE, WV) to FLAC in
+    place; each original is deleted once its FLAC is verified. Returns a job
+    id to poll. Allowed for library folders too: the person clicks it
+    explicitly.
     """
-    from app.utils.audio_convert import detect_convertible, probe_decoder
-    from app.utils.transcode import resolve_ffmpeg
-
     data = request.get_json() or {}
     folder = (data.get("folder_path") or "").strip()
-    if not folder or not os.path.isdir(folder):
-        return jsonify({"error": f"Folder not found: {folder!r}"}), 400
-    if not _within_import_roots(folder):
-        return jsonify({"error": "Outside the permitted import roots"}), 403
-
-    what = detect_convertible(folder)
-    if not what:
-        return jsonify({"error": "Nothing in this folder needs converting."}), 400
-
-    ffmpeg = resolve_ffmpeg()
-    if not probe_decoder(ffmpeg, what["ext"]):
-        # Named precisely, because the two causes need different answers from
-        # the user: no ffmpeg at all is an install, an ffmpeg without the
-        # Shorten decoder is a different build.
-        return jsonify({
-            "error": f"This copy of ffmpeg ({ffmpeg}) cannot decode "
-                     f"{what['ext']} files. Install ffmpeg, or a build with "
-                     f"the shorten decoder, and try again."
-        }), 503
-
-    job_id = uuid.uuid4().hex
-    _CONVERT_JOBS[job_id] = {
-        "status": "running", "done": 0, "total": what["count"],
-        "current": None, "error": None, "folder": qs.norm_path(folder),
-        "kind": what["kind"], "result": None, "cancel": False,
-    }
+    try:
+        job_id, what, ffmpeg = register_convert_job(folder)
+    except ConvertRefused as e:
+        return jsonify({"error": str(e)}), e.status
     threading.Thread(
         target=_run_convert_job,
-        args=(job_id, current_app._get_current_object(), folder, ffmpeg, what["ext"]),
+        args=(job_id, current_app._get_current_object(), folder, ffmpeg, what["exts"]),
         daemon=True,
     ).start()
     return jsonify({"job_id": job_id, "total": what["count"],
@@ -976,57 +995,7 @@ def convert_cancel(job_id):
 
 def _within_import_roots(path):
     """Same containment rule browse() applies — this endpoint reads audio."""
-    roots = [os.path.realpath(r) for r in current_app.config.get("IMPORT_ROOTS", [])]
-    real  = os.path.realpath(path)
-    return any(real == r or real.startswith(r + os.sep) for r in roots)
-
-
-@bp.route("/triage", methods=["POST"])
-@login_required
-def triage():
-    """
-    POST /api/quality/triage
-      { "folder_path": "...", "status": "accepted" | "rejected" | "pending" }
-    """
-    data = request.get_json() or {}
-    folder_path = (data.get("folder_path") or "").strip()
-    status = (data.get("status") or "").strip()
-
-    if not folder_path:
-        return jsonify({"error": "folder_path is required"}), 400
-    try:
-        row = qs.set_triage(folder_path, status)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    if row is None:
-        return jsonify({"error": "No analysis for that folder"}), 404
-    return jsonify(qs.serialize(row))
-
-
-@bp.route("/triage-bulk", methods=["POST"])
-@login_required
-def triage_bulk():
-    """
-    POST /api/quality/triage-bulk
-      { "folder_paths": [...], "status": "accepted" }
-
-    For "accept everything above N" — the common case on a clean bulk run.
-    """
-    data = request.get_json() or {}
-    paths = data.get("folder_paths") or []
-    status = (data.get("status") or "").strip()
-
-    if status not in qs.TRIAGE_STATUSES:
-        return jsonify({"error": f"unknown triage status {status!r}"}), 400
-
-    updated = 0
-    for p in paths:
-        row = qs.get_staging(p)
-        if row is not None:
-            row.triage_status = status
-            updated += 1
-    db.session.commit()
-    return jsonify({"updated": updated})
+    return within_import_roots(path)
 
 
 @bp.route("/browse", methods=["GET"])
@@ -1082,15 +1051,14 @@ def browse():
     # else to go. It stops there: above the app folder is the whole disk, which
     # is what made this a filesystem browser.
     app_root = os.path.dirname(import_dir.rstrip(os.sep)) or import_dir
-    roots = [os.path.realpath(r) for r in current_app.config.get("IMPORT_ROOTS", [])]
     # ~/Downloads/Trellis (2026-10-01) has ~/Downloads above it, which is not
     # an import root; stop "Up" at the folder itself rather than offering a 403.
     _ra = os.path.realpath(app_root)
-    if not any(_ra == r or _ra.startswith(r + os.sep) for r in roots):
+    if not within_import_roots(_ra):
         app_root = import_dir
     nav_root = os.path.realpath(app_root) if os.path.isdir(app_root) else None
     real = os.path.realpath(path)
-    if not any(real == r or real.startswith(r + os.sep) for r in roots):
+    if not within_import_roots(real):
         return jsonify({"error": "Outside the permitted import roots"}), 403
     # WALK UP RATHER THAN FAIL (2026-08-07). A remembered path routinely stops
     # existing: ingesting the last show of an act moves its folder into the
@@ -1111,7 +1079,7 @@ def browse():
         # Re-check the roots guard for wherever we landed — climbing must not
         # become a way out of IMPORT_ROOTS.
         real = os.path.realpath(path)
-        if not any(real == r or real.startswith(r + os.sep) for r in roots):
+        if not within_import_roots(real):
             return jsonify({"error": "Outside the permitted import roots"}), 403
     try:
         entries = sorted(os.listdir(path), key=lambda s: s.lower())
@@ -1177,8 +1145,17 @@ def browse():
         "dirs": dirs,
         "files": files,
         "here_has_audio": any(e.lower().endswith(AUDIO_EXT) for e in entries),
+        # The picker's Import Automatically / Review First default depends on
+        # placement, and the client has no other way to know where the library is.
+        "in_library": _in_library(path),
         "shortcuts": _shortcuts(),
     })
+
+
+def _in_library(path):
+    # Lazy import: bulk_ingest_run pulls in the ingest stack.
+    from app.utils.bulk_ingest_run import is_in_library
+    return bool(is_in_library(path))
 
 
 def _artist_status_map(names):
@@ -1315,6 +1292,61 @@ def _shortcuts():
     return out
 
 
+def move_folder_to_triage(folder_path, destination):
+    """The Move action's whole job, shared by POST /api/quality/move and the
+    Bulk Ingest item move: returns (payload, http_status). Moves USER FILES, so
+    every guard below stays in one place -- see the route's docstring."""
+    triage_dirs = current_app.config.get("TRIAGE_DIRS", {})
+    if destination not in triage_dirs:
+        return {"error": f"Unknown destination {destination!r}; "
+                                 f"expected one of {sorted(triage_dirs)}"}, 400
+
+    src = os.path.realpath(folder_path)
+    if not os.path.isdir(src):
+        return {"error": f"Not a folder: {folder_path!r}"}, 400
+    if os.path.ismount(src) or os.path.dirname(src) == src:
+        return {"error": "Refusing to move a mount point or root"}, 400
+
+    if not within_import_roots(src):
+        return {"error": "Folder is outside the permitted import roots"}, 403
+
+    dest_root = triage_dirs[destination]
+    try:
+        os.makedirs(dest_root, exist_ok=True)
+    except OSError as e:
+        return {"error": f"Cannot create {dest_root}: {e}"}, 500
+
+    base = os.path.basename(src)
+    target = os.path.join(dest_root, base)
+    n = 2
+    while os.path.exists(target):
+        target = os.path.join(dest_root, f"{base} ({n})")
+        n += 1
+
+    import shutil
+    from app.utils import download_queue as dq
+    # Check and move under one lock, so the download worker cannot create
+    # the folder between the two (2026-10-02).
+    with dq.FS_LOCK:
+        if dq.downloading_here(src):
+            return {"error": "This folder is still downloading."}, 409
+        try:
+            shutil.move(src, target)
+        except OSError as e:
+            return {"error": f"Move failed: {e}"}, 500
+
+    # Keep the analysis, repointed at the new location: re-scanning Backlog or
+    # Working later shows the existing score instead of paying to redo it.
+    row = qs.get_staging(folder_path)
+    if row is not None:
+        row.folder_path = qs.norm_path(target)
+        row.source_dir = qs.norm_path(dest_root)
+        row.triage_status = qs.TRIAGE_REJECTED
+        db.session.commit()
+
+    return {"moved_to": target, "destination": destination}, 200
+
+
 @bp.route("/move", methods=["POST"])
 @login_required
 def move_out_of_queue():
@@ -1337,59 +1369,10 @@ def move_out_of_queue():
         filesystem root
     """
     data = request.get_json() or {}
-    folder_path = (data.get("folder_path") or "").strip()
-    destination = (data.get("destination") or "").strip().lower()
-
-    triage_dirs = current_app.config.get("TRIAGE_DIRS", {})
-    if destination not in triage_dirs:
-        return jsonify({"error": f"Unknown destination {destination!r}; "
-                                 f"expected one of {sorted(triage_dirs)}"}), 400
-
-    src = os.path.realpath(folder_path)
-    if not os.path.isdir(src):
-        return jsonify({"error": f"Not a folder: {folder_path!r}"}), 400
-    if os.path.ismount(src) or os.path.dirname(src) == src:
-        return jsonify({"error": "Refusing to move a mount point or root"}), 400
-
-    roots = [os.path.realpath(r) for r in current_app.config.get("IMPORT_ROOTS", [])]
-    if not any(src == r or src.startswith(r + os.sep) for r in roots):
-        return jsonify({"error": "Folder is outside the permitted import roots"}), 403
-
-    dest_root = triage_dirs[destination]
-    try:
-        os.makedirs(dest_root, exist_ok=True)
-    except OSError as e:
-        return jsonify({"error": f"Cannot create {dest_root}: {e}"}), 500
-
-    base = os.path.basename(src)
-    target = os.path.join(dest_root, base)
-    n = 2
-    while os.path.exists(target):
-        target = os.path.join(dest_root, f"{base} ({n})")
-        n += 1
-
-    import shutil
-    from app.utils import download_queue as dq
-    # Check and move under one lock, so the download worker cannot create
-    # the folder between the two (2026-10-02).
-    with dq.FS_LOCK:
-        if dq.downloading_here(src):
-            return jsonify({"error": "This folder is still downloading."}), 409
-        try:
-            shutil.move(src, target)
-        except OSError as e:
-            return jsonify({"error": f"Move failed: {e}"}), 500
-
-    # Keep the analysis, repointed at the new location: re-scanning Backlog or
-    # Working later shows the existing score instead of paying to redo it.
-    row = qs.get_staging(folder_path)
-    if row is not None:
-        row.folder_path = qs.norm_path(target)
-        row.source_dir = qs.norm_path(dest_root)
-        row.triage_status = qs.TRIAGE_REJECTED
-        db.session.commit()
-
-    return jsonify({"moved_to": target, "destination": destination})
+    payload, status = move_folder_to_triage(
+        (data.get("folder_path") or "").strip(),
+        (data.get("destination") or "").strip().lower())
+    return jsonify(payload), status
 
 
 @bp.route("/staging", methods=["GET"])

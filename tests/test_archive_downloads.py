@@ -575,6 +575,18 @@ def test_imported_library_falls_back_to_home_downloads(runmod, app, tmp_path, mo
     assert app.config["IMPORT_DIR"] == str(tmp_path / "mine")
 
 
+def test_saved_downloads_folder_that_is_the_library_is_ignored(runmod, app, tmp_path, monkeypatch):
+    # Older installs saved the library root as Downloads; Add Recordings must
+    # not open on the collection.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    runmod._apply_imported_library(lib, import_dir=str(lib))
+    assert app.config["IMPORT_DIR"] == str(home / "Downloads" / "Trellis")
+
+
 def test_get_working_folders_reports_effective(runmod, app, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(runmod, "_read_trellis_root_marker",
@@ -598,7 +610,22 @@ def test_add_recordings_browse_opens_at_downloads(dl, app, tmp_path, monkeypatch
     r = dl.client.get("/api/quality/browse")
     assert r.status_code == 200
     assert r.get_json()["path"] == str(want) and want.is_dir()
-    assert r.get_json()["nav_root"] == str(want)
+    # The admin is not bound by IMPORT_ROOTS (2026-10-02), so "Up" reaches the
+    # folder holding Downloads/Trellis, as it does for a created library.
+    assert r.get_json()["nav_root"] == str(want.parent)
+
+
+def test_browse_reports_in_library(dl, app, tmp_path):
+    lib = tmp_path / "lib"
+    (lib / "sub").mkdir(parents=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    app.config["LIBRARY_ROOT"] = str(lib)
+    app.config["IMPORT_ROOTS"] = [str(lib), str(out)]
+    app.config["IMPORT_DIR"] = str(out)
+    _login(dl.client)
+    assert dl.client.get(f"/api/quality/browse?path={lib / 'sub'}").get_json()["in_library"] is True
+    assert dl.client.get(f"/api/quality/browse?path={out}").get_json()["in_library"] is False
 
 
 # -- review fixes (2026-10-01) -----------------------------------------------
@@ -732,6 +759,4 @@ def test_ingest_refuses_folder_still_downloading(dl):
     folder = str(dl.root / "busyingest")
     r = dl.client.post("/api/ingest/confirm",
                        json={"source_folder_path": folder, "artist_name": "X"})
-    assert r.status_code == 409
-    r = dl.client.post("/api/ingest/auto-confirm", json={"path": folder})
     assert r.status_code == 409

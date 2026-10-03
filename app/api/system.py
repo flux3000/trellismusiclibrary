@@ -39,7 +39,7 @@ _MESSAGES = {
     "volume_missing": "The library drive is not mounted. Audio and images are "
                       "unavailable until it reconnects.",
     "not_mounted":    "A folder is sitting where the library drive should be "
-                      "mounted — the share has probably mounted under a "
+                      "mounted. The share has probably mounted under a "
                       "different name. Audio and images are unavailable.",
     "unreadable":     "The library drive is mounted but its contents cannot be "
                       "read. Check the share on the NAS.",
@@ -76,7 +76,7 @@ def library_recheck():
 # the real image instead of a cached placeholder.
 _PLACEHOLDER_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" '
-    'role="img" aria-label="Image unavailable — library drive disconnected">'
+    'role="img" aria-label="Image unavailable, library drive disconnected">'
     '<rect width="100" height="100" fill="#1c1c1e"/>'
     '<path d="M32 62l14-18 10 12 7-8 9 14z" fill="#3a3a3d"/>'
     '<circle cx="63" cy="37" r="5" fill="#3a3a3d"/>'

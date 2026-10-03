@@ -41,6 +41,19 @@ class BulkIngestRun(db.Model):
     # normally, so the UI can say WHY it stopped instead of just "not done".
     last_error = db.Column(db.Text, nullable=True)
 
+    # 'auto' (Import Automatically) ingests every clean folder as it is found;
+    # 'hold' (Review First) analyzes each folder and parks it as 'ready' until
+    # a person ingests it. Chosen at start (default: auto for a source inside
+    # the library, hold for anywhere else) and never changed afterwards.
+    mode = db.Column(db.String(8), nullable=False,
+                     default="auto", server_default="auto")
+
+    # JSON object of the "applies to every recording below" blanket values
+    # (artist, venue, venue_id, city, state, country, event, source, lineage,
+    # notes). Applied at ingest time in either mode, OVERWRITING what the scan
+    # inferred for the fields it sets. NULL = nothing staged.
+    applied_json = db.Column(db.Text, nullable=True)
+
     items = db.relationship("BulkIngestItem", back_populates="run",
                             cascade="all, delete-orphan")
 
@@ -72,6 +85,10 @@ class BulkIngestItem(db.Model):
     # review       -> needs a human decision before it can proceed
     # skipped      -> deliberately not ingested (e.g. already in the library)
     # failed       -> bulk_ingest attempted and errored
+    # ready        -> Review First: analyzed (and scored, if live), waiting for
+    #                 a person to ingest it. Nothing is in the library yet.
+    # moved        -> sent to Backlog/Workshop instead of ingested. Terminal;
+    #                 not in the Queue and not in the library.
     status = db.Column(db.String(16), nullable=False,
                        default="pending", server_default="pending", index=True)
 
@@ -110,6 +127,12 @@ class BulkIngestItem(db.Model):
     duplicate_of = db.Column(db.Integer,
                              db.ForeignKey("recording.id", ondelete="SET NULL"),
                              nullable=True)
+
+    # A person asked for this ready/review item to be ingested. The worker (the
+    # only thing that touches folders) picks requested items up and clears the
+    # flag when it is done, whatever the outcome.
+    ingest_requested = db.Column(db.Boolean, nullable=False,
+                                 default=False, server_default="0")
 
     updated_at = db.Column(db.DateTime(timezone=True),
                            default=lambda: datetime.now(timezone.utc),

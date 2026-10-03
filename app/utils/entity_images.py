@@ -109,7 +109,7 @@ def handle_upload(parent, model, images_dir, url_prefix):
     for f in files:
         ext = os.path.splitext(secure_filename(f.filename))[1].lower()
         if ext not in ALLOWED_IMAGE_EXTS:
-            errors.append(f"{f.filename}: unsupported type '{ext}' — use jpg, png, or webp")
+            errors.append(f"{f.filename}: unsupported type '{ext}'. Use jpg, png, or webp")
             continue
         # Random basename, not the uploaded one: two files called cover.jpg from
         # different folders must not collide, and the original name carries no

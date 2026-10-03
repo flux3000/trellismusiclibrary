@@ -149,6 +149,35 @@ def test_an_unrecognized_choice_falls_back_to_the_safe_default(api, app):
     assert fh["placement"] == "artist"
 
 
+# ── Mode default follows the welcome-screen answer (2026-10-02) ─────────────
+
+def test_a_new_library_defaults_to_organize(api, app, tmp_path, monkeypatch):
+    import run
+    monkeypatch.setattr(run, "_write_trellis_root_marker", lambda r: None)
+    monkeypatch.setattr(run, "_apply_trellis_root", lambda r: None)
+    monkeypatch.setattr(api, "_create_owner_account", lambda u: None)
+
+    r = api.confirm_trellis_root(str(tmp_path), "ryan")
+
+    assert r["ok"] is True
+    assert node_settings.get_file_handling()["file_handling_mode"] == "organize"
+
+
+def test_an_existing_library_defaults_to_keep(api, app, tmp_path, monkeypatch):
+    import run
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    monkeypatch.setattr(run, "_write_marker", lambda d: None)
+    monkeypatch.setattr(run, "_apply_imported_library", lambda *a: None)
+    monkeypatch.setattr(run, "_maybe_start_bulk_ingest_from_marker", lambda: None)
+    monkeypatch.setattr(api, "_create_owner_account", lambda u: None)
+
+    r = api.confirm_existing_library(str(lib), "ryan")
+
+    assert r["ok"] is True
+    assert node_settings.get_file_handling()["file_handling_mode"] == "keep"
+
+
 # ── Bulk Ingest on first run (spec 1.9/4, chunk 7a) ─────────────────────────
 
 def test_marker_with_ingest_existing_starts_one_running_run(api, app, tmp_path, monkeypatch):
@@ -172,6 +201,8 @@ def test_marker_with_ingest_existing_starts_one_running_run(api, app, tmp_path, 
     assert len(runs) == 1
     assert runs[0].status == "running"
     assert runs[0].root == str(root)
+    # First run scans and waits for the person; it never ingests on its own.
+    assert runs[0].mode == "hold"
 
 
 def test_marker_without_ingest_existing_starts_no_run(api, app, tmp_path, monkeypatch):
@@ -213,3 +244,50 @@ def test_a_reachable_default_root_no_longer_skips_first_run(api, app, tmp_path, 
     monkeypatch.setattr(run.Config, "LIBRARY_ROOT", str(reachable))
     assert run._looks_reachable(str(reachable)) is True
     assert run.resolve_trellis_root_and_patch_config() is False
+
+
+# ── Welcome screen (2026-10-02 redesign) ────────────────────────────────────
+
+def test_welcome_page_markup(api):
+    import run
+    html = run._setup_html()
+    assert "undefined" not in html
+    assert "—" not in html
+    assert "Start Trellis</button>" in html
+    for gone in ("Select Library Location", "Launch Trellis and Build Library",
+                 "Start Trellis and Build Library", "Select Downloads Folder",
+                 "Import an Existing Library", "Create a New Library"):
+        assert gone not in html
+    for label in ("Library", "Downloads", "Workshop", "Backlog"):
+        assert f'<span class="row-label">{label}' in html
+    assert html.count("(optional)") == 2
+    assert "max-width: 240px" in html
+
+
+def test_import_persists_workshop_and_backlog(api, app, tmp_path, monkeypatch):
+    import run
+    lib, dl, ws, bl = (tmp_path / n for n in ("lib", "dl", "ws", "bl"))
+    for p in (lib, dl, ws, bl):
+        p.mkdir()
+    saved = {}
+    monkeypatch.setattr(run, "_write_marker", lambda d: saved.update(d))
+    monkeypatch.setattr(run, "_maybe_start_bulk_ingest_from_marker", lambda: None)
+    monkeypatch.setattr(api, "_create_owner_account", lambda u: None)
+    monkeypatch.setattr(api, "_apply_file_handling_choice", lambda a, b: None)
+
+    r = api.confirm_existing_library(str(lib), "ryan", str(dl), str(bl), str(ws), None, None)
+
+    assert r["ok"] is True
+    assert saved["workshop_dir"] == str(ws)
+    assert saved["backlog_dir"] == str(bl)
+    assert saved["import_dir"] == str(dl)
+    assert app.config["TRIAGE_DIRS"] == {"backlog": str(bl), "workshop": str(ws)}
+
+
+def test_import_refuses_downloads_inside_library(api, tmp_path, monkeypatch):
+    import run
+    lib = tmp_path / "lib"
+    (lib / "dl").mkdir(parents=True)
+    monkeypatch.setattr(run, "_write_marker", lambda d: pytest.fail("wrote marker"))
+    r = api.confirm_existing_library(str(lib), "ryan", str(lib / "dl"))
+    assert r["ok"] is False

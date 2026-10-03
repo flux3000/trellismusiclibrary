@@ -190,26 +190,15 @@ const App = (() => {
 
   // Ingest wizard state — persists across step renders
   const ingest = {
-    step:       'source',  // 'source' | 'triage' | 'review' | 'success' — unified ingestion flow
-                           // (2026-07-30): source picker -> Listening Quality triage -> metadata
-                           // review (renders as the '#/batch' stage, see the `batch`/`lq` state
-                           // below) -> ingest. (Confirm step removed 2026-07-15 — review's own
-                           // "Add Recording →" button now submits directly)
+    step:       'source',  // 'source' | 'review' | 'success'
     folderPath: null,
     scan:       null,      // full scan API response
     form: {},              // resolved metadata (populated on review step)
     tracks:     [],        // array of { track_number, title, set, duration, filename }
-    // True when this review was opened via Bulk Import's "Review →" (see
-    // _batchOpenReview) rather than a fresh Add Recording nav — drives the
-    // standardized back-link (top of the review page) and the post-submit
-    // redirect target (Ryan, 2026-07-15: bulk reviewers need a fast way back
-    // to the queue, not a forced detour through the new recording's page).
-    fromBatch:  false,
-    // True when this review was opened from the Listening Quality triage
-    // queue's "Review" action. Distinct from fromBatch because the two return
-    // to different places — triage returns to '#/ingest' in its triage step,
-    // which is the only place that knows the queue's state.
-    fromTriage: false,
+    // Set to a run's import page hash ('#/bulk-ingest/<id>') when this review
+    // was opened from that page's per-item Review. Back and Add & Return land
+    // there instead of the picker or the new recording's page.
+    returnTo:   null,
   }
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -833,7 +822,6 @@ const App = (() => {
     }
   }
 
-
   // Venue autocomplete — searches venues, shows location, offers a create row.
   // onPick receives {id|null, name}.
   function wireVenuePickerDropdown(inputEl, dropEl, onPick) {
@@ -957,7 +945,7 @@ const App = (() => {
         <span class="artist-picker-wrap mg-add-picker" data-role="${role}">
           <input type="text" class="mg-role-input" data-role="${role}" autocomplete="off"
                  aria-label="Add ${label === 'Members' ? 'a member' : 'a guest'}"
-                 placeholder="+ Add ${label === 'Members' ? 'member' : 'guest'}" />
+                 placeholder="+ Add ${label === 'Members' ? 'Member' : 'Guest'}" />
           <div class="artist-dropdown mg-role-dd" data-role="${role}" style="display:none"></div>
         </span>
       </div>`
@@ -1611,7 +1599,7 @@ const App = (() => {
     if (libraryState.remotes.length === 0) {
       host.innerHTML = `
         <button class="btn btn-ghost btn-sm lib-join-btn" id="lib-join-empty">
-          ${icon('plus', 'lib-join-ic')}Join a library
+          ${icon('plus', 'lib-join-ic')}Join a Library
         </button>`
       host.querySelector('#lib-join-empty')
           .addEventListener('click', openJoinLibraryModal)
@@ -1643,7 +1631,7 @@ const App = (() => {
         </div>`).join('')
         + `<div class="lib-select-join" id="lib-select-join">
              <span class="lib-select-icon">${icon('plus')}</span>
-             <span>Join a library…</span>
+             <span>Join a Library…</span>
            </div>`
       menu.style.display = 'block'
 
@@ -1715,7 +1703,7 @@ const App = (() => {
     wrap.className = 'modal-overlay'
     wrap.innerHTML = `
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="join-title">
-        <div class="modal-header"><h3 id="join-title">Join a library</h3></div>
+        <div class="modal-header"><h3 id="join-title">Join a Library</h3></div>
         <div class="modal-body">
           <p class="join-note">Paste the invite you were sent. It is an address
             and a code joined by a <span class="join-hash">#</span>.</p>
@@ -1754,7 +1742,7 @@ const App = (() => {
       // the address it came with. The server cannot guess the address, so the
       // error would otherwise be a confusing "not a usable address".
       if (!invite.includes('#')) {
-        return fail('That looks like just the code. The invite needs the address too — "https://their-library#CODE".')
+        return fail('That looks like just the code. The invite needs the address too: "https://their-library#CODE".')
       }
 
       go.disabled = true; go.textContent = 'Joining…'
@@ -1932,13 +1920,17 @@ const App = (() => {
     // Bulk Ingest (spec 1.9/4, chunk 7c) — local only, never in a shared
     // library (a peer's own machine has whatever bulkIngest status it has;
     // nothing here is about MY library when I'm looking at theirs).
-    const bulkIngestActive = !remote && state.bulkIngest
-                           && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
+    // The entry shows while ANY listed run exists (runs() lists only unfinished
+    // runs and Review First runs whose Queue still has ready/review items) and
+    // links to the most recent one. Add Recordings follows the same target.
+    const biHash = remote ? null : _biOpenRunHash()
+    // Rows waiting across the listed runs (ready + needs review); the Add
+    // Recordings button carries the count.
+    const biWaiting = remote ? 0 : _biWaitingCount()
     const homeHashUrl = remote ? '#/' : homeHash()
     nav.innerHTML = `
       <div class="nav-scroll">
-        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="#/ingest"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings</a>` : ''}
-        ${bulkIngestActive ? `<a class="nav-item" data-nav="bulk-ingest" href="#/bulk-ingest">Adding recordings</a>` : ''}
+        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="${biHash || '#/ingest'}"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings${biWaiting ? `<span class="nav-add-count">${biWaiting}</span>` : ''}</a>` : ''}
         <a class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate" data-nav="library" href="${homeHashUrl}">${esc(shelfTitle)}</a>
         <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('library', 'nav-ic')}Live Recordings</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
@@ -2562,14 +2554,14 @@ const App = (() => {
         label: 'Find a free photo', sub: 'Wikimedia Commons', glyph: '☁',
         href: 'https://commons.wikimedia.org/w/index.php?search=' +
               encodeURIComponent(q) + '&title=Special:MediaSearch&type=image',
-        title: 'Search Wikimedia Commons — freely licensed images only. ' +
+        title: 'Search Wikimedia Commons. Freely licensed images only. ' +
                'Opens in a new tab; save one and drop it here.',
       },
       {
         label: 'Search the web', sub: 'Google Images', glyph: '🔍',
         href: 'https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q),
         title: 'Open a Google Images search in a new tab. No licence is ' +
-               'checked — mind what you keep.',
+               'checked. Mind what you keep.',
       },
     ]
   }
@@ -2837,7 +2829,7 @@ const App = (() => {
         if (s.from_env) {
           input.disabled = true
           saveBtn.disabled = true
-          hint.textContent = 'Set via the SHARE_BASE_URL environment variable, which always wins — unset it there to edit this from here.'
+          hint.textContent = 'Set via the SHARE_BASE_URL environment variable, which always wins. Unset it there to edit this from here.'
         }
       } catch (e) { /* non-fatal — field just stays empty */ }
       const commit = async () => {
@@ -2870,7 +2862,7 @@ const App = (() => {
           <div class="peer-row-meta">${
             !p.is_active ? 'Revoked'
             : p.has_joined ? `${p.grant_count} collection${p.grant_count === 1 ? '' : 's'}`
-            : p.pending_invites ? 'Invited — not joined'
+            : p.pending_invites ? 'Invited, not joined'
             : 'Not invited'
           }</div>
         </div>`).join('')
@@ -2904,7 +2896,7 @@ const App = (() => {
                </span>`}
         </div>
         <div class="pp-desc pp-editable ${p.contact_note ? '' : 'pp-empty'}" id="peer-note" title="Click to edit">${
-          p.contact_note ? esc(p.contact_note) : 'Add a note — who is this?'}</div>
+          p.contact_note ? esc(p.contact_note) : 'Add a note: who is this?'}</div>
 
         <div class="pp-block">
           <h2 class="pp-block-title">Access</h2>
@@ -2923,7 +2915,7 @@ const App = (() => {
             // box instead of six.
             const full = collections.find(c => c.is_system)
             if (!full) {
-              return `<div class="peer-empty">No Full Library collection in this database — run <span class="join-hash">scripts/migrate_add_system_collections.py</span>.</div>`
+              return `<div class="peer-empty">No Full Library collection in this database. Run <span class="join-hash">scripts/migrate_add_system_collections.py</span>.</div>`
             }
             const on = granted.has(full.id)
             return `
@@ -2940,7 +2932,7 @@ const App = (() => {
 
         <div class="pp-block">
           <h2 class="pp-block-title">Invite</h2>
-          <div class="pp-block-hint">Generates a one-time code. It is shown once and stored only as a hash — if it's lost, mint a new one.</div>
+          <div class="pp-block-hint">Generates a one-time code. It is shown once and stored only as a hash. If it's lost, mint a new one.</div>
           <div class="ai-assist-cta">
             <button class="btn btn-primary btn-sm" id="peer-invite" ${p.is_active ? '' : 'disabled'}>
               ${p.has_joined ? 'New invite' : 'Create invite'}</button>
@@ -2970,7 +2962,7 @@ const App = (() => {
         },
       })
       makeInlineEditable(document.getElementById('peer-note'), {
-        multiline: true, placeholder: 'Add a note — who is this?',
+        multiline: true, placeholder: 'Add a note: who is this?',
         get: () => p.contact_note || '',
         onSave: async v => { v = v.trim(); p.contact_note = v; await API.peers.update(p.id, { contact_note: v || null }) },
       })
@@ -3027,7 +3019,7 @@ const App = (() => {
           if (live && !confirm(
                 'Cancel this unused invite?\n\n' +
                 'The code stops working immediately. Anyone who has already ' +
-                'joined your library is unaffected — this is not the same as ' +
+                'joined your library is unaffected. This is not the same as ' +
                 'revoking access.')) return
           btn.disabled = true
           try {
@@ -3080,7 +3072,7 @@ const App = (() => {
     }
 
     onAdminClick('peer-new', async () => {
-      const name = prompt('Peer name — your own label for this person:')
+      const name = prompt('Peer name (your own label for this person):')
       if (!name || !name.trim()) return
       try {
         const created = await API.peers.create({ name: name.trim() })
@@ -3114,7 +3106,7 @@ const App = (() => {
   const renderArtistForm = () => renderCreateForm({
     title: 'New artist', backHash: '#/artists', backLabel: 'Artists',
     invalidate: 'artists',
-    intro: 'The act that took the stage — the billing on the poster, not an '
+    intro: 'The act that took the stage. The billing on the poster, not an '
          + 'individual musician. Add people to it as Members afterwards.',
     fields: [
       { id: 'name', label: 'Artist name', required: true },
@@ -3150,7 +3142,7 @@ const App = (() => {
 
   const renderGenreForm = () => renderCreateForm({
     title: 'New genre', backHash: '#/genres', backLabel: 'Genres', invalidate: 'genres',
-    intro: 'Genres are a fixed vocabulary — nothing in the app creates one '
+    intro: 'Genres are a fixed vocabulary. Nothing in the app creates one '
          + 'implicitly, so this form is the only door in.',
     fields: [
       { id: 'name',  label: 'Genre name', required: true },
@@ -3167,7 +3159,7 @@ const App = (() => {
 
   const renderEventForm = () => renderCreateForm({
     title: 'New event', backHash: '#/events', backLabel: 'Events', invalidate: 'events',
-    intro: 'A named container for several shows — a festival, or a tour run. '
+    intro: 'A named container for several shows (a festival, or a tour run). '
          + 'Attach performances to it from the recordings themselves.',
     fields: [
       { id: 'name',  label: 'Event name', required: true },
@@ -3506,7 +3498,7 @@ const App = (() => {
           </div>`
         }).join('')
           + (total > items.length
-              ? `<div class="col-add-none">${total - items.length} more match — narrow the search.</div>`
+              ? `<div class="col-add-none">${total - items.length} more match. Narrow the search.</div>`
               : '')
         drop.style.display = 'block'
 
@@ -4026,7 +4018,6 @@ const App = (() => {
       </a>`
   }
 
-
   function colTileHtml(c) {
     const count = c.recording_count || 0
     return `
@@ -4036,8 +4027,6 @@ const App = (() => {
         <div class="col-tile-count">${count} recording${count === 1 ? '' : 's'}</div>
       </a>`
   }
-
-
 
   // Reroll counter for Recommended's "Show me three more" — deliberately kept
   // in memory only (module scope), not persisted: the default draw is stable
@@ -4510,7 +4499,7 @@ const App = (() => {
     if (!rows.length) {
       listEl.innerHTML = `<div class="empty-state" style="min-height:120px">
            <div class="empty-title">Nothing matches these filters</div>
-           <div class="empty-sub">Widen one of them — quality is the narrowest, since only
+           <div class="empty-sub">Widen one of them. Quality is the narrowest, since only
              ${_browseRows.filter(r => r.quality).length} of ${_browseRows.length} recordings are graded.</div>
          </div>`
       _browseSetMoreFurniture(false)
@@ -4846,10 +4835,15 @@ const App = (() => {
         window.location.hash = '#/albums'
         return
       }
+      // Welcome copy is Ryan's (2026-10-02). Top-aligned, not centred: it is
+      // the first thing a new library shows, so it reads as a greeting.
       setMainHTML(`
-        <div class="empty-state">
-          <div class="empty-title">Click Add Recordings to begin importing music into your library.</div>
-          <div class="empty-sub">Trellis reads FLAC, MP3 and WAV. SHN files are converted to FLAC when you review them.</div>
+        <div class="welcome-empty">
+          <h1 class="welcome-empty-title">Welcome to Trellis!</h1>
+          <p class="welcome-empty-body">Add some <a href="#/ingest">Recordings</a> to get started,
+            or check out the <a href="#/archive/lma">${icon('landmark', 'welcome-empty-ic')}Live Music Archive</a>
+            to find stuff to download.</p>
+          <p class="welcome-empty-body">Got an invite to join a friend's library? Choose "Join a Library" up top.</p>
         </div>`)
       return
     }
@@ -5247,7 +5241,7 @@ const App = (() => {
 
             <div class="pp-block">
               <h2 class="pp-block-title">MusicBrainz</h2>
-              <div class="pp-block-hint">Links this act to its MusicBrainz entry, so future ingests know where to look for information about it.</div>
+              <div class="pp-block-hint">Links this act to its MusicBrainz entry, so future imports know where to look for information about it.</div>
               <div id="pp-mb"></div>
             </div>
 
@@ -5258,7 +5252,7 @@ const App = (() => {
                  seeing what the automated passes missed. -->
             <div class="pp-block">
               <h2 class="pp-block-title">Trusted sources</h2>
-              <div class="pp-block-hint">Sites worth trusting for this act specifically \u2014 a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and ingest jobs.</div>
+              <div class="pp-block-hint">Sites worth trusting for this act specifically: a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and import jobs.</div>
               <div class="pp-resources" id="pp-resources"></div>
             </div>` },
         { id: 'photos',     label: 'Photos', count: photoCount || null,
@@ -5459,13 +5453,13 @@ const App = (() => {
       const single = member.stints.length <= 1
       box.innerHTML = `
         <div class="pp-stint-editor-head">
-          <span class="pp-stint-editor-title">Stint dates — <b>${esc(member.name)}</b></span>
+          <span class="pp-stint-editor-title">Stint dates: <b>${esc(member.name)}</b></span>
           <span class="pp-stint-editor-close" title="Close">${icon('x')}</span>
         </div>
         <div class="pp-stint-rows">
           ${member.stints.map(s => `
             <div class="pp-stint-row" data-stint-id="${s.id}">
-              ${isUnbounded(s) ? '<span class="pp-stint-always">Always a member — leave blank, or set dates for a specific tenure</span>' : ''}
+              ${isUnbounded(s) ? '<span class="pp-stint-always">Always a member. Leave blank, or set dates for a specific tenure</span>' : ''}
               <input type="number" class="pp-stint-input pp-s-y1" placeholder="Start yr" value="${s.start_year ?? ''}" style="width:64px" />
               <input type="number" class="pp-stint-input pp-s-m1" placeholder="mo" value="${s.start_month ?? ''}" min="1" max="12" style="width:38px" />
               <input type="number" class="pp-stint-input pp-s-d1" placeholder="day" value="${s.start_day ?? ''}" min="1" max="31" style="width:38px" />
@@ -5590,7 +5584,7 @@ const App = (() => {
           if (!val) return
           pendingUrl = /^https?:\/\//i.test(val) ? val : 'https://' + val
           input.value = ''
-          input.placeholder = 'Label (optional) — Enter to save'
+          input.placeholder = 'Label (optional). Enter to save'
           hint.textContent = pendingUrl
           return
         }
@@ -5729,7 +5723,7 @@ const App = (() => {
           <div class="pp-mb-searchrow">
             <input type="text" class="pp-mb-input" id="pp-mb-term"
                    value="${esc(artist.name)}" placeholder="Search term"
-                   title="Sent to MusicBrainz as the artist name — edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
+                   title="Sent to MusicBrainz as the artist name. Edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
             <button type="button" class="btn btn-primary btn-xs" id="pp-mb-lookup">
               ${mb.status === 'ambiguous' ? 'Choose a match' : 'Look up'}</button>
           </div>`
@@ -5807,7 +5801,7 @@ const App = (() => {
           <div class="pp-mb-searchrow">
             <input type="text" class="pp-mb-input" id="pp-mb-term"
                    value="${esc(query || artist.name)}" placeholder="Search term"
-                   title="Sent to MusicBrainz as the artist name — edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
+                   title="Sent to MusicBrainz as the artist name. Edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
             <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-lookup">Try again</button>
           </div>`
         document.getElementById('pp-mb-lookup').addEventListener('click', runMbLookup)
@@ -5821,7 +5815,7 @@ const App = (() => {
              results to read, not a choice to make, so people didn't realise a
              click was required to actually link the act. -->
         <div class="pp-mb-prompt">Click the right act to link it${
-          cands.length === 1 ? '' : ' — more than one goes by this name'}.</div>
+          cands.length === 1 ? '' : ' (more than one goes by this name)'}.</div>
         <!-- Same editable term as the empty state (Ryan, 2026-08-08) — if none
              of these candidates are right, revise and re-search without
              leaving the panel. "Search" only re-lists candidates (no
@@ -5829,7 +5823,7 @@ const App = (() => {
         <div class="pp-mb-searchrow pp-mb-searchrow-sm">
           <input type="text" class="pp-mb-input" id="pp-mb-term"
                  value="${esc(query || artist.name)}" placeholder="Search term"
-                 title="Sent to MusicBrainz as the artist name — edit and search again if none of these are right">
+                 title="Sent to MusicBrainz as the artist name. Edit and search again if none of these are right">
           <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-research">Search</button>
         </div>
         <div class="pp-mb-cands">
@@ -6115,7 +6109,7 @@ const App = (() => {
         const result = await pollDossierJob(artistId, job_id, t0)
         clearInterval(tick)
         msg.className = 'pp-sec-msg is-ok'
-        msg.textContent = 'Review each person below — nothing is added until you say so'
+        msg.textContent = 'Review each person below. Nothing is added until you say so'
         lineupResult = result
         renderLineupResults(result)
       } catch (e) {
@@ -6138,7 +6132,6 @@ const App = (() => {
       const lm = document.getElementById('pp-lineup-msg')
       if (lm) lm.textContent = 'Saved from an earlier run'
     }
-
 
     // Token range on the button's tooltip. Fetched rather than hardcoded so a
     // change to the search budget can't leave a stale promise in the UI, and
@@ -6274,7 +6267,7 @@ const App = (() => {
     if (!body) return
     // Read the question BEFORE the pane is overwritten by the spinner.
     const question = takeAiQuestion()
-    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web — this can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
+    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web. This can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
     const t0 = Date.now()
     try {
       const { job_id } = await API.ingest.aiAssistRecording(recordingId, { question })
@@ -6284,7 +6277,7 @@ const App = (() => {
     } catch (e) {
       const secs = Math.round((Date.now() - t0) / 1000)
       const msg = /no_api_key/.test(e.message)
-        ? 'No Anthropic API key set — add one in Settings.'
+        ? 'No Anthropic API key set. Add one in Settings.'
         : `AI Assist failed after ${secs}s: ${esc(e.message)}`
       body.innerHTML = `<div class="ai-assist-cta">
         <p class="ai-res-note" style="color:var(--red)">${msg}</p>
@@ -6306,7 +6299,7 @@ const App = (() => {
     tracks = tracks || []
     const withData = tracks.filter(t => t.checksum)
     if (!withData.length) {
-      return `<div class="info-panel-empty">No checksums on file for this recording yet — click Re-validate to check the library folder for a fingerprint file.</div>`
+      return `<div class="info-panel-empty">No checksums on file for this recording yet. Click Re-validate to check the library folder for a fingerprint file.</div>`
     }
     const mismatches = withData.filter(t => t.checksum.status === 'mismatch').length
     const summary = mismatches
@@ -6329,9 +6322,9 @@ const App = (() => {
         ${c.status === 'mismatch' ? `<div class="cksum-detail">expected ${esc(c.expected || '')}</div>` : ''}`
     }).join('')
     const md5Note = withData.some(t => t.checksum.type === 'md5')
-      ? `<p class="cksum-hint">MD5 checks the whole file, tags included — any tag edit (including Write Tags to Files) will flip a match to a mismatch. Expected, not corruption.</p>` : ''
+      ? `<p class="cksum-hint">MD5 checks the whole file, tags included. Any tag edit (including Write Tags to Files) will flip a match to a mismatch. Expected, not corruption.</p>` : ''
     const st5Note = withData.some(t => t.checksum.type === 'st5')
-      ? `<p class="cksum-hint">ST5 verification is best-effort — treat a mismatch as worth a second look, not a hard failure.</p>` : ''
+      ? `<p class="cksum-hint">ST5 verification is best-effort. Treat a mismatch as worth a second look, not a hard failure.</p>` : ''
     return `${summary}<div class="cksum-rows">${rows}</div>${md5Note}${st5Note}`
   }
 
@@ -6349,7 +6342,7 @@ const App = (() => {
         <span class="cksum-type">${esc((fp.type || '').toUpperCase())}</span>
         <span class="cksum-title">${esc(fp.filename)}</span>
       </div>`).join('')
-    return `<div class="cksum-summary">Found ${fingerprints.length} fingerprint file${fingerprints.length === 1 ? '' : 's'} — verified automatically against the copied files when you confirm.</div>
+    return `<div class="cksum-summary">Found ${fingerprints.length} fingerprint file${fingerprints.length === 1 ? '' : 's'}. Verified automatically against the copied files when you confirm.</div>
       <div class="cksum-rows">${rows}</div>`
   }
 
@@ -6506,7 +6499,7 @@ const App = (() => {
     const venueRows  = indexed.filter(x =>  AI_VENUE_FIELDS.includes(x.p.field))
     const propsHtml  = perfRows.map(x => row(x.p, x.i)).join('')
       + (venueRows.length
-          ? `<div class="ai-res-subhead">Venue details <span class="ai-res-subhead-note">— the venue record, not this show</span></div>${venueRows.map(x => row(x.p, x.i)).join('')}`
+          ? `<div class="ai-res-subhead">Venue details <span class="ai-res-subhead-note">(the venue record, not this show)</span></div>${venueRows.map(x => row(x.p, x.i)).join('')}`
           : '')
 
     const tt = r.track_titles || []
@@ -6669,7 +6662,7 @@ const App = (() => {
       const pane = document.getElementById('ai-results')
       if (!pane) return
       pane.innerHTML = `<div class="ai-assist-cta">
-        ${aiAskBoxHtml('Run again — a question here tells it where to look.')}
+        ${aiAskBoxHtml('Run again. A question here tells it where to look.')}
         <button class="btn btn-primary btn-sm iq-ai-btn" id="btn-ai-rerun-go">${icon('sparkles')} Research again</button>
       </div>`
       paintAiAskNote()
@@ -6935,11 +6928,11 @@ const App = (() => {
           <span class="hm-val hm-val--chip${qc}"${qa('source')}>${sourceBadge(rec.source) || '\u2014'}</span>
         </div>
         <div class="rec-sl-item">
-          <span class="mg-row-label">Source tag</span>
+          <span class="mg-row-label">Source Tag</span>
           <span class="hm-val${qc}"${qa('source_tag')}>${esc(rec.source_tag || '\u2014')}</span>
         </div>
         <div class="rec-sl-item">
-          <span class="mg-row-label">shnid</span>
+          <span class="mg-row-label">SHNID</span>
           <span class="hm-val mono${qc}"${qa('etree_shnid')}>${esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '\u2014')}</span>
         </div>` : ''}
         ${discsItemHtml}
@@ -6950,16 +6943,10 @@ const App = (() => {
         ${releaseItemHtml}
       </div>`
 
-    // Re-Analyze Tracks now lives in the Side Panel's tab strip with every
-    // other pane action (2026-08-21) — see the .pane-acts block below.
-    //
-    // Named "Tracks" deliberately: POST /reprocess re-runs the per-track librosa
-    // pass (waveform, spectrogram, the raw readings) and does NOT recompute the
-    // recording_quality row — there is no per-recording rescore endpoint today,
-    // only the bulk quality_store.rescore_stored(). A button labelled
-    // "Re-Analyze" sitting beside a quality verdict it silently leaves alone is
-    // exactly the kind of thing that costs an hour later, so the label says
-    // what it does.
+    // Analyze Audio lives in the Side Panel's tab strip with every other pane
+    // action (2026-08-21) — see the .pane-acts block below. POST /reprocess runs
+    // the whole audio pass (score, signals, librosa) for any recording, so the
+    // button and the quality verdict beside it can no longer disagree.
 
     // Which track to show by default: currently playing (if in this rec) else first track
     const firstTrack    = rec.tracks?.[0] ?? null
@@ -7007,7 +6994,7 @@ const App = (() => {
                  and after ingest would be the kind of small inconsistency
                  that makes people hesitate. -->
             ${rec.is_published === false ? `
-            <div class="actions-note">Out of the library — in Workshop or Backlog</div>` : `
+            <div class="actions-note">Out of the library, in Workshop or Backlog</div>` : `
             ${triageDests().length ? `
             <button class="actions-item" role="menuitem" data-act="move-toggle" aria-expanded="false">Move to ${chevronIcon()}</button>
             <div class="actions-submenu" id="rec-move-sub" hidden>
@@ -7194,7 +7181,7 @@ const App = (() => {
           <!-- Two rows: navigation, then actions (Ryan, 2026-08-21).
                Every pane used to repeat its own name in a .slide-pane-header
                directly under the tab that already said it, and each pane put
-               its action somewhere different — Re-Analyze inside the Quality
+               its action somewhere different — Analyze Audio inside the Quality
                report, AI Assist as a call-to-action block in its pane,
                Re-validate in a pane header, Write Tags all the way down in the
                page's bottom row. The pane headers are gone and every action now
@@ -7239,8 +7226,7 @@ const App = (() => {
               <button class="pane-act act-suppressed" id="btn-rec-save-info" data-for="info" hidden disabled>Save to File</button>
               <button class="pane-act" id="btn-info-edit" data-for="info">Edit File</button>` : ''}
               ${canEdit ? `
-              <button class="pane-act" id="btn-analyze-audio" data-for="quality"
-                      title="Re-runs per-track audio analysis (waveform, spectrogram, raw readings). Does not recompute the Listening Quality score.">Re-Analyze Tracks</button>` : ''}
+              <button class="pane-act" id="btn-analyze-audio" data-for="quality">Analyze Audio</button>` : ''}
               ${canEdit ? `
               <span class="pane-act-note${stagedCount > 0 ? '' : ' act-suppressed'}" id="tags-staged-note" data-for="filetags"
                     ${stagedCount > 0 ? '' : 'hidden'}>Edits not yet written to the files</span>
@@ -7665,7 +7651,7 @@ const App = (() => {
           <input type="number" class="rec-date-input" id="rec-d-y" placeholder="YYYY" value="${perf.start_year || ''}" min="1900" max="2099" style="width:52px" />
           <input type="number" class="rec-date-input" id="rec-d-m" placeholder="MM" value="${perf.start_month || ''}" min="1" max="12" style="width:38px" />
           <input type="number" class="rec-date-input" id="rec-d-d" placeholder="DD" value="${perf.start_day || ''}" min="1" max="31" style="width:38px" />
-          <a class="field-toggle-link" id="rec-toggle-end-date" href="#">${hasEnd ? '− End date' : '+ End date'}</a>
+          <a class="field-toggle-link" id="rec-toggle-end-date" href="#">${hasEnd ? '− End Date' : '+ End Date'}</a>
           <span id="rec-end-date-fields" style="display:${hasEnd ? 'inline-flex' : 'none'}; gap:3px; margin-left:4px">
             <input type="number" class="rec-date-input" id="rec-d-y2" placeholder="YYYY" value="${perf.end_year || ''}" min="1900" max="2099" style="width:52px" />
             <input type="number" class="rec-date-input" id="rec-d-m2" placeholder="MM" value="${perf.end_month || ''}" min="1" max="12" style="width:38px" />
@@ -7697,13 +7683,13 @@ const App = (() => {
           if (visible) {
             // Hide and clear — committing after this removes the end date.
             box.style.display = 'none'
-            e.currentTarget.textContent = '+ End date'
+            e.currentTarget.textContent = '+ End Date'
             document.getElementById('rec-d-y2').value = ''
             document.getElementById('rec-d-m2').value = ''
             document.getElementById('rec-d-d2').value = ''
           } else {
             box.style.display = 'inline-flex'
-            e.currentTarget.textContent = '− End date'
+            e.currentTarget.textContent = '− End Date'
             // Pre-fill from the start date on first reveal, same as ingest.
             if (!document.getElementById('rec-d-y2').value) document.getElementById('rec-d-y2').value = document.getElementById('rec-d-y').value
             if (!document.getElementById('rec-d-m2').value) document.getElementById('rec-d-m2').value = document.getElementById('rec-d-m').value
@@ -7939,7 +7925,7 @@ const App = (() => {
         }
         box.innerHTML = `
           <div class="pp-mb-prompt">Click the right release to link it${
-            cands.length === 1 ? '' : ' — more than one matches'}.</div>
+            cands.length === 1 ? '' : ' (more than one matches)'}.</div>
           <div class="pp-mb-cands">
             ${cands.map(c => `
               <div class="pp-mb-cand" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
@@ -8045,7 +8031,7 @@ const App = (() => {
             // ellipsized at 200px, so a long message is only readable on hover.
             infoStatus.textContent = res?.wrote_file
               ? `Saved to ${res.filename}`
-              : `Saved — ${res?.reason || 'database only'}`
+              : `Saved: ${res?.reason || 'database only'}`
             infoStatus.title = infoStatus.textContent
           } catch (e) {
             infoStatus.textContent = 'Save failed: ' + e.message
@@ -8143,23 +8129,27 @@ const App = (() => {
     // the tab strip and is present from page build, so it is bound once below
     // (see wireReanalyze) rather than re-attached on every pane render.
     async function onAnalyzeAudio() {
-      const btn = document.getElementById('btn-analyze-audio')
-      if (!btn) return
-      btn.disabled = true
-      btn.textContent = 'Analyzing…'
+      // The tab-strip button and the Quality tab's empty-state button run the
+      // same action and show the same progress.
+      const btns = ['btn-analyze-audio', 'btn-analyze-audio-empty']
+        .map(id => document.getElementById(id)).filter(Boolean)
+      if (!btns.length) return
+      const setAll = (text, disabled) => btns.forEach(b => { b.disabled = disabled; b.textContent = text })
+      setAll('Analyzing…', true)
       try {
         const result = await API.recordings.reprocess(recordingId)
-        btn.textContent = `Done (${result.analysed} track${result.analysed === 1 ? '' : 's'})`
+        setAll(`Done (${result.analysed} track${result.analysed === 1 ? '' : 's'})`, true)
         setTimeout(() => {
-          if (btn) { btn.disabled = false; btn.textContent = 'Re-Analyze Tracks' }
-          renderRecordingView(recordingId)  // reload to show waveform/spectrogram
+          setAll('Analyze Audio', false)
+          // Full reload: the Quality pane, score displays, waveform and
+          // spectrogram all rebuild from the fresh rows.
+          renderRecordingView(recordingId)
         }, 1500)
         if (result.errors?.length) {
           console.warn('Analysis errors:', result.errors)
         }
       } catch (e) {
-        btn.disabled = false
-        btn.textContent = 'Re-Analyze Tracks'
+        setAll('Analyze Audio', false)
         alert('Analysis failed: ' + e.message)
       }
     }
@@ -8675,8 +8665,9 @@ const App = (() => {
       } catch (e) {
         // 404 is the normal "never analysed" case, not a failure worth shouting
         // about — offer the button that fixes it.
-        body.innerHTML = `<div class="rq-empty">No listening-quality analysis for this
-          recording yet — run Re-Analyze Tracks above.</div>`
+        body.innerHTML = `<div class="rq-empty">Run Analyze Audio</div>
+          ${canEdit ? '<button class="pane-act" id="btn-analyze-audio-empty">Analyze Audio</button>' : ''}`
+        document.getElementById('btn-analyze-audio-empty')?.addEventListener('click', onAnalyzeAudio)
         return
       }
       body.innerHTML = buildQualityPaneHtml(q)
@@ -8709,7 +8700,6 @@ const App = (() => {
       const btn = document.getElementById('btn-analyze-audio')
       if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', onAnalyzeAudio) }
     }
-
 
     // ── Waveform (wavesurfer.js) — official renderer, fully wired to the
     // persistent player, adopted 2026-07-15 ─────────────────────────────────
@@ -8777,7 +8767,7 @@ const App = (() => {
       const label   = document.getElementById('spectrogram-track-name')
       if (!wrap || !imgEl) return
 
-      if (label) label.textContent = trackTitle ? ` — ${trackTitle}` : ''
+      if (label) label.textContent = trackTitle ? `: ${trackTitle}` : ''
       imgEl.style.display = 'none'
       if (loading) { loading.style.display = ''; loading.textContent = 'Generating…' }
 
@@ -8850,352 +8840,11 @@ const App = (() => {
     </div>`
   }
 
-  // ── Batch Import ────────────────────────────────────────────────────────────
-
-  // State for the batch import session (now the "Metadata review" stage of
-  // the unified ingestion flow, reached at '#/batch' once Listening Quality
-  // triage has accepted at least one folder — see `lq` state below).
-  const batch = {
-    sourceDir:   null,   // scanned directory path
-    results:     null,   // full scan response
-    acceptedPaths: null, // Set of NFC-normalised folder paths triaged 'accepted'
-                         // (from GET /api/quality/staging) — null means "no LQ
-                         // gate", i.e. this directory was never triaged, in
-                         // which case everything scanned is shown (keeps this
-                         // view usable if it's ever reached without going
-                         // through Listening Quality first).
-    ingestedIds: new Map(), // path → recording_id for items ingested this session
-    expandedPaths: new Set(), // expanded row paths
-    reviewFilter: false,      // header "Needs Review"/"Show all" toggle (2026-09-27)
-  }
-
-  async function renderBatchImportView() {
-    setActiveNav('ingest')   // reached from Add Recording; keep it lit
-    // No directory to review — this stage is only reachable after Listening
-    // Quality triage set one (or via a stale '#/batch' bookmark/back-nav from
-    // before 2026-07-30's unification, which no longer has its own picker).
-    // Either way, the unified flow's source step is the right place to land.
-    if (!batch.sourceDir) { window.location.hash = '#/ingest'; return }
-    // Re-scan the last directory every time we land on this route (not just
-    // the first time) — so returning here always reflects current disk + DB
-    // state and anything ingested (this session or otherwise) drops off the list.
-    setMainHTML(`<div class="empty-state">Refreshing <code>${esc(batch.sourceDir)}</code>…</div>`)
-    try {
-      // Scan + the current triage state both come fresh off the server on
-      // every entry, so the accepted-set can never go stale (a re-scan after
-      // a later triage change, app restart, etc. is always correct).
-      const [scanResult, stagingResult] = await Promise.all([
-        API.ingest.batchScan(batch.sourceDir),
-        API.quality.staging(batch.sourceDir),
-      ])
-      batch.results = scanResult
-      batch.acceptedPaths = new Set(
-        stagingResult.results
-          .filter(r => r.triage_status === 'accepted')
-          .map(r => nfc(r.folder_path))
-      )
-    } catch (e) {
-      if (/^Directory not found:/.test(e.message)) {
-        // Not a real failure — the scanned folder itself is gone, almost
-        // certainly because it WAS the "Artist Name" staging folder
-        // (Bulk Import pointed directly at one act's folder), and finishing
-        // its last show just deleted it as empty (move_to_library's
-        // empty-parent cleanup, 2026-07-23 — Ryan hit this immediately:
-        // "Mr. Sun"). There's nothing left to import here, not an error.
-        // Nothing to fall back to but a fresh run of the unified flow.
-        batch.sourceDir = null
-        batch.results   = null
-        window.location.hash = '#/ingest'
-        return
-      }
-      setMainHTML(`<div class="empty-state" style="color:var(--red)">Scan failed: ${esc(e.message)}</div>`)
-      return
-    }
-    renderBatchResultsView()
-  }
-
-  function _batchDateStr(e) {
-    return [e.year,
-      e.month ? String(e.month).padStart(2,'0') : null,
-      e.day   ? String(e.day).padStart(2,'0')   : null,
-    ].filter(Boolean).join('-')
-  }
-
-  // Render a single compact row — score-driven only; no tier dots/border.
-  // Normalizes one Bulk Import scan item into the shared ingest-queue-table
-  // row shape (see the component doc comment near ingestQueueTable/_iqRow).
-  function _batchBuildIqRow(item) {
-    const e = item.extracted
-    const health = item.health || { score: 0, band: 'red' }
-    const ingestedId = batch.ingestedIds.get(item.path)
-    const ingested = ingestedId != null
-    const dateStr = _batchDateStr(e)
-    const loc = [e.city, e.state].filter(Boolean).join(', ')
-    const metaParts = [e.artist, dateStr, e.venue || loc].filter(Boolean).map(esc)
-    const meta = metaParts.length ? metaParts.join('<span class="sep">·</span>') : ''
-
-    // e.reasons is the resolver's own verdict() reasons (spec chunk 6) --
-    // batch_scan() computed these off the same resolve() call that produced
-    // every other `extracted` field, so this reads its answer rather than
-    // re-deriving "no artist"/"no date" (and now needs_month/needs_day/
-    // conflict:<field>/duplicate_content, which a purely artist/date check
-    // never covered) a second time in JS.
-    const reviewIssues = _ingestReasonLabels(e.reasons || [])
-    const reviewReason = reviewIssues[0] || null
-    const needsReview = !!reviewReason
-
-    const trackRows = (e.tracks || []).map(t => `
-      <div class="iq-tracklist-row">
-        <span class="iq-tracklist-num">${t.number}</span>
-        <span class="iq-tracklist-title">${esc(t.title || '(no title)')}</span>
-      </div>`).join('')
-    const issuesHtml = (item.issues || []).length
-      ? item.issues.map(iss => `<span class="batch-issue-${esc(iss.severity)}">${esc(iss.msg)}</span>`).join(' ') : ''
-
-    return {
-      id: item.path,
-      name: item.name,
-      meta,
-      format: e.format || null,
-      kind: e.kind || null,
-      sound_band: null,
-      meta_band: health.band || null,
-      needs_review: needsReview,
-      review_reason: reviewReason,
-      review_issues: reviewIssues,
-      status: ingested ? 'ingested' : 'review',
-      recording_id: ingested ? ingestedId : null,
-      status_text: null,
-      detail: {
-        artist: e.artist || null, date: dateStr || null, venue: e.venue || null,
-        location: loc || e.country || null,
-        source: e.source || null, lineage: e.lineage || null,
-        tracksText: item.audio_count != null ? `${item.audio_count} track${item.audio_count === 1 ? '' : 's'}` : null,
-        trackListing: trackRows || null, issuesHtml,
-        path: item.path,
-      },
-    }
-  }
-
-  async function renderBatchResultsView() {
-
-    setNavCurrent('Batch Import')
-    const r = batch.results
-    if (!r) { window.location.hash = '#/ingest'; return }
-
-    // Listening Quality gate (2026-07-30): only folders the triage step
-    // accepted make it to metadata review. `acceptedPaths` is null when this
-    // directory was never triaged (e.g. a stale '#/batch' bookmark) — in that
-    // case fall back to showing everything scanned, so the page never just
-    // silently shows nothing for a reason the user can't see.
-    const scannedItems = r.items
-    const items = batch.acceptedPaths
-      ? scannedItems.filter(i => batch.acceptedPaths.has(nfc(i.path)))
-      : scannedItems
-    const hiddenCount = scannedItems.length - items.length
-
-    const greens  = items.filter(i => i.tier === 'green')
-    const yellows = items.filter(i => i.tier === 'yellow')
-    const reds    = items.filter(i => i.tier === 'red')
-    const nDone   = batch.ingestedIds.size
-
-    const tierPill = (label, count, cls) => count > 0
-      ? `<span class="batch-tier-pill batch-tier-${cls}">${count} ${label}</span>` : ''
-
-    const iqRows = items.map(item => _batchBuildIqRow(item))
-
-    // Auto-Ingest All covers green only (Ingest Field Resolver spec v1,
-    // chunk 6): tier is now the resolver's own verdict -- green means
-    // auto_confirm() would actually ingest it, yellow means it needs review
-    // (a missing field or a conflict between sources) and would come back
-    // from POST /api/ingest/auto-confirm as status "review"/"skipped" rather
-    // than ingested. Yellow used to auto-ingest here too under the old
-    // heuristic tier; it no longer can without a human filling the gap.
-    const autoIngestPending = items.filter(i =>
-      i.tier === 'green' && !batch.ingestedIds.has(i.path))
-
-    const tableBody = ingestQueueTable({
-      rows: iqRows,
-      soundQuality: false,
-      canIngest: true,
-      moveTargets: [],
-      filterReview: batch.reviewFilter,
-      isOpen: row => batch.expandedPaths.has(row.id),
-    })
-    const nReview = iqRows.filter(r => r.needs_review && r.status !== 'ingested').length
-
-    setMainHTML(`
-      <div class="batch-shell">
-        <div class="batch-header">
-          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <h2 style="margin:0">Batch Import</h2>
-            <span class="batch-dir-label">${esc(r.source_dir)}</span>
-            <button class="btn btn-ghost btn-sm" id="batch-rescan-btn">↺ New Scan</button>
-          </div>
-          ${hiddenCount > 0 ? `<p class="batch-subtitle" style="margin:6px 0 0">${hiddenCount} scanned folder${hiddenCount === 1 ? '' : 's'} not shown, rejected or still pending in Listening Quality.</p>` : ''}
-          <div class="batch-tier-pills" style="margin-top:10px">
-            ${tierPill('green', greens.length, 'green')}
-            ${tierPill('yellow', yellows.length, 'yellow')}
-            ${tierPill('red', reds.length, 'red')}
-            ${nDone > 0 ? `<span class="batch-tier-pill batch-tier-done">${nDone} ingested</span>` : ''}
-            ${autoIngestPending.length > 0
-              ? `<button class="btn btn-primary btn-sm" id="batch-ingest-all-btn" style="margin-left:8px">
-                   ⇉ Auto-Ingest All Green (${autoIngestPending.length})
-                 </button>`
-              : ''}
-            <span class="batch-tier-pill batch-tier-total">${items.length} total</span>
-            ${nReview > 0 || batch.reviewFilter
-              ? `<button class="btn btn-sm${batch.reviewFilter ? ' btn-ghost' : ' btn-primary'}" id="batch-review-toggle" style="margin-left:8px">${
-                  batch.reviewFilter ? 'Show all' : 'Needs Review'}</button>` : ''}
-          </div>
-          <div class="setbar" style="margin-top:10px">
-            <span id="batch-fh-strip"></span>
-          </div>
-        </div>
-        <div class="lq-cards lq-cards--compact" id="batch-table">${tableBody}</div>
-        ${items.length === 0 ? `<div class="empty-state">No accepted recordings to review. <a href="#/ingest">Back to Listening Quality</a></div>` : ''}
-      </div>`)
-
-    // ── Events ──────────────────────────────────────────────────────────────
-
-    document.getElementById('batch-rescan-btn')?.addEventListener('click', () => {
-      // Explicit "start over" — restart the whole unified flow (source picker
-      // -> Listening Quality) rather than silently reusing this directory
-      // (that's what returning to this page already does).
-      batch.sourceDir = null
-      batch.results = null
-      batch.acceptedPaths = null
-      window.location.hash = '#/ingest'
-    })
-    _wireFhStrip('batch-fh-strip')
-
-    // Ingest All Green — yellow (review/skipped) and red (failed) stay manual.
-    document.getElementById('batch-review-toggle')?.addEventListener('click', () => {
-      batch.reviewFilter = !batch.reviewFilter
-      renderBatchResultsView()
-    })
-    document.getElementById('batch-ingest-all-btn')?.addEventListener('click', async () => {
-      const btn = document.getElementById('batch-ingest-all-btn')
-      const pending = items.filter(i =>
-        i.tier === 'green' && !batch.ingestedIds.has(i.path))
-      if (!pending.length) return
-      btn.disabled = true
-
-      for (let idx = 0; idx < pending.length; idx++) {
-        const item = pending[idx]
-        btn.textContent = `⏳ ${idx + 1} / ${pending.length}`
-
-        // Update the row's status inline
-        const sid = 'batch-status-' + item.path.replace(/[^a-zA-Z0-9]/g,'_')
-        const statusEl = document.getElementById(sid)
-        if (statusEl) statusEl.textContent = '⏳'
-        const rowBtn = mainContent.querySelector(`.lq-act--ingest[data-path="${CSS.escape(item.path)}"]`)
-        if (rowBtn) { rowBtn.disabled = true; rowBtn.textContent = '⏳' }
-
-        try {
-          const recId = await _batchIngestOne(item)
-          batch.ingestedIds.set(item.path, recId)
-          if (statusEl) statusEl.textContent = 'Done'
-          if (rowBtn) rowBtn.textContent = 'Done'
-        } catch (err) {
-          if (statusEl) statusEl.textContent = 'Failed'
-          if (rowBtn) { rowBtn.disabled = false; rowBtn.textContent = 'Auto-Ingest' }
-          console.error('Bulk ingest failed for', item.name, err)
-          // Continue to next item rather than aborting the whole run
-        }
-      }
-
-      // Final re-render to show all ingested state cleanly
-      renderBatchResultsView()
-      loadArtistList()  // refresh sidebar — new artists/counts from this run
-    })
-
-    // Ingest / Review / expand, through the shared table's delegated wiring
-    // -- Auto-Ingest and Review are still the only two actions a batch row
-    // offers (no Move: Bulk Import never had a Backlog/Working destination).
-    wireIngestQueueTable(document.getElementById('batch-table'), id => r.items.find(i => i.path === id), {
-      onIngest: async row => {
-        const item = r.items.find(i => i.path === row.id)
-        if (!item) return
-        try {
-          const recId = await _batchIngestOne(item)
-          batch.ingestedIds.set(row.id, recId)
-          renderBatchResultsView()
-          loadArtistList()
-        } catch (err) {
-          alert('Ingest failed: ' + (err.message || 'Unknown error'))
-        }
-      },
-      onReview: row => {
-        const item = r.items.find(i => i.path === row.id)
-        if (item) _batchOpenReview(item)
-      },
-      onToggleExpand: row => {
-        if (batch.expandedPaths.has(row.id)) batch.expandedPaths.delete(row.id)
-        else batch.expandedPaths.add(row.id)
-        renderBatchResultsView()
-      },
-    })
-  }
-
-  // Direct ingest of a single item (green path — no wizard).
-  //
-  // One POST to the resolver's own auto-confirm endpoint (spec section 4) --
-  // the client used to scan the folder and rebuild the whole confirm body
-  // itself (tracks, date, venue…), which is exactly the three-way-drift the
-  // resolver exists to end. Now it just posts the path and polls, same as
-  // /api/ingest/confirm, through the same job/poll pair (pollConfirmJob).
-  //
-  // Throws for anything but an "ingested" verdict -- review/skipped/failed --
-  // so the existing callers (the "Ingest All" loop and the queue table's
-  // onIngest) keep working unchanged: they already treat a rejected promise
-  // as this row's failure and show it as such.
-  async function _batchIngestOne(item) {
-    const { job_id } = await API.ingest.autoConfirm(item.path)
-    const outcome = await pollConfirmJob(job_id)
-    if (!outcome || outcome.status !== 'ingested') {
-      const labels = _ingestReasonLabels((outcome && outcome.reasons) || [])
-      throw new Error(labels.length ? labels.join(', ') : (outcome?.detail || outcome?.status || 'Needs review'))
-    }
-    return outcome.result.recording_id
-  }
-
-  // Open ingest wizard pre-scanned (yellow / red / manual green)
-  // Scan FIRST, then set state, then navigate — so renderIngestView's reset guard
-  // sees step='review' + non-null scan and doesn't wipe everything.
-  async function _batchOpenReview(item) {
-    // Show loading on the button while we scan
-    const btn = mainContent.querySelector(`.lq-act--review[data-path="${CSS.escape(item.path)}"]`)
-    if (btn) { btn.disabled = true; btn.textContent = '⏳' }
-
-    try {
-      const scan        = await API.recordings.scan(item.path)
-      ingest.scan       = scan
-      ingest.step       = 'review'
-      ingest.folderPath = item.path
-      ingest.form       = {}
-      ingest.tracks     = []
-      ingest.fromBatch  = true    // drives the back-link + post-submit redirect
-      ingest._resume    = true   // one-shot: tell renderIngestView to resume here
-      window.location.hash = '#/ingest'
-    } catch (err) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Review →' }
-      console.error('Batch review scan failed:', err)
-      // Show inline error
-      const sid = 'batch-status-' + item.path.replace(/[^a-zA-Z0-9]/g,'_')
-      const el  = document.getElementById(sid)
-      if (el) el.textContent = 'Scan failed'
-    }
-  }
-
   // ══════════════════════════════════════════════════════════════════════════
-  // Unified ingestion flow (2026-07-30)
+  // Add Recordings
   //
-  //   Source  →  Listening Quality triage  →  Metadata review  →  Ingest
-  //
-  // One entry point for single-show and bulk. The backend resolves a folder to
-  // its shows either way (utils/ingest.py::resolve_shows_in_dir), so "batch"
-  // and "individual" are the same screens — a bulk run just has more cards.
+  //   Source picker  →  Bulk Ingest run (#/bulk-ingest/<id>)
+  //   Per-item Review (the Add Recording form) opens from a run's import page.
   // ══════════════════════════════════════════════════════════════════════════
 
   // Server-side preferences snapshot (config.IMPORT_DIR…).
@@ -9242,152 +8891,17 @@ const App = (() => {
     return appPrefs
   }
 
-  // Listening Quality triage state.
-  const lq = {
-    sourceDir: null,        // what the SERVER resolved the pick to
-    // What the user actually PICKED, kept so Reprocess can run the same scan
-    // again without sending them back to the folder picker (2026-09-03).
-    scanDir:   null,
-    rows:      [],          // serialized staging rows (+ health/extracted)
-    jobId:     null,
-    // Generation stamp for poll loops. Bumped on every startAnalysis, so a
-    // loop left over from an earlier scan can tell that it no longer speaks
-    // for this page and exit without writing anything — see pollAnalysis.
-    pollSeq:   0,
-    progress:  null,        // { done, total, current } while analysing
-    // folder_path → 'lq' | 'meta'. A Map rather than a Set since 2026-08-02:
-    // the card now has two tabs, so "open" is no longer a boolean but a
-    // question of WHICH panel. Absent = collapsed. One panel at a time.
-    expanded:  new Map(),
-    features:  new Map(),   // folder_path → features+interpretation, lazily fetched
-    // 'all' | 'green' | 'yellow' | 'red' — which tier chip is active (Ryan,
-    // 2026-08-27: "Direction A" from the ingest-redesign specimen). Filters
-    // both which cards are drawn AND what "Ingest N" acts on — one flag
-    // reused by both, same reasoning as _lqIngestable below: the number on
-    // the button can never promise more than the loop actually delivers.
-    // Ingestion mode (Ryan, 2026-08-28). 'quick' sends skip_analysis, which
-    // stops the confirm job enqueueing the Librosa track analysis — measured
-    // at ~57s PER TRACK on a 24/96 source, roughly 16 minutes for an 8-track
-    // show, against ~3 seconds for the listening-quality pass everyone assumes
-    // is the expensive one. Quick Add still copies, catalogs, verifies
-    // checksums and carries the quality score across; only waveform/BPM/
-    // spectral are deferred, and Re-Analyze fills those in later against the
-    // same rows. Persisted like the other display/behaviour preferences.
-    mode: localStorage.getItem('trellisIngestMode') === 'full' ? 'full' : 'quick',
-    // Compact mode — one scannable row per recording instead of a full metrics
-    // card (Ryan, 2026-08-28; Direction A "The Belt" from the ingest-redesign
-    // specimen, the half that did not ship with the tier chips on 08-27).
-    // A folder of hundreds is unreadable as cards, and the toggle is the whole
-    // point: the dense list is for triage, the cards are for judgement.
-    // Persisted like trellisPalette / trellisViewMode — a display preference the
-    // user
-    // set once, not a per-visit question.
-    // folder_path -> which pane is open ('lq' | 'meta' | 'fp'). One piece of
-    // state for both the caret and the Tab Strip, so they cannot disagree
-    // about whether a row is open. Replaced the old `expanded` Map when the
-    // card and the row became one thing (2026-08-28).
-    compactOpen: new Map(),
-    reviewFilter: false,  // header "Review"/"Show all" toggle (2026-09-27)
-    // Per-row bulk-run state (Ryan, 2026-08-28). Until now the ONLY per-row
-    // feedback during a queue run was the row vanishing when it finished, and
-    // a run-note sentence above the list naming one show — so seventeen rows
-    // sat looking idle while the queue worked through them.
-    //   queued       folder_paths this run will reach   → button reads "Queued"
-    //   activePath   the one being copied right now     → "Ingesting"
-    //   copyProgress folder_path → {copied,total}, straight off the confirm
-    //                job's own poll, so the inline bar is the server's count
-    //                rather than a guess
-    queued:       new Set(),
-    activePath:   null,
-    copyProgress: new Map(),
-    // folder_path → { jobId, done, total, current, kind } while a SHN/WAV
-    // conversion runs on that row (2026-09-02). A Map keyed by folder rather
-    // than a single active job, because a conversion is per-row and nothing
-    // stops a second one being started on another row while the first runs.
-    converting:   new Map(),
-    runTotal:     0,
-    // ── Values applied to EVERY recording this queue ingests ────────────────
-    // Expanded 2026-08-31 (Ryan) from Event alone to the full set worth
-    // setting once for a whole folder: Artist, Venue (+ City/State/Country,
-    // locked to the venue's own values once picked from the database — same
-    // behaviour as the Add Recording form's venue picker), Event, Source,
-    // Lineage and Notes. The server already resolves/creates Artist, Venue
-    // and Event rows per-recording (_do_confirm), so the queue only ever has
-    // to carry the values themselves.
-    // Uncommon enough that the whole area stays collapsed until asked for.
-    applyAll: {
-      event: '', artist: '',
-      venue: { id: null, name: '' },
-      city: '', state: '', country: '',
-      source: '', lineage: '', notes: '',
-    },
-    applyAllOpen: false,
-    // What was PRESSED, as opposed to what is typed (2026-09-03). Null until
-    // Apply Values is clicked; a plain {key: value} snapshot of the non-empty
-    // fields at that moment, plus venue_id. THE INGEST PATHS READ ONLY THIS —
-    // see the block comment above _applyQueueValuesToForm.
-    applied:      null,
-    // Which run each lq.log entry belongs to. Bumped at the start of every
-    // bulk run so the completion summary can describe one run rather than
-    // every ingest since the folder was scanned.
-    runSeq:       0,
-    // Set only by runIngestQueue() when a bulk run ends. Re-entering Add
-    // Recordings with this set starts fresh instead of redisplaying a job
-    // that is over.
-    jobFinished:  false,
-    // Queue-ingest state. `cancel` is checked between shows; `activeJob` is the
-    // in-flight confirm job so Cancel can also stop the current copy.
-    running:   false,
-    cancel:    false,
-    activeJob: null,
-    log:       [],          // [{name, status, recording_id|error}]
-    // Why the run stopped, when it stopped badly. Rendered as a banner above
-    // the cards. Before 2026-08-25 a failed poll or a failed job produced
-    // nothing at all on screen — see pollAnalysis().
-    error:     null,
-  }
-
   function renderIngestView() {
     setActiveNav('ingest')
     setActiveArtist(null)
     setNavCurrent('Add Recording')
     // Fresh navigation always starts at the source picker. The exception is
-    // Metadata review opening a pre-scanned folder, which sets a one-shot
-    // _resume flag so the in-progress review isn't wiped.
-    //
-    // A FINISHED run is not resumable (Ryan, 2026-08-28). The old guard was
-    // `ingest.step !== 'triage' || !lq.rows.length`, which resets when a run
-    // drained the queue to empty — but a run that ended with any errored or
-    // un-ingestable row left `lq.rows` non-empty, so coming back to Add
-    // Recordings redisplayed the completed job: its done strip, its log, its
-    // per-row Complete badges. `jobFinished` is set by runIngestQueue() and by
-    // nothing else, so a single-card ingest still leaves the rest of the batch
-    // resumable, which is the case the old guard was protecting.
-    // `lq.running` is the belt to jobFinished's braces: a run in flight is
-    // never resettable, whatever any other flag says.
-    const resumable = ingest.step === 'triage' && lq.rows.length
-                      && (lq.running || !lq.jobFinished)
-    // A folder handed over by the Downloads page's Ingest button (one-shot).
-    // Never over a run in flight.
-    const handoff = lq.running ? null : _ingestHandoffDir
-    _ingestHandoffDir = null
-    if (handoff) {
-      resetIngestState()
-      _lqReset()
-      setInPageBack(ingestStepBack)
-      setLoading()
-      startAnalysis(handoff, false, msg => {
-        if (!msg) return
-        renderIngestStep()
-        alert(msg)
-      })
-      return
-    }
+    // the import page's per-item Review opening a pre-scanned folder, which
+    // sets a one-shot _resume flag so the in-progress review isn't wiped.
     if (ingest._resume) {
       ingest._resume = false
-    } else if (!resumable) {
+    } else {
       resetIngestState()
-      _lqReset()
     }
     renderIngestStep()
   }
@@ -9410,7 +8924,6 @@ const App = (() => {
     switch (ingest.step) {
       case 'source':  show(renderIngestSource);  break
       case 'folder':  show(renderIngestSource);  break  // legacy alias
-      case 'triage':  show(renderTriageView);    break
       // A review step with no scan cannot render anything meaningful — that
       // happens when the page is re-entered after its source folder was moved
       // or removed. Fall back to the picker rather than throwing into the
@@ -9460,8 +8973,7 @@ const App = (() => {
     ingest.form       = {}
     ingest.tracks     = []
     ingest.aiResult   = null
-    ingest.fromBatch  = false
-    ingest.fromTriage = false
+    ingest.returnTo   = null
   }
 
   /** Header Back, while standing inside the Add Recordings wizard.
@@ -9488,9 +9000,7 @@ const App = (() => {
         return true
       case 'success':
         if (!probe) {
-          // A finished single add: the queue if there is still one to return
-          // to, otherwise the picker.
-          ingest.step = lq.rows.length ? 'triage' : 'source'
+          ingest.step = 'source'
           renderIngestStep()
         }
         return true
@@ -9553,8 +9063,11 @@ const App = (() => {
 
     // Where the navigator currently is. Was previously read back out of the
     // text input on every action, which is why the two could drift apart.
-    let here = lq.sourceDir || defaultDir
+    let here = defaultDir
     let busy = false
+    // The last folder listing: its in_library flag picks which remembered
+    // mode the start buttons use.
+    let pickerJ = null
 
     // Browsing a NAS folder is not instant even after the scandir rework, and
     // the old page gave no sign anything was happening — hence "I click Browse
@@ -9694,6 +9207,7 @@ const App = (() => {
     // `j === null` repaints the shell after a failure so the user is not left
     // staring at a spinner that will never resolve.
     function paint(j) {
+      pickerJ = j
       if (!j) {
         pickerEl.innerHTML = `<div class="lq-nav-loading">
           <span>Could not read that folder.</span>
@@ -9733,7 +9247,6 @@ const App = (() => {
                   title="${atRoot ? 'This is the top of your download folder'
                                   : 'Up one folder'}">${icon('arrow-left', 'lq-browse-ic')} Up</button>
           <span class="lq-nav-here" title="${esc(j.path)}">${esc(shown)}</span>
-          ${canEditLibrary() ? '<button class="btn btn-ghost btn-sm" data-ingest>My library folder</button>' : ''}
         </div>
         <div class="lq-dirs-head">
           <span class="lq-dirs-head-sp"></span>
@@ -9743,8 +9256,7 @@ const App = (() => {
         </div>
         <div class="lq-dirs">${dirs}</div>
         <div class="lq-pick-foot">
-          <button class="btn btn-primary" data-use="${esc(j.path)}">
-            Review This Folder</button>
+          ${_biModeButtonsHtml(!!j.in_library, j.path)}
           ${j.here_has_audio
             ? '<span>This folder holds audio, so it will be treated as one recording.</span>'
             : ''}
@@ -9792,17 +9304,19 @@ const App = (() => {
       // returns the already-active run untouched when one exists, so this
       // is exactly as safe to click mid-run as it is on a fresh library.
       if (e.target.closest('[data-ingest]')) {
-        API.bulkIngest.start().catch(() => {}).finally(() => {
-          window.location.hash = '#/bulk-ingest'
-        })
+        _biStartAndOpen(null, _biMode(true)).catch(err => say(err.message))
         return
       }
       const expand = e.target.closest('[data-expand]')
       if (expand) { toggleExpand(expand); return }
       const go  = e.target.closest('[data-go]')
-      const use = e.target.closest('[data-use]')
+      const start = e.target.closest('[data-start-mode]')
       if (go) openPicker(go.dataset.go)
-      else if (use) startAnalysis(use.dataset.use, false, say)
+      else if (start) {
+        const inLib = !!(pickerJ && pickerJ.in_library)
+        _biRememberMode(inLib, start.dataset.startMode)
+        _biStartAndOpen(start.dataset.use, start.dataset.startMode).catch(err => say(err.message))
+      }
     })
     // Folder rows and expand carets are real controls, so they answer the
     // keyboard too.
@@ -9817,181 +9331,7 @@ const App = (() => {
     openPicker(here)
   }
 
-  // `report` is how this tells the caller's page that something went wrong.
-  // ⚠ It used to write into `#lq-status`, an element that EXISTS NOWHERE — the
-  // id is not in renderIngestSource's markup or anywhere else (checked
-  // 2026-09-01). So `statusEl` was always null and every guard around it was
-  // permanently false: "Review This Folder" on a path outside the import roots
-  // failed in total silence, the button just did nothing. That silence is also
-  // half of the stale-error report — the only red text on the page was the
-  // leftover from an earlier browse, so the failure appeared to be the OLD
-  // error rather than a new one.
-  //
-  // Passed in rather than looked up, because the two callers report
-  // differently: the source picker has a message line, the triage view has
-  // lq.error and its own banner.
-  async function startAnalysis(sourceDir, reanalyze, report) {
-    report?.('')
-    try {
-      const res = await API.quality.analyze(sourceDir, reanalyze)
-      _lqReset()                       // a new scan is a new session, wholesale
-      lq.sourceDir = res.source_dir
-      lq.jobId     = res.job_id
-      // Placeholder rows so every show is on screen immediately — analysis
-      // fills them in at roughly 2s each rather than showing a blank wait.
-      lq.rows = res.folders.map(f => ({
-        folder_path: f.folder_path, name: f.name,
-        triage_status: 'pending', listening_quality: null, _pending: true,
-      }))
-      lq.progress = { done: 0, total: res.folders.length, current: null }
-      // Remember what produced this queue, so Reprocess can run it again
-      // without asking the user to find the folder a second time.
-      lq.scanDir = sourceDir
-      ingest.step = 'triage'
-      renderTriageView()
-      // Each poll loop owns its OWN job id, and a generation stamp says whether
-      // it is still the loop that speaks for this page. See pollAnalysis.
-      lq.pollSeq = (lq.pollSeq || 0) + 1
-      pollAnalysis(res.job_id, lq.pollSeq)
-    } catch (e) {
-      report?.(e.message)
-    }
-  }
-
-  // ⚠ `jobId` and `seq` are ARGUMENTS, not reads of lq (2026-09-03).
-  //
-  // This used to loop on `while (lq.jobId)` and poll `lq.jobId` — module
-  // state, shared by every loop. Start a second scan and the first loop, still
-  // sleeping, wakes up and polls the SECOND job. Two loops, one job id. The
-  // one that reads the terminal status first used to make the server drop the
-  // job, and the other then got a 404 and reported the finished scan as a
-  // failure. That is half of the "unknown job" report (the server keeps
-  // finished jobs readable now, which is the other half).
-  //
-  // So each loop carries its own id and a generation stamp. A loop whose
-  // generation is no longer `lq.pollSeq` has been superseded by a newer scan
-  // and exits without touching a single piece of shared state — it must not
-  // write progress, errors or rows belonging to a queue it no longer speaks
-  // for.
-  async function pollAnalysis(jobId, seq) {
-    const sleep = ms => new Promise(r => setTimeout(r, ms))
-    const mine = () => lq.pollSeq === seq && lq.jobId === jobId
-    while (mine()) {
-      await sleep(900)
-      if (!mine()) return
-      let s
-      try {
-        s = await API.quality.analyzeStatus(jobId, lq.sourceDir)
-      } catch (e) {
-        if (!mine()) return
-        // A failed poll used to `break` in silence. Every card then sat on
-        // "Analysing…" with nothing said anywhere and nothing in the debug
-        // drawer — exactly the stall Ryan reported on 2026-08-25. A stop we
-        // cannot explain is still a stop the user has to be told about.
-        lq.jobId   = null
-        lq.progress = null
-        // Name the ONE cause that is actually recoverable rather than passing
-        // the server's wording through. "unknown job" is a 404 from a job the
-        // server no longer holds — almost always because it was restarted —
-        // and it says nothing about the folders, which is exactly why the page
-        // it produced was so misleading.
-        lq.error = (e.status === 404 || /unknown job/i.test(e.message || ''))
-          ? 'Lost track of the analysis job — the app was most likely restarted '
-            + 'while the scan was running. The folders are fine; use Reprocess to run it again.'
-          : (e.message || 'Lost contact with the analysis job.')
-        _retirePendingRows()
-        if (ingest.step === 'triage') renderTriageView({ preserveScroll: true })
-        return
-      }
-      if (!mine()) return
-      _mergeAnalysisRows(s.results || [], s.ingested || [])
-      lq.progress = { done: s.done, total: s.total, current: s.current }
-      if (s.status !== 'running') {
-        lq.jobId = null
-        lq.progress = null
-        // The job's own failure was likewise never shown: `error` came back on
-        // the payload and nothing read it.
-        if (s.status === 'error') {
-          lq.error = s.error || 'The analysis job failed.'
-        }
-        _retirePendingRows()
-        _sortAnalysisRows()
-      }
-      // Don't fight the user: re-render only the parts that change during a run.
-      if (ingest.step === 'triage') renderTriageView({ preserveScroll: true })
-    }
-  }
-
-  // Merge server rows INTO the placeholder list, keyed on folder_path.
-  //
-  // `lq.rows = s.results` (the old line) had two failure modes, and the second
-  // one is what made the page hang:
-  //   * a partial result set REPLACED the list, so every show not yet analysed
-  //     vanished from the page instead of showing its placeholder — the exact
-  //     thing startAnalysis() renders placeholders to avoid;
-  //   * an EMPTY result set left the list untouched, so a job that finished
-  //     successfully but returned no rows left the whole page on "Analysing…"
-  //     forever. That is reachable whenever the scanned directory isn't the one
-  //     the rows were first recorded under (fixed server-side in
-  //     _reuse_into_scan) and whenever a folder is already an ingested
-  //     Recording (reported separately as `ingested`).
-  function _mergeAnalysisRows(results, ingested) {
-    const byPath = new Map(results.map(r => [r.folder_path, r]))
-    const done   = new Set(ingested)
-    const seen   = new Set()
-
-    lq.rows = lq.rows.map(row => {
-      const hit = byPath.get(row.folder_path)
-      if (hit) { seen.add(row.folder_path); return hit }
-      // Already in the library: list_staging excludes promoted rows on purpose
-      // (a row whose folder has become a Recording has nothing left to triage),
-      // so the server names them instead of returning them.
-      if (row._pending && done.has(row.folder_path)) {
-        return { ...row, _pending: false, _ingestedElsewhere: true }
-      }
-      return row
-    })
-
-    // A row the server knows about that we never placed a card for — a re-scan
-    // that resolved the folder differently this time.
-    for (const r of results) {
-      if (!seen.has(r.folder_path) &&
-          !lq.rows.some(x => x.folder_path === r.folder_path)) lq.rows.push(r)
-    }
-  }
-
-  // Nothing may still read "Analysing…" once the job is over. A placeholder
-  // with no server row and no explanation is a real problem, so it becomes a
-  // visible error card rather than a spinner that never resolves.
-  // ⚠ These rows were never ANALYSED, let alone found wanting.
-  //
-  // A retired placeholder is a folder the run never reached, and the old
-  // wording ("Analysis finished without returning a result for this folder")
-  // read as a verdict on the folder. Under the "unknown job" bug that put
-  // "Analysis failed" beside eight perfectly good shows, and reprocessing the
-  // same directory filed every one of them (Ryan, 2026-09-03). Say what is
-  // actually known — nothing — and the Retry on the row says what to do about
-  // it.
-  function _retirePendingRows() {
-    lq.rows = lq.rows.map(r => r._pending
-      ? { ...r, _pending: false, _unreached: true,
-          error: 'The scan stopped before reaching this folder — it has not been analysed yet.' }
-      : r)
-  }
-
-  // Best score first, un-scored and errored rows last — the same order
-  // qs.list_staging() applies server-side. Applied once, at the END of the run:
-  // re-sorting on every poll would shuffle cards out from under the pointer
-  // while the user is reading them.
-  function _sortAnalysisRows() {
-    lq.rows = [...lq.rows].sort((a, b) => {
-      const an = a.listening_quality == null, bn = b.listening_quality == null
-      if (an !== bn) return an ? 1 : -1
-      return (b.listening_quality || 0) - (a.listening_quality || 0)
-    })
-  }
-
-  // ── Stage 2: Listening Quality triage ──────────────────────────────────────
+  // ── Listening Quality colours ──────────────────────────────────────────────
 
   // Same bands as the interpretation text, ported from the standalone app so a
   // score is never a different colour in the two places it can be read.
@@ -10131,7 +9471,7 @@ const App = (() => {
           ${it.issues.map(i => `<div class="rq-issue"><b>${esc(i.issue)}</b>: ${esc(i.detail)}
             (−${i.deduction}) <span>${esc(i.text || '')}</span></div>`).join('')}
          </div>`
-      : `<div class="rq-clean">No technical issues detected — no clipping, dead channel,
+      : `<div class="rq-clean">No technical issues detected. No clipping, dead channel,
            phase problem or dropouts.</div>`
 
     // Add Recording passes { spectrogram: false }: a spectrogram is drawn from
@@ -10171,30 +9511,6 @@ const App = (() => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   }
 
-  function _lqDateStr(e) {
-    if (!e) return ''
-    return [e.year, e.month ? String(e.month).padStart(2, '0') : null,
-            e.day ? String(e.day).padStart(2, '0') : null].filter(Boolean).join('-')
-  }
-
-
-  // ── Concerns — the major-issue line under the card title ───────────────────
-  // Replaces the prose sound description (Ryan, 2026-08-02), which restated
-  // the Sound Quality band in more words and so used the most prominent line
-  // on the card to say something the pill already said. This space now carries
-  // ONLY things that should stop you: a possible duplicate, a failed checksum,
-  // no audio at all, a phase or clipping fault. Empty when there are none, so
-  // its presence is the signal.
-  function _lqConcerns(row) {
-    const cs = row.concerns || []
-    if (!cs.length) return ''
-    return `<div class="lq-concerns">${cs.map(c => `
-      <div class="lq-concern lq-concern--${c.level || 'warn'}">
-        <span class="tx">${esc(c.text)}</span>
-        ${c.recording_id ? `<a class="lk" href="#/recording/${c.recording_id}">View</a>` : ''}
-      </div>`).join('')}</div>`
-  }
-
   // ── Compact row — Direction A, "The Belt" (Ryan, 2026-08-28) ──────────────
   //
   // One grid row per recording: coloured spine, name, a mono facts line, the
@@ -10218,8 +9534,7 @@ const App = (() => {
 
   // ════════════════════════════════════════════════════════════════════════
   // ── Shared ingest queue table ("The Belt", unified 2026-09-27) ───────────
-  // ONE table component for every batch-style ingest surface: Review &
-  // Ingest, Bulk Ingest, and #/batch Bulk Import. Each caller normalizes its
+  // ONE table component for every batch-style ingest surface (Bulk Ingest). Each caller normalizes its
   // own rows into the shape below and calls ingestQueueTable(); the caret,
   // the column layout, the base expand panel and the default action group
   // are shared, so a change to any of them cannot drift between the three
@@ -10236,13 +9551,6 @@ const App = (() => {
   // set; `needs_review` only changes the meta line and forces the metadata
   // pill to Low.
   // ════════════════════════════════════════════════════════════════════════
-
-  // "<N> folders · <N> added · ..." -- zero-count parts dropped, joined with
-  // a middot. One tiny builder so the three callers' header subtitles cannot
-  // drift into three different separators or orders.
-  function iqCountsLine(parts) {
-    return parts.filter(p => p && p.n).map(p => `${p.n} ${p.label}`).join(' · ')
-  }
 
   // ── Resolver reason codes -> short review labels ───────────────────────────
   // Ingest Field Resolver spec v1, chunk 6: verdict() (app/utils/resolve.py)
@@ -10285,40 +9593,6 @@ const App = (() => {
     return list.map(_ingestReasonLabel).filter(Boolean)
   }
 
-  // Header block shared by all three surfaces: title, one subtitle line
-  // (plus an optional second small line while scoring/reasons continue),
-  // the source-folder chip (+ optional mode select for Review & Ingest),
-  // the file-handling strip, and the progress bar -- everything above the
-  // table itself. `actionsHtml` is the caller's primary action (Ingest all /
-  // Pause-Resume / Auto-Ingest All), always top right.
-  function ingestQueueHeader(opts) {
-    const {
-      title, subtitle = '', scoringLine = '', actionsHtml = '',
-      sourcePath = '', sourceDisabled = false, onSourceId = '',
-      modeHtml = '', fhStripId = '', progressHtml = '', extraHtml = '',
-    } = opts
-    return `
-      <div class="lq-header">
-        <div style="min-width:0">
-          <h2>${esc(title)}</h2>
-          <p class="batch-subtitle">${subtitle}</p>
-          ${scoringLine ? `<p class="batch-subtitle">${scoringLine}</p>` : ''}
-        </div>
-        <div class="lq-header-actions">${actionsHtml}</div>
-      </div>
-      <div class="lq-setbar">
-        <span class="bfilter">Source folder
-          <button class="lq-setbar-path" id="${esc(onSourceId)}" ${sourceDisabled ? 'disabled' : ''}
-                  title="${esc(sourcePath)}">
-            ${icon('folder-open', 'lq-setbar-ic')}<span>${esc(_lqShortPath(sourcePath))}</span></button>
-        </span>
-        ${modeHtml}
-        <span id="${esc(fhStripId)}"></span>
-      </div>
-      ${progressHtml}
-      ${extraHtml}`
-  }
-
   function _iqBandPill(band, concern) {
     if (!band) return ''
     // `concern` (2026-09-27) adds the same amber treatment the triage
@@ -10336,7 +9610,7 @@ const App = (() => {
   // in the row stays shared either way.
   function _iqDefaultActions(row, opts) {
     if (row.status === 'ingested') {
-      return `<button type="button" class="lq-act lq-act--ingest" disabled>Ingested</button>
+      return `<button type="button" class="lq-act lq-act--ingest" disabled>Imported</button>
         <a class="lq-act lq-act--view" href="#/recording/${row.recording_id}">View</a>`
     }
     if (row.status === 'pending' || row.status === 'ingesting') return ''
@@ -10349,7 +9623,7 @@ const App = (() => {
     if (!canEditLibrary()) return ''
     const btns = []
     if (opts.canIngest) {
-      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${esc(row.id)}">Ingest</button>`)
+      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${esc(row.id)}">Import</button>`)
     }
     btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${esc(row.id)}">Review</button>`)
     if (opts.moveTargets && opts.moveTargets.length) {
@@ -10399,57 +9673,26 @@ const App = (() => {
     return base + sq
   }
 
-  // Returns the header row + body rows only (no outer `.lq-cards` wrapper) --
-  // every caller already owns that wrapper (an id'd container it polls or
-  // patches), so this only ever fills it.
-  function ingestQueueTable(opts) {
-    const { rows, soundQuality, filterReview } = opts
-    const visible = filterReview ? rows.filter(r => r.needs_review) : rows
-    const cls = soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq'
-    const head = `<div class="lq-brow-head ${cls}">
-      <span></span><span>Recording</span>
-      <span>Format</span><span>Type</span>
-      ${soundQuality ? '<span>Sound Quality</span>' : ''}
-      <span>Metadata</span><span></span><span></span>
-    </div>`
-    if (!visible.length) {
-      return `${head}
-        <div class="empty-state" style="padding:20px">
-          <div class="empty-sub">${filterReview ? 'Nothing needs review.' : 'Nothing here yet.'}</div>
-        </div>`
+  // Row status (Ryan, 2026-10-02): "Ready" or the review issues get their own
+  // column instead of riding in the grey title line, where they read as part
+  // of the recording's name. The alert glyph stays because the Queue's note
+  // line tells the person to check it.
+  function _iqStatusCell(row) {
+    if (row.needs_review) {
+      const issues = (row.review_issues && row.review_issues.length)
+        ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
+      return `<span class="iq-status iq-status--issue">${icon('alert', 'iq-status-ic')}<span>${issues.map(esc).join(', ')}</span></span>`
     }
-    const body = visible.map(row => _iqRow(row, opts)).join('')
-    return `${head}${body}`
-  }
-
-  // Needs-review marker (Ryan, 2026-09-27): the reason no longer displaces
-  // the Artist / date / venue line. It is the same `alert` glyph and hover
-  // box the failed-ingest chip uses, listing every issue the row carries.
-  function _iqReviewChip(row) {
-    if (!row.needs_review) return ''
-    const issues = (row.review_issues && row.review_issues.length)
-      ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
-    return `<span class="lq-errchip iq-reviewchip lq-tip" role="img"
-                  aria-label="Needs review: ${esc(issues.join(', '))}">
-      ${icon('alert', 'lq-errchip-ic')}
-      <span class="lq-tipbox">
-        <div class="tt">Needs review</div>
-        ${issues.map(i => `<div class="ab">${esc(i)}</div>`).join('')}
-      </span></span>`
+    if (row.status === 'ready') return '<span class="iq-status iq-status--ready">Ready</span>'
+    return ''
   }
 
   function _iqRow(row, opts) {
     const open = !!(opts.isOpen && opts.isOpen(row))
     const cls = opts.soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq'
-    const spineColour =
-      row.status === 'failed' ? 'var(--red)'
-      : (row.status === 'pending' || row.status === 'ingesting') ? 'var(--bd-2)'
-      : ({ green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)' }[row.sound_band]
-         || 'var(--bd-2)')
-
     let metaLine
     if (row.status === 'pending') metaLine = 'Queued'
-    else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Ingesting</span>`
+    else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Importing</span>`
     else if (row.status === 'failed') metaLine = esc(row.status_text || 'Could not be read')
     else metaLine = row.meta || '—'
 
@@ -10458,8 +9701,8 @@ const App = (() => {
 
     return `<div class="lq-row iq-row${open ? ' is-open' : ''}" data-id="${esc(row.id)}">
       <div class="lq-brow ${cls}${row.status === 'pending' ? ' lq-brow--pending' : ''}${
-           row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}">
-        <span class="lq-brow-spine" style="background:${spineColour}"></span>
+           row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}${
+           row.needs_review ? ' iq-brow--issue' : ''}">
         <div class="lq-brow-main${row.thumb ? ' iq-main--thumb' : ''}">
           ${row.thumb ? (row.thumb.url
             ? `<img class="brow-av brow-av--img iq-thumb" src="${esc(row.thumb.url)}" alt="" loading="lazy">`
@@ -10467,7 +9710,6 @@ const App = (() => {
           <div class="iq-main-text">
             <div class="iq-name-row">
               <div class="lq-brow-name" title="${esc((row.detail && row.detail.path) || row.name)}">${esc(row.name)}</div>
-              ${_iqReviewChip(row)}
             </div>
             <div class="lq-brow-sub">${metaLine}</div>
           </div>
@@ -10476,6 +9718,7 @@ const App = (() => {
         <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Album' : 'Live'}</span>` : ''}</span>
         ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
         <span class="lq-brow-meta">${_iqBandPill(row.needs_review ? 'red' : (row.meta_band || 'red'), !!(row.concerns && row.concerns.length))}</span>
+        <span class="iq-col-status">${_iqStatusCell(row)}</span>
         <span class="lq-actions iq-actions">${actions}</span>
         ${canExpand
           ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
@@ -10485,49 +9728,6 @@ const App = (() => {
       </div>
       ${open ? _iqExpandHtml(row, opts) : ''}
     </div>`
-  }
-
-  // Delegated wiring for the two plain callers (Bulk Ingest, #/batch) whose
-  // rows use the default action group above -- Review & Ingest keeps its own
-  // richer `_wireTriage()` (its `actionsHtml` reuses `_lqActions()` verbatim,
-  // whose classes `_wireTriage()` already binds by). `container` is the
-  // element the table was painted into; `getRow(id)` looks a normalized row
-  // back up by the `id` a data-path attribute carries.
-  function wireIngestQueueTable(container, getRow, opts) {
-    if (!container) return
-    container.querySelectorAll('.lq-act--ingest').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const row = getRow(btn.dataset.path)
-        if (row && opts.onIngest) opts.onIngest(row)
-      })
-    })
-    container.querySelectorAll('.lq-act--review').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const row = getRow(btn.dataset.path)
-        if (row && opts.onReview) opts.onReview(row)
-      })
-    })
-    container.querySelectorAll('.lq-act--move').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation()
-        const menu = btn.nextElementSibling
-        const wasHidden = menu.hidden
-        container.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
-        menu.hidden = !wasHidden
-      })
-    })
-    container.querySelectorAll('.lq-move-opt').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const row = getRow(btn.dataset.path)
-        if (row && opts.onMove) opts.onMove(row, btn.dataset.dest)
-      })
-    })
-    container.querySelectorAll('.lq-brow-caret[data-expand]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const row = getRow(btn.dataset.expand)
-        if (row && opts.onToggleExpand) opts.onToggleExpand(row)
-      })
-    })
   }
 
   // One triage row = the CARD (a faithful port of the standalone app's card)
@@ -10726,193 +9926,10 @@ const App = (() => {
     </div>`
   }
 
-  // Actions, now INSIDE the card at top-right (Ryan, 2026-08-02), in the slot
-  // the Format/Bitrate/Cutoff box used to hold. They sat outside the card
-  // boundary on the theory that the card reports and the column acts — true,
-  // but it cost a fixed-width gutter down the whole queue and stopped the card
-  // ever being full width. Ingest / Review / Move, with Move opening a small
-  // menu (Backlog | Working). Once a recording is in, its actions collapse to
-  // a single View link to the finished record.
-  // "Ingesting 4/12" — the confirm job's own copied/total, not a guess. Blank
-  // until the first progress poll lands, so the label never flashes "0/0".
-  // Only the copy phase has a file count; the others have a name instead.
-  const _lqCopyText = pr =>
-    (pr && pr.total && (!pr.phase || pr.phase === 'copying' || pr.phase === 'moving')
-      ? ` ${pr.copied}/${pr.total}` : '')
-
-  // The inline completion bar, rendered into BOTH views (Ryan, 2026-08-28).
-  // Same markup either way: the compact row puts it under the facts line and
-  // the card puts it under the quick-glance line, and one function means they
-  // cannot report different numbers for the same copy.
-  function _lqCopyBar(row) {
-    if (lq.activePath !== row.folder_path) return ''
-    const pr = lq.copyProgress.get(row.folder_path)
-    return `<div class="lq-copybar" data-copybar-for="${esc(row.folder_path)}">
-      <div class="lq-copybar-track"><i style="width:${_lqCopyPct(pr)}%"></i></div>
-      <span class="lq-copybar-n">${esc(_lqPhaseText(pr))}</span>
-    </div>`
-  }
-
-  // What the bar says, and how full it is.
-  //
-  // Only the copy phase can report real progress (copied/total). The rest are
-  // sequential steps of known order, so the bar advances by STEP rather than
-  // pretending to know a percentage it cannot have — a bar frozen at 100%
-  // through a long checksum pass is exactly the "is it stuck?" the phases were
-  // added to answer.
-  // Every phase EXCEPT the copy needs an entry here. A missing key falls
-  // through to the copy branch, which still holds the finished copy's
-  // copied/total and so returns 85 — the bar visibly ran backwards from
-  // "checksums" (94) into "signals", which is precisely the "did it restart?"
-  // the phase bar exists to prevent. Keep in step with PHASES in api/ingest.py.
-  const _LQ_PHASE_PCT = { resolving: 4, copying: null, moving: null,
-                          cataloging: 88, checksums: 94, signals: 96,
-                          saving: 99, tags: 99, done: 100 }
-  function _lqCopyPct(pr) {
-    if (!pr) return 2
-    const fixed = _LQ_PHASE_PCT[pr.phase]
-    if (fixed != null) return fixed
-    // Copy phase: 8-85% of the bar, so it never claims to be finished while
-    // cataloging and checksums are still to come.
-    return pr.total ? 8 + Math.round(77 * pr.copied / pr.total) : 8
-  }
-  function _lqPhaseText(pr) {
-    if (!pr) return 'Starting…'
-    if ((pr.phase === 'copying' || pr.phase === 'moving') && pr.total) {
-      return `${pr.label || 'Copying'}: ${pr.copied}/${pr.total} files`
-    }
-    return pr.label || 'Working…'
-  }
-
-  function _lqActions(row, done) {
-    // `done` is this session's log; `row.recording_id` is the DURABLE fact,
-    // written onto the staging row when the ingest committed. Checking only
-    // the log meant a folder ingested in an earlier session was offered for
-    // ingest all over again (2026-07-31).
-    const recId = done?.status === 'done' ? done.recording_id : row.recording_id
-    if (recId) {
-      // "Complete" while a bulk run is still going, "Ingested" once it is over
-      // (Ryan, 2026-08-28). The words are different on purpose: during the run
-      // it is the third state of a progression the user is watching; after it,
-      // it is a durable fact about the row.
-      return `<div class="lq-actions">
-        <button type="button" class="lq-act lq-act--ingest" disabled>${lq.running ? 'Complete' : 'Ingested'}</button>
-        <a class="lq-act lq-act--view" href="#/recording/${recId}">View</a>
-      </div>`
-    }
-    // ── Bulk-run states. Checked BEFORE the disk/error states below: a row the
-    // queue is actively copying is not offering buttons, so nothing here can be
-    // clicked into a second confirm job for the same folder.
-    if (lq.activePath === row.folder_path) {
-      const pr = lq.copyProgress.get(row.folder_path)
-      return `<div class="lq-actions">
-        <span class="lq-act-running" data-progress-for="${esc(row.folder_path)}">
-          <span class="lq-spin"></span>Ingesting${_lqCopyText(pr)}</span>
-      </div>`
-    }
-    if (lq.running && lq.queued.has(row.folder_path)) {
-      return `<div class="lq-actions"><span class="lq-act-queued">Queued</span></div>`
-    }
-    // Folder is gone from disk but the analysis row remains — nothing here can
-    // act on it, so say so instead of offering buttons that must fail.
-    if (row.exists === false) {
-      return `<div class="lq-actions">
-        <span class="lq-act-cancelled" title="${esc(row.folder_path)}">Folder moved</span>
-      </div>`
-    }
-    // ── Convert offer (Ryan, 2026-09-02) ──────────────────────────────────
-    // Placed ABOVE the error branch on purpose. A Shorten folder arrives with
-    // an analysis error, because there was nothing this app could decode —
-    // and the answer to that error is not "Retry", it is "convert it first".
-    // Offering Retry on a format we cannot read is offering the same failure
-    // again.
-    const cv = lq.converting.get(row.folder_path)
-    if (cv) {
-      return `<div class="lq-actions">
-        <span class="lq-act-running" data-convert-for="${esc(row.folder_path)}">
-          <span class="lq-spin"></span>${esc(_lqConvertText(cv))}</span>
-        <button class="lq-act lq-act--cancel" data-convert-cancel="${esc(row.folder_path)}">Stop</button>
-      </div>`
-    }
-    if (row.convertible && !lq.running) {
-      const k = row.convertible.kind
-      const n = row.convertible.count
-      return `<div class="lq-actions">
-        ${row.convertError ? _lqErrorChip(row.convertError, 'Could not convert this folder') : ''}
-        <button class="lq-act lq-act--convert" data-convert="${esc(row.folder_path)}"
-                title="${k === 'shn'
-                  ? `Decode ${n} Shorten file${n === 1 ? '' : 's'} to FLAC, keeping the originals in an _originals folder, then re-run the scan.`
-                  : `Re-encode ${n} WAV file${n === 1 ? '' : 's'} to FLAC at the same bit depth — same audio, about half the size. Originals are kept in an _originals folder.`}"
-                >${k === 'shn' ? 'Convert to FLAC' : 'Compress to FLAC'}</button>
-        ${k === 'wav' ? _lqReviewMove(row) : `
-          <div class="lq-move-wrap">
-            <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
-            <div class="lq-move-menu" hidden>
-              ${triageDestButtons('lq', row.folder_path)}
-            </div>
-          </div>`}
-      </div>`
-    }
-
-    if (done?.status === 'error') {
-      return `<div class="lq-actions">
-        ${_lqErrorChip(done.error || 'The ingest failed.', 'Could not add this recording')}
-        <button class="lq-act lq-act--ingest" data-path="${esc(row.folder_path)}">Retry</button>
-        ${_lqReviewMove(row)}
-      </div>`
-    }
-
-    // A row whose ANALYSIS failed (Ryan, 2026-09-03). Distinct from the ingest
-    // failure above: nothing has been attempted on the library yet, so the
-    // action is to analyse it again, not to file it again. It offered Ingest /
-    // Review / Move — three buttons, none of which can work on a row with no
-    // analysis behind it, and the one thing that does work was not there.
-    //
-    // Re-analyses THIS FOLDER only. Reprocess in the settings bar is the
-    // whole-scan version; a single bad row should not cost a re-run of
-    // twenty good ones.
-    if (row.error && !row._reanalyzing) {
-      return `<div class="lq-actions">
-        <button class="lq-act lq-act--retry" data-reanalyze="${esc(row.folder_path)}"
-                title="Analyse this folder again">Retry</button>
-        ${_lqReviewMove(row)}
-      </div>`
-    }
-    if (done?.status === 'cancelled') {
-      return `<div class="lq-actions">
-        <span class="lq-act-cancelled">Cancelled</span>
-        <button class="lq-act lq-act--ingest" data-path="${esc(row.folder_path)}">Ingest</button>
-      </div>`
-    }
-    return `<div class="lq-actions">
-      <button class="lq-act lq-act--ingest" data-path="${esc(row.folder_path)}"
-              title="Auto-ingest using the metadata shown">Ingest</button>
-      ${_lqReviewMove(row)}
-    </div>`
-  }
-
-  // "Converting 4 of 17 · d1t04.shn". The filename is worth the width here in
-  // a way it is not during an ingest copy: a conversion can fail on ONE bad
-  // file out of twenty, and knowing which one it stopped on is the whole
-  // diagnosis.
+  // "Converting 4 of 17". The filename was dropped (Ryan, 2026-10-02): it made
+  // the row far too wide.
   function _lqConvertText(cv) {
-    const head = `Converting${cv.total ? ` ${Math.min(cv.done + 1, cv.total)} of ${cv.total}` : ''}`
-    return cv.current ? `${head} · ${cv.current}` : head
-  }
-
-  // Review + Move. Shared so the failure state offers exactly what the normal
-  // state does — the whole point of the 2026-08-28 fix is that a failed ingest
-  // must not strip away the two things that can actually resolve it.
-  function _lqReviewMove(row) {
-    return `
-      <button class="lq-act lq-act--review" data-path="${esc(row.folder_path)}"
-              title="Open the full Add Recording page">Review</button>
-      <div class="lq-move-wrap">
-        <button class="lq-act lq-act--move" data-path="${esc(row.folder_path)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
-        <div class="lq-move-menu" hidden>
-          ${triageDestButtons('lq', row.folder_path)}
-        </div>
-      </div>`
+    return `Converting${cv.total ? ` ${Math.min(cv.done + 1, cv.total)} of ${cv.total}` : ''}`
   }
 
   // A failure marker that costs one column, not four lines.
@@ -10932,268 +9949,14 @@ const App = (() => {
       </span></span>`
   }
 
-  // Where the caret was, so a repaint can put it back.
-  //
-  // renderTriageView() rebuilds the WHOLE page through setMainHTML(), and the
-  // page holds a form. Two things drive repaints the user did not ask for:
-  // pollAnalysis() fires one every ~900ms for the length of a scan, and every
-  // apply-all field repaints on blur. Both destroyed the element the caret was
-  // in — so typing into "Applies to every recording" while a scan was running
-  // lost the cursor once per analysed folder (Ryan, 2026-09-02), and Tab moved
-  // to the next field only for the blur repaint to delete it a millisecond
-  // later, which is why the form could not be tabbed through at all.
-  //
-  // The id is enough of a key: every field in this form has one, and an
-  // element with no id is not a field worth restoring to.
-  function _lqCaptureFocus() {
-    const el = document.activeElement
-    if (!el || !el.id || !mainContent.contains(el)) return null
-    const sel = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')
-    return {
-      id: el.id,
-      // Only text-ish controls have a selection; reading it off a checkbox or
-      // a range input throws in Chrome.
-      start: sel && el.selectionStart != null ? el.selectionStart : null,
-      end:   sel && el.selectionEnd   != null ? el.selectionEnd   : null,
-    }
-  }
-
-  function _lqRestoreFocus(snap) {
-    if (!snap) return
-    const el = document.getElementById(snap.id)
-    if (!el) return
-    // preventScroll: the caret is being put back where it already was, so the
-    // browser's "scroll the focused element into view" would be a jump the
-    // user did not cause.
-    try { el.focus({ preventScroll: true }) } catch (_) { el.focus() }
-    if (snap.start != null) {
-      try { el.setSelectionRange(snap.start, snap.end) } catch (_) {}
-    }
-  }
-
-  // Normalizes one staging row into the shared ingest-queue-table row shape
-  // (see the component doc comment above). Kept next to renderTriageView()
-  // since it reads `lq` state directly (activePath/queued/log) the same way
-  // the render function always has.
-  function _lqBuildIqRow(row) {
-    const x = row.extracted || {}
-    const h = row.health
-    const done = lq.log.find(l => l.folder_path === row.folder_path)
-    const recId = done?.status === 'done' ? done.recording_id : row.recording_id
-
-    let status
-    if (recId) status = 'ingested'
-    else if (row._ingestedElsewhere) status = 'skipped'
-    else if (lq.activePath === row.folder_path) status = 'ingesting'
-    else if (row._pending || (lq.running && lq.queued.has(row.folder_path))) status = 'pending'
-    else if (row.error) status = 'failed'
-    else status = 'review'
-
-    const dateStr = _lqDateStr(x) || null
-    const venueOrLoc = x.venue || [x.city, x.state].filter(Boolean).join(', ')
-    const metaParts = [x.artist, dateStr, venueOrLoc].filter(Boolean).map(esc)
-    const meta = metaParts.length ? metaParts.join('<span class="sep">·</span>') : ''
-
-    // needs_review / review_reason are tied to the METADATA reasons only
-    // (no artist, no date, unsupported format) -- concerns (possible
-    // duplicate, failed checksum, no audio, a technical fault) are a
-    // separate signal and must keep their own text and, for a duplicate,
-    // its View link, rather than being folded into this one line and losing
-    // everything but the first concern's words (Ryan, 2026-09-27). They
-    // still show, in the expand panel's Issues row and as an amber flag on
-    // the Metadata pill below.
-    const artistMissing = !x.artist
-    const dateMissing = !((h && h.date_precision >= 2) || x.year)
-    const unsupported = !!row.convertible
-    const reviewIssues = []
-    if (artistMissing) reviewIssues.push('No artist found')
-    if (dateMissing) reviewIssues.push('No date found')
-    if (unsupported) reviewIssues.push('Unsupported format')
-    const reviewReason = reviewIssues[0] || null
-    const needsReview = !!reviewReason
-
-    const format = x.format || null
-    const nTracks = x.track_count
-    const tracksText = nTracks != null ? `${nTracks} track${nTracks === 1 ? '' : 's'}` : null
-    const technicalIssuesHtml = (row.interp?.issues || []).length
-      ? row.interp.issues.map(i => `<span>${esc(i.issue)}</span>`).join(' ') : ''
-    // Concerns reuse _lqConcerns()'s exact markup (level colour, text, and
-    // the duplicate concern's View link) rather than a second, thinner
-    // rendering of the same data.
-    const issuesHtml = technicalIssuesHtml + _lqConcerns(row)
-
-    return {
-      id: row.folder_path,
-      name: row.name,
-      meta,
-      format,
-      kind: x.kind || null,
-      sound_band: row.verdict_band || null,
-      meta_band: (h && h.band) || null,
-      needs_review: needsReview,
-      review_reason: reviewReason,
-      review_issues: reviewIssues,
-      concerns: row.concerns || [],
-      status,
-      recording_id: recId,
-      status_text: row.error ? (typeof row.error === 'string' ? row.error : 'Could not be read')
-        : row._ingestedElsewhere ? 'Already in your library' : null,
-      detail: {
-        artist: x.artist || null, date: dateStr, venue: x.venue || null,
-        location: [x.city, x.state, x.country].filter(Boolean).join(', ') || null,
-        source: x.source || null, lineage: x.lineage || null,
-        tracksText, issuesHtml,
-        path: row.folder_path,
-      },
-      _triageRow: row,
-      _done: done,
-    }
-  }
-
-  function renderTriageView({ preserveScroll = false } = {}) {
-    setActiveNav('ingest')
-    setNavCurrent('Add Recordings')
-    const scrollY = preserveScroll ? window.scrollY : 0
-    const focusSnap = preserveScroll ? _lqCaptureFocus() : null
-
-    // Anything still in the list is still a candidate — moving a show to
-    // Backlog/Working physically removes it from the scanned folder, so the
-    // queue IS the remaining work. No separate accept step to forget.
-    const visibleRows = lq.rows
-    const queue        = visibleRows.filter(_lqIngestable)
-    const analysing    = !!lq.progress && lq.progress.done < lq.progress.total
-
-    const progressBar = analysing ? `
-      <div class="lq-progress">
-        <div class="lq-progress-bar"><i style="width:${
-          Math.round(100 * lq.progress.done / Math.max(1, lq.progress.total))}%"></i></div>
-        <span class="lq-progress-count">${lq.progress.done}/${lq.progress.total}</span>
-        ${lq.progress.current ? `<span class="lq-progress-current">${esc(lq.progress.current)}</span>` : ''}
-      </div>` : ''
-
-    // Why the run stopped, when it stopped badly. Reuses the card's own error
-    // styling rather than inventing a banner class.
-    const errorBar = lq.error
-      ? `<div class="lq-err" style="margin:0 0 12px">${esc(lq.error)}</div>` : ''
-
-    // The single action. Cancel replaces it mid-run rather than sitting next to
-    // it, so there is never a question about which button is live. Label and
-    // count both track the active tier filter — "Ingest 178 High" can never
-    // promise more than the loop (which filters the same way) will do.
-    const queueWord = `recording${queue.length === 1 ? '' : 's'}`
-    // The note is DERIVED, not poked into the DOM. runIngestQueue() used to
-    // set #lq-run-note.textContent and then immediately call renderTriageView(),
-    // which re-emitted the span empty — so the sentence never survived to a
-    // frame. Same for the cancel handler's "Cancelling…".
-    const activeRow = lq.activePath && lq.rows.find(r => r.folder_path === lq.activePath)
-    const runNote = lq.cancel
-      ? 'Cancelling. Finishing the current copy safely…'
-      : (activeRow ? `Ingesting ${activeRow.name}…` : '')
-    const runBar = lq.running
-      ? `<button class="btn btn-danger" id="lq-cancel-btn">Cancel</button>
-         <span class="lq-run-note" id="lq-run-note">${esc(runNote)}</span>`
-      : `<button class="btn btn-primary" id="lq-ingest-all-btn" ${queue.length ? '' : 'disabled'}>
-           ⇉ Ingest ${queue.length} ${queueWord}
-         </button>`
-
-    // Three body states: the queue is genuinely empty (all done / nothing
-    // found), a tier filter is hiding everything that IS left, or there are
-    // cards to show.
-    const cardsBody = !lq.rows.length
-      ? (
-        // Rows no longer drain on ingest (2026-08-30), so this is only
-        // reached when literally nothing was found, or every row was Moved
-        // away (the one action that still removes a row outright). Kept as
-        // two distinct messages rather than collapsing to one, since "you
-        // ingested everything" and "there was nothing here" are different
-        // facts worth telling apart.
-        lq.log.some(l => l.status === 'done')
-          ? `<div class="empty-state">
-               <div class="empty-title">All done</div>
-               <div class="empty-sub">Everything in this folder has been added to your library.</div>
-               <div style="margin-top:14px; display:flex; gap:8px; justify-content:center">
-                 <button class="btn btn-primary btn-sm" id="lq-alldone-more">Add More Recordings</button>
-                 <a class="btn btn-ghost btn-sm" href="#/">Browse Library</a>
-               </div>
-             </div>`
-          : `<div class="empty-state">
-               <div class="empty-title">Nothing to ingest here</div>
-               <div class="empty-sub">No audio folders were found under this directory.</div>
-               <div style="margin-top:14px; display:flex; gap:8px; justify-content:center">
-                 <button class="btn btn-primary btn-sm" id="lq-alldone-more">Add More Recordings</button>
-                 <a class="btn btn-ghost btn-sm" href="#/">Browse Library</a>
-               </div>
-             </div>`)
-      : ingestQueueTable({
-          rows: visibleRows.map(_lqBuildIqRow),
-          soundQuality: true,
-          canIngest: true,
-          moveTargets: triageDests().map(d => ({ key: d, label: TRIAGE_LABELS[d] || d })),
-          filterReview: lq.reviewFilter,
-          isOpen: r => lq.compactOpen.has(r.id),
-          actionsHtml: r => _lqActions(r._triageRow, r._done),
-        })
-
-    // ── Settings bar ─────────────────────────────────────────────────────
-    // Horizontal, across the top, matching `.browse-filters` in the Browse
-    // view (Ryan, 2026-08-28: "like all the other navigation elements in the
-    // app"). It was a left-hand rail for one day; a vertical column of
-    // settings is not a shape this app uses anywhere else, and consistency
-    // beats the extra room it bought.
-    //
-    // Mode collapses from two labelled radio cards to a select for the same
-    // reason. The cards carried a sentence of explanation each, which now
-    // lives on the label's tooltip and in the option text.
-    //
-    // Disabled as a set while a run is going: changing the destination folder
-    // or the file treatment underneath a queue that is already copying is not
-    // a thing the user can mean.
-    const dis = lq.running ? 'disabled' : ''
-    const settingsBar = `
-      <div class="lq-setbar">
-        <span class="bfilter">Source folder
-          <button class="lq-setbar-path" id="lq-back-btn" ${dis}
-                  title="Choose another folder. Currently ${esc(lq.sourceDir || '')}">
-            ${icon('folder-open', 'lq-setbar-ic')}
-            <span>${esc(_lqShortPath(lq.sourceDir))}</span></button>
-          <!-- Reprocess (Ryan, 2026-09-03). Re-runs the whole scan over the
-               same directory with reanalyze=true, so it redoes the work rather
-               than adopting the rows already stored. It exists because the
-               recovery for a run that stopped badly used to be "go back to the
-               picker and find the folder again" — several clicks, and the
-               folder you want is the one you are already looking at. Beside
-               the path it acts on, not in the header: it is a property of this
-               scan, like the two selects to its right. -->
-          <button class="lq-setbar-re" id="lq-reprocess-btn" ${dis}
-                  title="Run the scan again over this folder, re-analysing every recording from scratch">
-            ${icon('rotate-cw', 'lq-setbar-ic')}<span>Reprocess</span></button>
-        </span>
-
-        <label class="bfilter" title="Quick Add files the recording with full metadata, checksums and a sound-quality score, and leaves the per-track audio analysis for later. Complete does that analysis during the ingest, which takes roughly a minute per minute of music.">Mode
-          <select id="lq-mode" ${dis}>
-            <option value="quick"${lq.mode !== 'full' ? ' selected' : ''}>Quick Add</option>
-            <option value="full"${lq.mode === 'full' ? ' selected' : ''}>Add w Audio Analysis</option>
-          </select>
-        </label>
-
-        <span id="lq-fh-strip"></span>
-      </div>`
-
-    // ── Apply to all ─────────────────────────────────────────────────────
-    // Collapsed to one small link until used, because this is a rare case and
-    // a permanently visible empty form above the primary button would tax
-    // every ordinary ingest for the sake of an occasional one. Stays open once
-    // it holds a value, so a set value can never be invisible.
-    //
-    // Expanded 2026-08-31 (Ryan) to the same field set the Add Recording form
-    // carries: Artist, Venue, City/State/Country, Event, Source, Lineage,
-    // Notes — one small form instead of one input, reusing the exact same
-    // `.ingest-field` / `.artist-picker-wrap` / `.venue-picker-wrap` markup and
-    // styling the review form already uses, so it reads as the same control.
-    const aa = lq.applyAll
+  // The "Apply values to every recording below" block, shared by Review & Ingest and
+  // the import page: `cx` carries what differs (the typed values `aa`, open,
+  // busy, the staged values `applied`, and the derived `typed`/`state`).
+  function _applyAllHtml(cx) {
+    const aa = cx.aa
     const anyApplied = !!(aa.event.trim() || aa.artist.trim() || aa.venue.name.trim()
       || aa.city.trim() || aa.state.trim() || aa.country.trim()
-      || aa.source.trim() || aa.lineage.trim() || aa.notes.trim())
+      || aa.source.trim() || aa.source_tag.trim() || aa.lineage.trim() || aa.notes.trim())
     // Locked exactly like the Add Recording form's own venue picker: an id
     // means an existing Venue row was picked, so City/State/Country are that
     // venue's own stored values and editing them here would do nothing — the
@@ -11205,18 +9968,17 @@ const App = (() => {
     // invisible. The +/- toggle (Ryan, 2026-09-02) makes that unenforceable —
     // the user can now close it whenever they like — so the invariant is kept
     // by saying so on the header instead of by refusing the click.
-    const aaTyped = _aaTyped()
+    const aaTyped = cx.typed
     const aaCount = _aaCount(aaTyped)
-    const aaState = _aaState()
-    const aaOpen = lq.applyAllOpen
-    const applyAllBar = !lq.rows.length ? '' :
-      `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}">
+    const aaState = cx.state
+    const aaOpen = cx.open
+    return `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}">
            <div class="lq-applyall-head">
              <button type="button" class="lq-applyall-tog" id="lq-applyall-toggle"
                      aria-expanded="${aaOpen}"
                      title="${aaOpen ? 'Collapse' : 'Expand'}"
                      >${icon(aaOpen ? 'minus' : 'plus', 'lq-applyall-ic')}</button>
-             <span class="lq-applyall-h">Applies to every recording below</span>
+             <span class="lq-applyall-h">Apply values to every recording below</span>
              ${!aaOpen && aaCount ? `<span class="lq-applyall-n">${aaCount} value${
                  aaCount === 1 ? '' : 's'} set</span>` : ''}
              <!-- Apply Values (Ryan, 2026-09-03). The blanket values do
@@ -11237,491 +9999,98 @@ const App = (() => {
                ? `<span class="lq-applyall-ok" title="These values overwrite the inferred metadata on every recording in this queue.">
                     ${icon('check', 'lq-applyall-ic')} Applied to all recordings</span>`
                : `<button type="button" class="lq-applyall-go" id="lq-applyall-apply"
-                          ${lq.running ? 'disabled' : ''}
+                          ${cx.busy ? 'disabled' : ''}
                           title="Stage these values for every recording below. They will replace whatever the scan inferred for those fields.">
                     Apply Values</button>`}
-             ${anyApplied || lq.applied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
-                               ${lq.running ? 'disabled' : ''}>Clear all</button>` : ''}
+             ${anyApplied || cx.applied ? `<button type="button" class="lq-applyall-x" id="lq-applyall-clear"
+                               ${cx.busy ? 'disabled' : ''}>Clear All</button>` : ''}
            </div>
            ${!aaOpen ? '' : `<div class="lq-applyall-grid">
-             <div class="ingest-field">
-               <label>Artist</label>
-               <div class="artist-picker-wrap">
-                 <input type="text" id="lq-apply-artist" autocomplete="off"
-                        value="${esc(aa.artist)}" ${lq.running ? 'disabled' : ''}>
-                 <div class="artist-dropdown" id="lq-apply-artist-dropdown" style="display:none"></div>
+             <!-- Same rows and field classes as the Add Recording form
+                  (ingest-row-act / ingest-row-src), so the inputs come out at
+                  the same widths. -->
+             <div class="ingest-field-grid ingest-row-act">
+               <div class="ingest-field">
+                 <label>Artist</label>
+                 <div class="artist-picker-wrap">
+                   <input type="text" id="lq-apply-artist" autocomplete="off"
+                          value="${esc(aa.artist)}" ${cx.busy ? 'disabled' : ''}>
+                   <div class="artist-dropdown" id="lq-apply-artist-dropdown" style="display:none"></div>
+                 </div>
+               </div>
+               <div class="ingest-field">
+                 <label>Event / Festival</label>
+                 <input type="text" id="lq-apply-event"
+                        value="${esc(aa.event)}" ${cx.busy ? 'disabled' : ''}>
                </div>
              </div>
              <div class="ingest-field">
                <label>Venue</label>
                <div class="venue-picker-wrap">
                  <input type="text" id="lq-apply-venue-name" autocomplete="off"
-                        value="${esc(aa.venue.name)}" ${lq.running ? 'disabled' : ''}>
+                        value="${esc(aa.venue.name)}" ${cx.busy ? 'disabled' : ''}>
                  <input type="hidden" id="lq-apply-venue-id" value="${esc(String(aa.venue.id || ''))}">
                  <div class="venue-dropdown" id="lq-apply-venue-dropdown" style="display:none"></div>
                </div>
              </div>
-             <div class="ingest-field">
-               <label>City</label>
-               <input type="text" id="lq-apply-city" value="${esc(aa.city)}"
-                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
-                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+             <div class="ingest-field-grid ingest-row-loc">
+               <div class="ingest-field">
+                 <label>City</label>
+                 <input type="text" id="lq-apply-city" value="${esc(aa.city)}"
+                        ${cx.busy || aaVenueLocked ? 'disabled' : ''}
+                        title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+               </div>
+               <div class="ingest-field">
+                 <label>State</label>
+                 <input type="text" id="lq-apply-state" maxlength="6" value="${esc(aa.state)}"
+                        ${cx.busy || aaVenueLocked ? 'disabled' : ''}
+                        title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+               </div>
+               <div class="ingest-field">
+                 <label>Country</label>
+                 <input type="text" id="lq-apply-country" value="${esc(aa.country)}"
+                        ${cx.busy || aaVenueLocked ? 'disabled' : ''}
+                        title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
+               </div>
              </div>
-             <div class="ingest-field">
-               <label>State</label>
-               <input type="text" id="lq-apply-state" maxlength="6" value="${esc(aa.state)}"
-                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
-                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
-             </div>
-             <div class="ingest-field">
-               <label>Country</label>
-               <input type="text" id="lq-apply-country" value="${esc(aa.country)}"
-                      ${lq.running || aaVenueLocked ? 'disabled' : ''}
-                      title="${aaVenueLocked ? 'Filled from the selected venue' : ''}">
-             </div>
-             <div class="ingest-field">
-               <label>Event / Festival</label>
-               <input type="text" id="lq-apply-event"
-                      value="${esc(aa.event)}" ${lq.running ? 'disabled' : ''}>
-             </div>
-             <div class="ingest-field">
-               <label>Source</label>
-               <input type="text" id="lq-apply-source"
-                      value="${esc(aa.source)}" ${lq.running ? 'disabled' : ''}>
-             </div>
-             <div class="ingest-field">
-               <label>Lineage</label>
-               <input type="text" id="lq-apply-lineage" value="${esc(aa.lineage)}"
-                      ${lq.running ? 'disabled' : ''}>
+             <div class="ingest-field-grid ingest-row-src">
+               <div class="ingest-field">
+                 <label>Source</label>
+                 <input type="text" id="lq-apply-source"
+                        value="${esc(aa.source)}" ${cx.busy ? 'disabled' : ''}>
+               </div>
+               <div class="ingest-field">
+                 <label>Source Tag</label>
+                 <input type="text" id="lq-apply-source-tag"
+                        value="${esc(aa.source_tag)}" ${cx.busy ? 'disabled' : ''}>
+               </div>
+               <div class="ingest-field">
+                 <label>Lineage</label>
+                 <input type="text" id="lq-apply-lineage" value="${esc(aa.lineage)}"
+                        ${cx.busy ? 'disabled' : ''}>
+               </div>
              </div>
              <div class="ingest-field lq-applyall-notes">
                <label>Notes</label>
-               <textarea id="lq-apply-notes" ${lq.running ? 'disabled' : ''}>${esc(aa.notes)}</textarea>
+               <textarea id="lq-apply-notes" ${cx.busy ? 'disabled' : ''}>${esc(aa.notes)}</textarea>
              </div>
            </div>`}
          </div>`
-
-    setMainHTML(`
-      <div class="batch-shell lq-shell">
-        <div class="batch-header lq-header">
-          <div style="min-width:0">
-            <h2>Review &amp; Ingest</h2>
-            <p class="batch-subtitle">${lq.rows.length
-              ? `${lq.rows.length} recording${lq.rows.length === 1 ? '' : 's'} found`
-              : 'Nothing to review'}</p>
-          </div>
-          <!-- The primary action, top-right (Ryan, 2026-08-31) — actions
-               centralize in the header the same way View Recording's do in
-               .rec-header-actions, rather than sitting in their own bar
-               beneath the settings/apply-all rows below. -->
-          <div class="lq-header-actions">
-            ${!lq.running && visibleRows.some(r => _lqBuildIqRow(r).needs_review) ? `
-              <button type="button" class="btn btn-ghost btn-sm${lq.reviewFilter ? ' btn-primary' : ''}" id="lq-review-toggle">${
-                lq.reviewFilter ? 'Show all' : 'Needs Review'}</button>` : ''}
-            ${runBar}
-          </div>
-        </div>
-
-        ${settingsBar}
-        ${progressBar}
-        ${errorBar}
-        ${applyAllBar}
-        ${_lqDoneStripHtml()}
-        <div class="lq-cards lq-cards--compact" id="lq-cards">${cardsBody}</div>
-      </div>`)
-
-    if (preserveScroll) window.scrollTo(0, scrollY)
-    _wireTriage()
-    // After wiring, not before: _wireTriage() is what attaches the listeners
-    // the restored element needs, and focusing a field with no listeners on it
-    // is how a keystroke goes nowhere.
-    _lqRestoreFocus(focusSnap)
   }
 
-  // The <audio> element carries no `controls` any more (Ryan, 2026-09-02).
-  // The browser's default bar is the one control in this app drawn by the
-  // OS rather than by us — chrome, type, colours and all — and it sat in the
-  // middle of a panel where everything else is ours. So the element is
-  // silent scaffolding now and the visible player is `.lq-mini`, built from
-  // the same .player-btn-play / .progress-bar / .player-time parts the main
-  // player bar uses, so a preview reads as this app playing something.
-  //
-  // Still a SEPARATE element from the shared #audio-el, for the reason it
-  // always was: this is a pre-ingest file with no track ID and no queue, and
-  // routing it through Player would blow away whatever the user actually had
-  // on. Still exactly ONE of it, so a second click stops the first.
-  //
-  // The wrapper moves between slots as a unit; `_lqPreviewUI` holds the
-  // handful of nodes the tick handler writes to, so nothing is queried per
-  // frame.
-  let _lqPreviewUI = null
-  const _lqPreviewWrap = () => {
-    let wrap = document.getElementById('lq-preview-player')
-    if (wrap && _lqPreviewUI) return wrap
-
-    // Removing an <audio> from the DOM does NOT stop it. renderTriageView()
-    // rebuilds mainContent wholesale, so the previous wrapper is detached with
-    // its file still playing — and building a fresh one on top of that is two
-    // previews at once out of a component whose whole point is that there is
-    // only ever one. Silence the orphan before replacing it.
-    if (_lqPreviewUI?.el) { try { _lqPreviewUI.el.pause() } catch (_) {} }
-
-    wrap = document.createElement('div')
-    wrap.id = 'lq-preview-player'
-    wrap.className = 'lq-mini'
-    wrap.innerHTML = `
-      <button type="button" class="player-btn player-btn-play lq-mini-play"
-              title="Play / Pause">${icon('play')}</button>
-      <span class="player-time lq-mini-cur">0:00</span>
-      <input type="range" class="progress-bar lq-mini-bar"
-             min="0" max="100" value="0" step="0.1" aria-label="Seek">
-      <span class="player-time lq-mini-dur">0:00</span>
-      <audio id="lq-preview-audio" preload="metadata"></audio>`
-
-    const ui = {
-      play: wrap.querySelector('.lq-mini-play'),
-      bar:  wrap.querySelector('.lq-mini-bar'),
-      cur:  wrap.querySelector('.lq-mini-cur'),
-      dur:  wrap.querySelector('.lq-mini-dur'),
-      el:   wrap.querySelector('audio'),
-      // True while the user has the seek handle down. The timeupdate handler
-      // must not write to the bar during a drag, or the thumb fights the
-      // pointer and snaps back on every frame.
-      seeking: false,
-    }
-    _lqPreviewUI = ui
-
-    const paint = () => {
-      const d = ui.el.duration
-      ui.dur.textContent = isFinite(d) ? _mmss(d) : '0:00'
-      ui.cur.textContent = _mmss(ui.el.currentTime || 0)
-      if (!ui.seeking && isFinite(d) && d > 0) {
-        ui.bar.value = String(100 * (ui.el.currentTime || 0) / d)
-      }
-    }
-    const paintPlay = () => {
-      ui.play.innerHTML = icon(ui.el.paused ? 'play' : 'pause')
-    }
-
-    ui.el.addEventListener('timeupdate', paint)
-    ui.el.addEventListener('loadedmetadata', paint)
-    ui.el.addEventListener('play', paintPlay)
-    ui.el.addEventListener('pause', paintPlay)
-    // Reset to the start rather than leaving the bar pinned full and the
-    // button showing pause on a finished file.
-    ui.el.addEventListener('ended', () => { ui.bar.value = '0'; paintPlay() })
-
-    ui.play.addEventListener('click', () => {
-      if (!ui.el.src) return
-      if (ui.el.paused) ui.el.play(); else ui.el.pause()
-    })
-    ui.bar.addEventListener('pointerdown', () => { ui.seeking = true })
-    const endSeek = () => {
-      if (!ui.seeking) return
-      ui.seeking = false
-      const d = ui.el.duration
-      if (isFinite(d) && d > 0) {
-        try { ui.el.currentTime = d * (parseFloat(ui.bar.value) || 0) / 100 } catch (_) {}
-      }
-    }
-    ui.bar.addEventListener('pointerup', endSeek)
-    ui.bar.addEventListener('change', endSeek)
-    // Scrub live while dragging — the time readout is the only feedback
-    // there is until the pointer comes up.
-    ui.bar.addEventListener('input', () => {
-      const d = ui.el.duration
-      if (isFinite(d) && d > 0) ui.cur.textContent = _mmss(d * (parseFloat(ui.bar.value) || 0) / 100)
-    })
-    return wrap
-  }
-
-  const playAt = (folder, file, seek, slot) => {
-    const wrap = _lqPreviewWrap()
-    const el = _lqPreviewUI.el
-    const host = slot
-      ? mainContent.querySelector(`.lq-trk-player[data-slot-for="${CSS.escape(slot)}"]`)
-      : null
-    if (host && wrap.parentElement !== host) {
-      const prev = wrap.parentElement
-      wrap.remove()
-      if (prev && prev.classList.contains('lq-trk-player')) prev.classList.remove('on')
-      host.appendChild(wrap)
-    }
-    if (host) host.classList.add('on')
-    if (!wrap.isConnected) document.body.appendChild(wrap)
-
-    // The player no longer sits under the track, so the highlight is the
-    // only thing saying WHICH track is playing. It has to be reliable.
-    mainContent.querySelectorAll('.lq-trk.playing').forEach(r => r.classList.remove('playing'))
-    const btn = mainContent.querySelector(
-      `.lq-trk [data-file="${CSS.escape(file)}"][data-slot="${CSS.escape(slot || '')}"]`)
-    btn?.closest('.lq-trk')?.classList.add('playing')
-
-    const url = `/api/stream/ingest-preview?folder=${encodeURIComponent(folder)}`
-              + `&file=${encodeURIComponent(file)}`
-    if (el.dataset.src !== url) {
-      el.src = url; el.dataset.src = url
-      // A new file has a new length; leaving the old one up means the bar
-      // reads against a duration that no longer applies until the first
-      // timeupdate lands.
-      _lqPreviewUI.bar.value = '0'
-      _lqPreviewUI.dur.textContent = '0:00'
-    }
-    const go = () => { try { el.currentTime = seek } catch (_) {} ; el.play() }
-    // Seeking before metadata lands silently no-ops, so wait when cold.
-    if (el.readyState >= 1) go()
-    else el.addEventListener('loadedmetadata', go, { once: true })
-  }
-
-  // ── SHN / WAV → FLAC, driven from one triage row ──────────────────────────
-  //
-  // The interaction Ryan asked for is that the row handles it: click Convert,
-  // watch the count, and end up with a normally-analysed recording sitting in
-  // the same place in the queue. So this does the whole arc — start the job,
-  // poll it, then re-scan that one folder and drop the fresh row in where the
-  // old one was.
-  //
-  // ⚠ Position in the list is preserved deliberately. `startAnalysis` sorts
-  // rows by score and a converted show suddenly HAS a score, so letting the
-  // list re-sort would slide the row the user is watching somewhere else on
-  // the page at the exact moment they were told it finished.
-  async function _lqConvert(folderPath) {
-    const row = lq.rows.find(r => r.folder_path === folderPath)
-    if (!row || lq.converting.has(folderPath)) return
-    row.convertError = null
-
-    let start
-    try {
-      start = await API.quality.convert(folderPath)
-    } catch (e) {
-      // Onto the ROW, not into lq.error's page-wide banner: this failed for
-      // one folder, and a banner over a 30-row queue does not say which.
-      row.convertError = e.message || 'Could not start the conversion.'
-      renderTriageView({ preserveScroll: true })
-      return
-    }
-
-    lq.converting.set(folderPath, {
-      jobId: start.job_id, done: 0, total: start.total || 0,
-      current: null, kind: start.kind,
-    })
-    renderTriageView({ preserveScroll: true })
-
-    const sleep = ms => new Promise(r => setTimeout(r, ms))
-    let final = null
-    while (true) {
-      await sleep(900)
-      let st
-      try {
-        st = await API.quality.convertStatus(start.job_id)
-      } catch (e) {
-        // Same rule as pollAnalysis: a stop we cannot explain is still a stop
-        // the user has to be told about.
-        row.convertError = e.message || 'Lost contact with the conversion job.'
-        break
-      }
-      const cv = lq.converting.get(folderPath)
-      if (cv) {
-        cv.done = st.done || 0
-        cv.total = st.total || cv.total
-        cv.current = st.current || null
-        // Patch the one live node rather than repainting: a full render every
-        // 900ms would close any menu open elsewhere in the list, and would
-        // fight the apply-all form the same way pollAnalysis used to.
-        _lqPaintConvert(folderPath)
-      }
-      if (st.status !== 'running') { final = st; break }
-    }
-
-    lq.converting.delete(folderPath)
-
-    if (!final || final.status === 'error') {
-      row.convertError = row.convertError
-        || final?.error || 'The conversion failed.'
-      renderTriageView({ preserveScroll: true })
-      return
-    }
-    if (final.status === 'cancelled') {
-      // Not an error, and not silence either. Whatever finished IS converted,
-      // so the folder has changed and the row must be re-read rather than
-      // left describing a state that no longer exists.
-      await _lqRescanRow(folderPath)
-      return
-    }
-
-    // Done. Some files may still have failed — report those on the row while
-    // showing the freshly analysed result for the ones that worked.
-    const failed = final.result?.failed || []
-    await _lqRescanRow(folderPath)
-    if (failed.length) {
-      const r2 = lq.rows.find(x => x.folder_path === folderPath)
-      if (r2) {
-        r2.convertError = `${failed.length} file${failed.length === 1 ? '' : 's'} `
-                        + `could not be converted (${failed[0].name}: ${failed[0].error}).`
-        renderTriageView({ preserveScroll: true })
-      }
-    }
-  }
-
-  // In-place repaint of one row's conversion label — the same treatment
-  // _lqPaintProgress gives an ingest copy, and for the same reason.
-  function _lqPaintConvert(folderPath) {
-    const cv = lq.converting.get(folderPath)
-    if (!cv) return
-    const el = mainContent.querySelector(
-      `[data-convert-for="${CSS.escape(folderPath)}"]`)
-    if (!el) return
-    const spin = el.querySelector('.lq-spin')
-    el.textContent = _lqConvertText(cv)
-    if (spin) el.prepend(spin)
-  }
-
-  // Re-analyse ONE folder and swap its row in place.
-  //
-  // The staging row was deleted server-side when the conversion finished (see
-  // convert_status), so this is a genuine fresh analysis of the FLACs, not an
-  // adopted row still carrying the Shorten set's error.
-  async function _lqRescanRow(folderPath) {
-    const idx = lq.rows.findIndex(r => r.folder_path === folderPath)
-    if (idx < 0) return
-    // Placeholder while it runs, so the row says something rather than
-    // reverting to its old pre-conversion reading for a few seconds.
-    // `_reanalyzing` is what makes it read "Analyzing now…" instead of
-    // "Queued": a single-row retry has no lq.progress behind it.
-    lq.rows[idx] = { ...lq.rows[idx], _pending: true, _reanalyzing: true,
-                     error: null, convertible: null, convertError: null }
-    renderTriageView({ preserveScroll: true })
-
-    try {
-      const res = await API.quality.analyze(folderPath, true)
-      // Poll that little job to completion, then take the one row we want.
-      const sleep = ms => new Promise(r => setTimeout(r, ms))
-      let rows = []
-      for (let i = 0; i < 400; i++) {
-        await sleep(700)
-        const st = await API.quality.analyzeStatus(res.job_id, res.source_dir)
-        rows = st.results || []
-        if (st.status !== 'running') break
-      }
-      const fresh = rows.find(r => r.folder_path === qsNorm(folderPath))
-                 || rows[0]
-      if (fresh) {
-        // The row keeps its SLOT. See the ⚠ above.
-        const at = lq.rows.findIndex(r => r.folder_path === folderPath)
-        if (at >= 0) lq.rows[at] = fresh
-      } else {
-        const at = lq.rows.findIndex(r => r.folder_path === folderPath)
-        if (at >= 0) lq.rows[at] = { ...lq.rows[at], _pending: false, _reanalyzing: false,
-                                     error: 'The re-scan returned nothing for this folder.' }
-      }
-    } catch (e) {
-      const at = lq.rows.findIndex(r => r.folder_path === folderPath)
-      if (at >= 0) lq.rows[at] = { ...lq.rows[at], _pending: false, _reanalyzing: false,
-                                   error: `The re-scan failed: ${e.message}` }
-    }
-    renderTriageView({ preserveScroll: true })
-  }
-
-  // The server keys staging rows on an NFC-normalised path. macOS hands the
-  // client decomposed filenames, so a raw comparison misses every accented
-  // folder — the same trap CONTEXT.md records for the database side.
-  function qsNorm(p) {
-    return (p || '').normalize('NFC').replace(/\/+$/, '')
-  }
-
-  // A repaint scheduled for AFTER the current event finishes.
-  //
-  // The apply-all fields repaint on blur so the Clear/Hide control and the
-  // Ingest button's count catch up with a value that was typed but never
-  // committed. Doing it synchronously inside the blur handler is what broke
-  // Tab: at that instant focus belongs to nobody (the old field has lost it,
-  // the new one has not gained it yet), so _lqCaptureFocus() sees `body`, the
-  // rebuild lands, and the field Tab was moving to no longer exists. One tick
-  // of delay is all it takes — focus has settled by then and the capture finds
-  // the right element. Coalesced, because a click from one field to another
-  // fires blur and change back to back and one repaint answers both.
-  let _lqRepaintTimer = null
-  function _lqRepaintSoon(delay = 0) {
-    clearTimeout(_lqRepaintTimer)
-    _lqRepaintTimer = setTimeout(() => {
-      _lqRepaintTimer = null
-      renderTriageView({ preserveScroll: true })
-    }, delay)
-  }
-
-  function _wireTriage() {
-    document.getElementById('lq-back-btn')?.addEventListener('click', () => {
-      _lqReset()
-      ingest.step = 'source'
-      renderIngestSource()
-    })
-    document.getElementById('lq-review-toggle')?.addEventListener('click', () => {
-      lq.reviewFilter = !lq.reviewFilter
-      renderTriageView({ preserveScroll: true })
-    })
-    document.getElementById('lq-reprocess-btn')?.addEventListener('click', () => {
-      // `lq.scanDir` is what the user PICKED; `lq.sourceDir` is what the server
-      // resolved it to. They are the same in the ordinary case, and where they
-      // differ the picked one is the honest thing to re-run — re-scanning the
-      // resolved path of a single show would silently narrow a directory-wide
-      // scan to one folder.
-      const dir = lq.scanDir || lq.sourceDir
-      if (!dir) return
-      lq.error = null
-      startAnalysis(dir, true, msg => { lq.error = msg || null })
-    })
-    document.getElementById('lq-alldone-more')?.addEventListener('click', () => {
-      _lqReset()
-      ingest.step = 'source'
-      renderIngestSource()
-    })
-
-    // Apply-to-all. Typed fields are read on INPUT rather than on change so
-    // a value is never lost by clicking straight from a field to Ingest, and
-    // typing does NOT re-render on every keystroke — that would rebuild the
-    // field under the cursor and drop focus. Blur repaints so the button
-    // count and the Clear/Hide control catch up with a value that was typed
-    // but never committed.
-    // One control, both directions (Ryan, 2026-09-02) — was a "+ Add a value
-    // for every recording" link that became a "Hide" link once open, so the
-    // thing you clicked to open was never the thing you clicked to close. The
-    // header is permanent now and the +/- sits beside it.
-    document.getElementById('lq-applyall-toggle')?.addEventListener('click', () => {
-      const opening = !lq.applyAllOpen
-      lq.applyAllOpen = opening
-      renderTriageView({ preserveScroll: true })
-      if (opening) document.getElementById('lq-apply-artist')?.focus()
-    })
-    document.getElementById('lq-applyall-apply')?.addEventListener('click', () => {
-      // A SNAPSHOT, not a reference. Editing a field afterwards must leave the
-      // staged set alone and put the button back to "Apply Values" — that is
-      // what tells the user whether what is on screen is what is staged.
-      lq.applied = _aaTyped()
-      renderTriageView({ preserveScroll: true })
-    })
-    document.getElementById('lq-applyall-clear')?.addEventListener('click', () => {
-      lq.applyAll = {
-        event: '', artist: '',
-        venue: { id: null, name: '' },
-        city: '', state: '', country: '',
-        source: '', lineage: '', notes: '',
-      }
-      // Both, or the queue would keep overwriting from a snapshot whose fields
-      // the user just emptied — the staged set is the one that actually acts.
-      lq.applied = null
-      renderTriageView({ preserveScroll: true })
-    })
-
+  // Field wiring for the block above: plain inputs, the Artist picker and the
+  // Venue picker. `cx` = { aa, rerender(), repaintSoon(delay) }.
+  function _wireApplyAll(cx) {
     // Plain text/textarea fields — same input/blur pattern as the Event field
     // always used.
-    ;[['lq-apply-event', 'event'], ['lq-apply-source', 'source'],
+    ;[['lq-apply-event', 'event'], ['lq-apply-source', 'source'], ['lq-apply-source-tag', 'source_tag'],
       ['lq-apply-lineage', 'lineage'], ['lq-apply-notes', 'notes'],
       ['lq-apply-city', 'city'], ['lq-apply-state', 'state'], ['lq-apply-country', 'country'],
     ].forEach(([id, key]) => {
       const el = document.getElementById(id)
       if (!el) return
-      el.addEventListener('input', e => { lq.applyAll[key] = e.target.value })
-      el.addEventListener('blur', () => _lqRepaintSoon())
+      el.addEventListener('input', e => { cx.aa[key] = e.target.value })
+      el.addEventListener('blur', () => cx.repaintSoon())
     })
 
     // Artist — the same wirePickerDropdown() autocomplete the Members/
@@ -11732,11 +10101,11 @@ const App = (() => {
       const el = document.getElementById('lq-apply-artist')
       const dd = document.getElementById('lq-apply-artist-dropdown')
       if (!el) return
-      el.addEventListener('input', e => { lq.applyAll.artist = e.target.value })
-      el.addEventListener('blur', () => _lqRepaintSoon())
+      el.addEventListener('input', e => { cx.aa.artist = e.target.value })
+      el.addEventListener('blur', () => cx.repaintSoon())
       wirePickerDropdown(el, dd, API.artists.search, ({ name }) => {
-        lq.applyAll.artist = name
-        renderTriageView({ preserveScroll: true })
+        cx.aa.artist = name
+        cx.rerender()
       }, 'Use as typed')
     })()
 
@@ -11770,25 +10139,25 @@ const App = (() => {
             e.preventDefault()
             if (el.dataset.id) {
               const id = parseInt(el.dataset.id)
-              lq.applyAll.venue = { id, name: el.dataset.name }
+              cx.aa.venue = { id, name: el.dataset.name }
               try {
                 const v = await API.venues.get(id)
                 if (!isPlaceholderVenue(v.name)) {
-                  lq.applyAll.city = v.city || ''
-                  lq.applyAll.state = v.state || ''
-                  lq.applyAll.country = v.country || ''
+                  cx.aa.city = v.city || ''
+                  cx.aa.state = v.state || ''
+                  cx.aa.country = v.country || ''
                 }
               } catch (_) {}
             } else {
-              lq.applyAll.venue = { id: null, name: q }
+              cx.aa.venue = { id: null, name: q }
             }
-            renderTriageView({ preserveScroll: true })
+            cx.rerender()
           })
         })
       }
       nameEl.addEventListener('input', () => {
         idEl.value = ''
-        lq.applyAll.venue = { id: null, name: nameEl.value }
+        cx.aa.venue = { id: null, name: nameEl.value }
         const q = nameEl.value.trim()
         clearTimeout(debounce)
         if (q.length < 2) { closeDropdown(); return }
@@ -11796,523 +10165,15 @@ const App = (() => {
           try { showResults(await API.venues.list(q), q) } catch (_) { closeDropdown() }
         }, 220)
       })
-      nameEl.addEventListener('blur', () => _lqRepaintSoon(200))
+      nameEl.addEventListener('blur', () => cx.repaintSoon(200))
       nameEl.addEventListener('focus', () => {
         if (nameEl.value.trim().length >= 2) nameEl.dispatchEvent(new Event('input'))
       })
     })()
-
-    // Mode. Persisted, and read at ingest time rather than captured at render
-    // time, so switching it mid-queue affects the shows not yet started.
-    document.getElementById('lq-mode')?.addEventListener('change', e => {
-      lq.mode = e.target.value === 'full' ? 'full' : 'quick'
-      try { localStorage.setItem('trellisIngestMode', lq.mode) } catch (_) { /* private mode */ }
-    })
-    _wireFhStrip('lq-fh-strip')
-
-    // Sound Quality / Metadata pills — click either to open (or switch) the
-    // row's drill-in straight to that tab. A separate handler from the Tab
-    // Strip's own .lq-dtab (rather than sharing the class) because .lq-dtab
-    // carries its OWN background/border/padding for the tab-strip look,
-    // which would fight .lq-verdict's pill styling on the same element if
-    // both classes landed on one button.
-    mainContent.querySelectorAll('.lq-brow-pill[data-tab]').forEach(btn =>
-      btn.addEventListener('click', e => {
-        e.stopPropagation()
-        lq.compactOpen.set(btn.dataset.path, btn.dataset.tab)
-        renderTriageView({ preserveScroll: true })
-      }))
-
-    // The caret opens and closes the drill-in beneath the row. It no longer
-    // swaps the row for a different component, so nothing above it moves.
-    mainContent.querySelectorAll('.lq-brow-caret[data-expand]').forEach(btn =>
-      btn.addEventListener('click', () => {
-        const p = btn.dataset.expand
-        if (lq.compactOpen.has(p)) lq.compactOpen.delete(p)
-        else lq.compactOpen.set(p, 'lq')      // Sound Quality is the default pane
-        renderTriageView({ preserveScroll: true })
-      }))
-
-    // Expand/collapse. BOTH detail panels are already in the DOM (rendered up
-    // front, hidden by CSS — same as the standalone app), so this is a class
-    // toggle, not a fetch.
-    //
-    // One panel at a time (Ryan, 2026-08-02): opening Metadata Completeness closes
-    // Sound Quality, and clicking the open tab collapses the card. Cards get
-    // tall fast in a multi-show queue, and the queue has to stay scannable.
-    // Tab Strip inside an expanded row. `compactOpen` holds WHICH pane, so the
-    // caret and the tabs share one piece of state and cannot disagree.
-    mainContent.querySelectorAll('.lq-dtab').forEach(btn =>
-      btn.addEventListener('click', () => {
-        lq.compactOpen.set(btn.dataset.path, btn.dataset.tab)
-        renderTriageView({ preserveScroll: true })
-      }))
-
-    // Move ›  → menu (Backlog | Working). One menu open at a time.
-    mainContent.querySelectorAll('.lq-act--move').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation()
-        const menu = btn.nextElementSibling
-        const wasHidden = menu.hidden
-        mainContent.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
-        menu.hidden = !wasHidden
-      })
-    })
-    document.addEventListener('click', _closeMoveMenus)
-
-    // Physically moves the folder out of the scanned directory, so it simply
-    // stops being offered — no status to filter on later.
-    mainContent.querySelectorAll('.lq-move-opt').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const p = btn.dataset.path, dest = btn.dataset.dest
-        btn.disabled = true; btn.textContent = '…'
-        try {
-          await API.quality.move(p, dest)
-          lq.rows = lq.rows.filter(r => r.folder_path !== p)
-          renderTriageView({ preserveScroll: true })
-        } catch (e) {
-          btn.disabled = false
-          btn.textContent = dest === 'backlog' ? 'Backlog' : 'Working'
-          alert(`Move failed: ${e.message}`)
-        }
-      })
-    })
-
-    // Ingest this one now. Sets activePath so a single-row ingest gets the same
-    // "Ingesting n/m" label and inline bar as one inside a bulk run — the copy
-    // is identical work and there is no reason to report it two ways.
-    mainContent.querySelectorAll('.lq-act--ingest').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const row = lq.rows.find(r => r.folder_path === btn.dataset.path)
-        if (!row || lq.activePath) return
-        lq.activePath = row.folder_path
-        renderTriageView({ preserveScroll: true })
-        await ingestOne(row)
-        lq.activePath = null
-        renderTriageView({ preserveScroll: true })
-      })
-    })
-
-    // Review → the existing Add Recording page, pre-scanned.
-    mainContent.querySelectorAll('.lq-act--review').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const p = btn.dataset.path
-        btn.disabled = true; btn.textContent = '⏳'
-        try {
-          const scan = await API.recordings.scan(p)
-          ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = p
-          ingest.form = {}; ingest.tracks = []
-          // fromTriage, NOT fromBatch: fromBatch sends the back-link and the
-          // post-submit redirect to '#/batch', which has no scan in this flow,
-          // so it bounced to '#/ingest' and re-rendered this very form — the
-          // recording having just been created, complete with an "already in
-          // your library" warning (2026-07-31).
-          ingest.fromBatch  = false
-          ingest.fromTriage = true
-          ingest._resume    = true
-          // Through renderIngestStep, not renderIngestReview directly: that is
-          // where the in-page Back handler is registered and the header nav
-          // buttons are repainted. Calling the renderer straight left header
-          // Back greyed out on the one step it was built for.
-          renderIngestStep()
-        } catch (e) {
-          btn.disabled = false; btn.textContent = 'Review'
-          alert(`Scan failed: ${e.message}`)
-        }
-      })
-    })
-
-    // Preview playback. Deliberately its own <audio> element, NOT the shared
-    // player bar: this is a pre-ingest file that has no track ID and no queue,
-    // and hijacking the persistent player for it would blow away whatever the
-    // user was actually listening to.
-    //
-    // MOVED INLINE 2026-08-02. It used to be appended to document.body and
-    // parked bottom-right, so clicking a timestamp halfway up a long queue
-    // started audio in a corner of the window the user was not looking at —
-    // indistinguishable from "the click did nothing, and something else began
-    // playing". The element now relocates into the slot under the track that
-    // was clicked. Still ONE element, so a second click stops the first: two
-    // simultaneous previews is never what was wanted.
-    mainContent.querySelectorAll('.lq-trk-play, .lq-win').forEach(btn => {
-      btn.addEventListener('click', () => {
-        playAt(btn.dataset.folder, btn.dataset.file,
-               parseFloat(btn.dataset.seek) || 0, btn.dataset.slot)
-      })
-    })
-
-    // ── Convert to FLAC (Ryan, 2026-09-02) ────────────────────────────────
-    //
-    // Start, poll, and on success re-scan JUST THIS FOLDER — not the whole
-    // directory. A full re-scan would restart every other row's analysis and
-    // throw away a queue the user may be halfway through triaging, to learn
-    // one thing about one folder.
-    mainContent.querySelectorAll('[data-reanalyze]').forEach(btn => {
-      btn.addEventListener('click', () => _lqRescanRow(btn.dataset.reanalyze))
-    })
-    mainContent.querySelectorAll('[data-convert]').forEach(btn => {
-      btn.addEventListener('click', () => _lqConvert(btn.dataset.convert))
-    })
-    mainContent.querySelectorAll('[data-convert-cancel]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const cv = lq.converting.get(btn.dataset.convertCancel)
-        if (!cv) return
-        btn.disabled = true
-        try { await API.quality.convertCancel(cv.jobId) } catch (_) {}
-      })
-    })
-
-    // Deep fingerprint verification — the expensive MD5 pass, on demand.
-    mainContent.querySelectorAll('.lq-fp-verify').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const path = btn.dataset.path
-        btn.disabled = true
-        btn.textContent = 'Verifying…'
-        try {
-          const res = await API.quality.verifyFingerprints(path)
-          const row = lq.rows.find(r => r.folder_path === path)
-          if (row && !res.error) { row.fingerprints = res; renderTriageView({ preserveScroll: true }) }
-          else btn.textContent = res.error || 'Failed'
-        } catch (e) {
-          btn.disabled = false
-          btn.textContent = 'Retry verification'
-        }
-      })
-    })
-
-    document.getElementById('lq-ingest-all-btn')?.addEventListener('click', runIngestQueue)
-    document.getElementById('lq-cancel-btn')?.addEventListener('click', async () => {
-      lq.cancel = true
-      // Repaint so the derived run note says "Cancelling…" — writing to the
-      // node directly did not survive the next render.
-      renderTriageView({ preserveScroll: true })
-      // Also stop the show currently mid-copy. The worker undoes its own
-      // filesystem work and rolls back; earlier recordings are untouched.
-      if (lq.activeJob) { try { await API.ingest.confirmCancel(lq.activeJob) } catch (_) {} }
-    })
-  }
-
-  // What "Ingest all" will actually act on. One definition, used by both the
-  // button's count and the loop, so the number on the button can never promise
-  // more than the loop delivers.
-  // Drop a successfully-ingested show from the queue entirely (Ryan,
-  // 2026-08-07). It used to stay in the list wearing a "✓ Ingested" badge AND
-  // holding whatever panel you had expanded before you walked into the review
-  // — so returning from an ingest showed the show you just finished, still
-  // open, at the top of the work you had left. The queue is the remaining
-  // work; a finished show is not remaining work.
-  //
-  // Only on SUCCESS. Errors and cancellations stay put, because those are
-  // still work to do and hiding them would hide the problem.
-  //
-  // Also clears the per-row caches: leaving them keyed by folder_path means a
-  // re-scan of the same directory re-opens the panel you closed months ago.
-  // "Added this session" strip. Cards leave the queue on success, so without
-  // this the only feedback for a completed ingest would be the list quietly
-  // getting shorter. Driven by lq.log, which already records every outcome.
-  // Run summary. Was a count plus the last six folder names run together as
-  // links — Ryan, 2026-08-28: "we do not need the concatenated list". A list of
-  // folder names is also the wrong thing to show, because a folder name is the
-  // one piece of a recording the ingest was busy replacing: `thile2026-06-18.
-  // fob-akg481.obrien.flac24` is what the DOWNLOAD was called, not what the
-  // recording IS. The result payload carries the canonical folder_name built by
-  // build_folder_name(), which is the title, so that is what gets named.
-  function _lqDoneStripHtml() {
-    // Scoped to the CURRENT run, not the whole session. lq.log accumulates
-    // across every run and every single-card ingest in a triage session, so
-    // filtering it wholesale against one run's runTotal produced arithmetic
-    // like "16 of 11 recordings added" — and re-reported the previous run's
-    // cancellation as this one's verdict. `runSeq` stamps each log entry with
-    // the run that produced it; single-card ingests get the current value too,
-    // so they are counted alongside the run they happen during.
-    // One entry per FOLDER, latest wins. A per-row Retry pushes a second
-    // entry for a folder that already has an 'error' one, so counting raw log
-    // rows made a 3-show batch report "3 of 4 added. Job completed with 1
-    // error" — for a failure the user had just fixed. Map insertion order is
-    // preserved, so "last added" still names the most recent one.
-    const seq = lq.runSeq
-    const byPath = new Map()
-    for (const l of lq.log) if (l.run === seq) byPath.set(l.folder_path, l)
-    const mine = [...byPath.values()]
-    const done = mine.filter(l => l.status === 'done')
-    const bad  = mine.filter(l => l.status === 'error')
-    const cancelled = mine.filter(l => l.status === 'cancelled')
-    if (!done.length && !bad.length && !cancelled.length) return ''
-
-    // Y is everything the run set out to do, not just what it managed. A
-    // single-card ingest outside a bulk run has no runTotal, so it falls back
-    // to what actually happened.
-    const attempted = Math.max(lq.runTotal || 0, done.length + bad.length + cancelled.length)
-    const last = done[done.length - 1]
-
-    // Only claim the job is over when it actually is. Mid-run this reads as a
-    // progress line; the verdict sentence appears when nothing is still going.
-    let verdict = ''
-    if (!lq.running) {
-      if (bad.length) {
-        verdict = `<span class="lq-done-verdict is-bad">Job completed with ${
-          bad.length} error${bad.length === 1 ? '' : 's'}</span>`
-      } else if (cancelled.length) {
-        verdict = `<span class="lq-done-verdict is-warn">Job cancelled, ${
-          cancelled.length} not added</span>`
-      } else {
-        verdict = `<span class="lq-done-verdict is-ok">Job completed without errors</span>`
-      }
-    }
-
-    return `
-      <div class="lq-donestrip">
-        <span class="lq-donestrip-n">${done.length} of ${attempted} recording${
-          attempted === 1 ? '' : 's'} added.</span>
-        ${verdict}
-        ${last ? `<span class="lq-donestrip-last">Last added:
-          ${last.recording_id
-            ? `<a href="#/recording/${last.recording_id}">${esc(last.title || last.name)}</a>`
-            : `<span>${esc(last.title || last.name)}</span>`}</span>` : ''}
-      </div>`
-  }
-
-  // The ONE place triage state is cleared. There were three copies of this
-  // line and they had already drifted apart — each remembered a different
-  // subset of the fields, so which stale bit survived depended on which exit
-  // you took. Everything added since (compactOpen, queued, copyProgress,
-  // runTotal, jobFinished) would have had to be added to all three.
-  function _lqReset() {
-    lq.rows = []
-    lq.log = []
-    lq.jobId = null
-    // NOT pollSeq — it only ever counts up. Resetting it could let a stale
-    // loop's captured generation match a later one and speak for a queue it
-    // has nothing to do with, which is the exact bug the stamp exists to stop.
-    lq.scanDir = null
-    lq.progress = null
-    lq.error = null
-    lq.running = false
-    lq.cancel = false
-    lq.activeJob = null
-    lq.activePath = null
-    lq.runTotal = 0
-    lq.jobFinished = false
-    lq.applyAll = {
-      event: '', artist: '',
-      venue: { id: null, name: '' },
-      city: '', state: '', country: '',
-      source: '', lineage: '', notes: '',
-    }
-    lq.applyAllOpen = false
-    lq.applied = null
-    lq.expanded.clear()
-    lq.features.clear()
-    lq.compactOpen.clear()
-    lq.reviewFilter = false
-    lq.queued.clear()
-    lq.copyProgress.clear()
-    lq.converting.clear()
-  }
-
-  function _lqRemoveRow(folderPath) {
-    lq.rows = lq.rows.filter(r => r.folder_path !== folderPath)
-    lq.expanded.delete(folderPath)
-    lq.features.delete(folderPath)
-  }
-
-  function _lqIngestable(r) {
-    return !r.error
-        && !r._pending
-        && !r._ingestedElsewhere                  // already a Recording
-        && r.exists !== false                     // folder still on disk
-        && !r.recording_id                        // not already in the library
-        // A Shorten folder holds nothing this app can read a track from, so a
-        // bulk run would reach it, fail, and log an error the user then has to
-        // clear before they can do the thing that actually helps (2026-09-02).
-        // WAV is NOT excluded — it ingests perfectly; converting it is an
-        // offer about disk space, not a precondition.
-        && !(r.convertible && r.convertible.kind === 'shn')
-        && !lq.converting.has(r.folder_path)      // mid-conversion
-        && !lq.log.some(l => l.folder_path === r.folder_path)
   }
 
   function _closeMoveMenus() {
     mainContent.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
-  }
-
-  // Ingest ONE recording, recording the outcome in lq.log. Shared by the
-  // per-card Ingest button and the queue loop so the two can't drift apart.
-  async function ingestOne(row) {
-    try {
-      const e = row.extracted || {}
-      // ⚠ `lq.applied`, never `lq.applyAll` (2026-09-03). Typed-but-unapplied
-      // values do nothing on this path either — "Apply is the only path"
-      // (Ryan). A queue set up and never applied ingests from the scan alone,
-      // which is exactly what it did before anyone typed anything.
-      const a = lq.applied || {}
-      // Auto-ingest needs an artist name and cannot invent one — from the
-      // folder OR from the applied blanket values. Failing here with something
-      // readable beats letting the server return a bare "artist_name is
-      // required" 400 from a button press.
-      if (!a.artist && !e.artist) {
-        throw new Error('No artist could be read from this folder. Use '
-                      + 'Review to fill it in, or set one above and press Apply Values.')
-      }
-      const scan = await API.recordings.scan(row.folder_path)
-      // Track list comes straight off the resolver now (Ingest Field
-      // Resolver spec v1, chunk 6) -- build_scan_payload() already ran it
-      // server-side, title-cased and flagged; buildIngestTracks is gone.
-      const tracks = scan.resolved?.tracks || []
-
-      const { job_id } = await API.ingest.confirm({
-        source_folder_path: row.folder_path,
-        // Applied blanket values win outright — "Applies to every recording
-        // below" is a plain statement, not a fallback. The
-        // server resolves/creates Artist, Venue and Event rows exactly as
-        // it does per-recording; City/State/Country are ignored server-side
-        // once venue_id is set, so what is sent there is harmless either way.
-        artist_name: a.artist || e.artist,
-        start_year: e.year,
-        start_month: e.month, start_day: e.day,
-        venue_name: a.venue || e.venue || null,
-        // Only ever the APPLIED venue's id. Pairing a staged name with the
-        // scan's id would file the show against a venue whose name is not the
-        // one being sent.
-        venue_id: a.venue ? (a.venue_id || null) : null,
-        city: a.city || e.city || null,
-        state: a.state || e.state || null,
-        country: a.country || e.country || null,
-        source: a.source || e.source || null,
-        lineage: a.lineage || e.lineage || null,
-        // No form field for these in the queue either (spec section 5) --
-        // same folder-name detection fallback as the green-path auto ingest.
-        source_tag:  scan.suggestions?.from_info_file?.source_tag  || null,
-        etree_shnid: scan.suggestions?.from_info_file?.etree_shnid || null,
-        notes: a.notes || null,
-        is_complete: true,
-        event_name: a.event || null,
-        // Quick Add. The server reads this to decide whether to enqueue the
-        // Librosa track analysis; nothing else about the ingest changes.
-        skip_analysis: lq.mode !== 'full',
-        info_file_content: scan.info_file_content || null,
-        fingerprints: scan.fingerprints || [],
-        tracks,
-      })
-      lq.activeJob = job_id
-      // The confirm job already reported copied/total on every poll and nobody
-      // ever passed a callback (2026-08-28). Feeding it into copyProgress is
-      // what puts a real, server-counted bar on the row instead of a spinner
-      // that says only "something is happening".
-      //
-      // Patches the two live nodes directly rather than re-rendering: a full
-      // renderTriageView() every 600ms during a copy would rebuild the whole
-      // list under the pointer and close any menu the user had open.
-      const result = await pollConfirmJob(job_id, (copied, total, st) => {
-        lq.copyProgress.set(row.folder_path, {
-          copied, total,
-          phase: st && st.phase,
-          label: (st && st.phase_label) || null,
-          detail: (st && st.phase_detail) || null,
-        })
-        _lqPaintProgress(row.folder_path)
-      })
-      lq.activeJob = null
-      lq.copyProgress.delete(row.folder_path)
-
-      lq.log.push(result === null
-        ? { folder_path: row.folder_path, name: row.name, status: 'cancelled', run: lq.runSeq }
-        : { folder_path: row.folder_path, name: row.name, run: lq.runSeq,
-            // The canonical name build_folder_name() produced — "Chris Thile -
-            // 2026-06-18 - Telluride Bluegrass Festival" rather than the
-            // download's own folder name, which is what the ingest just
-            // replaced. Falls back to the folder name if an older server
-            // build doesn't send it.
-            title: result.folder_name || row.name,
-            status: 'done', recording_id: result.recording_id })
-      if (result) {
-        invalidateDims()
-        // Row stays put — it does not leave the queue at all (Ryan,
-        // 2026-08-30: "so a person coming back after a long queue can review
-        // everything, rather than just see a blank page that says all
-        // done"). It renders via _lqActions()'s existing recording_id branch:
-        // "Complete" while a bulk run is still going, "Ingested" + a View
-        // link once it (or this single-card ingest) is done. Nothing removes
-        // a row on success any more — see the matching change at the end of
-        // runIngestQueue().
-      }
-      return result
-    } catch (err) {
-      lq.activeJob = null
-      lq.copyProgress.delete(row.folder_path)
-      lq.log.push({ folder_path: row.folder_path, name: row.name, run: lq.runSeq,
-                    status: 'error', error: err.message })
-      return null
-    }
-  }
-
-  // In-place repaint of one row's progress. Both views carry the same two
-  // hooks — the bar and the button label — so this does not care which is on
-  // screen, and does nothing at all if neither is (the row scrolled out of a
-  // re-render, or the user switched folders mid-copy).
-  function _lqPaintProgress(folderPath) {
-    const pr = lq.copyProgress.get(folderPath)
-    if (!pr) return
-    const bar = mainContent.querySelector(`[data-copybar-for="${CSS.escape(folderPath)}"]`)
-    if (bar) {
-      bar.querySelector('.lq-copybar-track i').style.width = `${_lqCopyPct(pr)}%`
-      bar.querySelector('.lq-copybar-n').textContent = _lqPhaseText(pr)
-    }
-    const lbl = mainContent.querySelector(`[data-progress-for="${CSS.escape(folderPath)}"]`)
-    if (lbl) lbl.lastChild.textContent = `Ingesting${_lqCopyText(pr)}`
-  }
-
-  // Sequential queue ingest. Sequential on purpose: parallel copies to one
-  // spinning NAS volume are slower, not faster, and a serial queue makes
-  // "stop after the current one" a well-defined thing to ask for.
-  async function runIngestQueue() {
-    lq.running = true; lq.cancel = false
-    // Cleared HERE, not only in _lqReset(). Leaving it true from a previous
-    // run made renderIngestView()'s guard treat a run in flight as finished
-    // business: navigating to Add Recordings mid-copy called _lqReset(),
-    // emptying lq.rows and lq.log and flipping lq.running to false while the
-    // loop below was still iterating its captured queue — the ingests carried
-    // on invisibly and every later success called _lqRemoveRow() against a
-    // list that no longer held it.
-    lq.jobFinished = false
-    lq.runSeq += 1
-
-    const queue = lq.rows.filter(_lqIngestable)
-    // Every row the run WILL reach is marked up front, so the whole queue reads
-    // "Queued" from the first frame rather than each row sitting on an Ingest
-    // button that is no longer clickable but still looks like one.
-    lq.queued = new Set(queue.map(r => r.folder_path))
-    // Y in "X of Y added". Captured up front: rows leave lq.rows as they
-    // finish, so counting them afterwards would always report X of X.
-    lq.runTotal = queue.length
-    lq.copyProgress.clear()
-    renderTriageView({ preserveScroll: true })
-
-    for (const row of queue) {
-      if (lq.cancel) break
-      lq.activePath = row.folder_path
-      lq.queued.delete(row.folder_path)
-      renderTriageView({ preserveScroll: true })   // → this row flips to "Ingesting"
-      await ingestOne(row)
-      lq.activePath = null
-      renderTriageView({ preserveScroll: true })   // → and to "Complete"
-    }
-
-    // Finished rows are NOT drained (Ryan, 2026-08-30) — they stay on screen
-    // reading "Ingested", each with a View link, so a long queue's cards are
-    // still there to review afterwards instead of the page going straight to
-    // the empty "All done" panel. _lqIngestable() already excludes anything
-    // in lq.log from being offered again, so nothing here can be re-ingested.
-    lq.running = false; lq.activeJob = null; lq.activePath = null
-    // A cancelled run is NOT finished business. It stops with untouched rows
-    // still on screen and live Ingest buttons, and marking it finished meant
-    // the next navigation silently reset the session — the user came back to
-    // the picker and had to re-scan every folder to reach the shows they had
-    // deliberately stopped short of.
-    lq.jobFinished = !lq.cancel
-    lq.queued.clear(); lq.copyProgress.clear()
-    invalidateDims()
-    renderTriageView({ preserveScroll: true })
   }
 
   async function runScan(folderPath) {
@@ -12345,7 +10206,7 @@ const App = (() => {
       statusEl.innerHTML = `
         <div style="color:var(--red); font-size:13px; margin-top:12px; padding:12px 16px; background:rgba(224,85,85,0.08); border-radius:var(--r-sm);">
           Scan failed: ${esc(e.message)}
-          <div style="color:var(--t2); margin-top:6px">If this show was just ingested, its source folder was moved into the library and is no longer here.</div>
+          <div style="color:var(--t2); margin-top:6px">If this show was just imported, its source folder was moved into the library and is no longer here.</div>
         </div>`
     }
   }
@@ -12693,7 +10554,7 @@ const App = (() => {
   ]
   // Queue-level values → this form (Ryan, 2026-09-02).
   //
-  // "Applies to every recording below" already reached the server on BOTH
+  // "Apply values to every recording below" already reached the server on BOTH
   // ingest paths — the confirm payload falls back to it field by field — but
   // on the Review path it did so INVISIBLY: you set a Venue for the batch,
   // clicked Review on one show to check it, and the Venue box was empty. The
@@ -12741,14 +10602,14 @@ const App = (() => {
     { key: 'country',   form: 'country',     live: 'f-country' },
     { key: 'event',     form: 'event_name',  live: 'f-event-name' },   // + id
     { key: 'source',    form: 'source',      live: 'f-source' },
+    { key: 'source_tag', form: 'source_tag', live: 'f-source-tag' },
     { key: 'lineage',   form: 'lineage',     live: 'f-lineage' },
     { key: 'notes',     form: 'notes',       live: 'f-notes' },
   ]
 
   // What is currently TYPED, normalised: {key: value} for non-empty fields
   // only, plus venue_id when a real Venue row was picked.
-  function _aaTyped() {
-    const aa = lq.applyAll
+  function _aaTyped(aa) {
     if (!aa) return {}
     const out = {}
     for (const f of _AA_FIELDS) {
@@ -12769,15 +10630,6 @@ const App = (() => {
     return Object.keys(o || {}).filter(k => k !== 'venue_id').length
   }
 
-  // Three states, and the button reads them: nothing typed, typed-but-not-
-  // applied (or changed since), and applied-and-unchanged.
-  function _aaState() {
-    const typed = _aaTyped()
-    const n = _aaCount(typed)
-    if (!n && !lq.applied) return 'empty'
-    return _aaFingerprint(typed) === _aaFingerprint(lq.applied) ? 'applied' : 'dirty'
-  }
-
   // Write the STAGED values over a form object, at prefill, before the DOM
   // exists. Returns how many fields it set.
   //
@@ -12785,7 +10637,7 @@ const App = (() => {
   // not lost forever: Rescan re-derives the whole form from the info file, and
   // re-applies whatever is staged afterwards.
   function _applyQueueValuesToForm(f) {
-    const a = lq.applied
+    const a = _biApplied
     if (!a) return 0
     let n = 0
     for (const fld of _AA_FIELDS) {
@@ -12818,7 +10670,7 @@ const App = (() => {
   // app's way of saying "this box was filled by something other than you",
   // which matters more now that the fill can replace something.
   function _applyQueueValuesToLiveForm() {
-    const a = lq.applied
+    const a = _biApplied
     if (!a) return 0
     let n = 0
     for (const fld of _AA_FIELDS) {
@@ -12841,7 +10693,7 @@ const App = (() => {
   // its re-apply button at all — unstaged values have no effect anywhere, so
   // offering to apply them would be offering a no-op.
   function _queueValuesCount() {
-    return _aaCount(lq.applied)
+    return _aaCount(_biApplied)
   }
 
   function _ingestFormSnapshot(f) {
@@ -13085,7 +10937,7 @@ const App = (() => {
     } catch (_) {
       if (ingest.folderPath !== forFolder) return
       body.innerHTML = `<div class="rq-empty">No sound-quality analysis for this folder yet.
-        It is measured during Review &amp; Ingest, and again in full once the
+        It is measured during Review &amp; Import, and again in full once the
         recording is filed.</div>`
     }
   }
@@ -13108,7 +10960,7 @@ const App = (() => {
     switchIngestPane('isp-ai')
     const question = takeAiQuestion()   // read before the spinner overwrites the pane
     if (btn) { btn.disabled = true; btn.textContent = '… researching' }
-    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web — this can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
+    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web. This can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
     const t0 = Date.now()
     try {
       const { job_id } = await API.ingest.aiAssist({ folder_path: ingest.folderPath, current: collectCurrentMeta(), question })
@@ -13119,7 +10971,7 @@ const App = (() => {
       const secs = Math.round((Date.now() - t0) / 1000)
       console.error('AI Assist error after', secs, 's:', e)
       if (/no_api_key/.test(e.message)) {
-        body.innerHTML = `<p class="ai-res-note">No Anthropic API key set — add one in Settings.</p>`
+        body.innerHTML = `<p class="ai-res-note">No Anthropic API key set. Add one in Settings.</p>`
       } else {
         body.innerHTML = `<p class="ai-res-note" style="color:var(--red)">AI Assist failed after ${secs}s: ${esc(e.message)}</p>`
           + aiAskBoxHtml('Research the web to verify and fill this recording\'s metadata.')
@@ -13130,41 +10982,31 @@ const App = (() => {
     }
   }
 
-  /** Leave the metadata review step the way it was entered — reflects how
-   *  this review was actually reached (Ryan, 2026-07-15: "scrub our back link
-   *  logic for that space"). From Bulk Import's "Review →": straight back to
-   *  the in-memory batch results, no rescan — speed is the whole point for a
-   *  bulk reviewer working through many folders. From the triage queue: back
-   *  to the queue. Otherwise: the folder step.
+  /** Leave the metadata review step the way it was entered: a review opened
+   *  from a run's import page goes back to that page, otherwise to the picker.
    *
    *  Shared by the in-page back link and the header Back button. */
   function ingestBackFromReview() {
-    if (ingest.fromTriage) {
-      ingest.step = 'triage'
-      ingest.fromTriage = false
-      history.replaceState(null, '', '#/ingest')
-      renderIngestStep()
-    } else if (ingest.fromBatch) {
-      // renderBatchResultsView() paints the batch list directly, bypassing
-      // the hash router — but window.location.hash is still '#/ingest' from
-      // when we navigated in. Left uncorrected, the NEXT _batchOpenReview()
-      // call sets hash to '#/ingest' again, which is a no-op (same value =>
-      // no hashchange => route() never runs => renderIngestView() never fires).
-      // The scan completes fine and ingest.* state is fully populated — the
-      // review form just never gets painted, looking exactly like a stuck
-      // hang even though nothing is hung. replaceState fixes the recorded
-      // hash without triggering a redundant render (2026-07-20).
-      history.replaceState(null, '', '#/batch')
-      _navRewrite('#/batch')
-      setInPageBack(null)          // leaving the wizard without going through route()
-      renderBatchResultsView()
-    } else {
-      ingest.step = 'folder'
-      renderIngestStep()
+    if (ingest.returnTo) {
+      _ingestReturnToRun()
+      return
     }
-    // The step we just landed on may no longer offer an in-page Back (the
-    // triage queue and the picker both hand Back to history), and the two
-    // branches above that paint directly bypass renderIngestStep's repaint.
+    ingest.step = 'folder'
+    renderIngestStep()
+    paintNavButtons()
+  }
+
+  // Back to the import page that opened this review. The page paints through
+  // route(), but window.location.hash is still '#/ingest' from the way in, so
+  // the recorded hash and the nav stack are corrected first (replaceState
+  // fires no hashchange) and route() is dispatched directly.
+  function _ingestReturnToRun() {
+    const hash = ingest.returnTo
+    resetIngestState()
+    history.replaceState(null, '', hash)
+    _navRewrite(hash)
+    setInPageBack(null)
+    route()
     paintNavButtons()
   }
 
@@ -13429,8 +11271,7 @@ const App = (() => {
       <div class="ingest-review-outer">
       <div class="ingest-review-topbar">
         <a href="#" id="ingest-back-link" class="ingest-back-link">${
-          ingest.fromTriage ? 'Back to Ingest Queue'
-          : ingest.fromBatch ? 'Back to Bulk Import' : 'Back'}</a>
+          ingest.returnTo ? 'Back to Add Recordings' : 'Back'}</a>
         <div class="ingest-topbar-line">
           <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}</span></h2>
           <!-- Metadata Completeness — a labelled readout, not a pill (Ryan,
@@ -13467,7 +11308,7 @@ const App = (() => {
                be offering a no-op. -->
           ${_queueValuesCount() ? `<button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-apply-queue"
                   title="Overwrite this form's Artist, Venue, Event and the rest with the values applied to the whole queue">
-            ${icon('plus', 'lq-browse-ic')} Apply queue values</button>` : ''}
+            ${icon('plus', 'lq-browse-ic')} Apply Queue Values</button>` : ''}
         </div>
       </div>
       <div class="ingest-review-shell">
@@ -13515,7 +11356,7 @@ const App = (() => {
                  permanent inputs. -->
             <div class="ingest-field-grid ingest-row-ident" style="margin-top:6px">
               <div class="ingest-field"><label>Year</label><input type="number" id="f-year" class="${paulaCls('date')}" value="${esc(f.start_year)}" min="1900" max="2099" /></div>
-              <div class="ingest-field"><label>Mo</label><input type="number" id="f-month" class="${paulaCls('date')}" value="${esc(f.start_month)}" min="1" max="12" /></div>
+              <div class="ingest-field"><label>Month</label><input type="number" id="f-month" class="${paulaCls('date')}" value="${esc(f.start_month)}" min="1" max="12" /></div>
               <div class="ingest-field"><label>Day</label><input type="number" id="f-day" class="${paulaCls('date')}" value="${esc(f.start_day)}" min="1" max="31" /></div>
               <div class="ingest-field">
                 <label>Venue</label>
@@ -13535,11 +11376,11 @@ const App = (() => {
               </div>
             </div>
             <div id="end-date-toggle-row" style="margin-top:3px">
-              <a class="field-toggle-link" id="btn-toggle-end-date" href="#">+ End date</a>
+              <a class="field-toggle-link" id="btn-toggle-end-date" href="#">+ End Date</a>
             </div>
             <div class="ingest-field-grid date-grid" id="end-date-row" style="margin-top:5px; display:none">
-              <div class="ingest-field"><label>End yr</label><input type="number" id="f-end-year" value="${esc(f.end_year)}" min="1900" max="2099" /></div>
-              <div class="ingest-field"><label>Mo</label><input type="number" id="f-end-month" value="${esc(f.end_month)}" min="1" max="12" /></div>
+              <div class="ingest-field"><label>End Year</label><input type="number" id="f-end-year" value="${esc(f.end_year)}" min="1900" max="2099" /></div>
+              <div class="ingest-field"><label>Month</label><input type="number" id="f-end-month" value="${esc(f.end_month)}" min="1" max="12" /></div>
               <div class="ingest-field"><label>Day</label><input type="number" id="f-end-day" value="${esc(f.end_day)}" min="1" max="31" /></div>
             </div>
 
@@ -13550,7 +11391,6 @@ const App = (() => {
               <div class="dup-warn-title">Already in your library</div>
               <div class="dup-warn-body" id="dup-warn-body"></div>
             </div>
-
 
             <!-- City / State / Country — state is narrow -->
             <div class="ingest-field-grid" style="grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr); gap:10px; margin-top:6px" id="f-location-row">
@@ -13583,11 +11423,11 @@ const App = (() => {
                  View Recording Source block. -->
             <div class="ingest-field-grid ingest-row-src" style="margin-top:6px">
               <div class="ingest-field">
-                <label>Source tag</label>
+                <label>Source Tag</label>
                 <input type="text" id="f-source-tag" value="${esc(f.source_tag)}" />
               </div>
               <div class="ingest-field">
-                <label>shnid</label>
+                <label>SHNID</label>
                 <input type="text" id="f-shnid" class="mono" value="${esc(f.etree_shnid)}" />
               </div>
             </div>
@@ -13653,7 +11493,7 @@ const App = (() => {
 
             <label style="display:flex; align-items:center; gap:8px; color:var(--t3); font-size:11px; margin-top:8px; cursor:pointer">
               <input type="checkbox" id="f-is-official" ${f.is_official ? 'checked' : ''} />
-              <span>Official release</span>
+              <span>Official Release</span>
               <span style="color:var(--t3); font-style:italic">marks the recording and all tracks as officially released</span>
             </label>
 
@@ -13670,11 +11510,17 @@ const App = (() => {
                  doesn't read as primary+disabled-looking-ghost. -->
             <div class="ingest-actions-left" id="ingest-fh-strip"></div>
             <div class="ingest-actions-right">
-              <button class="btn btn-primary" id="btn-confirm"
+              <button class="btn btn-ingest-secondary" id="btn-confirm"
                       data-after="return" title="Add to library and return to the list">Add &amp; Return ↵</button>
-              <button class="btn btn-ingest-secondary" id="btn-confirm-view"
+              <button class="btn btn-ghost" id="btn-confirm-view"
                       data-after="view" title="Add to library and open the finished record">Add &amp; View →</button>
             </div>
+          </div>
+          <!-- Reserved before it is needed (Ryan, 2026-10-02): the bar used to be
+               inserted on click and pushed the page up. Hidden, not absent. -->
+          <div id="confirm-progress" class="confirm-progress" style="visibility:hidden">
+            <div class="confirm-progress-bar"><div class="confirm-progress-fill" id="confirm-progress-fill"></div></div>
+            <div class="confirm-progress-label" id="confirm-progress-label">Preparing…</div>
           </div>
           <div id="review-submit-error" class="review-submit-error" style="display:none"></div>
         </div>
@@ -14221,17 +12067,12 @@ const App = (() => {
     // screen agree with what Confirm will send — the entire point of the
     // change (see _applyQueueValuesToForm).
     document.getElementById('btn-apply-queue')?.addEventListener('click', () => {
-      const n = _applyQueueValuesToLiveForm()
+      _applyQueueValuesToLiveForm()
       const errEl = document.getElementById('review-submit-error')
       if (!errEl) return
-      if (n) {
-        errEl.style.display = 'none'
-      } else {
-        // Saying nothing would read as a broken button.
-        errEl.textContent = 'No values have been applied to this queue yet — '
-                          + 'set them on Review & Ingest and press Apply Values.'
-        errEl.style.display = 'block'
-      }
+      // Ryan cut the "no values applied" message (2026-10-02); the button only
+      // shows when values are staged, so an empty apply is near-unreachable.
+      errEl.style.display = 'none'
     })
 
     // ── Rescan (Ryan, 2026-09-01) ──────────────────────────────────────────
@@ -14412,7 +12253,7 @@ const App = (() => {
       // If end date was already set (back-nav), show immediately
       if (ingest.form.end_year) {
         endRow.style.display = ''
-        toggleBtn.textContent = '− End date'
+        toggleBtn.textContent = '− End Date'
       }
 
       toggleBtn.addEventListener('click', e => {
@@ -14421,14 +12262,14 @@ const App = (() => {
         if (visible) {
           // Hide and clear
           endRow.style.display = 'none'
-          toggleBtn.textContent = '+ End date'
+          toggleBtn.textContent = '+ End Date'
           document.getElementById('f-end-year').value  = ''
           document.getElementById('f-end-month').value = ''
           document.getElementById('f-end-day').value   = ''
         } else {
           // Show and pre-fill from start date
           endRow.style.display = ''
-          toggleBtn.textContent = '− End date'
+          toggleBtn.textContent = '− End Date'
           const yr = document.getElementById('f-year').value
           const mo = document.getElementById('f-month').value
           const dy = document.getElementById('f-day').value
@@ -14806,11 +12647,6 @@ const App = (() => {
         // lost the moment confirm creates the row (2026-07-14 bug: it wasn't).
         ai_result: ingest.aiResult || null,
         resolver_result: ingest.scan?.resolved || null,
-        // Was missing entirely (2026-08-28). Review is the OTHER way into
-        // /api/ingest/confirm, so without this the mode set on the triage page
-        // was silently ignored the moment a user clicked Review instead of
-        // Ingest — same server endpoint, opposite behaviour.
-        skip_analysis: lq.mode !== 'full',
       }
       // ⚠ NO blanket-value fallback here any more (2026-09-03).
       //
@@ -14828,18 +12664,13 @@ const App = (() => {
       // way to pull the staged values back in after a Rescan or an edit.
 
       // Progress UI under the button (copy can take a while for big folders)
-      const actions = btn.closest('.ingest-actions')
-      let prog = document.getElementById('confirm-progress')
-      if (!prog) {
-        prog = document.createElement('div')
-        prog.id = 'confirm-progress'
-        prog.className = 'confirm-progress'
-        prog.innerHTML = `<div class="confirm-progress-bar"><div class="confirm-progress-fill" id="confirm-progress-fill"></div></div>
-                          <div class="confirm-progress-label" id="confirm-progress-label">Preparing…</div>`
-        actions?.parentNode.insertBefore(prog, actions.nextSibling)
-      }
+      // The progress area is already in the markup, holding its space.
+      const prog  = document.getElementById('confirm-progress')
       const fill  = document.getElementById('confirm-progress-fill')
       const label = document.getElementById('confirm-progress-label')
+      if (fill)  fill.style.width = '0'
+      if (label) label.textContent = 'Preparing…'
+      if (prog)  prog.style.visibility = 'visible'
       const fmtMB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB'
 
       try {
@@ -14856,42 +12687,13 @@ const App = (() => {
             alert(`${result.checksum_mismatches} track checksum${result.checksum_mismatches === 1 ? '' : 's'} did not match the fingerprint file for this show. Check the Checksums pane before trusting this copy.`)
           }
           await loadArtistList()   // new artist/venue/musician may exist
-          batch.ingestedIds.set(ingest.folderPath, result.recording_id)
-
-          // Record the outcome on the triage row so returning to the queue
-          // shows "✓ Ingested / View" rather than offering to ingest a folder
-          // that is already in the library — which is exactly what produced
-          // the "Already in your library" warning on re-entry (2026-07-31).
-          if (ingest.fromTriage) {
-            const row = lq.rows.find(r => r.folder_path === ingest.folderPath)
-            if (!lq.log.some(l => l.folder_path === ingest.folderPath)) {
-              lq.log.push({ folder_path: ingest.folderPath,
-                            name: row?.name || ingest.folderPath,
-                            status: 'done', recording_id: result.recording_id })
-            }
-            // Gone from the queue, not merely badged — see _lqRemoveRow.
-            _lqRemoveRow(ingest.folderPath)
-          }
 
           if (after === 'view') {
             resetIngestState()
             window.location.hash = `#/recording/${result.recording_id}`
-          } else if (ingest.fromTriage) {
-            // Straight back to the ingest queue, which is the point of
-            // "Add & Return" for someone working through a folder of shows.
-            ingest.step = 'triage'
-            ingest.fromTriage = false
-            history.replaceState(null, '', '#/ingest')
-            renderIngestStep()
-          } else if (ingest.fromBatch) {
-            // Legacy metadata-review path — see ingestBackFromReview's note on
-            // why the recorded hash has to be corrected without re-rendering,
-            // and _navRewrite's on why the nav stack has to be told about it.
-            history.replaceState(null, '', '#/batch')
-            _navRewrite('#/batch')
-            setInPageBack(null)    // leaving the wizard without going through route()
-            renderBatchResultsView()
-            paintNavButtons()
+          } else if (ingest.returnTo) {
+            // "Add & Return": back to the run's import page.
+            _ingestReturnToRun()
           } else {
             resetIngestState()
             window.location.hash = `#/recording/${result.recording_id}`
@@ -14907,7 +12709,7 @@ const App = (() => {
         btn.disabled = false
         if (otherBtn) otherBtn.disabled = false
         btn.classList.remove('is-busy')
-        prog?.remove()
+        if (prog) prog.style.visibility = 'hidden'
       }
     }
 
@@ -15210,7 +13012,6 @@ const App = (() => {
     })
   }
 
-
   // ══ Event page ═════════════════════════════════════════════════════════════
   //
   // The fifth dimension page (Ryan, 2026-09-01). Event has been in the schema
@@ -15294,7 +13095,7 @@ const App = (() => {
               <span class="vn-field"><label>State / Region</label><span class="pp-editable vn-val ${e.state ? '' : 'pp-empty'}" id="ev-state">${e.state ? esc(e.state) : '—'}</span></span>
               <span class="vn-field"><label>Country</label><span class="pp-editable vn-val ${e.country ? '' : 'pp-empty'}" id="ev-country">${e.country ? esc(e.country) : '—'}</span></span>
             </div>
-            <div class="pp-block-hint">A show inside this event can override any of these with its own venue or city — this is the event's default, not a claim about every night.</div>
+            <div class="pp-block-hint">A show inside this event can override any of these with its own venue or city. This is the event's default, not a claim about every night.</div>
 
             <div class="pp-sec">Shows</div>
             ${perfRowsHtml || '<div class="pp-empty">No performances linked to this event yet.</div>'}
@@ -15571,7 +13372,7 @@ const App = (() => {
           <input type="checkbox" id="ga-show-all" /> Show all <span class="genre-assign-toggle-hint">(default: unassigned only)</span>
         </label>
       </div>
-      <div class="genre-assign-hint">Sorted by recording count, descending — the top acts cover most of the library fastest. Each pick saves immediately.</div>
+      <div class="genre-assign-hint">Sorted by recording count, descending. The top acts cover most of the library fastest. Each pick saves immediately.</div>
       <div class="genre-assign-list" id="genre-assign-list"></div>`)
 
     function rowHtml(p) {
@@ -15640,7 +13441,7 @@ const App = (() => {
       const box = document.getElementById('genre-assign-list')
       box.innerHTML = list.length
         ? list.map(rowHtml).join('')
-        : `<div class="empty-state" style="min-height:120px"><div class="empty-title">${showAll ? 'No artists yet' : 'Every artist has a genre — nothing left to assign'}</div></div>`
+        : `<div class="empty-state" style="min-height:120px"><div class="empty-title">${showAll ? 'No artists yet' : 'Every artist has a genre. Nothing left to assign'}</div></div>`
       wireRows(list)
     }
 
@@ -16037,8 +13838,8 @@ const App = (() => {
   // URL all get there too, and a listener has no toggle at all. One check on
   // the way in covers every route.
   const ADMIN_ONLY_HASHES = [
-    '#/ingest',          // Add Recordings — source picker, triage queue, metadata review
-    '#/batch',           // Batch import
+    '#/ingest',          // Add Recordings — source picker, metadata review
+    '#/batch',           // Retired; redirects to #/ingest
     '#/genres/assign',   // Assign Genres
     '#/peers',           // Sharing
     '#/venue/new', '#/artist/new', '#/musician/new',
@@ -16049,7 +13850,8 @@ const App = (() => {
     '#/workshop',           // Workshop folder (2026-10-01)
     '#/backlog',            // Backlog folder (2026-10-01)
   ]
-  const isAdminOnlyHash = h => ADMIN_ONLY_HASHES.includes((h || '').split('?')[0])
+  const isAdminOnlyHash = h => ADMIN_ONLY_HASHES.includes(
+    (h || '').split('?')[0].replace(/^(#\/bulk-ingest)\/\d+$/, '$1'))
 
   // ── In-page Back ──────────────────────────────────────────────────────────
   // A view whose steps all share one hash (Add Recordings) registers a handler
@@ -16179,6 +13981,87 @@ const App = (() => {
   async function _fetchBulkIngestStatus() {
     try { state.bulkIngest = _bulkIngestRun(await API.bulkIngest.current()) }
     catch (e) { state.bulkIngest = null }
+    await _fetchBulkIngestRuns()
+  }
+
+  // The listed runs (unfinished, or a Review First Queue still holding
+  // ready/review items). Drives the Add Recordings badge and where Add
+  // Recordings goes. Fetched on boot, on navigation (route) and when the
+  // import page opens, never on a timer.
+  async function _fetchBulkIngestRuns() {
+    try {
+      const d = await API.bulkIngest.runs()
+      state.biRuns = d.runs || []
+      state.biWaiting = typeof d.waiting === 'number' ? d.waiting : null
+    } catch (e) { state.biRuns = []; state.biWaiting = 0 }
+  }
+
+  // Distinct folders waiting on a person (ready + needs review) across every
+  // listed run. The server dedupes by folder; the per-run sum is only a
+  // fallback, since one folder can sit in two runs' queues.
+  function _biWaitingCount() {
+    if (typeof state.biWaiting === 'number') return state.biWaiting
+    return (state.biRuns || []).reduce((n, r) => {
+      const c = r.counts || {}
+      return n + (c.ready || 0) + (c.review || 0)
+    }, 0)
+  }
+
+  // The import page of the most recent listed run, or null when none is listed.
+  function _biOpenRunHash() {
+    const runs = state.biRuns || []
+    if (!runs.length) return null
+    return '#/bulk-ingest/' + runs.reduce((a, b) => (b.id > a.id ? b : a)).id
+  }
+
+  // On navigation: refetch the list and repaint the sidebar only when it
+  // changed (renderSidebar also clears the dimension caches, so not every time).
+  let _biRunsSig = null
+  async function _biRefreshRunsOnNav() {
+    if (!canEditLibrary()) return
+    await _fetchBulkIngestRuns()
+    const sig = (state.biRuns || []).map(r => r.id + ':' + r.status).join(',') + '|' + _biWaitingCount()
+    if (_biRunsSig !== null && sig !== _biRunsSig) renderSidebar()
+    _biRunsSig = sig
+  }
+
+  // Import mode memory. Import Automatically / Review First is remembered per
+  // placement (inside the library vs outside) so a choice made for Downloads
+  // never changes what the library folder offers. Absent or unreadable storage
+  // falls back to the server default (auto inside the library, hold outside).
+  const _BI_MODE_KEY = 'trellisBulkIngestMode'
+  function _biDefaultMode(inLibrary) { return inLibrary ? 'auto' : 'hold' }
+  function _biMode(inLibrary) {
+    try {
+      const m = (JSON.parse(localStorage.getItem(_BI_MODE_KEY)) || {})[inLibrary ? 'library' : 'outside']
+      if (m === 'auto' || m === 'hold') return m
+    } catch (e) { /* storage blocked or malformed: use the default */ }
+    return _biDefaultMode(inLibrary)
+  }
+  function _biRememberMode(inLibrary, mode) {
+    try {
+      const all = JSON.parse(localStorage.getItem(_BI_MODE_KEY)) || {}
+      all[inLibrary ? 'library' : 'outside'] = mode
+      localStorage.setItem(_BI_MODE_KEY, JSON.stringify(all))
+    } catch (e) { /* best effort */ }
+  }
+
+  // Two start buttons; the remembered (or default) mode is the primary one.
+  function _biModeButtonsHtml(inLibrary, path) {
+    // Equal-weight pair (Ryan, 2026-10-02): Import Automatically carries a
+    // light accent tint as the usual choice; Review First is a plain ghost.
+    // The remembered choice no longer lights one up as a primary.
+    const btn = (mode, label) => `<button class="btn ${mode === 'auto' ? 'btn-ingest-secondary' : 'btn-ghost'}"
+            data-start-mode="${mode}" data-use="${esc(path)}">${label}</button>`
+    return btn('auto', 'Import Automatically') + btn('hold', 'Review First')
+  }
+
+  // Start a run on `path` and open its import page. Shared by the Add
+  // Recordings picker and the Downloads / Workshop / Backlog Ingest buttons.
+  async function _biStartAndOpen(path, mode) {
+    const run = await API.bulkIngest.start(path, mode)
+    await refreshBulkIngestStatus()
+    window.location.hash = '#/bulk-ingest/' + run.id
   }
 
   // Called after an action on the bulkIngest page itself might have changed run
@@ -16191,27 +14074,22 @@ const App = (() => {
     renderSidebar()
   }
 
-  function _bulkIngestElapsedStr(startedAt, finishedAt) {
-    const start = new Date(startedAt).getTime()
-    const end   = finishedAt ? new Date(finishedAt).getTime() : Date.now()
-    const total = Math.max(0, Math.round((end - start) / 1000))
-    const h = Math.floor(total / 3600)
-    const m = Math.floor((total % 3600) / 60)
-    const sec = total % 60
-    const ss = String(sec).padStart(2, '0')
-    return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`
-  }
+  // The run this page shows. #/bulk-ingest/<id> names it; bare #/bulk-ingest
+  // resolves to the current run once and then sticks to that id, so a later
+  // run starting never swaps the table under the person.
+  let _biRun = null
+  let _biPageRunId = null
 
-  async function renderBulkIngestView() {
-    setActiveNav('bulk-ingest')
+  async function renderBulkIngestView(runId) {
+    setActiveNav('ingest')
     setActiveArtist(null)
-    setNavCurrent('Adding recordings')
+    setNavCurrent('Add Recordings')
     _stopBulkIngestPoll()
     _biResetProgressState()
 
     let data
     try {
-      data = await API.bulkIngest.current()
+      data = await API.bulkIngest.current(runId || null)
     } catch (e) {
       setMainHTML(`
         <div class="empty-state">
@@ -16220,27 +14098,88 @@ const App = (() => {
         </div>`)
       return
     }
-    state.bulkIngest = _bulkIngestRun(data)
+    const run = _bulkIngestRun(data)
+    // Nav item and home routing follow the CURRENT run only.
+    if (!runId) state.bulkIngest = run
+    await _fetchBulkIngestRuns()
     renderSidebar()
-    if (!state.bulkIngest) { window.location.hash = '#/'; return }
+    if (!run) { window.location.hash = '#/'; return }
 
-    await _paintBulkIngestPage(state.bulkIngest)
+    _biRun = run
+    _biPageRunId = run.id
+    // The blanket values live on the server; the block starts from them.
+    _biAa = _biAaFromApplied(run.applied)
+    _biApplied = run.applied || null
+    _biAaOpen = false
 
-    if (state.bulkIngest.status === 'running') {
-      _bulkIngestPollTimer = setInterval(async () => {
+    await _paintBulkIngestPage(run)
+    _biStartPoll()
+  }
+
+  // 3s poll while the run is running, then the slower scoring poll below.
+  function _biStartPoll() {
+    _stopBulkIngestPoll()
+    const run = _biRun
+    if (!run) return
+    if (run.status !== 'running') { _maybeStartScoringPoll(run); return }
+    const pid = run.id
+    _bulkIngestPollTimer = setInterval(async () => {
+      // One tick at a time: a slow tick used to let the next ones pile up on
+      // top of it, and nothing moved on screen until they all drained.
+      if (_biTickBusy) return
+      _biTickBusy = true
+      try {
         let d
-        try { d = await API.bulkIngest.current() } catch (e) { return }
-        const run = _bulkIngestRun(d)
-        state.bulkIngest = run
-        if (!run) { _stopBulkIngestPoll(); return }
-        await _paintBulkIngestPage(run)
-        if (run.status !== 'running') {
-          _stopBulkIngestPoll(); renderSidebar(); _maybeStartScoringPoll(run)
-        }
-      }, 3000)
-    } else {
-      _maybeStartScoringPoll(state.bulkIngest)
-    }
+        try { d = await API.bulkIngest.current(pid) } catch (e) { return }
+        const r = _bulkIngestRun(d)
+        if (!r) { _stopBulkIngestPoll(); return }
+        _biRun = r
+        if (state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
+        // The Add Recordings badge comes from this same payload's counts.
+        const badgeChanged = _biSyncRunCounts(state.biRuns, r)
+        // The badge is a deduped count from /runs; refetch it only when this
+        // run's waiting count moved, not on every tick.
+        if (badgeChanged) await _fetchBulkIngestRuns()
+        await _paintBulkIngestPage(r)
+        if (r.status !== 'running') {
+          _stopBulkIngestPoll(); renderSidebar(); _maybeStartScoringPoll(r)
+        } else if (badgeChanged) renderSidebar()
+      } finally { _biTickBusy = false }
+    }, 3000)
+  }
+
+  let _biTickBusy = false
+
+  // Copy a freshly polled run's status and counts into the listed-runs entry
+  // the sidebar badge reads, so the badge follows the poll without another
+  // request. Returns true when the waiting count changed.
+  function _biSyncRunCounts(runs, r) {
+    const entry = (runs || []).find(x => x.id === r.id)
+    if (!entry) return false
+    const before = ((entry.counts || {}).ready || 0) + ((entry.counts || {}).review || 0)
+    entry.counts = r.counts
+    entry.status = r.status
+    const after = ((r.counts || {}).ready || 0) + ((r.counts || {}).review || 0)
+    return before !== after
+  }
+
+  // After an action that woke the worker (Ingest, Convert, Ingest all ready,
+  // Move): refetch the run, repaint, patch the rows, and make sure the poll is
+  // running. A finished run is flipped back to running by those routes, so the
+  // poll has something to follow.
+  async function _biAfterAction() {
+    let d
+    try { d = await API.bulkIngest.current(_biPageRunId) } catch (e) { return }
+    const r = _bulkIngestRun(d)
+    if (!r) return
+    _biRun = r
+    if (state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
+    await _paintBulkIngestPage(r)
+    // The worker may already have finished, which skips the poll's own table
+    // patch, so patch here.
+    await _biTableRefresh()
+    _biStartPoll()
+    renderSidebar()
   }
 
   // Listening Quality keeps scoring in the background after a run finishes
@@ -16250,11 +14189,13 @@ const App = (() => {
     const scorable = (run && run.scorable) || 0
     const scored   = (run && run.scored)   || 0
     if (!(run && run.status === 'done' && scorable > 0 && scored < scorable)) return
+    const pid = run.id
     _bulkIngestPollTimer = setInterval(async () => {
       let d
-      try { d = await API.bulkIngest.current() } catch (e) { return }
+      try { d = await API.bulkIngest.current(pid) } catch (e) { return }
       const r = _bulkIngestRun(d)
-      state.bulkIngest = r
+      if (r) _biRun = r
+      if (r && state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
       if (!r) { _stopBulkIngestPoll(); return }
       await _paintBulkIngestPage(r)
       if ((r.scored || 0) >= (r.scorable || 0)) _stopBulkIngestPoll()
@@ -16340,13 +14281,6 @@ const App = (() => {
     return { rateText, etaText }
   }
 
-  const _BI_REVIEW_REASON_PHRASE = {
-    needs_artist:       'without an artist',
-    needs_date:         'without a date',
-    needs_month:        'with only the year known',
-    needs_day:          'missing the day',
-    unsupported_format: 'unsupported format',
-  }
   const _BI_SKIPPED_REASON_PHRASE = {
     already_in_library: 'already in your library',
     rejected:           'rejected earlier',
@@ -16370,23 +14304,6 @@ const App = (() => {
     return out
   }
 
-  // "<N> without an artist, <N> without a date, ..." -- inline, after a
-  // colon, only the reasons that actually have a count (spec chunk 5e).
-  // conflict:<field> reasons are one field each but read as one aggregate
-  // count here -- a per-field breakdown would overflow this one-line summary
-  // (the row-level chip, _biBuildIqRow below, still lists each field).
-  function _biReasonInline(reasons, phraseMap) {
-    const counts = _biSplitReasonCounts(reasons)
-    const parts = Object.entries(phraseMap)
-      .map(([key, phrase]) => counts[key] ? `${counts[key]} ${phrase}` : null)
-      .filter(Boolean)
-    const conflictN = Object.entries(counts)
-      .filter(([k]) => k.startsWith('conflict:'))
-      .reduce((sum, [, n]) => sum + n, 0)
-    if (conflictN) parts.push(`${conflictN} with conflicting sources`)
-    return parts.length ? `: ${parts.join(', ')}` : ''
-  }
-
   // Meta line for a finished bulk-ingest row: Artist · date · venue, or
   // Artist · title for a studio record. Same separator markup as the
   // Review & Ingest row builder (_lqBuildIqRow).
@@ -16404,10 +14321,15 @@ const App = (() => {
   // Normalizes one GET .../items row into the shared ingest-queue-table row
   // shape (see the component doc comment near ingestQueueTable/_iqRow).
   function _biBuildIqRow(it) {
+    // A ready/review item the person just sent to Ingest shows as pending
+    // until the poll sees what became of it.
     const pending    = it.status === 'pending'
+      || (!!it.ingest_requested && (it.status === 'ready' || it.status === 'review'))
     const inProgress = it.status === 'in_progress'
     const status = pending ? 'pending' : inProgress ? 'ingesting' : it.status // ingested|review|skipped|failed
     const needsReview = it.status === 'review'
+    // Held back for audio Trellis does not import: only Convert and Move apply.
+    const unsupported = needsReview && String(it.reason || '').split(',').includes('unsupported_format')
     // it.reason may hold several resolver codes comma-joined (see
     // _biSplitReasonCounts above) -- _ingestReasonLabels splits and maps all
     // of them, so a row needing both an artist and a day shows both, not
@@ -16424,12 +14346,15 @@ const App = (() => {
       : it.status === 'failed' ? (it.detail || 'Could not be read') : null
     const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
       ? '' : _biMetaLine(it)
-    const basename = (it.rel_path || '').split('/').pop()
+    const basename = _biItemName(it)
     // Completed tabs (2026-10-01): the recording's own name leads and the
     // folder name drops to the grey line. Live: Artist - date - venue, place.
     // Album: Artist - Title.
     const imported = _biTab !== 'queue' && it.status === 'ingested'
-    let title = basename, sub = meta
+    // Ready / issue labels live in their own status column (_iqStatusCell),
+    // not in this line.
+    let title = basename
+    let sub = meta
     if (imported) {
       const place = it.venue && it.location && !String(it.venue).includes(it.location)
         ? `${it.venue}, ${it.location}` : (it.venue || it.location)
@@ -16443,8 +14368,11 @@ const App = (() => {
       meta: sub,
       format: it.format || null,
       kind: it.kind || null,
-      sound_band: null,
+      sound_band: it.sound_band || null,
       meta_band: it.meta_band || null,
+      convertible: unsupported ? _biConvertKind(it) : null,
+      unsupported,
+      _it: it,
       needs_review: needsReview,
       review_reason: reviewLabel,
       review_issues: reviewIssues,
@@ -16464,11 +14392,88 @@ const App = (() => {
     }
   }
 
+  // An outside single-show run has one item with rel_path "." -- its folder
+  // is the run root, so that is the name to show.
+  function _biItemName(it) {
+    if (it.rel_path && it.rel_path !== '.') return it.rel_path.split('/').pop()
+    return String((_biRun && _biRun.root) || '').replace(/\/+$/, '').split('/').pop()
+  }
+
+  // Only FLAC and MP3 are imported; a folder holding any other lossless
+  // format (even beside FLAC) is what Convert applies to, the same rule
+  // detect_convertible enforces server-side.
+  function _biConvertKind(it) {
+    const f = String(it.format || '').toUpperCase().split(/[,\s]+/).filter(Boolean)
+    if (f.includes('SHN')) return { kind: 'shn' }
+    return f.some(x => x === 'WAV' || x === 'AIFF' || x === 'APE' || x === 'WV') ? { kind: 'wav' } : null
+  }
+
+  // Review First runs score live folders before ingest, so only their Queue
+  // shows the Sound Quality column.
+  function _biSoundCol() {
+    return !!(_biRun && _biRun.mode === 'hold' && _biTab === 'queue')
+  }
+
+  function _biTheadHtml() {
+    const sq = _biSoundCol()
+    return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}">
+      <span>Recording</span>
+      <span>Format</span><span>Type</span>
+      ${sq ? '<span>Sound Quality</span>' : ''}
+      <span>Metadata</span><span></span><span></span><span></span>
+    </div>`
+  }
+
+  // Row actions on the Queue: Import, Review, Move (bring-in runs only) and
+  // Convert (unsupported audio). Every other state defers to the shared defaults.
+  function _biActionsHtml(row) {
+    const it = row._it
+    if (row.status === 'moved') return ''
+    if (!it || (row.status !== 'ready' && row.status !== 'review')) return _iqDefaultActions(row, {})
+    if (!canEditLibrary()) return ''
+    const id = esc(row.id)
+    // A row's own Convert is tracked here; Convert All's rows come from the
+    // server (it.converting) and have no Stop.
+    const cv = _biConverting.get(it.id) || it.converting
+    if (cv) {
+      return `<span class="lq-act-running" data-convert-for="${id}">
+          <span class="lq-spin"></span>${esc(_lqConvertText(cv))}</span>
+        ${cv.jobId ? `<button class="lq-act lq-act--cancel" data-convert-cancel="${id}">Stop</button>` : ''}`
+    }
+    const btns = []
+    const err = _biConvertErr.get(it.id) || (row.unsupported && it.detail)
+    if (err) btns.push(_lqErrorChip(err, 'Could not convert this folder'))
+    // Unsupported audio is never imported, so Import and Review are not
+    // offered. A paused run refuses import requests (409), so the button is
+    // not offered then either.
+    if (!row.unsupported && !(_biRun && _biRun.status === 'paused')) {
+      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${id}">Import</button>`)
+    }
+    if (!row.unsupported) {
+      btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${id}">Review</button>`)
+    }
+    // Convert is offered everywhere, library folders included: it only runs
+    // on an explicit click, behind a confirmation.
+    if (row.convertible) {
+      btns.push(`<button class="lq-act lq-act--convert" data-convert="${id}">Convert to FLAC</button>`)
+    }
+    // Move is for brought-in folders; one inside the library is never moved.
+    if (_biRun && _biRun.placement === 'bring_in' && triageDests().length) {
+      btns.push(`<div class="lq-move-wrap">
+        <button type="button" class="lq-act lq-act--move" data-path="${id}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
+        <div class="lq-move-menu" hidden>${triageDests().map(d =>
+          `<button type="button" class="lq-move-opt" data-path="${id}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}</div>
+      </div>`)
+    }
+    return btns.join('')
+  }
+
   function _biRowHtml(it) {
     return _iqRow(_biBuildIqRow(it), {
-      soundQuality: false,
+      soundQuality: _biSoundCol(),
       canIngest: true,
       moveTargets: [],
+      actionsHtml: _biActionsHtml,
       isOpen: r => _biOpenRows.has(r.id),
     })
   }
@@ -16534,6 +14539,71 @@ const App = (() => {
     _biSetupTableSentinel()
   }
 
+  // Does this item belong in the slice the active tab shows? Mirrors the
+  // server's items filters.
+  function _biRowBelongs(it) {
+    const f = _biItemsFilter()
+    if (f === 'queue') return it.status !== 'ingested' && it.status !== 'moved'
+    if (f === 'review') return it.status === 'review'
+    if (f === 'album') return it.status === 'ingested' && it.kind === 'studio'
+    return it.status === 'ingested' && it.kind !== 'studio'
+  }
+
+  // Rows that can still change on their own: being worked, waiting on a
+  // request, or pending. Capped, lowest id first (the worker's order).
+  function _biLiveRowIds(cache) {
+    const ids = []
+    for (const it of cache.values()) {
+      if (it.status === 'in_progress' || it.ingest_requested || it.status === 'pending' || it.converting) ids.push(it.id)
+    }
+    return ids.sort((a, b) => a - b).slice(0, 100)
+  }
+
+  // Pure: given the cached rows and the fresh copies of some of them, which
+  // rows leave the slice and which are redrawn. `askedIds` that did not come
+  // back are gone.
+  function _biPlanRowUpdates(cache, askedIds, fetched, belongs) {
+    const remove = [], replace = []
+    const got = new Set(fetched.map(i => i.id))
+    for (const id of askedIds) if (!got.has(id)) remove.push(id)
+    for (const it of fetched) {
+      if (!belongs(it)) { remove.push(it.id); continue }
+      const prev = cache.get(it.id)
+      if (!prev || prev.status !== it.status || !!prev.ingest_requested !== !!it.ingest_requested
+          || JSON.stringify(prev.converting || null) !== JSON.stringify(it.converting || null)) replace.push(it)
+    }
+    return { remove, replace }
+  }
+
+  // Poll tick for the table. Normally only the few live rows are refetched, so
+  // each ingested row leaves the Queue the moment its own ingest finishes. The
+  // full paged reconcile is kept for what the cheap path cannot see: newly
+  // discovered rows, and tabs other than the plain Queue.
+  async function _biTableTick(run) {
+    const want = _biTabCounts(run)[_biTab]
+    const plainQueue = _biTab === 'queue' && !_biReviewFilter
+    if (!plainQueue || (_biTableExhausted && want > _biLoadedCount)) { await _biTableRefresh(); return }
+    const ids = _biLiveRowIds(_biRowsCache)
+    if (!ids.length) return
+    let body
+    try { body = await API.bulkIngest.itemsByIds(_biTableRunId, ids) } catch (e) { return }
+    const plan = _biPlanRowUpdates(_biRowsCache, ids, body.items || [], _biRowBelongs)
+    const listEl = document.getElementById('bi-rows')
+    if (!listEl) return
+    for (const id of plan.remove) {
+      listEl.querySelector(`:scope > .iq-row[data-id="${id}"]`)?.remove()
+      if (_biRowsCache.delete(id)) _biLoadedCount--
+    }
+    for (const it of plan.replace) {
+      const el = listEl.querySelector(`:scope > .iq-row[data-id="${it.id}"]`)
+      _biRowsCache.set(it.id, it)
+      if (!el) continue
+      const tmp = document.createElement('div')
+      tmp.innerHTML = _biRowHtml(it).trim()
+      el.replaceWith(tmp.firstElementChild)
+    }
+  }
+
   function _biReconcile(items) {
     const listEl = document.getElementById('bi-rows')
     if (!listEl) return
@@ -16548,7 +14618,8 @@ const App = (() => {
     for (const it of items) {
       let el = listEl.querySelector(`:scope > .iq-row[data-id="${it.id}"]`)
       const prev = _biRowsCache.get(it.id)
-      if (!el || !prev || prev.status !== it.status) {
+      if (!el || !prev || prev.status !== it.status || !!prev.ingest_requested !== !!it.ingest_requested
+          || JSON.stringify(prev.converting || null) !== JSON.stringify(it.converting || null)) {
         const tmp = document.createElement('div')
         tmp.innerHTML = _biRowHtml(it).trim()
         const fresh = tmp.firstElementChild
@@ -16571,13 +14642,14 @@ const App = (() => {
     const total = Object.values(c).reduce((a, b) => a + b, 0)
     const ingested = c.ingested || 0
     const album = run.studio || 0
-    return { queue: total - ingested, live: ingested - album, album }
+    return { queue: total - ingested - (c.moved || 0), live: ingested - album, album }
   }
 
   function _biTabsHtml(run) {
     const n = _biTabCounts(run)
     const tabs = [['queue', 'Queue'], ['live', 'Imported - Live Recordings'], ['album', 'Imported - Albums']]
-    return tabs.map(([id, label]) => `
+    // Imported tabs appear only once they hold rows (Ryan, 2026-10-02).
+    return tabs.filter(([id]) => id === 'queue' || n[id] > 0).map(([id, label]) => `
       <button type="button" class="pp-tab bi-tab--${id}${_biTab === id ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
   }
 
@@ -16586,16 +14658,46 @@ const App = (() => {
   function _biTabNoteHtml(run) {
     if (_biTab === 'queue') {
       const review = (run.counts && run.counts.review) || 0
-      return review ? `<p class="bi-tab-note">Check the ${icon('alert', 'bi-note-ic')} for issues, then manually "Review", or "Ingest" to import it anyway</p>` : ''
+      return review ? `<p class="bi-tab-note">Check the ${icon('alert', 'bi-note-ic')} for issues, then manually "Review", or "Import" to import it anyway</p>` : ''
     }
     return ''
   }
 
   function _biPaintTabs(run) {
+    // A selected tab that has emptied is hidden, so fall back to Queue.
+    if (_biTab !== 'queue' && !_biTabCounts(run)[_biTab]) _biTab = 'queue'
     const tabsEl = document.getElementById('bi-tabs')
     if (tabsEl) tabsEl.innerHTML = _biTabsHtml(run)
     const noteEl = document.getElementById('bi-tab-note')
     if (noteEl) noteEl.innerHTML = _biTabNoteHtml(run)
+    const allEl = document.getElementById('bi-ingest-all-wrap')
+    if (allEl) allEl.innerHTML = _biIngestAllHtml(run)
+  }
+
+  // Rows held back for unsupported audio, from the run's reason breakdown
+  // (keys are comma-joined reason codes, see _biSplitReasonCounts).
+  function _biUnsupportedCount(run) {
+    return Object.entries(run.reasons || {})
+      .filter(([k]) => k.split(',').includes('unsupported_format'))
+      .reduce((n, [, c]) => n + c, 0)
+  }
+
+  // Above the Queue list: Import All Ready (Review First only) imports every
+  // item that is ready; Convert All to FLAC (any mode) shows only while a
+  // Queue row has unsupported audio. Same button family as the row actions,
+  // one size up.
+  function _biIngestAllHtml(run) {
+    if (!canEditLibrary() || _biTab !== 'queue') return ''
+    const idle = run.status !== 'paused'
+    let html = ''
+    if (run.mode === 'hold') {
+      const ready = (run.counts && run.counts.ready) || 0
+      html += `<button type="button" class="lq-act lq-act--ingest lq-act--lg" id="bi-ingest-all"${ready && idle ? '' : ' disabled'}>Import All Ready</button>`
+    }
+    if (_biUnsupportedCount(run) > 0) {
+      html += `<button type="button" class="lq-act lq-act--convert lq-act--lg" id="bi-convert-all"${idle ? '' : ' disabled'}>Convert All to FLAC</button>`
+    }
+    return html
   }
 
   async function _biTableInit(runId) {
@@ -16605,6 +14707,8 @@ const App = (() => {
     _biTableExhausted = false
     _biTableLoading = false
     _biOpenRows = new Set()
+    const headEl = document.getElementById('bi-thead')
+    if (headEl) headEl.innerHTML = _biTheadHtml()
     const listEl = document.getElementById('bi-rows')
     if (listEl) listEl.innerHTML = ''
     await _biTableLoadMore()
@@ -16620,20 +14724,232 @@ const App = (() => {
   // safely one-click auto-ingested, so both buttons land on the same form a
   // human finishes.
   async function _biOpenReviewFor(it, btn) {
-    const root = (state.bulkIngest && state.bulkIngest.root) || ''
-    const abs = root.replace(/\/+$/, '') + '/' + it.rel_path
+    const root = (_biRun && _biRun.root) || ''
+    const abs = it.abs_path || (root.replace(/\/+$/, '') + '/' + it.rel_path)
     if (btn) { btn.disabled = true; btn.textContent = '…' }
     try {
       const scan = await API.recordings.scan(abs)
       ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = abs
       ingest.form = {}; ingest.tracks = []
-      ingest.fromBatch = false; ingest.fromTriage = true; ingest._resume = true
+      ingest.returnTo = _biRun ? '#/bulk-ingest/' + _biRun.id : null; ingest._resume = true
       window.location.hash = '#/ingest'
       renderIngestStep()
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Review' }
       alert(`Scan failed: ${e.message}`)
     }
+  }
+
+  // ── Queue row actions ────────────────────────────────────────────────────
+  let _biConverting = new Map()   // item id -> { jobId, done, total, current, kind }
+  const _biConvertErr = new Map() // item id -> message
+
+  function _biRepaintRow(id) {
+    const it = _biRowsCache.get(id)
+    const el = document.querySelector(`#bi-rows > .iq-row[data-id="${id}"]`)
+    if (it && el) el.outerHTML = _biRowHtml(it)
+  }
+
+  function _biSetItem(it) { _biRowsCache.set(it.id, it); _biRepaintRow(it.id) }
+
+  // Ingest runs on the server's worker: flag the row pending now, and let the
+  // poll show what became of it (gone to the library, or back in review or
+  // skipped with its reason).
+  async function _biIngestItem(it, btn) {
+    if (btn) btn.disabled = true
+    try { await API.bulkIngest.ingestItem(it.id) }
+    catch (e) { if (btn) btn.disabled = false; alert(e.message); return }
+    _biSetItem({ ...it, ingest_requested: true })
+    await _biAfterAction()
+  }
+
+  async function _biIngestAllReady(btn) {
+    if (btn) btn.disabled = true
+    try { await API.bulkIngest.ingestReady(_biPageRunId) }
+    catch (e) { alert(e.message); await _biAfterAction(); return }
+    await _biAfterAction()
+  }
+
+  async function _biMoveItem(it, dest, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = '…' }
+    try { await API.bulkIngest.moveItem(it.id, dest) }
+    catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = TRIAGE_LABELS[dest] || dest }
+      alert(`Move failed: ${e.message}`)
+      return
+    }
+    // A moved item leaves the Queue.
+    _biRowsCache.delete(it.id)
+    document.querySelector(`#bi-rows > .iq-row[data-id="${it.id}"]`)?.remove()
+    await _biAfterAction()
+  }
+
+  // A small in-app confirmation (same modal classes as the Settings and Write
+  // Tags dialogs), never window.confirm.
+  function _confirmDialog(message, confirmLabel, onConfirm) {
+    const wrap = document.createElement('div')
+    wrap.className = 'modal-overlay'
+    wrap.innerHTML = `
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-body"><p>${esc(message)}</p></div>
+        <div class="modal-footer">
+          <button class="btn btn-sm btn-ghost" data-cd="cancel">Cancel</button>
+          <button class="btn btn-sm btn-primary" data-cd="confirm">${esc(confirmLabel)}</button>
+        </div>
+      </div>`
+    document.body.appendChild(wrap)
+    const onKey = e => { if (e.key === 'Escape') close() }
+    const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+    document.addEventListener('keydown', onKey)
+    wrap.querySelector('[data-cd="cancel"]').addEventListener('click', close)
+    wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+    wrap.querySelector('[data-cd="confirm"]').addEventListener('click', () => { close(); onConfirm() })
+  }
+
+  // Convert deletes the originals, so it always asks first.
+  function _biConvert(id) {
+    _confirmDialog('Replace the original files with FLAC? The originals will be deleted. This can\'t be undone.',
+      'Convert to FLAC', () => { _biConvertRun(id) })
+  }
+
+  // Server-side, one folder at a time. Rows show a converting state (from the
+  // server) and then turn importable; a watcher patches them meanwhile, since
+  // a finished run has no poll of its own.
+  let _biConvertAllTimer = null
+  function _biConvertAll(btn) {
+    const n = _biUnsupportedCount(_biRun || {})
+    _confirmDialog(`Replace the SHN and WAV files in ${n} recordings with FLAC? The originals will be deleted. This can't be undone.`,
+      'Convert All to FLAC', async () => {
+        if (btn) btn.disabled = true
+        try { await API.bulkIngest.convertUnsupported(_biPageRunId) }
+        catch (e) { if (btn) btn.disabled = false; alert(e.message); return }
+        await _biTableRefresh()
+        clearInterval(_biConvertAllTimer)
+        _biConvertAllTimer = setInterval(async () => {
+          const ids = [..._biRowsCache.values()].filter(it => it.converting).map(it => it.id)
+          if (!document.getElementById('bi-rows') || !ids.length) {
+            clearInterval(_biConvertAllTimer); _biConvertAllTimer = null
+            if (document.getElementById('bi-rows')) await _biAfterAction()
+            return
+          }
+          let body
+          try { body = await API.bulkIngest.itemsByIds(_biTableRunId, ids) } catch (e) { return }
+          for (const it of body.items || []) {
+            const prev = _biRowsCache.get(it.id)
+            if (prev && prev.status === it.status && JSON.stringify(prev.converting) === JSON.stringify(it.converting)) continue
+            _biSetItem(it)
+          }
+        }, 2000)
+      })
+  }
+
+  // Same job and poll Review & Ingest uses; afterwards the server re-reads the
+  // folder (reanalyze) because its format and verdict have changed.
+  async function _biConvertRun(id) {
+    const it = _biRowsCache.get(id)
+    if (!it || _biConverting.has(id)) return
+    _biConvertErr.delete(id)
+    let start
+    try { start = await API.quality.convert(it.abs_path) }
+    catch (e) {
+      _biConvertErr.set(id, e.message || 'Could not start the conversion.')
+      _biRepaintRow(id)
+      return
+    }
+    _biConverting.set(id, { jobId: start.job_id, done: 0, total: start.total || 0, current: null, kind: start.kind })
+    _biRepaintRow(id)
+
+    let final = null
+    while (true) {
+      await new Promise(r => setTimeout(r, 900))
+      let st
+      try { st = await API.quality.convertStatus(start.job_id) }
+      catch (e) { _biConvertErr.set(id, e.message || 'Lost contact with the conversion job.'); break }
+      const cv = _biConverting.get(id)
+      if (cv) {
+        cv.done = st.done || 0
+        cv.total = st.total || cv.total
+        cv.current = st.current || null
+        // Patch the label in place; a repaint every 900ms would close menus.
+        const el = document.querySelector(`[data-convert-for="${CSS.escape(String(id))}"]`)
+        if (el) { const spin = el.querySelector('.lq-spin'); el.textContent = _lqConvertText(cv); if (spin) el.prepend(spin) }
+      }
+      if (st.status !== 'running') { final = st; break }
+    }
+    _biConverting.delete(id)
+    if (!final || final.status === 'error') {
+      if (!_biConvertErr.has(id)) _biConvertErr.set(id, (final && final.error) || 'The conversion failed.')
+      _biRepaintRow(id)
+      return
+    }
+    // Done or cancelled: whatever finished IS converted, so read the folder again.
+    try { await API.bulkIngest.reanalyzeItem(id) }
+    catch (e) { _biConvertErr.set(id, e.message); _biRepaintRow(id); return }
+    _biSetItem({ ...it, status: 'pending', reason: null, ingest_requested: false })
+    await _biAfterAction()
+  }
+
+  // ── "Apply values to every recording below" (Queue tab) ───────────────────────
+  // Same block as Review & Ingest's, but the staged values are saved on the
+  // run (PUT .../applied) and come back in the run payload, so they survive a
+  // reload and reach the worker.
+  const _biEmptyAa = () => ({
+    event: '', artist: '', venue: { id: null, name: '' },
+    city: '', state: '', country: '', source: '', source_tag: '', lineage: '', notes: '',
+  })
+  let _biAa = _biEmptyAa()
+  let _biAaOpen = false
+  let _biApplied = null
+  let _biAaTimer = null
+
+  function _biAaFromApplied(a) {
+    const aa = _biEmptyAa()
+    if (!a) return aa
+    for (const k of ['artist', 'city', 'state', 'country', 'event', 'source', 'source_tag', 'lineage', 'notes']) aa[k] = a[k] || ''
+    aa.venue = { id: a.venue_id || null, name: a.venue || '' }
+    return aa
+  }
+
+  function _biAaState() {
+    const typed = _aaTyped(_biAa)
+    if (!_aaCount(typed) && !_biApplied) return 'empty'
+    return _aaFingerprint(typed) === _aaFingerprint(_biApplied) ? 'applied' : 'dirty'
+  }
+
+  function _biPaintApplyAll() {
+    const el = document.getElementById('bi-applyall')
+    if (!el) return
+    if (!(canEditLibrary() && _biTab === 'queue' && _biRun && _biTabCounts(_biRun).queue > 0)) {
+      el.innerHTML = ''
+      return
+    }
+    el.innerHTML = _applyAllHtml({
+      aa: _biAa, open: _biAaOpen, busy: false, applied: _biApplied,
+      typed: _aaTyped(_biAa), state: _biAaState(),
+    })
+    document.getElementById('lq-applyall-toggle')?.addEventListener('click', () => {
+      _biAaOpen = !_biAaOpen
+      _biPaintApplyAll()
+      if (_biAaOpen) document.getElementById('lq-apply-artist')?.focus()
+    })
+    document.getElementById('lq-applyall-apply')?.addEventListener('click', async () => {
+      const typed = _aaTyped(_biAa)
+      try { await API.bulkIngest.setApplied(_biPageRunId, typed) }
+      catch (e) { alert(e.message); return }
+      _biApplied = typed
+      _biPaintApplyAll()
+    })
+    document.getElementById('lq-applyall-clear')?.addEventListener('click', async () => {
+      try { await API.bulkIngest.setApplied(_biPageRunId, {}) }
+      catch (e) { alert(e.message); return }
+      _biAa = _biEmptyAa()
+      _biApplied = null
+      _biPaintApplyAll()
+    })
+    _wireApplyAll({
+      aa: _biAa, rerender: _biPaintApplyAll,
+      repaintSoon: (delay = 0) => { clearTimeout(_biAaTimer); _biAaTimer = setTimeout(_biPaintApplyAll, delay) },
+    })
   }
 
   function _biOnTableClick(ev) {
@@ -16646,10 +14962,31 @@ const App = (() => {
       menu.hidden = !wasHidden
       return
     }
-    const ingestBtn = ev.target.closest('.lq-act--ingest, .lq-act--review')
+    const itemOf = el => _biRowsCache.get(Number(el.dataset.path))
+    const moveOpt = ev.target.closest('.lq-move-opt')
+    if (moveOpt) {
+      const it = itemOf(moveOpt)
+      if (it) _biMoveItem(it, moveOpt.dataset.dest, moveOpt)
+      return
+    }
+    const ingestBtn = ev.target.closest('.lq-act--ingest')
     if (ingestBtn) {
-      const it = _biRowsCache.get(Number(ingestBtn.dataset.path))
-      if (it) _biOpenReviewFor(it, ingestBtn)
+      const it = itemOf(ingestBtn)
+      if (it) _biIngestItem(it, ingestBtn)
+      return
+    }
+    const reviewBtn = ev.target.closest('.lq-act--review')
+    if (reviewBtn) {
+      const it = itemOf(reviewBtn)
+      if (it) _biOpenReviewFor(it, reviewBtn)
+      return
+    }
+    const convertBtn = ev.target.closest('[data-convert]')
+    if (convertBtn) { _biConvert(Number(convertBtn.dataset.convert)); return }
+    const stopBtn = ev.target.closest('[data-convert-cancel]')
+    if (stopBtn) {
+      const cv = _biConverting.get(Number(stopBtn.dataset.convertCancel))
+      if (cv) { stopBtn.disabled = true; API.quality.convertCancel(cv.jobId).catch(() => {}) }
       return
     }
     const caret = ev.target.closest('[data-expand]')
@@ -16669,37 +15006,23 @@ const App = (() => {
     if (!canEditLibrary()) return ''
     if (run.status === 'running') return '<button class="btn btn-ghost btn-sm" id="bi-pause">Pause</button>'
     if (run.status === 'paused')  return '<button class="btn btn-ghost btn-sm" id="bi-resume">Resume</button>'
-    if (run.status === 'done')    return '<button class="btn btn-ghost btn-sm" id="bi-again">Scan again</button>'
+    if (run.status === 'done')    return '<button class="btn btn-ghost btn-sm" id="bi-again">Scan Again</button>'
     return ''
   }
 
-
-  // Subtitle area -- "<N> folders found" while running/paused; once done,
-  // the summary, one small line each (spec chunk 5e).
-  function _biSubtitleHtml(run) {
-    const c = run.counts || {}
-    const found    = Object.values(c).reduce((a, b) => a + b, 0)
-
-    if (run.status !== 'done') {
-      return `<p class="batch-subtitle">${found} folder${found === 1 ? '' : 's'} found</p>`
-    }
-
-    const added    = c.ingested || 0
-    const review   = c.review || 0
-    const skipped  = c.skipped || 0
-    const failed   = run.failed || 0
-    const studio   = run.studio || 0
-    const reasons        = run.reasons || {}
-    const skippedReasons = run.skipped_reasons || {}
+  // Notices above the queue table, shown once the run is done: the
+  // scoring-continues line and the Possible Duplicates list. The counts and
+  // elapsed line this block used to lead with were removed (Ryan, 2026-10-02).
+  function _biNoticesHtml(run) {
+    if (run.status !== 'done') return ''
     const scorable = run.scorable || 0
     const scored   = run.scored   || 0
     const scoring  = scorable > 0 && scored < scorable
-    const elapsedStr = _bulkIngestElapsedStr(run.started_at, run.finished_at)
 
     const dupes = run.duplicates || []
     const dupesHtml = dupes.length ? `
       <div class="bi-dupes">
-        <h2>Possible duplicates</h2>
+        <h2>Possible Duplicates</h2>
         <ul>
           ${dupes.map(d => `<li>
             <a href="#/recording/${d.recording_id}">${esc(d.rel_path_basename)}</a>
@@ -16708,22 +15031,25 @@ const App = (() => {
         </ul>
       </div>` : ''
 
-    // One subtitle line, middle-dot joined, zero-count parts dropped;
-    // the scoring sentence is a second small line only while scoring runs.
-    const parts = [
-      `${found} folder${found === 1 ? '' : 's'}`,
-      added   > 0 ? `${added} added` : null,
-      studio  > 0 ? `${studio} album${studio === 1 ? '' : 's'}` : null,
-      review  > 0 ? `${review} need review${_biReasonInline(reasons, _BI_REVIEW_REASON_PHRASE)}` : null,
-      skipped > 0 ? `${skipped} skipped${_biReasonInline(skippedReasons, _BI_SKIPPED_REASON_PHRASE)}` : null,
-      failed  > 0 ? `${failed} could not be read` : null,
-      elapsedStr ? esc(elapsedStr) : null,
-    ].filter(Boolean)
+    return `${scoring ? `<p class="batch-subtitle" id="bi-scoring-line">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''}${dupesHtml}`
+  }
 
-    return `
-      <p class="batch-subtitle" style="margin-bottom:0">${parts.join(' · ')}</p>
-      ${scoring ? `<p class="batch-subtitle" id="bi-scoring-line" style="margin-top:4px">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''}
-      ${dupesHtml}`
+  // Header's second line: which File Handling mode is active, with a text
+  // link to where it is changed. Page-specific so the shared strip used on
+  // the other ingest screens stays as it was.
+  function _biFileHandlingHtml(fh) {
+    const text = fh && fh.file_handling_mode === 'organize'
+      ? 'File Handling set to move/organize into Trellis folders'
+      : 'File Handling set to keep files as-is (do not move or copy)'
+    return `${esc(text)} <a href="#/settings">Change in Settings</a>`
+  }
+
+  async function _wireBiFileHandling() {
+    const el = document.getElementById('bi-fh-line')
+    if (!el) return
+    try {
+      el.innerHTML = _biFileHandlingHtml(await fileHandling())
+    } catch (e) { /* leave it empty rather than showing a broken line */ }
   }
 
   // Progress bar -- same markup as Review & Ingest's own (.lq-progress),
@@ -16754,12 +15080,12 @@ const App = (() => {
     document.getElementById('bi-pause')?.addEventListener('click', async () => {
       try { await API.bulkIngest.pause(run.id) } catch (e) {}
       await refreshBulkIngestStatus()
-      renderBulkIngestView()
+      renderBulkIngestView(run.id)
     })
     document.getElementById('bi-resume')?.addEventListener('click', async () => {
       try { await API.bulkIngest.resume(run.id) } catch (e) {}
       await refreshBulkIngestStatus()
-      renderBulkIngestView()
+      renderBulkIngestView(run.id)
     })
     // In place (2026-09-27 unified table), not a navigation to Review &
     // Ingest any more: toggles the SAME table down to just its needs-review
@@ -16774,9 +15100,10 @@ const App = (() => {
       await _biTableInit(run.id)
     })
     document.getElementById('bi-again')?.addEventListener('click', async () => {
-      try { await API.bulkIngest.start() } catch (e) {}
+      let again = null
+      try { again = await API.bulkIngest.start(run.root) } catch (e) {}
       await refreshBulkIngestStatus()
-      renderBulkIngestView()
+      renderBulkIngestView(again && again.id)
     })
   }
 
@@ -16793,12 +15120,19 @@ const App = (() => {
     if (!isFreshBuild) {
       const actionsEl = document.getElementById('bi-header-actions')
       if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(run); _biWireHeaderActions(run) }
-      const subEl = document.getElementById('bi-subtitle')
-      if (subEl) subEl.innerHTML = _biSubtitleHtml(run)
+      const noticesEl = document.getElementById('bi-notices')
+      if (noticesEl) noticesEl.innerHTML = _biNoticesHtml(run)
       const progEl = document.getElementById('bi-progress-wrap')
       if (progEl) progEl.innerHTML = _biProgressHtml(run)
+      const tabBefore = _biTab
       _biPaintTabs(run)
-      if (!done) await _biTableRefresh()
+      // The open tab emptied and fell back to Queue: reload what it shows.
+      if (_biTab !== tabBefore) {
+        _biPaintApplyAll()
+        await _biTableInit(run.id)
+        return
+      }
+      if (!done) await _biTableTick(run)
       return
     }
 
@@ -16808,54 +15142,59 @@ const App = (() => {
       <div class="batch-shell lq-shell">
         <div class="lq-header">
           <div style="min-width:0">
-            <h2>Importing Recordings from ${esc(String(run.root || '').replace(/\/+$/, '').split('/').pop() || '')}</h2>
-            <div id="bi-subtitle">${_biSubtitleHtml(run)}</div>
+            <h2>Add Recordings</h2>
+            <div class="bi-src">
+              <div class="bi-src-line">
+                <span class="bi-src-label">Source Folder</span>
+                <span class="bi-src-path" title="${esc(run.root || '')}">${esc(_lqShortPath(run.root))}</span>
+                ${canEditLibrary() ? `<button type="button" class="btn btn-ghost btn-sm" id="bi-browse">Browse…</button>` : ''}
+              </div>
+              <div class="bi-src-line" id="bi-fh-line"></div>
+            </div>
           </div>
           <div class="lq-header-actions" id="bi-header-actions">${_biHeaderActionsHtml(run)}</div>
         </div>
 
-        <div class="lq-setbar">
-          <span class="bfilter">Source folder
-            <button class="lq-setbar-path" disabled title="${esc(run.root || '')}">
-              ${icon('folder-open', 'lq-setbar-ic')}<span>${esc(_lqShortPath(run.root))}</span></button>
-          </span>
-          <span id="bi-fh-strip"></span>
-        </div>
-
         <div id="bi-progress-wrap">${_biProgressHtml(run)}</div>
 
-        <h3 class="bi-queue-head">Import Queue</h3>
         <div class="pp-tabs bi-tabs" id="bi-tabs" role="tablist">${_biTabsHtml(run)}</div>
         <div class="bi-tab-note-wrap" id="bi-tab-note">${_biTabNoteHtml(run)}</div>
+        <div id="bi-applyall"></div>
+        <div id="bi-ingest-all-wrap" class="bi-ingest-all-wrap">${_biIngestAllHtml(run)}</div>
+        <div id="bi-notices">${_biNoticesHtml(run)}</div>
 
         <div class="lq-cards lq-cards--compact" id="bi-table">
-          <div class="lq-brow-head iq-brow iq-brow--nosq">
-            <span></span><span>Recording</span>
-            <span>Format</span><span>Type</span>
-            <span>Metadata</span><span></span><span></span>
-          </div>
+          <div id="bi-thead">${_biTheadHtml()}</div>
           <div id="bi-rows"></div>
           <div id="bi-sentinel"></div>
         </div>
       </div>`)
+    _biPaintApplyAll()
+    document.addEventListener('click', _closeMoveMenus)
+    document.getElementById('bi-ingest-all-wrap')?.addEventListener('click', e => {
+      const b = e.target.closest('#bi-ingest-all')
+      if (b) _biIngestAllReady(b)
+      const c = e.target.closest('#bi-convert-all')
+      if (c) _biConvertAll(c)
+    })
 
     _biWireHeaderActions(run)
-    _wireFhStrip('bi-fh-strip')
+    _wireBiFileHandling()
+    document.getElementById('bi-browse')?.addEventListener('click', () => { location.hash = '#/ingest?new=1' })
     document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
     document.getElementById('bi-tabs')?.addEventListener('click', async e => {
       const t = e.target.closest('[data-bitab]')
       if (!t || t.dataset.bitab === _biTab) return
       _biTab = t.dataset.bitab
       if (_biTab !== 'queue') _biReviewFilter = false
-      _biPaintTabs(state.bulkIngest || run)
+      _biPaintTabs(_biRun || run)
+      _biPaintApplyAll()
       const actionsEl = document.getElementById('bi-header-actions')
-      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(state.bulkIngest || run); _biWireHeaderActions(state.bulkIngest || run) }
-      await _biTableInit((state.bulkIngest || run).id)
+      if (actionsEl) { actionsEl.innerHTML = _biHeaderActionsHtml(_biRun || run); _biWireHeaderActions(_biRun || run) }
+      await _biTableInit((_biRun || run).id)
     })
     await _biTableInit(run.id)
   }
-
-
 
   // ══════════════════════════════════════════════════════════════════════════
   // Archive Downloads (spec "Archive Downloads v1", sections 2, 6, 7, 8)
@@ -16897,10 +15236,6 @@ const App = (() => {
   // canEditLibrary() is also true for the archivist role, so both must hold.
   const _dlAllowed = () => isAdmin() && canEditLibrary()
   const _dlIsLive = j => j.status === 'queued' || j.status === 'active'
-
-  // Set by the Downloads page's Ingest button, consumed once by
-  // renderIngestView(): the folder to hand to the Add Recordings analysis.
-  let _ingestHandoffDir = null
 
   const ARC_SORTS = [['newest', 'Newest'], ['date', 'Show date'], ['az', 'A–Z']]
   const ARC_SRC_CLASSES = new Set(['sbd', 'aud', 'mtx', 'fm'])
@@ -17619,7 +15954,7 @@ const App = (() => {
     })
     const actions = busy
       ? `<span class="dl-prog"><span class="dl-bar"><span class="dl-bar-fill" style="width:${_dlPct(job)}%"></span></span>${_dlPct(job)}%</span>`
-      : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Ingest</button>
+      : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Import</button>
          ${sorted.length ? `
          <div class="lq-move-wrap">
            <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
@@ -17695,8 +16030,9 @@ const App = (() => {
     document.getElementById('dl-rows').addEventListener('click', async e => {
       const ingest = e.target.closest('.dl-ingest')
       if (ingest) {
-        _ingestHandoffDir = dir(ingest.dataset.name)
-        window.location.hash = '#/ingest'
+        // Outside the library: the remembered outside mode, Review First by
+        // default. A folder still downloading is refused server-side.
+        _biStartAndOpen(dir(ingest.dataset.name), _biMode(false)).catch(err => alert(err.message))
         return
       }
       const mv = e.target.closest('.dl-move')
@@ -17720,7 +16056,6 @@ const App = (() => {
     })
   }
 
-
   // ── Workshop / Backlog pages: #/workshop, #/backlog (2026-10-01) ─────────
   // The Downloads page design for the other two working folders: the same
   // folder rows, Ingest, and Move to the other working folder. No Delete:
@@ -17735,7 +16070,7 @@ const App = (() => {
         <span class="arc-num">${esc(f.format || '')}</span>
         <span class="arc-num arc-num--dim">${esc(_dlModified(f.modified))}</span>
         <span class="dl-acts">
-          <button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Ingest</button>
+          <button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Import</button>
           ${dests.length ? `
           <div class="lq-move-wrap">
             <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
@@ -17788,8 +16123,7 @@ const App = (() => {
     document.getElementById('wf-rows').addEventListener('click', async e => {
       const ingestBtn = e.target.closest('.dl-ingest')
       if (ingestBtn) {
-        _ingestHandoffDir = dir(ingestBtn.dataset.name)
-        window.location.hash = '#/ingest'
+        _biStartAndOpen(dir(ingestBtn.dataset.name), _biMode(false)).catch(err => alert(err.message))
         return
       }
       const mv = e.target.closest('.dl-move')
@@ -17834,6 +16168,7 @@ const App = (() => {
     }
 
     _navRecord(hash)
+    _biRefreshRunsOnNav()
     // Any handler belongs to the view we are leaving. The incoming view
     // re-registers one if it has steps of its own, and repaints the buttons
     // itself when it does — this paint only has to be right for views that
@@ -17900,13 +16235,32 @@ const App = (() => {
       renderAlbumsView()
 
     } else if (hash === '#/batch') {
-      renderBatchImportView()
+      // Retired page: old bookmarks land on Add Recordings.
+      _navReplace = true
+      window.location.hash = '#/ingest'
 
-    } else if (hash === '#/ingest') {
-      renderIngestView()
+    } else if (hash.split('?')[0] === '#/ingest') {
+      // Add Recordings opens the current run while one is listed; ?new=1 is
+      // the import page's way to the picker. _navReplace so Back does not
+      // land on the redirecting entry.
+      // ingest._resume marks the import page's own per-item Review (the
+      // Add Recording form), which must not bounce back to the run.
+      if (hash === '#/ingest' && canEditLibrary() && !ingest._resume) {
+        _fetchBulkIngestRuns().then(() => {
+          // The person may have navigated away while the fetch ran; the new
+          // route has already rendered, so do not redirect or render over it.
+          if (window.location.hash !== '#/ingest') return
+          const open = _biOpenRunHash()
+          if (open) { _navReplace = true; window.location.hash = open }
+          else renderIngestView()
+        })
+      } else {
+        renderIngestView()
+      }
 
-    } else if (hash === '#/bulk-ingest') {
-      renderBulkIngestView()
+    } else if (/^#\/bulk-ingest(\/\d+)?$/.test(hash.split('?')[0])) {
+      // #/bulk-ingest/<run_id> is one run; bare #/bulk-ingest is the current run.
+      renderBulkIngestView(Number((hash.split('?')[0].split('/')[2])) || null)
 
     } else if (hash === '#/archive/lma') {
       renderArchiveLmaView()
@@ -18209,7 +16563,7 @@ const App = (() => {
         <section class="set-sec">
           <h2 class="set-sec-title">You</h2>
           <p class="set-sec-hint">Your name and picture appear on any library you
-            share — they are how a peer knows whose shelf they are looking at.</p>
+            share. They are how a peer knows whose shelf they are looking at.</p>
 
           <div class="set-person">
             <div class="set-avatar" id="set-avatar">${_settingsAvatarHtml(me)}</div>
@@ -18287,8 +16641,8 @@ const App = (() => {
           <div class="set-field">
             <label class="set-label" for="set-model">Model</label>
             <select class="set-input" id="set-model">
-              <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet — stronger research</option>
-              <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku — faster and cheaper</option>
+              <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet: stronger research</option>
+              <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku: faster and cheaper</option>
             </select>
             <span class="set-flash" id="set-model-flash"></span>
           </div>
@@ -18601,7 +16955,6 @@ const App = (() => {
     $('set-peers')?.addEventListener('click', () => { window.location.hash = '#/peers' })
   }
 
-
   document.getElementById('settings-btn')?.addEventListener('click',
     () => { window.location.hash = '#/settings' })
 
@@ -18742,7 +17095,7 @@ const App = (() => {
       // remote calls (CONTEXT, "Remote failures disguise themselves").
       if (seq !== _searchSeq) return
       searchDropdown.innerHTML =
-        `<div class="search-dropdown-empty">Search failed — ${esc(e.message)}</div>`
+        `<div class="search-dropdown-empty">Search failed: ${esc(e.message)}</div>`
       openSearchDropdown()
       return
     }
@@ -18985,9 +17338,7 @@ const App = (() => {
   function searchPageHintHtml(q) {
     const short = q && q.length > 0 && q.length < SEARCH_MIN_CHARS
     return `<div class="search-page-hint">
-      ${short ? `<div class="search-page-hint-min">Keep typing — searches start at ${SEARCH_MIN_CHARS} characters.</div>` : ''}
-      Search covers artists, the musicians in them, venues, cities and show dates.
-      A year on its own works too, like <b>1983</b>.
+      ${short ? `<div class="search-page-hint-min">Keep typing. Searches start at ${SEARCH_MIN_CHARS} characters.</div>` : ''}
     </div>`
   }
 

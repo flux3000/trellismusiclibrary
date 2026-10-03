@@ -20,6 +20,15 @@ Flags:
     --rebuild    build even if this version's artifacts are already in dist/
     --yes        skip the confirmation prompts (for a re-run you have already
                  eyeballed once; not the way to do a first run)
+    --intel      add the Intel Mac build to a release that is already
+                 published. Run it AFTER the normal command, same version:
+
+                     python3 tools/release.py 0.2.5 --intel
+
+                 It builds under Rosetta from .venv-intel (override with
+                 TRELLIS_INTEL_VENV), signs and notarizes, then uploads
+                 TrellisMusicLibrary-<version>-macOS-intel.{dmg,zip} to the
+                 existing GitHub release. It never bumps, tags or publishes.
 
 Why this lives in tools/ alongside build_macos.sh and sign_macos.sh: it is
 build tooling, not application behaviour. Nothing here decides how a recording
@@ -32,6 +41,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -110,8 +120,9 @@ def as_tuple(v):
     return tuple(int(p) if p.isdigit() else -1 for p in v.split("."))
 
 
-def artifacts(version):
-    base = f"TrellisMusicLibrary-{version}-macOS"
+def artifacts(version, intel=False):
+    # Must match BASE in tools/sign_macos.sh, which names the files.
+    base = f"TrellisMusicLibrary-{version}-macOS" + ("-intel" if intel else "")
     return REPO / "dist" / f"{base}.dmg", REPO / "dist" / f"{base}.zip"
 
 
@@ -491,15 +502,168 @@ def phase_publish(version, dry_run, auto_yes, draft=None):
 
 # ── entry point ──────────────────────────────────────────────────────────────
 
+# ── Intel build ──────────────────────────────────────────────────────────────
+
+def intel_venv():
+    return Path(os.environ.get("TRELLIS_INTEL_VENV", REPO / ".venv-intel"))
+
+
+def intel_preflight(version, dry_run, auto_yes):
+    """Checks for the Intel add-on. Same rule as preflight: fail before the slow part."""
+    rule("Preflight (Intel)")
+
+    if sys.platform != "darwin":
+        raise Stop("A Mac app is built on a Mac. PyInstaller does not cross-compile.")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise Stop(f"'{version}' is not a version number. Expected something like 0.2.2.")
+    if current_version() != version:
+        raise Stop(f"version.py says {current_version()}, not {version}. The Intel build "
+                   f"is made from the tree as it stands, so it has to be at {version}.")
+    say(f"  ✓ version.py is at {version}")
+
+    if not shutil.which("gh") or not ok(["gh", "auth", "status"]):
+        raise Stop("gh is missing or not logged in. Run: gh auth login")
+    if not ok(["gh", "release", "view", f"v{version}"]):
+        raise Stop(f"Release v{version} is not on GitHub yet. Run the normal release first:\n"
+                   f"  python3 tools/release.py {version}")
+    say(f"  ✓ release v{version} exists on GitHub")
+
+    py = intel_venv() / "bin" / "python"
+    if not py.exists():
+        raise Stop(f"No Intel venv at {intel_venv()}. Create it under Rosetta:\n"
+                   f"  arch -x86_64 /Library/Frameworks/Python.framework/Versions/3.13/bin/python3.13 "
+                   f"-m venv {intel_venv()}\n"
+                   f"  arch -x86_64 {intel_venv()}/bin/pip install -r requirements-lock-intel.txt")
+    machine = out(["arch", "-x86_64", str(py), "-c", "import platform; print(platform.machine())"])
+    if machine != "x86_64":
+        raise Stop(f"{py} does not run as x86_64 (got {machine!r}). Rebuild the venv under Rosetta.")
+    say("  ✓ Intel venv runs as x86_64")
+
+    # The venv must hold the Intel lock, not the Apple Silicon one: numba 0.67
+    # would install on nothing here and numpy 2.5 would not satisfy numba 0.62.
+    lock = {}
+    for line in (REPO / "requirements-lock-intel.txt").read_text().splitlines():
+        if "==" in line and not line.lstrip().startswith("#"):
+            n, v = line.strip().split("==", 1)
+            lock[n.lower()] = v
+    freeze = out(["arch", "-x86_64", str(py), "-m", "pip", "freeze"]) or ""
+    have = dict(l.split("==", 1) for l in freeze.splitlines() if "==" in l)
+    have = {k.lower(): v for k, v in have.items()}
+    off = [f"{n} {have.get(n, 'missing')} (lock: {v})" for n, v in lock.items() if have.get(n) != v]
+    if off:
+        raise Stop("The Intel venv does not match requirements-lock-intel.txt:\n  "
+                   + "\n  ".join(off[:8]))
+    say("  ✓ Intel venv matches requirements-lock-intel.txt")
+
+    # Two binaries must not claim one version. The tag is the commit the arm64
+    # build came from; differing files mean this build is not that code.
+    if out(["git", "rev-parse", "--verify", "-q", f"v{version}"]):
+        drift = out(["git", "diff", "--stat", f"v{version}", "--", "."])
+        if drift:
+            say(f"  ! The tree differs from tag v{version}:")
+            say()
+            say("\n".join("    " + l for l in drift.splitlines()))
+            say()
+            if not dry_run:
+                confirm("Build the Intel app from this tree anyway?", auto_yes)
+
+    identity = signing_identity()
+    say(f"  ✓ signing as: {identity}")
+    profile = os.environ.get("TRELLIS_NOTARY_PROFILE", DEFAULT_NOTARY_PROFILE)
+    say(f"  ✓ notary profile: {profile}")
+    if dry_run:
+        say()
+        say("  DRY RUN. Nothing below this line will actually run.")
+    return identity, profile
+
+
+def phase_build_intel(version, identity, profile, dry_run, rebuild):
+    rule("1. Build, sign, notarize (Intel)")
+    dmg, zipf = artifacts(version, intel=True)
+    if dmg.exists() and zipf.exists() and not rebuild:
+        say(f"  {dmg.name} and {zipf.name} are already in dist/.")
+        say("  Skipping the build. Pass --rebuild to force one.")
+        return
+    say("  Running tools/build_macos.sh under Rosetta from the Intel venv.")
+    if dry_run:
+        return
+
+    venv = intel_venv()
+    env = dict(os.environ)
+    env["TRELLIS_SIGN_IDENTITY"] = identity
+    env["TRELLIS_NOTARY_PROFILE"] = profile
+    env["VIRTUAL_ENV"] = str(venv)
+    env["PATH"] = f"{venv / 'bin'}{os.pathsep}{env.get('PATH', '')}"
+
+    # build_macos.sh empties dist/ first. That would delete the Apple Silicon
+    # DMG and zip, so they wait outside the repo and go back afterwards, even
+    # if the build fails.
+    stash = Path(tempfile.mkdtemp(prefix="trellis-dist-"))
+    kept = [f for f in (REPO / "dist").glob("*.dmg") if "-intel" not in f.name]
+    kept += [f for f in (REPO / "dist").glob("*.zip") if "-intel" not in f.name]
+    for f in kept:
+        shutil.move(str(f), stash / f.name)
+    try:
+        run(["arch", "-x86_64", "./tools/build_macos.sh"], env=env)
+    finally:
+        for f in stash.iterdir():
+            shutil.move(str(f), REPO / "dist" / f.name)
+        stash.rmdir()
+
+    for f in (dmg, zipf):
+        if not f.exists():
+            raise Stop(f"The build finished but {f.name} is missing.")
+    # The point of this whole build. A file name proves nothing; the binary does.
+    binary = REPO / "dist" / "Trellis Music Library.app" / "Contents" / "MacOS" / "Trellis Music Library"
+    kind = out(["file", str(binary)]) or ""
+    if "x86_64" not in kind:
+        raise Stop(f"The app binary is not Intel code:\n  {kind}")
+    say("  ✓ app binary is x86_64")
+    say(f"  ✓ {dmg.name}")
+    say(f"  ✓ {zipf.name}")
+
+
+def phase_upload_intel(version, dry_run, auto_yes):
+    rule("2. Upload to the GitHub release (Intel)")
+    tag = f"v{version}"
+    dmg, zipf = artifacts(version, intel=True)
+    have = (out(["gh", "release", "view", tag, "--json", "assets",
+                 "-q", ".assets[].name"]) or "").split()
+    todo = [f for f in (dmg, zipf) if f.name not in have]
+    if not todo:
+        say(f"  {tag} already carries both Intel files. Nothing to upload.")
+        return
+    say(f"  Uploading to {tag}: " + ", ".join(f.name for f in todo))
+    if dry_run:
+        say("  Would run: gh release upload ...")
+        return
+    confirm(f"Attach these to {tag}?", auto_yes)
+    run(["gh", "release", "upload", tag] + [str(f.relative_to(REPO)) for f in todo])
+    say(f"  ✓ uploaded to {tag}")
+
+
+def main_intel(args):
+    identity, profile = intel_preflight(args.version, args.dry_run, args.yes)
+    phase_build_intel(args.version, identity, profile, args.dry_run, args.rebuild)
+    phase_upload_intel(args.version, args.dry_run, args.yes)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Cut a Trellis release.")
     ap.add_argument("version", help="the version to release, e.g. 0.2.2")
     ap.add_argument("--dry-run", action="store_true", help="change nothing")
     ap.add_argument("--rebuild", action="store_true", help="build even if artifacts exist")
     ap.add_argument("--yes", action="store_true", help="skip confirmations")
+    ap.add_argument("--intel", action="store_true",
+                    help="build the Intel Mac app and add it to the existing release")
     args = ap.parse_args()
 
     try:
+        if args.intel:
+            main_intel(args)
+            rule("Done")
+            say(f"  https://github.com/flux3000/trellismusiclibrary/releases/tag/v{args.version}")
+            return 0
         identity, profile = preflight(args.version, args.dry_run)
         draft = generate_notes(args.version, args.dry_run)
         phase_bump(args.version, args.dry_run)
