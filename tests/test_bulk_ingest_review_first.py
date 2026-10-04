@@ -526,7 +526,10 @@ def test_single_show_run_reads_its_own_folder_name(env):
     bir.discover(run)
     bir.process(run, _never_stop)
     it = _item(_db.session.get(BulkIngestRun, run.id), ".")
-    assert it.status == "ready", (it.status, it.reason)
+    # The folder name alone is single-source date evidence: the resolver reads
+    # it (so the reason is "tentative:date", not a missing date) but the
+    # calibrated verdict will not auto-ingest on it.
+    assert (it.status, it.reason) == ("review", "tentative:date"), (it.status, it.reason)
     from app.utils import quality_store as qs
     assert qs.get_staging(str(show)) is not None
 

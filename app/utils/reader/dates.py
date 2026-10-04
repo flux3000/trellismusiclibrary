@@ -366,3 +366,28 @@ def best_show_date(text):
                        span=lead.span, ambiguous=lead.ambiguous,
                        role_hint=lead.role_hint)
     return best, mentions
+
+
+def date_evidence(text):
+    """
+    What the show date was read from, for the Resolver pane and the confidence
+    step: the leading mention, the other usable mentions that agree with it, and
+    the ones that state something else. Lines are indexes into `text`.
+    Returns None when there is no show date.
+    """
+    best, mentions = best_show_date(text)
+    if best is None or best.year is None:
+        return None
+
+    def row(m):
+        return {"text": text[m.span[0]:m.span[1]].strip(), "line": text.count("\n", 0, m.span[0]),
+                "date": [m.year, m.month, m.day], "role_hint": m.role_hint}
+    lead = row(best)
+    lead["date"] = [best.year, best.month, best.day]
+    support, against = [], []
+    for m in mentions:
+        if m.role_hint == "transfer" or m.span == best.span or m.year is None:
+            continue
+        (support if _agrees(best, m) else against).append(row(m))
+    return {"lead": lead, "support": support, "against": against}
+

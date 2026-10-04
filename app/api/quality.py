@@ -729,6 +729,10 @@ def _attach_concerns(results):
                 field_name = reason.split(":", 1)[1].replace("_", " ")
                 concerns.append({"level": "warn", "kind": "conflict",
                                  "text": f"Sources disagree on {field_name}"})
+            elif reason.startswith("tentative:"):
+                field_name = reason.split(":", 1)[1].replace("_", " ")
+                concerns.append({"level": "warn", "kind": "tentative",
+                                 "text": f"Check {field_name}"})
 
         r["concerns"] = concerns
 

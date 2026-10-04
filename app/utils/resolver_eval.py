@@ -44,7 +44,7 @@ from pathlib import Path
 FIELDS = ("artist", "date", "venue", "event", "stage",
           "city", "state", "country", "source")
 TIERS = ("G1", "G2", "G3", "G4")
-JUDGMENTS = ("right", "partial", "wrong", "empty")
+JUDGMENTS = ("right", "variant", "partial", "wrong", "empty")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CORPUS = REPO_ROOT.parent / "resolver-corpus"   # ~/Workshop/dev/resolver-corpus
@@ -109,6 +109,31 @@ def _has_words(small, big):
     return f" {small} " in f" {big} "
 
 
+# Ensemble and billing variants of one act (Ryan, 2026-10-04): "Miles Davis" and "Miles Davis
+# Quintet", "Dave Matthews" and "Dave Matthews Band", "Bob Weir and Friends", "Phil Lesh with
+# Warren Haynes". Unattended import still files each spelling under its own Artist row; the
+# harness only stops counting the difference as an error.
+_VARIANT_TAIL = re.compile(
+    r"(?:\s+(?:trio|quartet|quintet|sextet|septet|octet|band|group|orchestra))+$"
+    r"|\s+and\s+friends$|\s+and\s+(?:his|her)\s+.+$|\s+with\s+.+$")
+
+
+def _variant_base(s):
+    return _VARIANT_TAIL.sub("", s).strip()
+
+
+def is_variant(gold, pred):
+    g, p = norm(gold), norm(pred)
+    return bool(g) and bool(p) and g != p and _variant_base(g) == _variant_base(p) != ""
+
+
+def judge_artist(gold, pred):
+    j = judge_text(gold, pred)
+    if j in ("partial", "wrong") and gold is not False and is_variant(gold, pred):
+        return "variant"
+    return j
+
+
 def judge_text(gold, pred, canon=norm):
     """right / partial / wrong / empty, or None when the key has no value.
 
@@ -162,6 +187,8 @@ def judge_date(gold, pred):
 def judge_field(field, gold, pred):
     if field == "date":
         return judge_date(gold, pred)
+    if field == "artist":
+        return judge_artist(gold, pred)
     if field == "state":
         return judge_text(gold, pred, _canon_state)
     if field == "country":
@@ -358,7 +385,7 @@ def predict_reader(item):
     for k in ("venue", "event", "stage", "city", "state", "country", "source"):
         p[k] = r.get(k)
     p["venue"] = venue_or_event(r)
-    return p, None, None
+    return p, None, None, None
 
 
 def build_scan(item):
@@ -389,6 +416,7 @@ def build_scan(item):
     from_info["tracks"] = [{"number": t["number"], "title": t["title"],
                             "songwriter": t.get("songwriter")}
                            for t in parsed.get("tracks", [])]
+    from_info["evidence"] = parsed.get("evidence")
 
     # Same last-resort folder-name fallbacks as build_scan_payload().
     if not from_tags.get("source") and not from_info.get("source"):
@@ -434,10 +462,18 @@ def predict_resolve(item):
     for k in ("venue", "event", "stage", "city", "state", "country", "source"):
         p[k] = val(k)
     p["venue"] = p["venue"] or p["event"]          # corpus convention, as in predict_reader
-    # Confidence arrives in chunk 6; until then every value is "confident".
     conf = {k: (getattr(getattr(res, k, None), "confidence", None) or "confident")
             for k in FIELDS if hasattr(res, k)}
-    return p, status, conf
+    # The raw scores the confidence came from, for fitting thresholds (reader/calibrate.py).
+    from app.utils.reader.confidence import CALIBRATED_FIELDS
+    assess = {}
+    for k in CALIBRATED_FIELDS:
+        f = getattr(res, k)
+        assess[k] = {"logit": f.logit, "margin": f.margin, "has_value": f.value is not None}
+        if k == "date":
+            assess[k]["srcs"] = sorted((f.candidates or {}).keys())
+    assess["_reasons"] = list(reasons)
+    return p, status, conf, assess
 
 
 # ── Scoring ──────────────────────────────────────────────────────────────────
@@ -446,7 +482,16 @@ def _jsonable(v):
     return list(v) if isinstance(v, tuple) else v
 
 
-def score_item(item, pred, status=None, conf=None):
+# A value is "wrong" for the confident-but-wrong gate when it would be filed wrongly: an
+# artist that is only partly right still files the recording under the wrong act.
+WRONG_FOR = {"artist": ("wrong", "partial")}
+
+
+def is_wrong(field, judgment):
+    return judgment in WRONG_FOR.get(field, ("wrong",))
+
+
+def score_item(item, pred, status=None, conf=None, assess=None):
     gold = item.get("gold") or {}
     judgments = {f: judge_field(f, gold.get(f), pred.get(f)) for f in FIELDS}
     # A required field that is wrong: artist wrong or only partly right, date wrong.
@@ -458,7 +503,8 @@ def score_item(item, pred, status=None, conf=None):
                            or judgments["date"] == "wrong"))
     return {"id": str(item.get("id")), "judgments": judgments,
             "pred": {k: _jsonable(v) for k, v in pred.items()},
-            "verdict": status, "conf": conf or {}, "auto_wrong": auto_wrong}
+            "verdict": status, "conf": conf or {}, "auto_wrong": auto_wrong,
+            "assess": assess or {}}
 
 
 def aggregate(results):
@@ -472,14 +518,15 @@ def aggregate(results):
                 no_key += 1
                 continue
             c[j] += 1
-            if j == "wrong" and (r["conf"].get(f) or "confident") == "confident":
+            if is_wrong(f, j) and (r["conf"].get(f) or "confident") == "confident":
                 cbw += 1
         n = sum(c.values())
-        answered = c["right"] + c["partial"] + c["wrong"]
+        good = c["right"] + c["variant"]
+        answered = good + c["partial"] + c["wrong"]
         fields[f] = {
             **c, "n": n, "no_key": no_key,
-            "precision": c["right"] / answered if answered else None,
-            "recall": c["right"] / n if n else None,
+            "precision": good / answered if answered else None,
+            "recall": good / n if n else None,
             "wrong_rate": c["wrong"] / n if n else None,
             "confident_but_wrong": cbw / n if n else None,
         }
@@ -505,11 +552,14 @@ def aggregate(results):
 
 
 def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None, library="none",
-             atlas="none"):
-    """Score every item in a tier. mode is 'reader' or 'resolve'; library is 'none' or 'loo'."""
+             atlas="none", only_ids=None):
+    """Score every item in a tier. mode is 'reader' or 'resolve'; library is 'none' or 'loo'.
+    only_ids restricts the run to those item ids (the held-out fold of a cross-validation)."""
     set_library_mode(library)
     set_atlas_mode(atlas)
     items, meta = load_tier(tier, corpus_dir, fixtures_dir)
+    if only_ids is not None:
+        items = [it for it in items if str(it.get("id")) in only_ids]
     if limit:
         items = items[:limit]
     predict = predict_resolve if mode == "resolve" else predict_reader
@@ -517,12 +567,12 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
     for it in items:
         t0 = time.perf_counter()
         try:
-            pred, status, conf = predict(it)
+            pred, status, conf, assess = predict(it)
         except Exception as exc:                      # a crash is a result, not a halt
-            pred, status, conf = _empty_pred(), None, None
+            pred, status, conf, assess = _empty_pred(), None, None, None
             pred["_error"] = f"{type(exc).__name__}: {exc}"
         times.append((time.perf_counter() - t0) * 1000)
-        results.append(score_item(it, pred, status, conf))
+        results.append(score_item(it, pred, status, conf, assess))
     errors = sum(1 for r in results if "_error" in r["pred"])
     ms = sorted(times)
     q = lambda f: ms[min(len(ms) - 1, int(len(ms) * f))] if ms else None
@@ -533,6 +583,147 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
     return {"tier": tier, "mode": mode, "library": library, "atlas": str(atlas), "n": len(items), "errors": errors,
             "meta": meta, "timing": timing, "when": datetime.now().strftime("%Y-%m-%d %H:%M"),
             **aggregate(results), "items": results}
+
+
+# ── Calibration (chunk 6) ────────────────────────────────────────────────────
+
+CAL_POPS = ("none", "loo")
+
+
+def _artist_group(item):
+    return norm((item.get("gold") or {}).get("artist")) or f"item-{item.get('id')}"
+
+
+def collect_samples(corpus_dir=None, atlas="real", pops=CAL_POPS):
+    """One sample per (item, population, field) with a gold value: the raw logit and
+    margin the resolver computed, and whether the value is wrong."""
+    from app.utils.reader.confidence import CALIBRATED_FIELDS
+    items, meta = load_tier("G1", corpus_dir)
+    by_id = {str(it["id"]): it for it in items}
+    samples = {f: [] for f in CALIBRATED_FIELDS}
+    for pop in pops:
+        rep = run_tier("G1", "resolve", corpus_dir=corpus_dir, library=pop, atlas=atlas)
+        for r in rep["items"]:
+            group = _artist_group(by_id[r["id"]])
+            for f in CALIBRATED_FIELDS:
+                j = r["judgments"][f]
+                if j is None:
+                    continue
+                a = r["assess"].get(f) or {}
+                has = bool(a.get("has_value"))
+                samples[f].append({"item": r["id"], "group": group, "pop": pop,
+                                   "logit": a.get("logit") if has else 0.0,
+                                   "margin": a.get("margin") if has else 0.0,
+                                   "has_value": has, "wrong": is_wrong(f, j)})
+    return samples, items, meta
+
+
+def calibrate(corpus_dir=None, atlas="real", k=5, train_target=None, write=False):
+    """Fit the thresholds on G1 with k folds by artist, replay each fold's held-out items
+    through resolve() + verdict() with the model fitted on the other folds, and return the
+    held-out report. With write=True the all-of-G1 fit goes to reader/calibration.json."""
+    from app.utils.reader import calibrate as cal
+    from app.utils.reader import confidence as conf
+    train_target = cal.TRAIN_TARGET if train_target is None else train_target
+    samples, items, meta = collect_samples(corpus_dir, atlas)
+    folds = cal.assign_folds([_artist_group(it) for it in items], k)
+    notes = ["tags and folder-artist evidence (reader/confidence.py TAGS_SCORE, FOLDER_ARTIST_SCORE, "
+             "DATE_WEIGHT['tags']): G1 has no tags and no artist folders, so those weights are set, not fitted",
+             "the info-text date and the folder-name date are both exercised (G1 carries the original folder names)"]
+    doc, fold_models = cal.build_calibration(
+        samples, folds, k=k, train_target=train_target, snapshot=meta.get("snapshot_date"),
+        n_items=len(items), populations=[f"resolve, library {p}, real Atlas" for p in CAL_POPS], notes=notes)
+
+    held = {}
+    try:
+        for f in range(k):
+            ids = {str(it["id"]) for it in items if folds[_artist_group(it)] == f}
+            fold_cal = {"fields": {name: models[f] for name, models in fold_models.items()}}
+            conf.set_calibration(fold_cal)
+            for pop in CAL_POPS:
+                rep = run_tier("G1", "resolve", corpus_dir=corpus_dir, library=pop, atlas=atlas, only_ids=ids)
+                held.setdefault(pop, []).extend(rep["items"])
+    finally:
+        conf.set_calibration(None)
+    held_agg = {pop: aggregate(res) for pop, res in held.items()}
+    held_bd = {pop: conf_breakdown(res) for pop, res in held.items()}
+    held_fo = {pop: folder_only_dates(res) for pop, res in held.items()}
+    if write:
+        cal.write_calibration(doc)
+        conf.load_calibration(force=True)
+    return {"doc": doc, "held_out": held_agg, "held_breakdown": held_bd, "folder_only": held_fo, "n": len(items), "folds": k,
+            "train_target": train_target}
+
+
+def review_reasons(results):
+    import collections
+    c = collections.Counter()
+    for r in results:
+        if r["verdict"] is None or r["verdict"] == "ingested":
+            continue
+        for x in (r.get("assess") or {}).get("_reasons") or []:
+            c[x] += 1
+    return c
+
+
+def folder_only_dates(results):
+    """The class of items whose only date evidence is the folder name: how many, how many
+    came out confident, and how many of those confident dates were wrong."""
+    c = {"n": 0, "confident": 0, "confident_wrong": 0, "wrong": 0, "right": 0}
+    for r in results:
+        a = (r.get("assess") or {}).get("date") or {}
+        if a.get("srcs") != ["folder"]:
+            continue
+        j = r["judgments"]["date"]
+        if j is None:
+            continue
+        c["n"] += 1
+        c["wrong"] += is_wrong("date", j)
+        c["right"] += j == "right"
+        if (r["conf"].get("date") or "empty") == "confident":
+            c["confident"] += 1
+            c["confident_wrong"] += is_wrong("date", j)
+    return c
+
+
+def conf_breakdown(results):
+    """{field: {confident, tentative, empty}} over every item of a run."""
+    from app.utils.reader.confidence import CALIBRATED_FIELDS
+    out = {}
+    for f in CALIBRATED_FIELDS:
+        c = {"confident": 0, "tentative": 0, "empty": 0}
+        for r in results:
+            c[(r["conf"].get(f) or "empty")] += 1
+        out[f] = c
+    return out
+
+
+def format_calibration(rep):
+    from app.utils.reader.confidence import CALIBRATED_FIELDS
+    out = [f"calibration  G1 n={rep['n']}  folds {rep['folds']} by artist  fit target "
+           f"{rep['train_target'] * 100:.3f}%  gate 0.500%"]
+    for pop, agg in rep["held_out"].items():
+        bd = rep["held_breakdown"][pop]
+        n = rep["n"]
+        out += ["", f"held-out, resolve, library {pop}",
+                f"{'field':<9}{'conf%':>7}{'tent%':>7}{'empty%':>8}{'scored':>8}{'CBW':>5}{'CBW%':>8}"]
+        for f in CALIBRATED_FIELDS:
+            s = agg["fields"][f]
+            cbw = round((s["confident_but_wrong"] or 0) * s["n"])
+            out.append(f"{f:<9}{bd[f]['confident'] / n * 100:>7.1f}{bd[f]['tentative'] / n * 100:>7.1f}"
+                       f"{bd[f]['empty'] / n * 100:>8.1f}{s['n']:>8}{cbw:>5}{_pct(s['confident_but_wrong']):>8}")
+        fo = rep["folder_only"][pop]
+        out.append(f"folder-only date: {fo['n']} items, {fo['right']} right, {fo['wrong']} wrong; "
+                   f"{fo['confident']} confident, {fo['confident_wrong']} confident-but-wrong")
+        a = agg["auto_ingest"]
+        out.append(f"would-auto-ingest-wrongly {a['would_auto_ingest_wrongly']} of {a['n_with_verdict']} "
+                   f"({_pct(a['rate_of_all']).strip()}%); review {a['n_with_verdict'] - a['n_ingested']} "
+                   f"({(1 - a['n_ingested'] / a['n_with_verdict']) * 100:.1f}%)")
+    out += ["", "shipped thresholds (fit on all of G1)"]
+    for f in CALIBRATED_FIELDS:
+        m = rep["doc"]["fields"][f]
+        out.append(f"  {f:<8} tau {m['tau']:.3f}  m {m['m']:.1f}")
+    return "\n".join(out)
 
 
 # ── Report and diff ──────────────────────────────────────────────────────────
@@ -552,11 +743,11 @@ def format_report(rep):
     if rep["mode"] == "resolve" and rep["tier"] == "G1":
         out.append("note: folder_name is the original folder name and may state a date or source")
     out.append("")
-    out.append(f"{'field':<9}{'n':>5}{'right':>7}{'part':>6}{'wrong':>7}{'empty':>7}"
+    out.append(f"{'field':<9}{'n':>5}{'right':>7}{'vrnt':>6}{'part':>6}{'wrong':>7}{'empty':>7}"
                f"{'nokey':>7}{'prec%':>7}{'rec%':>7}{'CBW%':>7}")
     for f in FIELDS:
         s = rep["fields"][f]
-        out.append(f"{f:<9}{s['n']:>5}{s['right']:>7}{s['partial']:>6}{s['wrong']:>7}"
+        out.append(f"{f:<9}{s['n']:>5}{s['right']:>7}{s['variant']:>6}{s['partial']:>6}{s['wrong']:>7}"
                    f"{s['empty']:>7}{s['no_key']:>7}{_pct(s['precision']):>7}"
                    f"{_pct(s['recall']):>7}{_pct(s['confident_but_wrong']):>7}")
     a = rep["auto_ingest"]
@@ -568,10 +759,19 @@ def format_report(rep):
         br = a["by_reason"]
         out.append(f"  by reason: artist wrong {br['artist_wrong']}, artist partial "
                    f"{br['artist_partial']}, date wrong {br['date_wrong']}")
+    if a["n_with_verdict"]:
+        rc = review_reasons(rep["items"])
+        if rc:
+            out.append("  review reasons (an item can have several): "
+                       + ", ".join(f"{k} {v}" for k, v in rc.most_common()))
     t = rep["timing"]
     if t["p50_ms"] is not None:
         out.append(f"time per item: p50 {t['p50_ms']:.2f} ms, p95 {t['p95_ms']:.2f} ms")
-    out.append("CBW = wrong and confident, over scored items (all values are confident until chunk 6)")
+    out.append("CBW = wrong and confident, over scored items (artist: wrong or partial)")
+    rv = rep["auto_ingest"]
+    if rv["n_with_verdict"]:
+        out.append(f"review rate: {rv['n_with_verdict'] - rv['n_ingested']} of {rv['n_with_verdict']} "
+                   f"({(1 - rv['n_ingested'] / rv['n_with_verdict']) * 100:.1f}%)")
     return "\n".join(out)
 
 
@@ -660,12 +860,26 @@ def main(argv=None):
     ap.add_argument("--no-write", action="store_true", help="do not update last_run.json")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     ap.add_argument("--export-g1", action="store_true", help="write corpus/g1.jsonl from the snapshot")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="fit the confidence thresholds on G1 (5 folds by artist, library none and loo) "
+                         "and print the held-out result")
+    ap.add_argument("--write-calibration", action="store_true",
+                    help="with --calibrate: write app/utils/reader/calibration.json")
+    ap.add_argument("--train-target", type=float, help="with --calibrate: the rate the fit aims for (default 0.0025)")
     ap.add_argument("--db", help="snapshot path for --export-g1 (default db/_cowork.db)")
     args = ap.parse_args(argv)
 
     if args.export_g1:
         meta = export_g1(args.db, args.corpus)
         print(f"g1.jsonl: {meta['n']} items from snapshot dated {meta['snapshot_date']}")
+        return 0
+
+    if args.calibrate:
+        rep = calibrate(args.corpus, atlas="real", train_target=args.train_target,
+                        write=args.write_calibration)
+        print(format_calibration(rep))
+        if args.write_calibration:
+            print("\nwrote app/utils/reader/calibration.json")
         return 0
 
     for _ in range(max(1, args.timing or 1)):

@@ -65,7 +65,7 @@ def test_g4_report_shape(mode, tmp_path):
         for key in ("right", "partial", "wrong", "empty", "n", "no_key",
                     "precision", "recall", "wrong_rate", "confident_but_wrong"):
             assert key in stats
-        assert stats["n"] == stats["right"] + stats["partial"] + stats["wrong"] + stats["empty"]
+        assert stats["n"] == stats["right"] + stats["variant"] + stats["partial"] + stats["wrong"] + stats["empty"]
     assert {"p50_ms", "p95_ms"} <= set(rep["timing"])
     assert len(rep["items"]) == rep["n"]
     if mode == "resolve":

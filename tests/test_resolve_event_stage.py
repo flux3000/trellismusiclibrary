@@ -61,7 +61,9 @@ def test_resolved_carries_event_and_stage_apart_from_the_venue():
 def test_resolved_event_and_stage_are_empty_when_the_text_has_none():
     r = _resolved("Some Band\n2001-06-02\nThe Rex Theatre\nToronto, Ontario, Canada\n")
     assert r.event.value is None and r.stage.value is None and r.event.source is None
-    assert r.to_dict()["stage"] == {"value": None, "source": None, "candidates": {}, "conflict": False}
+    d = r.to_dict()["stage"]
+    assert (d["value"], d["source"], d["candidates"], d["conflict"]) == (None, None, {}, False)
+    assert d["confidence"] == "empty" and d["evidence"] == [] and d["runner_up"] is None
 
 
 def test_resolver_json_for_storage_keeps_event_and_stage():

@@ -31,6 +31,11 @@ _ARTIST = _R["ARTIST"]
 _VENUE_LEAD_RE = re.compile(r"^(?:recorded\s+live\s+at|recorded\s+at|live\s+at|live\s+in)(?:\s+|$)", re.I)
 _SPLIT_AND_RE = re.compile(r"\s+(?:and|&)\s+", re.I)
 
+# A billing assembled from "with" + member names is a proposal, not what the file says.
+ASSEMBLED_SCORE = 2.0
+# A venue the library links to an event it matched (no line in the text names it).
+LIBRARY_EVENT_VENUE_SCORE = 5.0
+
 
 @dataclass
 class Reading:
@@ -45,6 +50,7 @@ class Reading:
     sets: list = field(default_factory=list)     # [{"label", "line"}]
     fields: dict = field(default_factory=dict)   # per-field evidence
     segments: list = field(default_factory=list)
+    cands: dict = field(default_factory=dict)    # per-field candidates the confidence step weighs
 
 
 def _clean(text):
@@ -72,6 +78,20 @@ def _member_name(text):
 
 def _span_text(doc, units):
     return doc.text[units[0].start:units[-1].end]
+
+
+def _ext(d):
+    """The library and Atlas features behind a decoded unit's score: [[name, contribution]]."""
+    return [[n, round(c, 2)] for n, c in d.features if n.startswith(("lib_", "atl_"))]
+
+
+def _cand(d, text=None, chosen=False, role=None):
+    """One candidate for the confidence step: the unit's text, line, local score and
+    runner-up role, plus the library and Atlas features that raised it."""
+    return {"text": text if text is not None else _clean(d.unit.text), "line": d.unit.line,
+            "score": round(d.score, 2), "role": role or d.role, "ext": _ext(d),
+            "runner_up": {"value": d.runner_up[0], "score": round(d.runner_up[1], 2)},
+            "chosen": chosen}
 
 
 def _artist_candidates(doc, dec):
@@ -138,6 +158,10 @@ def read_billing(doc, dec, library=None, title_case=None):
     best = None
     if cands:
         best = max(cands, key=lambda c: (c[1], -c[0][0].start))
+        for c in cands:
+            top = max((d for d in c[2] if d.role == "ARTIST"), key=lambda d: d.score)
+            r.cands.setdefault("artist", []).append(
+                _cand(top, text=_clean(_span_text(doc, c[0])), chosen=c is best))
     if best is not None:
         us, score, gd = best
         raw = _clean(_span_text(doc, us))
@@ -176,6 +200,10 @@ def read_billing(doc, dec, library=None, title_case=None):
             else:
                 names = [tc(m) for m in members]
                 r.artist, r.artist_how, r.artist_tentative = _natural_join(names), "assembled", True
+                mem = [d for d in dec if d.role == "MEMBER" and not _is_track_region(d)]
+                r.cands["artist"] = [{"text": ", ".join(members), "line": mem[0].unit.line if mem else None,
+                                      "score": ASSEMBLED_SCORE, "role": "MEMBER", "ext": [],
+                                      "runner_up": {"value": "", "score": 0.0}, "chosen": True}]
                 r.fields["artist"] = {"role": "MEMBER", "text": ", ".join(members), "via": "assembled from members",
                                       "tentative": True}
         else:
@@ -193,6 +221,8 @@ def read_billing(doc, dec, library=None, title_case=None):
                 raw = _clean(d.unit.text)
                 if raw:
                     r.artist, r.artist_how = tc(raw), "fallback"
+                    r.cands["artist"] = [_cand(d, text=raw, chosen=True)]
+                    r.cands["artist"][0]["score"] = round(emission(d.unit)[_ARTIST], 2)
                     r.fields["artist"] = {"role": d.role, "text": raw, "span": [d.unit.start, d.unit.end],
                                           "line": d.unit.line, "score": round(d.score, 2), "via": "best guess"}
 
@@ -201,7 +231,11 @@ def read_billing(doc, dec, library=None, title_case=None):
         c = [d for d in dec if d.role == role and not _is_track_region(d)]
         return max(c, key=lambda d: (d.score, -d.unit.start)) if c else None
 
+    def unit_cands(role, chosen):
+        return [_cand(d, chosen=d is chosen) for d in dec if d.role == role and not _is_track_region(d)]
+
     ev = best_unit("EVENT")
+    r.cands["event"] = unit_cands("EVENT", ev)
     if ev is not None:
         r.event = clean_event_name(tc(_clean(ev.unit.text)))
         if r.event:
@@ -215,16 +249,20 @@ def read_billing(doc, dec, library=None, title_case=None):
     cs = [d for d in dec if header_stage(d) and not _is_track_region(d)]
     st = max(cs, key=lambda d: (d.score, -d.unit.start)) if cs else None
     st_venue = None
+    st_venue_unit = None
+    r.cands["stage"] = [_cand(d, chosen=d is st) for d in cs]
     if st is not None:
         rem = re.sub(r"\s*\bstage\b\s*$", "", _clean(st.unit.text), flags=re.I).strip()
         if rem and {w.lower() for w in re.findall(r"[^\W\d_]+", rem)} & VENUE_WORDS:
-            st_venue, st = rem, None        # "Town Park Stage": the place is the venue, the stage word is generic
+            st_venue, st_venue_unit, st = rem, st, None   # "Town Park Stage": the place is the venue, the stage word is generic
+            r.cands["stage"] = [_cand(d, chosen=False) for d in cs]
     if st is not None:
         r.stage = tc(_clean(st.unit.text))
         r.fields["stage"] = {"role": "STAGE", "text": _clean(st.unit.text), "span": [st.unit.end - len(st.unit.text), st.unit.end],
                              "line": st.unit.line, "score": round(st.score, 2)}
 
     vd = best_unit("VENUE")
+    r.cands["venue"] = unit_cands("VENUE", vd)
     if vd is not None:
         raw = _clean(_VENUE_LEAD_RE.sub("", vd.unit.text.strip()))
         raw = re.sub(r"^ft\.?\s+", "Fort ", raw, flags=re.I)
@@ -246,11 +284,17 @@ def read_billing(doc, dec, library=None, title_case=None):
                                  "runner_up": {"value": vd.runner_up[0], "score": round(vd.runner_up[1], 2)}}
     if r.venue is None and st_venue:
         r.venue, r.venue_how = tc(st_venue), "line"
-        r.fields["venue"] = {"role": "STAGE", "text": st_venue, "via": "place named in a stage line"}
+        r.fields["venue"] = {"role": "STAGE", "text": st_venue, "via": "place named in a stage line",
+                             "line": st_venue_unit.unit.line, "score": round(st_venue_unit.score, 2)}
+        r.cands["venue"] = [_cand(st_venue_unit, text=st_venue, chosen=True)]
     if r.venue is None and r.event:
         evrow = library.event_match(r.event)
         vrow = library.event_venue(evrow)
         if vrow and not is_festival_like(vrow["name"]):
             r.venue, r.venue_how = vrow["name"], "library event"
-            r.fields["venue"] = {"role": "EVENT", "text": r.event, "via": "library event's venue"}
+            r.fields["venue"] = {"role": "EVENT", "text": r.event, "via": "library event's venue",
+                                 "score": LIBRARY_EVENT_VENUE_SCORE}
+            r.cands["venue"] = [{"text": vrow["name"], "line": None, "score": LIBRARY_EVENT_VENUE_SCORE,
+                                 "role": "EVENT", "ext": [], "runner_up": {"value": "", "score": 0.0},
+                                 "chosen": True}]
     return r

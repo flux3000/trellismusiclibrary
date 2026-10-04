@@ -6346,11 +6346,20 @@ const App = (() => {
       <div class="cksum-rows">${rows}</div>`
   }
 
-  // ── Resolver pane — where the sources disagreed at ingest ────────────────────
+  // ── Resolver pane — what each field was read from ───────────────────────────
   // One builder for View Recording (rec.resolver_json) and Add Recording
-  // (ingest.scan.resolved); both are the resolver's to_dict() shape. Returns
-  // '' when no field has a conflict, and the caller then renders no tab at all.
-  const _RESOLVER_SOURCE_LABEL = { tags: 'Tags', info: 'Info file', folder: 'Folder' }
+  // (ingest.scan.resolved); both are the resolver's to_dict() shape. A recording
+  // saved after Resolver v2 carries evidence on every field and lists them all: the
+  // chosen value, the lines it was read from, the runner-up when one was close, and
+  // a mark on a field the resolver is not sure of. An older one has no evidence and
+  // shows only the fields whose sources disagreed. Returns '' when there is nothing
+  // to show, and the caller then renders no tab at all.
+  const _RESOLVER_SOURCE_LABEL = {
+    tags: 'Tags', info: 'Info File', folder: 'Folder', archive: 'Archive',
+    library: 'Your Library', atlas: 'Atlas',
+  }
+  const _RESOLVER_PANE_FIELDS = ['date', 'artist', 'venue', 'event', 'stage', 'city', 'state',
+    'country', 'source', 'lineage', 'source_tag', 'shnid', 'album']
 
   function _resolverValueText(v) {
     if (v && typeof v === 'object') {
@@ -6361,21 +6370,54 @@ const App = (() => {
     return String(v)
   }
 
-  function buildResolverPaneHtml(resolved) {
-    if (!resolved) return ''
+  function _resolverFieldTitle(k) {
+    const label = _INGEST_FIELD_LABEL[k] || k
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }
+
+  function _resolverRow(source, lineNo, text, strong, dim) {
+    const src = esc(_RESOLVER_SOURCE_LABEL[source] || source || '')
+    const num = lineNo != null ? esc(lineNo + 1) : ''
+    const body = esc(text == null ? '' : text)
+    return `<div class="cksum-row"><span class="cksum-status resolver-src${dim ? ' cksum-status--unverified' : ''}">${strong ? `<strong>${src}</strong>` : src}</span><span class="cksum-num">${num}</span><span class="cksum-title">${strong ? `<strong>${body}</strong>` : body}</span></div>`
+  }
+
+  // Rows for fields whose sources disagreed -- all an older recording can show.
+  function _resolverPaneConflicts(resolved) {
     return Object.keys(_INGEST_FIELD_LABEL).filter(k => resolved[k]?.conflict).map(k => {
       const f = resolved[k]
-      const label = _INGEST_FIELD_LABEL[k]
       const rows = Object.keys(_RESOLVER_SOURCE_LABEL)
         .filter(s => f.candidates && f.candidates[s] != null)
-        .map(s => {
-          const src = esc(_RESOLVER_SOURCE_LABEL[s])
-          const val = esc(_resolverValueText(f.candidates[s]))
-          const used = s === f.source
-          return `<div class="cksum-row"><span class="cksum-status resolver-src">${used ? `<strong>${src}</strong>` : src}</span><span class="cksum-title">${used ? `<strong>${val}</strong>` : val}</span></div>`
-        }).join('')
-      return `<div class="cksum-summary">${esc(label.charAt(0).toUpperCase() + label.slice(1))}</div><div class="cksum-rows">${rows}</div>`
+        .map(s => _resolverRow(s, null, _resolverValueText(f.candidates[s]), s === f.source, false))
+        .join('')
+      return `<div class="cksum-summary">${esc(_resolverFieldTitle(k))}</div><div class="cksum-rows">${rows}</div>`
     }).join('')
+  }
+
+  // Every field with a value: the value, then where it was read from.
+  function _resolverPaneFields(resolved) {
+    return _RESOLVER_PANE_FIELDS.filter(k => resolved[k] && (resolved[k].value != null || resolved[k].conflict)).map(k => {
+      const f = resolved[k]
+      const mark = f.confidence === 'tentative' ? ' <span class="cksum-status cksum-status--unverified">Tentative</span>' : ''
+      const evidence = (f.evidence || []).map(e => _resolverRow(e.source, e.line, e.text, false, false)).join('')
+      let others = ''
+      if (f.conflict) {
+        others = Object.keys(_RESOLVER_SOURCE_LABEL)
+          .filter(s => s !== f.source && f.candidates && f.candidates[s] != null)
+          .map(s => _resolverRow(s, null, _resolverValueText(f.candidates[s]), false, true)).join('')
+      } else if (f.runner_up) {
+        const r = f.runner_up
+        others = _resolverRow(r.source, r.line, _resolverValueText(r.value), false, true)
+      }
+      const chosen = `<div class="cksum-row"><span class="cksum-title"><strong>${esc(_resolverValueText(f.value))}</strong></span></div>`
+      return `<div class="cksum-summary">${esc(_resolverFieldTitle(k))}${mark}</div><div class="cksum-rows">${chosen}${evidence}${others}</div>`
+    }).join('')
+  }
+
+  function buildResolverPaneHtml(resolved) {
+    if (!resolved) return ''
+    const hasEvidence = _RESOLVER_PANE_FIELDS.some(k => Array.isArray(resolved[k]?.evidence))
+    return hasEvidence ? _resolverPaneFields(resolved) : _resolverPaneConflicts(resolved)
   }
 
   // ── Shared AI Assist results template — Add Recording + View Recording ────────
@@ -9384,6 +9426,10 @@ const App = (() => {
     if (code.startsWith('conflict:')) {
       const field = code.slice('conflict:'.length)
       return `Sources disagree on ${_INGEST_FIELD_LABEL[field] || field}`
+    }
+    if (code.startsWith('tentative:')) {
+      const field = code.slice('tentative:'.length)
+      return `Check ${_INGEST_FIELD_LABEL[field] || field}`
     }
     return _INGEST_REASON_LABEL[code] || null
   }

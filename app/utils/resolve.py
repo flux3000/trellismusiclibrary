@@ -77,20 +77,46 @@ class Field:
 
     value        the winning value (None if nothing offered one)
     source       "tags" | "info" | "folder" | None -- which source won
+                 ("applied" for a value a person typed: locked, never re-resolved)
     candidates   {source: value} for every source that offered a value, so a
                  UI can show "tags say X, info file says Y" without
                  re-deriving anything
     conflict     True when two sources both state something for this field
                  and disagree
+    confidence   "confident" | "tentative" | "empty" (reader/confidence.py). A field
+                 built without an assessment (a value a person typed, or a field the
+                 resolver reads as stated) is confident when it has a value
+    evidence     [{source, text, line, role, extractor, score, notes}] -- where the value
+                 was read from, for the Resolver pane. line is a physical line index
+                 into the info text (0-based) or None
+    runner_up    {value, source, text, line, score} when a rival came close, else None
+    p, margin, logit
+                 calibrated probability, margin over the best rival and the raw logit
+                 the confidence came from (None when not assessed)
     """
     value: object = None
     source: str = None
     candidates: dict = _dc_field(default_factory=dict)
     conflict: bool = False
+    confidence: str = None
+    evidence: list = _dc_field(default_factory=list)
+    runner_up: dict = None
+    p: float = None
+    margin: float = None
+    logit: float = None
+
+    def __post_init__(self):
+        if self.confidence is None:
+            self.confidence = "confident" if self.value is not None else "empty"
 
     def to_dict(self):
         return {"value": self.value, "source": self.source,
-                "candidates": dict(self.candidates), "conflict": self.conflict}
+                "candidates": dict(self.candidates), "conflict": self.conflict,
+                "confidence": self.confidence, "evidence": [dict(e) for e in self.evidence],
+                "runner_up": dict(self.runner_up) if self.runner_up else None,
+                "p": None if self.p is None else round(self.p, 4),
+                "margin": None if self.margin is None else round(self.margin, 2),
+                "logit": None if self.logit is None else round(self.logit, 2)}
 
 
 @dataclass
@@ -149,6 +175,135 @@ class Resolved:
         }
 
 
+# ── Evidence and confidence (reader/confidence.py) ───────────────────────────
+
+from app.utils.reader import confidence as _conf
+from app.utils.reader.library import norm_key as _nkey
+
+
+def _row(source, text=None, line=None, role=None, extractor=None, score=None, notes=""):
+    """One evidence row. line is a physical line index into the info text, or None."""
+    return {"source": source, "text": text, "line": line, "role": role, "extractor": extractor,
+            "score": None if score is None else round(float(score), 2), "notes": notes or ""}
+
+
+def _template(scan):
+    """The folder name read back as Artist - Date - Venue - Location, or {}."""
+    from app.utils.reader.folder import parse_template
+    return parse_template(scan.get("folder_name")) or {}
+
+
+def _template_group(groups, fname, scan, text):
+    """Corroboration from a template-named folder: adds its score to the group that
+    says the same thing, or becomes a rival group when it says something else."""
+    if text:
+        groups.add(_nkey(text), _conf.FOLDER_TEMPLATE_SCORE[fname], text,
+                   [_row("folder", text, None, None, "folder name", _conf.FOLDER_TEMPLATE_SCORE[fname], "template")])
+
+
+def _info_evidence(from_info):
+    return (from_info or {}).get("evidence") or {}
+
+
+def _agree_src(row):
+    """Which independent source a row stands for, or None when it does not count as one
+    (the library and Atlas rows shown under an info candidate are part of its score)."""
+    if not row:
+        return None
+    src = row.get("source")
+    if src == "folder" and row.get("extractor") == "folder tree":
+        return "parent"                      # the artist folder it was filed under
+    return src if src in _conf.INDEPENDENT_SOURCES else None
+
+
+class _Groups:
+    """Candidates of one field, pooled by what they say: key -> {score, value, rows}.
+    Sources that say the same thing add their scores (agreement is evidence the text
+    was read right); a candidate that says something else competes with it. Two or
+    more independent sources saying it earn the field's agreement bonus on top."""
+
+    def __init__(self, field=None):
+        self.field = field
+        self.d = {}
+
+    def add(self, key, score, value, rows, agree=True):
+        g = self.d.setdefault(key, {"score": 0.0, "value": value, "rows": [], "srcs": set()})
+        g["score"] += score
+        g["rows"].extend(rows)
+        src = _agree_src(rows[0]) if rows and agree else None
+        if src:
+            g["srcs"].add(src)
+
+    def bonus(self, g):
+        extra = min(max(len(g["srcs"]) - 1, 0), _conf.AGREE_CAP)
+        return _conf.AGREE_BONUS.get(self.field, 0.0) * extra
+
+    def scores(self):
+        return {k: g["score"] + self.bonus(g) for k, g in self.d.items()}
+
+
+def _runner_up(group):
+    if not group:
+        return None
+    r0 = group["rows"][0] if group["rows"] else {}
+    return {"value": group["value"], "source": r0.get("source"), "text": r0.get("text"),
+            "line": r0.get("line"), "score": round(group["score"], 2)}
+
+
+def _assessed(fname, groups, chosen_key, **field_kwargs):
+    """Build the Field for `fname`: confidence, evidence rows of the chosen candidate and
+    the runner-up when it is close. A field whose NONE candidate wins comes back empty."""
+    a = _conf.assess(fname, groups.scores(), chosen_key)
+    if a.none_wins:
+        return Field()
+    ru = None
+    if a.runner_key is not None and a.margin < _conf.CLOSE_MARGIN:
+        ru = _runner_up(groups.d.get(a.runner_key))
+    g = groups.d[chosen_key]
+    rows = list(g["rows"])
+    if groups.bonus(g) and rows:
+        rows[0] = dict(rows[0], notes=(rows[0]["notes"] + "; " if rows[0]["notes"] else "")
+                       + "agreed by " + ", ".join(sorted(g["srcs"])) + f" (+{groups.bonus(g):g})")
+    return Field(confidence=a.confidence, evidence=rows,
+                 runner_up=ru, p=a.p, margin=a.margin, logit=a.logit, **field_kwargs)
+
+
+def _decoded_rows(c, source="info"):
+    """Evidence rows for one decoder candidate: the info text row, then one row each for
+    the library and Atlas features that raised its score (shown, not added again)."""
+    rows = [_row(source, c.get("text"), c.get("line"), c.get("role"), "decoder", c.get("score"),
+                 "runner-up role " + str((c.get("runner_up") or {}).get("value") or "none"))]
+    for name, contrib in c.get("ext") or []:
+        rows.append(_row("library" if name.startswith("lib_") else "atlas", c.get("text"),
+                         c.get("line"), c.get("role"),
+                         "library" if name.startswith("lib_") else "atlas", contrib,
+                         f"part of the info score ({name})"))
+    return rows
+
+
+def _add_info_groups(groups, fname, info_value, from_info, key=_nkey):
+    """Add the info text's candidates for a decoder field. Returns the chosen key."""
+    ev = _info_evidence(from_info)
+    chosen_key = key(info_value)
+    cl = (ev.get("cands") or {}).get(fname)
+    chosen_seen = False
+    for c in cl or []:
+        if c.get("chosen") and not chosen_seen:
+            chosen_seen = True
+            groups.add(chosen_key, c["score"], info_value, _decoded_rows(c))
+        elif not c.get("chosen"):
+            k = key(c.get("text"))
+            if k != chosen_key:
+                groups.add(k, c["score"], c.get("text"), _decoded_rows(c))
+    if not chosen_seen:
+        f = (ev.get("fields") or {}).get(fname) or {}
+        score = f.get("score", _conf.INFO_NO_EVIDENCE_SCORE)
+        groups.add(chosen_key, score, info_value,
+                   [_row("info", f.get("text") or info_value, f.get("line"), f.get("role"),
+                         "decoder" if f else None, score, f.get("via") or "")])
+    return chosen_key
+
+
 # ── Date ──────────────────────────────────────────────────────────────────
 
 import re as _re
@@ -176,15 +331,71 @@ def _date_from_info(from_info):
 
 
 def _date_from_folder(folder_name):
-    m = FOLDER_DATE_RE.search(folder_name or "")
-    if not m:
-        return None
-    g = m.group(0)
-    return (int(g[:4]), int(g[5:7]), int(g[8:10]))
+    """The one full date written in the folder name, in any form the date grammar reads
+    (1997-11-22, 11-22-97, Nov 22 1997 ...). A transfer date, a range, an ambiguous
+    reading, or two different full dates give nothing."""
+    from app.utils.reader.dates import find_dates
+    seen = set()
+    for m in find_dates(folder_name or ""):
+        if m.role_hint == "transfer" or m.ambiguous or m.end_day:
+            continue
+        if m.year and m.month and m.day:
+            seen.add((m.year, m.month, m.day))
+    return seen.pop() if len(seen) == 1 else None
 
 
 def _date_precision(v):
     return sum(1 for c in v if c is not None)
+
+
+def _date_compatible(a, b):
+    """No component both state differs."""
+    return all(x is None or y is None or x == y for x, y in zip(a, b))
+
+
+def _date_text(v):
+    return "-".join(f"{c:02d}" if i else str(c) for i, c in enumerate(v) if c is not None)
+
+
+def _date_score_groups(cands, scan, from_info):
+    """Pool the sources' dates into groups. A date's score is the weight of every source
+    stating it, plus a fraction of the weight of each source stating a less precise date
+    inside it. Returns (groups, rows_by_tuple)."""
+    ev = (_info_evidence(from_info).get("date") or {})
+    folder_name = scan.get("folder_name", "")
+    groups = _Groups("date")
+    tuples = sorted(set(cands.values()), key=lambda t: tuple(c or 0 for c in t))
+    for t in tuples:
+        for src, v in cands.items():
+            w = _conf.DATE_WEIGHT[src]
+            if v == t:
+                full = True
+            elif _date_precision(v) < _date_precision(t) and _date_compatible(v, t):
+                full = False
+            else:
+                continue
+            score = w if full else w * _conf.DATE_PARTIAL
+            rows = []
+            if src == "info":
+                lead = ev.get("lead") or {}
+                rows.append(_row("info", lead.get("text") or _date_text(v), lead.get("line"), "DATE",
+                                 "date grammar", score, lead.get("role_hint") or ""))
+                if full:
+                    sup = [x for x in ev.get("support") or []]
+                    extra = min(_conf.DATE_SUPPORT_CAP, _conf.DATE_SUPPORT_EACH * len(sup))
+                    score += extra
+                    for x in sup:
+                        rows.append(_row("info", x.get("text"), x.get("line"), "DATE", "date grammar",
+                                         _conf.DATE_SUPPORT_EACH, "agrees"))
+                    against = ev.get("against") or []
+                    score -= min(_conf.DATE_AGAINST_CAP, _conf.DATE_AGAINST_EACH * sum(
+                        1 for x in against if sum(c is not None for c in x["date"]) >= 2))
+            elif src == "folder":
+                rows.append(_row("folder", _date_text(v), None, None, "folder name", score, ""))
+            else:
+                rows.append(_row("tags", _date_text(v), None, None, "tag", score, ""))
+            groups.add(t, score, v, rows, agree=full)
+    return groups
 
 
 def _resolve_date_field(scan):
@@ -225,12 +436,17 @@ def _resolve_date_field(scan):
     def _as_dict(v):
         return {"year": v[0], "month": v[1], "day": v[2]}
 
-    return Field(
-        value=_as_dict(value),
-        source=best_source,
-        candidates={s: _as_dict(v) for s, v in cands.items()},
-        conflict=conflict,
-    )
+    # Confidence: the chosen date against every date that contradicts it (a less precise
+    # date inside it is not a rival) and NONE.
+    groups = _date_score_groups(cands, scan, from_info)
+    rivals = {k: g for k, g in groups.d.items()
+              if k == value or not (_date_compatible(k, value))}
+    groups.d = rivals
+    fld = _assessed("date", groups, value, value=_as_dict(value), source=best_source,
+                    candidates={s: _as_dict(v) for s, v in cands.items()}, conflict=conflict)
+    if fld.runner_up and isinstance(fld.runner_up.get("value"), tuple):
+        fld.runner_up["value"] = _as_dict(fld.runner_up["value"])
+    return fld
 
 
 # ── Artist ────────────────────────────────────────────────────────────────
@@ -253,6 +469,7 @@ def _resolve_artist_field(scan, *, library_root=None, placement=None):
         cands["tags"] = tag_artist
     if from_info.get("artist"):
         cands["info"] = from_info["artist"]
+    folder_artist = None
     if placement == "artist" and library_root and scan.get("folder_path"):
         folder_artist = _folder_tree_artist(scan["folder_path"], library_root)
         if folder_artist:
@@ -268,7 +485,24 @@ def _resolve_artist_field(scan, *, library_root=None, placement=None):
 
     source = "tags" if "tags" in cands else ("info" if "info" in cands else "folder")
     cased = {k: title_case(v) for k, v in cands.items()}
-    return Field(value=cased[source], source=source, candidates=cased, conflict=conflict)
+
+    # Pooled by the exact normalised name, not the act core: "Miles Davis Sextet" does not
+    # corroborate "Miles Davis" (the conflict test above still compares act cores).
+    groups = _Groups("artist")
+    if "tags" in cands:
+        groups.add(_nkey(cands["tags"]), _conf.TAGS_SCORE["artist"], cased["tags"],
+                   [_row("tags", cands["tags"], None, None, "tag", _conf.TAGS_SCORE["artist"], "")])
+    if "info" in cands:
+        _add_info_groups(groups, "artist", cased["info"], from_info)
+    if "folder" in cands:
+        groups.add(_nkey(cands["folder"]), _conf.FOLDER_ARTIST_SCORE, cased["folder"],
+                   [_row("folder", cands["folder"], None, None, "folder tree", _conf.FOLDER_ARTIST_SCORE, "")])
+    _template_group(groups, "artist", scan, _template(scan).get("artist"))
+    chosen = _nkey(cased[source])
+    if chosen not in groups.d:
+        groups.add(chosen, _conf.INFO_NO_EVIDENCE_SCORE, cased[source], [])
+    return _assessed("artist", groups, chosen, value=cased[source], source=source,
+                     candidates=cased, conflict=conflict)
 
 
 # ── Venue + city/state/country ───────────────────────────────────────────
@@ -289,7 +523,16 @@ def _resolve_venue_field(scan):
         return Field()
 
     source = "tags" if "tags" in cands else "info"
-    return Field(value=cands[source], source=source, candidates=dict(cands), conflict=False)
+    groups = _Groups("venue")
+    if "tags" in cands:
+        groups.add(_nkey(cands["tags"]), _conf.TAGS_SCORE["venue"], cands["tags"],
+                   [_row("tags", cands["tags"], None, None, "tag", _conf.TAGS_SCORE["venue"], "")])
+    if "info" in cands:
+        _add_info_groups(groups, "venue", cands["info"], from_info)
+    _template_group(groups, "venue", scan, _template(scan).get("venue"))
+    chosen = _nkey(cands[source])
+    return _assessed("venue", groups, chosen, value=cands[source], source=source,
+                     candidates=dict(cands), conflict=False)
 
 
 def _resolve_info_only_field(scan, key):
@@ -297,14 +540,27 @@ def _resolve_info_only_field(scan, key):
     folder name is not read for them, so there is one source and no conflict to track.
     The festival is an Event, "Harbor Stage" is the performance's Stage; neither is
     ever the venue (the reader already keeps them apart)."""
-    v = scan["suggestions"]["from_info_file"].get(key)
+    from_info = scan["suggestions"]["from_info_file"]
+    v = from_info.get(key)
     v = v.strip() if isinstance(v, str) else v
     if key == "event":
         from app.utils.event_names import clean_event_name
         v = clean_event_name(v)
     if not v:
         return Field()
-    return Field(value=v, source="info", candidates={"info": v}, conflict=False)
+    groups = _Groups(key)
+    chosen = _add_info_groups(groups, key, v, from_info)
+    return _assessed(key, groups, chosen, value=v, source="info",
+                     candidates={"info": v}, conflict=False)
+
+
+def _location_score(key, pe):
+    how = (pe or {}).get("how")
+    if key == "city":
+        conf = pe.get("confidence") or "" if how == "line" else ""
+        return _conf.CITY_SCORE.get((how, conf), _conf.INFO_NO_EVIDENCE_SCORE)
+    table = _conf.STATE_SCORE if key == "state" else _conf.COUNTRY_SCORE
+    return table.get(how, _conf.INFO_NO_EVIDENCE_SCORE)
 
 
 def _resolve_location_fields(scan, venue_field):
@@ -314,6 +570,7 @@ def _resolve_location_fields(scan, venue_field):
     from_info = scan["suggestions"]["from_info_file"]
     sources = {"tags": from_tags, "info": from_info}
     primary = venue_field.source
+    place = _info_evidence(from_info).get("place") or {}
 
     out = {}
     for key in ("city", "state", "country"):
@@ -326,7 +583,22 @@ def _resolve_location_fields(scan, venue_field):
             out[key] = Field()
             continue
         source = primary if primary in cands else ("tags" if "tags" in cands else "info")
-        out[key] = Field(value=cands[source], source=source, candidates=dict(cands), conflict=False)
+        groups = _Groups(key)
+        if "tags" in cands:
+            groups.add(_nkey(cands["tags"]), _conf.TAGS_SCORE[key], cands["tags"],
+                       [_row("tags", cands["tags"], None, None, "tag", _conf.TAGS_SCORE[key], "")])
+        if "info" in cands:
+            pe = place.get(key)
+            score = _location_score(key, pe) if pe else _conf.INFO_NO_EVIDENCE_SCORE
+            how = (pe or {}).get("how")
+            src = "atlas" if how == "atlas" else "info"
+            groups.add(_nkey(cands["info"]), score, cands["info"],
+                       [_row(src, (pe or {}).get("text"), (pe or {}).get("line"), "PLACE",
+                             "atlas" if how == "atlas" else "place peeler", score, how or "")])
+        if key in _conf.FOLDER_TEMPLATE_SCORE:
+            _template_group(groups, key, scan, _template(scan).get(key))
+        out[key] = _assessed(key, groups, _nkey(cands[source]), value=cands[source], source=source,
+                             candidates=dict(cands), conflict=False)
     return out
 
 
@@ -658,6 +930,17 @@ def verdict(resolved):
         f = getattr(resolved, name)
         if f.conflict:
             reasons.append(f"conflict:{name}")
+
+    # Auto-ingest needs a CONFIDENT artist and, for a live recording, a CONFIDENT full date
+    # (reader/confidence.py). A value a person set is locked: its Field is built confident.
+    # Year-only and year-and-month dates already have their own reasons above.
+    if resolved.artist.value and resolved.artist.confidence == "tentative":
+        reasons.append("tentative:artist")
+    if resolved.kind != "studio":
+        date = resolved.date.value or {}
+        if (date.get("year") and date.get("month") and date.get("day")
+                and resolved.date.confidence == "tentative"):
+            reasons.append("tentative:date")
 
     # Exact content duplicate short-circuits everything else: skipped, not
     # reviewed (spec section 9, resolved question 1).

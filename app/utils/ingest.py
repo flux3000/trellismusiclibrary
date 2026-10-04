@@ -23,7 +23,7 @@ from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX
 import geonamescache as _geonamescache
 
 from app.utils.format import format_partial_date
-from app.utils.reader.dates import best_show_date as _best_show_date
+from app.utils.reader.dates import best_show_date as _best_show_date, date_evidence as _date_evidence
 from app.utils.reader.place import peel as _peel_place
 from app.utils.health import compute_health
 from app.utils.venues import is_placeholder_venue_name
@@ -2298,6 +2298,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
 
     # ── Pass 1: split into header block and track block ───────────────────────
     header_lines = []
+    header_idx   = []       # physical line index of each header line
     track_pairs  = []       # [(number, title, songwriter), ...]
     track_meta   = []       # [{"line": physical line index, "seconds": printed time or None}]
     in_tracks    = False
@@ -2322,6 +2323,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
         if _TOTAL_DURATION_RE.match(stripped):
             if not in_tracks:
                 header_lines.append(stripped)
+                header_idx.append(line_idx)
             continue
 
         m = _TRACK_PATTERN.match(stripped)
@@ -2353,6 +2355,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
 
         if not in_tracks:
             header_lines.append(stripped)
+            header_idx.append(line_idx)
 
     # ── Pass 2: extract fields from header ────────────────────────────────────
     result = {
@@ -2421,6 +2424,8 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
     # City / State / Country — first header line that validates. The artist
     # line gives no region/country without a city ("Kansas | Live"), and no
     # bare city ("Boston", "Phoenix").
+    loc_how = loc_line = loc_pr = None      # where the place came from, for the evidence
+    fill_state = fill_country = False
     artist_hi = None
     for ai, line in enumerate(header_lines[:3]):
         if not _is_filename_line(line) and not _looks_like_date_line(line):
@@ -2434,6 +2439,8 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             result["city"]    = city
             result["state"]   = state
             result["country"] = country
+            loc_how, loc_line = "line", header_idx[li]
+            loc_pr = _peel_place(_split_dash_location(line)[1].strip(), city_only=False)
             break
     else:
         # No line names a region or country: a bare city of the gazetteer
@@ -2445,6 +2452,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             pr = _peel_place(line, city_only=True)
             if pr.city and not pr.has_region_or_country:
                 result["city"] = pr.city
+                loc_how, loc_line, loc_pr = "bare", header_idx[li], pr
                 break
     def _decoder_place(region_ok=False):
         """The decoder's first PLACE segment: a bare city on the artist's line
@@ -2455,15 +2463,16 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             if d.role == "PLACE" and u.kind == "seg" and not u.feats.get("after_track_start"):
                 ln = next((L for L in doc.lines if L.nb == u.nb), None)
                 if ln is not None and ln.place is not None and (ln.place.city or (region_ok and ln.place.has_region_or_country)):
-                    return ln.place
-        return None
+                    return ln.place, u.line
+        return None, None
 
     _ck = _norm_key_simple(result["city"]) if result["city"] else ""
     _vk = _norm_key_simple(result["venue"]) if result["venue"] else ""
     _clash = bool(_ck and _vk and (_ck in _vk or _vk in _ck))
     if not result["city"] or _clash:
-        pr = _decoder_place(region_ok=_clash)
+        pr, _pl = _decoder_place(region_ok=_clash)
         if pr is not None:
+            loc_how, loc_line, loc_pr = "decoder", _pl, pr
             result["city"] = pr.city or None
             if pr.has_region_or_country:
                 result["state"] = pr.state or None
@@ -2480,17 +2489,21 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             _names = {_norm_key_simple(k) for k in atlas.place_keys(show_eps[0]["place_id"])}
             if _pi.get("city") and (not _vk0 or _vk0 in _names):
                 result["city"] = _pi["city"]
+                loc_how, loc_line, loc_pr = "atlas", None, None
                 if not result["country"] and _pi.get("country"):
                     try:
                         result["country"] = _cd(_pi["country"])
+                        fill_country = True
                     except KeyError:
                         pass
         if result["city"] and not result["country"]:
             _st, _co = fill_place(atlas, result["city"], result["venue"])
             if _co:
                 result["country"] = _co
+                fill_country = True
                 if _st and not result["state"]:
                     result["state"] = _st
+                    fill_state = True
 
     # A venue is never the city it sits in, nor the artist's own name.
     if result["venue"]:
@@ -2568,9 +2581,40 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
     if durations:
         result["track_alignment"] = _rt.align_durations(printed, durations)
 
+    # What the confidence step weighs: the date mentions, where the place was read, and
+    # the other candidates for each decoded field (reader/billing.py).
+    date_ev = None
+    de = _date_evidence("\n".join(header_lines))
+    if de:
+        def _phys(row):
+            row = dict(row)
+            row["line"] = header_idx[row["line"]] if row["line"] < len(header_idx) else None
+            return row
+        date_ev = {"lead": _phys(de["lead"]), "support": [_phys(x) for x in de["support"]],
+                   "against": [_phys(x) for x in de["against"]]}
+    place_ev = {}
+    _ptext = lines[loc_line].strip() if loc_line is not None and loc_line < len(lines) else None
+    _pkinds = {e["kind"] for e in (loc_pr.evidence if loc_pr else [])}
+    for _k in ("city", "state", "country"):
+        if not result.get(_k):
+            continue
+        if _k == "city":
+            _how = loc_how or "line"
+        elif _k == "state":
+            _how = "atlas" if fill_state else "text"
+        else:
+            _how = "atlas" if fill_country else ("text" if "country" in _pkinds else "derived")
+        place_ev[_k] = {"how": _how, "line": None if _how == "atlas" else loc_line,
+                        "text": None if _how == "atlas" else _ptext,
+                        "confidence": (loc_pr.confidence if loc_pr else ""),
+                        "validated": bool(loc_pr.city_validated) if loc_pr else False}
+
     result["evidence"] = {
         "library": not library.is_empty,
         "fields": reading.fields,
+        "cands": reading.cands,
+        "date": date_ev,
+        "place": place_ev,
         "sets": reading.sets,
         "artist_tentative": reading.artist_tentative,
         "segments": [d.to_dict() for d in decoded
