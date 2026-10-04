@@ -71,7 +71,7 @@ def test_peel_canadian_province():
     # abbreviations are read as written: lower-case "on" needs the city to be in Ontario
     assert peel("Toronto, on").region == "Ontario"
     assert peel("Set on").has_region_or_country is False
-    assert _parse_location("The Hummingbird Centre, Toronto, ON") == ("Toronto", None, "Canada")
+    assert _parse_location("The Hummingbird Centre, Toronto, ON") == ("Toronto", "ON", "Canada")
 
 
 def test_peel_iso2_country():
@@ -106,9 +106,9 @@ def test_peel_dash_venue_and_long_country():
     ("Atlanta, Georgia", ("Atlanta", "GA", "US")),
     ("Tbilisi, Georgia", ("Tbilisi", None, "Georgia")),
     ("Lyons, Co", ("Lyons", "CO", "US")),
-    ("Ottawa, Ontario (Canada)", ("Ottawa", None, "Canada")),
+    ("Ottawa, Ontario (Canada)", ("Ottawa", "ON", "Canada")),
     ("Munich, Bavaria, Germany", ("Munich", None, "Germany")),
-    ("Perth, WA, Australia", ("Perth", None, "Australia")),
+    ("Perth, WA, Australia", ("Perth", "WA", "Australia")),
     ("Rising Sun, MD", ("Rising Sun", "MD", "US")),
     ("East Hempstead, NY", ("East Hempstead", "NY", "US")),
 ])
@@ -125,8 +125,10 @@ def test_not_a_place(line):
 
 def test_venue_no_longer_swallows_city():
     assert _venue("Concertgebouw, Amsterdam, Netherlands") == "Concertgebouw"
-    assert _venue("Boxcar Pinion Memorial Bluegrass Festival  Chattanooga, TN") == \
-        "Boxcar Pinion Memorial Bluegrass Festival"
+    # a festival-only line is an EVENT now (Resolver v2 chunk 3), not a venue
+    r = parse_info_file(None, text="Some Artist\nBoxcar Pinion Memorial Bluegrass Festival  Chattanooga, TN\n")
+    assert r["event"] == "Boxcar Pinion Memorial Bluegrass Festival"
+    assert r["venue"] is None
 
 
 # ── artist line is never a place; lead-ins; NYC ─────────────────────────────
@@ -162,3 +164,10 @@ def test_live_in_lead_and_mass():
 def test_nyc(line):
     r = peel(line)
     assert (r.city, r.region, r.country) == ("New York", "NY", "US")
+
+
+def test_state_is_filled_for_canada_and_australia_only():
+    assert _parse_location("Toronto, ON") == ("Toronto", "ON", "Canada")
+    assert _parse_location("Sydney, NSW, Australia") == ("Sydney", "NSW", "Australia")
+    assert _parse_location("Munich, Bavaria, Germany")[1] in ("", None)
+    assert _parse_location("Paris, France")[1] in ("", None)

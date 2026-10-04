@@ -26,6 +26,7 @@ from app.utils.format import format_partial_date
 from app.utils.reader.dates import best_show_date as _best_show_date
 from app.utils.reader.place import peel as _peel_place
 from app.utils.health import compute_health
+from app.utils.venues import is_placeholder_venue_name
 from app.utils.folder_naming import unique_folder_name, unique_file_name
 from app.utils.file_naming import rename_plan, flattens
 
@@ -399,6 +400,25 @@ def _parse_filename_set(filename):
         return None
     kind = "set" if prefix == "s" else "disc"
     return label, disc, track, kind
+
+
+def _stamp_info_sets(audio_files, info_tracks):
+    """The info file as the LAST set carrier (decision 9): used only when neither
+    the folder nor the filenames carried a set or disc, and all-or-nothing. Every
+    info track must name a set, there must be two or more distinct sets, and the
+    track count must equal the audio count; otherwise no file is touched."""
+    if not audio_files or len(info_tracks) != len(audio_files):
+        return False
+    if any(a.get("set_number") or a.get("disc_number") for a in audio_files):
+        return False
+    labels = [t.get("set") for t in info_tracks]
+    if not all(isinstance(l, str) and (l.startswith("Set ") or l == "Encore") for l in labels):
+        return False
+    if len(set(labels)) < 2:
+        return False
+    for a, label in zip(sorted(audio_files, key=lambda x: x["index"]), labels):
+        a["set_number"] = label
+    return True
 
 
 def _apply_filename_sets(result):
@@ -1384,7 +1404,7 @@ _MONTH_NAMES = {
 }
 
 # Track line: "01 Title", "1. Title", "1 - Title", "11: Title"
-_TRACK_PATTERN = re.compile(r"^\s*(\d{1,3})[.:\-\s]\s*(.+)$")
+_TRACK_PATTERN = re.compile(r"^\s*(\d{1,3})(?:[.:\-\s]\s*|\)\s*)(.+)$")
 
 # A bare "H:MM:SS" or "M:SS" value with nothing else on the line — almost
 # always a stated total running time in the header ("1:46:28"), never a
@@ -1895,6 +1915,27 @@ def detect_source(text):
             return val
     return None
 
+def detect_source_with_roles(text, decoded):
+    """
+    detect_source() with the decoder's role context: a labelled line still wins
+    (it is an assertion); then a SOURCE segment, in file order; then the old
+    whole-text keyword fallback, where a bare word in NOTES is only a hint.
+    """
+    if not text:
+        return None
+    for line in text.splitlines():
+        if _SOURCE_LABEL_RE.match(line):
+            for pat, val in _SOURCE_PATTERNS:
+                if pat.search(line):
+                    return val
+    for d in decoded or ():
+        if d.role == "SOURCE":
+            for pat, val in _SOURCE_PATTERNS:
+                if pat.search(d.text):
+                    return val
+    return detect_source(text)
+
+
 # Lineage section triggers — explicit labels only (bare ">" removed to avoid false positives)
 _LINEAGE_LABELS = {"lineage", "source:", "transfer", "recording info", "recorded by", "chain:"}
 
@@ -1956,8 +1997,9 @@ def _parse_location_plain(line):
         "Fillmore East, New York, NY"   -> ("New York", "NY", "US")   (drops venue)
         "Osaka, Japan"                  -> ("Osaka", None, "Japan")
         "Ann Arbor MI"                  -> ("Ann Arbor", "MI", "US")   (no comma)
-        "Toronto, ON"                   -> ("Toronto", None, "Canada")
-    state stays US-only (non-US regions are not stored as state). Returns
+        "Toronto, ON"                   -> ("Toronto", "ON", "Canada")
+    state is the code for a US state, Canadian province or Australian state
+    (other countries leave it None; decision 2026-10-03). Returns
     (None, None, None) when no region or country is recognised, i.e. the line
     is not a location; a bare city is not enough here.
     """
@@ -2190,7 +2232,8 @@ def _read_text_auto(file_path):
         return raw_bytes.decode("cp1252", errors="replace")
 
 
-def parse_info_file(file_path, known_artists=None, known_venues=None, text=None):
+def parse_info_file(file_path, known_artists=None, known_venues=None, text=None, *,
+                    library=None, n_audio=None, durations=None, hints=None):
     """
     Parse a ROIO info/text file and extract structured metadata suggestions.
 
@@ -2200,6 +2243,15 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         known_venues:   list of venue name strings for fuzzy matching (optional)
         text:           parse THIS string instead of reading `file_path`
                         (2026-09-01, for the Rescan button on Add Recording).
+        library:        a reader.library.LibraryIndex (the user's own acts, musicians,
+                        venues and events) for the role decoder; None reads with an
+                        empty library, so this function stays pure.
+        n_audio:        number of audio files in the folder, when known (a strong
+                        feature for an unnumbered setlist).
+        durations:      seconds per audio file in order, when known; printed track
+                        times are aligned against them (result["track_alignment"]).
+        hints:          {"artist": ..., "venue": ...} the tags or folder name state,
+                        as agreement features for the decoder.
 
     `text` exists so a rescan can re-run the inference over the reviewer's
     EDITED info file without first writing it to their disk. The alternative
@@ -2211,11 +2263,21 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
     file: a reviewer who cleared the box means the file is empty. Hence the
     `is not None` test rather than a truthiness one.
 
+    The header (artist, event, stage, venue) is read by the role decoder
+    (app/utils/reader): every segment of the text gets a role and the best
+    labelling of the whole file wins. Date and place keep the strict extractors
+    of reader/dates.py and reader/place.py.
+
     Returns dict:
         raw_content, artist, artist_match, year, month, day, date_str,
-        venue, venue_match, city, state, country, source, lineage,
-        tracks [ {number, title} ]
+        venue, venue_match, event, stage, city, state, country, source, lineage,
+        tracks [ {number, title, songwriter, set} ], evidence, track_alignment
     """
+    from app.utils.reader.decode import decode_text
+    from app.utils.reader.billing import read_billing
+    from app.utils.reader.library import LibraryIndex
+    from app.utils.reader import tracks as _rt
+
     if text is not None:
         raw = text
     else:
@@ -2224,17 +2286,19 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         except OSError:
             return {"raw_content": "", "tracks": []}
 
+    library = library or LibraryIndex.empty()
     lines = raw.splitlines()
 
     # ── Pass 1: split into header block and track block ───────────────────────
     header_lines = []
     track_pairs  = []       # [(number, title, songwriter), ...]
+    track_meta   = []       # [{"line": physical line index, "seconds": printed time or None}]
     in_tracks    = False
     tracks_ended = False    # set once a trailing Notes/Comments/etc. heading is seen
     disc_offset  = 0        # running offset so multi-disc restarts (1, 2, 3... 1, 2, 3...)
     last_raw_num = None     # come out sequential instead of colliding by number
 
-    for line in lines:
+    for line_idx, line in enumerate(lines):
         stripped = line.strip()
         if not stripped:
             continue
@@ -2256,6 +2320,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         m = _TRACK_PATTERN.match(stripped)
         if m:
             num   = int(m.group(1))
+            printed = _rt.printed_seconds(m.group(2).strip())
             raw_title = _TRAILING_TS_RE.sub('', m.group(2).strip())
             raw_title = _TRAILING_PAREN_TS_RE.sub('', raw_title)
             # Split off a trailing "(Composer Name)" credit BEFORE title-
@@ -2276,6 +2341,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
                     disc_offset += last_raw_num
                 last_raw_num = num
                 track_pairs.append((disc_offset + num, title, songwriter))
+                track_meta.append({"line": line_idx, "seconds": printed})
                 continue
 
         if not in_tracks:
@@ -2292,35 +2358,56 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         "date_str":     None,
         "venue":        None,
         "venue_match":  None,
+        "event":        None,
+        "stage":        None,
         "city":         None,
         "state":        None,
         "country":      None,
         "source":       None,
         "lineage":      None,
         "tracks":       [],
+        "evidence":     {},
+        "track_alignment": None,
     }
 
-    # Artist — first non-blank, non-filename line in the first 3 lines
-    artist_idx = None
-    for ai, line in enumerate(header_lines[:3]):
-        if not _is_filename_line(line) and not _looks_like_date_line(line):
-            artist_idx = ai
-            result["artist"]       = title_case(line)
-            result["artist_match"] = _fuzzy_match(line, known_artists or [])
-            break
+    # Roles: every segment of the text gets one (reader/decode.py), and the
+    # artist, event, stage and venue are read off them (reader/billing.py).
+    doc, decoded = decode_text(raw, library, n_audio, hints)
+    reading = read_billing(doc, decoded, library, title_case)
 
-    # Venue — keyword scan then positional fallback
-    venue_raw = _extract_venue(header_lines)
+    if not known_artists and not library.is_empty:
+        known_artists = library.artist_names()
+    if not known_venues and not library.is_empty:
+        known_venues = library.venue_names()
+
+    artist_idx = None
+    if reading.artist:
+        result["artist"] = reading.artist
+        fa = reading.fields.get("artist", {})
+        if reading.artist_how in ("library act", "members match"):
+            result["artist_match"] = reading.artist
+        else:
+            result["artist_match"] = _fuzzy_match(fa.get("text") or reading.artist, known_artists or [])
+        if fa.get("line") is not None:
+            artist_idx = fa["line"]
+    result["event"] = reading.event
+    result["stage"] = reading.stage
+    venue_raw = reading.venue
     if venue_raw:
-        result["venue"]       = title_case(venue_raw)
+        result["venue"]       = venue_raw
         result["venue_match"] = _fuzzy_match(venue_raw, known_venues or [])
 
     # City / State / Country — first header line that validates. The artist
     # line gives no region/country without a city ("Kansas | Live"), and no
     # bare city ("Boston", "Phoenix").
+    artist_hi = None
+    for ai, line in enumerate(header_lines[:3]):
+        if not _is_filename_line(line) and not _looks_like_date_line(line):
+            artist_hi = ai
+            break
     for li, line in enumerate(header_lines):
         city, state, country = _parse_location(line)
-        if li == artist_idx and not city:
+        if li == artist_hi and not city:
             continue          # a region word alone on the artist line is not a place
         if city or state or country:
             result["city"]    = city
@@ -2332,12 +2419,44 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
         # ("Old Town School of Folk Music, Chicago") still gives the city, but
         # never from the first header line or the artist line.
         for li, line in enumerate(header_lines):
-            if li == 0 or li == artist_idx:
+            if li == 0 or li == artist_hi:
                 continue
             pr = _peel_place(line, city_only=True)
             if pr.city and not pr.has_region_or_country:
                 result["city"] = pr.city
                 break
+    def _decoder_place(region_ok=False):
+        """The decoder's first PLACE segment: a bare city on the artist's line
+        ("Warren Haynes | Chicago"), or the real city when the old line reading
+        took the venue name for it."""
+        for d in decoded:
+            u = d.unit
+            if d.role == "PLACE" and u.kind == "seg" and not u.feats.get("after_track_start"):
+                ln = next((L for L in doc.lines if L.nb == u.nb), None)
+                if ln is not None and ln.place is not None and (ln.place.city or (region_ok and ln.place.has_region_or_country)):
+                    return ln.place
+        return None
+
+    _ck = _norm_key_simple(result["city"]) if result["city"] else ""
+    _vk = _norm_key_simple(result["venue"]) if result["venue"] else ""
+    _clash = bool(_ck and _vk and (_ck in _vk or _vk in _ck))
+    if not result["city"] or _clash:
+        pr = _decoder_place(region_ok=_clash)
+        if pr is not None:
+            result["city"] = pr.city or None
+            if pr.has_region_or_country:
+                result["state"] = pr.state or None
+                result["country"] = pr.country or None
+
+    # A venue is never the city it sits in, nor the artist's own name.
+    if result["venue"]:
+        vk = _norm_key_simple(result["venue"])
+        if (result["city"] and vk == _norm_key_simple(result["city"])) or \
+                (result["artist"] and vk == _norm_key_simple(result["artist"])) or \
+                is_placeholder_venue_name(result["venue"]) or \
+                not venue_plausible(result["venue"]):
+            result["venue"] = None
+            result["venue_match"] = None
 
     # Date — every mention in the header is read together (strict grammar, no
     # defaults).
@@ -2345,34 +2464,79 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None)
     if parsed:
         result["year"], result["month"], result["day"], result["date_str"] = parsed
 
-    # Source type — labelled lines first, then the whole file. See detect_source.
-    result["source"] = detect_source(raw)
+    # Source type — labelled lines first, then a SOURCE segment, then the whole
+    # file. See detect_source and detect_source_with_roles.
+    result["source"] = detect_source_with_roles(raw, decoded)
 
-    # Lineage — collect the contiguous block of non-blank lines starting at an
-    # explicit lineage label, stopping at the next blank line (or a hard line
-    # cap). This is lower-priority than the core fields — it should only fire
-    # when it's confidently bounded to a real chain description, not guess at
-    # where one ends. Info files routinely have unrelated sections (setlist,
-    # taper notes, footnotes) after the label; without a stop condition this
-    # used to run to EOF and swallow the whole rest of the file.
+    # Lineage — the LINEAGE segments: from the first line the decoder gives that
+    # role, on through the lines that continue it (to a blank line, or a hard
+    # cap). Without one, the older rule: an explicit label starts the block.
     _MAX_LINEAGE_LINES = 8
     lineage_buf = []
-    for i, line in enumerate(lines):
-        low = line.strip().lower()
-        if any(lbl in low for lbl in _LINEAGE_LABELS):
-            lineage_buf.append(line.strip())
-            for follow in lines[i + 1:]:
-                if not follow.strip() or len(lineage_buf) >= _MAX_LINEAGE_LINES:
-                    break
-                lineage_buf.append(follow.strip())
-            break
+    lin_lines = [d.unit.line for d in decoded if d.role == "LINEAGE"
+                 and not d.unit.feats.get("after_track_start")]
+    if lin_lines:
+        first = min(lin_lines)
+        role_by_line = {}
+        for d in decoded:
+            role_by_line.setdefault(d.unit.line, set()).add(d.role)
+        for i in range(first, len(lines)):
+            ln = lines[i].strip()
+            if not ln:
+                break
+            roles = role_by_line.get(i, set())
+            if i > first and not roles <= {"LINEAGE", "EQUIPMENT", "NOTES", "SOURCE", "OTHER"}:
+                break
+            lineage_buf.append(ln)
+            if len(lineage_buf) >= _MAX_LINEAGE_LINES:
+                break
+    else:
+        for i, line in enumerate(lines):
+            low = line.strip().lower()
+            if any(lbl in low for lbl in _LINEAGE_LABELS):
+                lineage_buf.append(line.strip())
+                for follow in lines[i + 1:]:
+                    if not follow.strip() or len(lineage_buf) >= _MAX_LINEAGE_LINES:
+                        break
+                    lineage_buf.append(follow.strip())
+                break
     if lineage_buf:
         result["lineage"] = " ".join(lineage_buf)
 
-    # Tracks
-    result["tracks"] = [{"number": n, "title": t, "songwriter": sw} for n, t, sw in track_pairs]
+    # Tracks. Numbered lines come from Pass 1. An unnumbered setlist (a run of
+    # title lines the decoder marks TRACK) fills in only when there are none.
+    tracks = [{"number": n, "title": t, "songwriter": sw, "set": _rt.set_label_at(reading.sets, tm["line"])}
+              for (n, t, sw), tm in zip(track_pairs, track_meta)]
+    printed = [tm["seconds"] for tm in track_meta]
+    if not tracks:
+        for k, (li, ttl) in enumerate(_rt.unnumbered_titles(decoded), start=1):
+            secs = _rt.printed_seconds(ttl)
+            t2 = _TRAILING_TS_RE.sub('', ttl.strip())
+            t2 = _TRAILING_PAREN_TS_RE.sub('', t2)
+            t2, sw = _extract_trailing_songwriter(t2)
+            t2 = title_case(t2)
+            if _is_track_noise(t2) or not t2.strip():
+                continue
+            tracks.append({"number": len(tracks) + 1, "title": t2, "songwriter": sw,
+                           "set": _rt.set_label_at(reading.sets, li)})
+            printed.append(secs)
+    result["tracks"] = tracks
+    if durations:
+        result["track_alignment"] = _rt.align_durations(printed, durations)
 
+    result["evidence"] = {
+        "library": not library.is_empty,
+        "fields": reading.fields,
+        "sets": reading.sets,
+        "artist_tentative": reading.artist_tentative,
+        "segments": [d.to_dict() for d in decoded
+                     if d.role not in ("TRACK", "BOILERPLATE") and d.unit.kind != "titleline"],
+    }
     return result
+
+
+def _norm_key_simple(s):
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", unicodedata.normalize("NFKD", s or "").casefold())).strip()
 
 
 def _titlecase(s):
@@ -2442,6 +2606,11 @@ def build_scan_payload(folder_path, info_override=None):
     from_info         = {}
     info_file_content = None
     parsed_candidates = []
+    from app.utils.reader.library import current_library
+    _lib = current_library()
+    _n_audio = len(files.get("audio_files") or []) or None
+    _durs = [t.get("duration") for t in from_tags.get("tracks", [])]
+    _durs = _durs if _durs and all(isinstance(d, (int, float)) and d > 0 for d in _durs) else None
     override_name = (info_override or {}).get("filename")
     override_used = False
     for tf in files["text_files"]:
@@ -2452,7 +2621,8 @@ def build_scan_payload(folder_path, info_override=None):
         if info_override and (override_name is None or override_name == tf["filename"]):
             use_text = info_override.get("content") or ""
             override_used = True
-        parsed = parse_info_file(tf["path"], text=use_text)
+        parsed = parse_info_file(tf["path"], text=use_text, library=_lib, n_audio=_n_audio,
+                                 durations=_durs)
         log_step(job, "parsed info file",
                  tf["filename"] + (" (edited text)" if use_text is not None else ""))
         entry  = {
@@ -2472,9 +2642,12 @@ def build_scan_payload(folder_path, info_override=None):
                 "country":      parsed.get("country"),
                 "source":       parsed.get("source"),
                 "lineage":      parsed.get("lineage"),
+                "event":        parsed.get("event"),
+                "stage":        parsed.get("stage"),
+                "evidence":     parsed.get("evidence"),
                 "tracks": [
                     {"number": t["number"], "title": t["title"],
-                     "songwriter": t.get("songwriter")}
+                     "songwriter": t.get("songwriter"), "set": t.get("set")}
                     for t in parsed.get("tracks", [])
                 ],
             },
@@ -2487,7 +2660,7 @@ def build_scan_payload(folder_path, info_override=None):
     # which is a different and much more misleading answer.
     if info_override and not override_used and (info_override.get("content") or "").strip():
         content = info_override["content"]
-        parsed  = parse_info_file(None, text=content)
+        parsed  = parse_info_file(None, text=content, library=_lib, n_audio=_n_audio, durations=_durs)
         parsed_candidates.insert(0, {
             "filename": override_name or "info.txt",
             "score": 0,
@@ -2505,9 +2678,12 @@ def build_scan_payload(folder_path, info_override=None):
                 "country":      parsed.get("country"),
                 "source":       parsed.get("source"),
                 "lineage":      parsed.get("lineage"),
+                "event":        parsed.get("event"),
+                "stage":        parsed.get("stage"),
+                "evidence":     parsed.get("evidence"),
                 "tracks": [
                     {"number": t["number"], "title": t["title"],
-                     "songwriter": t.get("songwriter")}
+                     "songwriter": t.get("songwriter"), "set": t.get("set")}
                     for t in parsed.get("tracks", [])
                 ],
             },
@@ -2516,6 +2692,7 @@ def build_scan_payload(folder_path, info_override=None):
     if parsed_candidates:
         from_info         = parsed_candidates[0]["suggestions"]
         info_file_content = parsed_candidates[0]["content"]
+        _stamp_info_sets(files["audio_files"], from_info.get("tracks") or [])
 
     # Read fingerprint file contents
     fingerprints = []
@@ -2599,6 +2776,9 @@ def build_scan_payload(folder_path, info_override=None):
                 "lineage":      from_info.get("lineage"),
                 "source_tag":   from_info.get("source_tag"),
                 "etree_shnid":  from_info.get("etree_shnid"),
+                "event":        from_info.get("event"),
+                "stage":        from_info.get("stage"),
+                "evidence":     from_info.get("evidence"),
                 "tracks": [
                     {"number": t["number"], "title": t["title"],
                      "songwriter": t.get("songwriter")}

@@ -275,15 +275,61 @@ def _empty_pred():
     return {f: None for f in FIELDS}
 
 
+# ── Library modes ────────────────────────────────────────────────────────────
+# "none": the reader sees an empty library. "loo": leave-one-out, the item's own
+# performance's venue/event/act rows count only if another performance also uses
+# them. There is deliberately no mode that scores with the full library.
+LIBRARY_MODES = ("none", "loo")
+_LIB = {"mode": "none", "full": None, "rec_perf": None, "db": None}
+
+
+def set_library_mode(mode, db=None):
+    if mode not in LIBRARY_MODES:
+        raise ValueError(f"library mode must be one of {LIBRARY_MODES}")
+    _LIB["mode"] = mode
+    _LIB["db"] = db
+    _LIB["full"] = _LIB["rec_perf"] = None
+
+
+def library_for(item):
+    """The LibraryIndex a prediction for `item` may see."""
+    from app.utils.reader.library import LibraryIndex
+    if _LIB["mode"] != "loo":
+        return LibraryIndex.empty()
+    if _LIB["full"] is None:
+        import sqlite3
+        path = _LIB["db"] or str(Path(__file__).resolve().parents[2] / "db" / "_cowork.db")
+        _LIB["full"] = LibraryIndex.from_snapshot(path)
+        con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        try:
+            _LIB["rec_perf"] = {str(r[0]): r[1] for r in con.execute("select id, performance_id from recording")}
+        finally:
+            con.close()
+    pid = _LIB["rec_perf"].get(str(item.get("id")))
+    return _LIB["full"].without_performance(pid) if pid is not None else LibraryIndex.empty()
+
+
+def _parse(item):
+    from app.utils.ingest import parse_info_file
+    return parse_info_file(None, text=item.get("info_text") or "", library=library_for(item),
+                           n_audio=int(item.get("n_audio") or 0) or None)
+
+
+def venue_or_event(r):
+    """Corpus convention: a festival-only file carries the festival as its venue
+    (Resolved has no event field until chunk 4)."""
+    return r.get("venue") or r.get("event")
+
+
 def predict_reader(item):
     """info text alone, through parse_info_file()."""
-    from app.utils.ingest import parse_info_file
-    r = parse_info_file(None, text=item.get("info_text") or "")
+    r = _parse(item)
     p = _empty_pred()
     p["artist"] = r.get("artist")
     p["date"] = (r.get("year"), r.get("month"), r.get("day"))
     for k in ("venue", "event", "stage", "city", "state", "country", "source"):
         p[k] = r.get(k)
+    p["venue"] = venue_or_event(r)
     return p, None, None
 
 
@@ -294,7 +340,7 @@ def build_scan(item):
     when the item carries them, and the folder-name fallbacks match scan time.
     """
     from app.utils import ingest as ing
-    parsed = ing.parse_info_file(None, text=item.get("info_text") or "")
+    parsed = _parse(item)
     folder_name = item.get("folder_name") or ""
     n_audio = int(item.get("n_audio") or 0)
     tags = item.get("tags") or {}
@@ -312,6 +358,7 @@ def build_scan(item):
     keys = ("artist", "artist_match", "year", "month", "day", "venue", "venue_match",
             "city", "state", "country", "source", "lineage")
     from_info = {k: parsed.get(k) for k in keys}
+    from_info["venue"] = venue_or_event(parsed)
     from_info["tracks"] = [{"number": t["number"], "title": t["title"],
                             "songwriter": t.get("songwriter")}
                            for t in parsed.get("tracks", [])]
@@ -429,8 +476,9 @@ def aggregate(results):
     return {"fields": fields, "auto_ingest": auto}
 
 
-def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None):
-    """Score every item in a tier. mode is 'reader' or 'resolve'."""
+def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None, library="none"):
+    """Score every item in a tier. mode is 'reader' or 'resolve'; library is 'none' or 'loo'."""
+    set_library_mode(library)
     items, meta = load_tier(tier, corpus_dir, fixtures_dir)
     if limit:
         items = items[:limit]
@@ -449,7 +497,7 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
     ms = sorted(times)
     timing = {"p50_ms": statistics.median(ms) if ms else None,
               "p95_ms": ms[min(len(ms) - 1, int(len(ms) * 0.95))] if ms else None}
-    return {"tier": tier, "mode": mode, "n": len(items), "errors": errors,
+    return {"tier": tier, "mode": mode, "library": library, "n": len(items), "errors": errors,
             "meta": meta, "timing": timing, "when": datetime.now().strftime("%Y-%m-%d %H:%M"),
             **aggregate(results), "items": results}
 
@@ -462,7 +510,7 @@ def _pct(x):
 
 def format_report(rep):
     snap = rep["meta"].get("snapshot_date")
-    head = (f"{rep['tier']} ({rep['mode']})  n={rep['n']}"
+    head = (f"{rep['tier']} ({rep['mode']}{'' if rep.get('library', 'none') == 'none' else ', library ' + rep['library']})  n={rep['n']}"
             + (f"  snapshot {snap}" if snap else "") + f"  run {rep['when']}")
     out = [head]
     if rep["errors"]:
@@ -494,7 +542,8 @@ def format_report(rep):
 
 
 def _run_key(rep):
-    return f"{rep['tier']}:{rep['mode']}"
+    lib = rep.get("library", "none")
+    return f"{rep['tier']}:{rep['mode']}" + ("" if lib == "none" else f":{lib}")
 
 
 def load_last_run(corpus_dir=None):
@@ -550,6 +599,8 @@ def main(argv=None):
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--reader-only", action="store_true", help="info text alone (default)")
     mode.add_argument("--resolve", action="store_true", help="scan payload through resolve()")
+    ap.add_argument("--library", choices=LIBRARY_MODES, default="none",
+                    help="none: empty library; loo: leave-one-out (never the full library)")
     ap.add_argument("--diff", action="store_true", help="print items that changed verdict since the last run")
     ap.add_argument("--corpus", help="corpus folder (default ~/Workshop/dev/resolver-corpus)")
     ap.add_argument("--limit", type=int)
@@ -565,7 +616,7 @@ def main(argv=None):
         return 0
 
     rep = run_tier(args.tier, "resolve" if args.resolve else "reader",
-                   corpus_dir=args.corpus, limit=args.limit)
+                   corpus_dir=args.corpus, limit=args.limit, library=args.library)
     changes = diff_runs(load_last_run(args.corpus).get(_run_key(rep)), rep) if args.diff else None
     if args.json:
         print(json.dumps({k: v for k, v in rep.items() if k != "items"}, indent=2))

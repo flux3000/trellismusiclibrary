@@ -23,6 +23,8 @@ Output conventions (unchanged from ingest.py):
            gazetteer name ("Canada", "France", "Japan")
   region   US state code ("VA"); for other countries the region name as
            written canonically ("Ontario", "Bavaria", "England")
+  state    the code for a US state, Canadian province or Australian state
+           ("ON", "WA"); empty for every other country
 """
 import re
 import unicodedata
@@ -163,6 +165,7 @@ def _city_in(text, cc, admin1=None):
 class PlaceResult:
     city: str = ""
     region: str = ""          # US code, or region name for other countries
+    region_code: str = ""     # state/province code for US, CA and AU ("ON", "WA"); "" elsewhere
     country: str = ""         # "US", "UK", gazetteer name, or "" when not stated/derivable
     left: str = ""            # text left of the place in its clause (venue candidate)
     others: list = field(default_factory=list)    # other clauses: {text, span, sep, side}
@@ -181,8 +184,9 @@ class PlaceResult:
 
     @property
     def state(self):
-        """US state code, as ingest stores it (non-US regions are not stored as state)."""
-        return self.region if self.country == "US" else ""
+        """State as ingest stores it: the code for a US state, Canadian province or
+        Australian state ("ON", "NSW"). Other countries leave it empty (decision 2026-10-03)."""
+        return self.region_code
 
     def venue_candidate(self):
         """The text that should be considered the venue: what stands left of the
@@ -495,6 +499,7 @@ def _peel_clause(segs, work, city_only):
     r = PlaceResult()
     if region is not None:
         r.region = region.code if region.cc == "US" else region.display
+        r.region_code = region.code if region.cc in ("US", "CA", "AU") else ""
     if country_cc:
         r.country = _country_display(country_cc)
     elif region is not None:

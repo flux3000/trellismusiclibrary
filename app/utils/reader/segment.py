@@ -40,12 +40,13 @@ class Segment:
         return (self.start, self.end)
 
 
-def segment_line(line, line_index=0, block=0, offset=0):
-    """Segments of one line. `offset` shifts spans into a larger text."""
+def segment_line(line, line_index=0, block=0, offset=0, labels=True):
+    """Segments of one line. `offset` shifts spans into a larger text. `labels=False`
+    leaves a leading "Label:" in the first segment (the caller handles labels)."""
     segs = []
     pos = 0
     label = None
-    m = _LABEL_RE.match(line)
+    m = _LABEL_RE.match(line) if labels else None
     if m:
         label = m.group(1).strip()
         pos = m.end()
