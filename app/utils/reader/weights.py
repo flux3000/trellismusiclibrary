@@ -84,6 +84,27 @@ EMISSION = [
     ("after_at",          "ARTIST", -3.5),
     ("paren_tail",        "ARTIST", -3.0),
 
+    # ── ATLAS (shipped reference data): evidence weaker than the library's ─
+    # Every weight here is below the smallest lib_* weight for its role
+    # (tests/test_atlas_features.py keeps that true), and reader/features.py gives
+    # the Atlas no say wherever the library has already spoken.
+    ("atl_artist",        "ARTIST",  2.0),
+    ("atl_artist_fz",     "ARTIST",  1.0),
+    ("atl_musician",      "ARTIST",  0.5),
+    ("atl_musician",      "MEMBER",  1.5),
+    ("atl_venue",         "VENUE",   2.0),
+    ("atl_venue_fz",      "VENUE",   1.0),
+    ("atl_show_place",    "VENUE",   3.8),
+    ("atl_show_event",    "EVENT",   3.8),
+    ("atl_show_event",    "VENUE",  -1.5),
+    ("atl_event",         "EVENT",   2.5),
+    ("atl_event_fz",      "EVENT",   1.2),
+    ("atl_artist",        "VENUE",  -1.5),
+    ("atl_artist",        "TITLE",  -1.0),
+    ("atl_venue",         "ARTIST", -1.5),
+    ("atl_event",         "ARTIST", -1.5),
+    ("atl_event",         "VENUE",  -1.5),
+
     # ── TITLE (tour or show banner) ───────────────────────────────────────
     ("line0",             "TITLE",   0.5),
     ("quoted",            "TITLE",   3.5),

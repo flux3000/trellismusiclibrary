@@ -11,6 +11,7 @@ Everything below is here because leaving it out produces an app that launches
 and then dies, usually with a message that names something unrelated.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -26,6 +27,24 @@ from version import __version__, APP_NAME, SHORT_NAME   # noqa: E402
 # to PyInstaller's unpack directory at runtime, which is why they are placed at
 # the same relative path they occupy in the repo.
 datas = [("app/static", "app/static")]
+
+# The Atlas (Resolver v2, chunk 4): the shipped, read-only reference database of
+# places, acts and events the reader consults. Built on a Mac, before a release,
+# by `python3 -m app.atlas.build`; it is too big to commit (gitignored), so it is
+# absent from a fresh checkout. A bundle without it still runs (the reader works
+# as it did before the Atlas existed) but would ship without the feature the
+# release is for, so the build refuses unless told otherwise.
+# app/atlas/lookup.py finds it at resource_dir()/assets/atlas/atlas.sqlite, which
+# is exactly where this places it.
+_atlas = Path(SPECPATH) / "assets" / "atlas" / "atlas.sqlite"
+if _atlas.is_file():
+    datas += [(str(_atlas), "assets/atlas")]
+elif os.environ.get("TRELLIS_ALLOW_NO_ATLAS") != "1":
+    raise SystemExit(
+        "Refusing to build: assets/atlas/atlas.sqlite is missing.\n"
+        "Build it first:  python3 -m app.atlas.build\n"
+        "(or set TRELLIS_ALLOW_NO_ATLAS=1 for a bundle that ships without it)"
+    )
 
 # soundfile ships its OWN copy of libsndfile, loaded through ctypes rather than
 # imported — PyInstaller follows Python imports and cannot see it. Without it

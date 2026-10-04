@@ -87,7 +87,7 @@ _ITEM_STATUSES = ("pending", "in_progress", "ingested", "review", "skipped", "fa
                   "ready", "moved")
 
 # Keys a run's blanket "applies to every recording below" values may carry.
-_APPLIED_KEYS = ("artist", "venue", "city", "state", "country", "event",
+_APPLIED_KEYS = ("artist", "venue", "city", "state", "country", "event", "stage",
                  "source", "source_tag", "lineage", "notes")
 
 
@@ -618,7 +618,7 @@ def set_applied(run_id):
     """
     Store the run's blanket "applies to every recording below" values: a JSON
     object of the non-empty fields to impose (artist, venue [+ venue_id], city,
-    state, country, event, source, source_tag, lineage, notes). They overwrite the scan's
+    state, country, event, stage, source, source_tag, lineage, notes). They overwrite the scan's
     inference at ingest, in either mode. An empty object (or null) clears them.
     """
     run, err = _get_run_or_404(run_id)

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from .decode import emission, _R
 from .features import (VENUE_WORDS, is_festival_like, instrument_annotation, parse_set_label, person_shaped,
                        _PAREN_TAIL_RE, _HYPHEN_INSTR_RE, _INSTR)
+from app.utils.event_names import clean_event_name
 from .library import LibraryIndex, norm_key
 
 _ARTIST = _R["ARTIST"]
@@ -202,9 +203,10 @@ def read_billing(doc, dec, library=None, title_case=None):
 
     ev = best_unit("EVENT")
     if ev is not None:
-        r.event = tc(_clean(ev.unit.text))
-        r.fields["event"] = {"role": "EVENT", "text": _clean(ev.unit.text), "span": [ev.unit.start, ev.unit.end],
-                             "line": ev.unit.line, "score": round(ev.score, 2)}
+        r.event = clean_event_name(tc(_clean(ev.unit.text)))
+        if r.event:
+            r.fields["event"] = {"role": "EVENT", "text": _clean(ev.unit.text), "span": [ev.unit.start, ev.unit.end],
+                                 "line": ev.unit.line, "score": round(ev.score, 2)}
     _BODY = ("block_later", "line_late", "source_kw", "recording_verb", "equip_word", "notes_word",
              "has_gt", "has_clock", "prose", "w8p")
 
@@ -232,9 +234,10 @@ def read_billing(doc, dec, library=None, title_case=None):
         if raw and r.event and norm_key(raw) == norm_key(r.event):
             raw = ""                # the venue candidate is the event text: venue stays empty
         if raw and (is_festival_like(raw) or library.event_match(raw)) and not r.event:
-            r.event = tc(raw)       # a festival never goes into Venue
-            r.fields["event"] = {"role": "VENUE", "text": raw, "span": [vd.unit.start, vd.unit.end],
-                                 "line": vd.unit.line, "score": round(vd.score, 2), "via": "festival-like venue segment"}
+            r.event = clean_event_name(tc(raw))     # a festival never goes into Venue
+            if r.event:
+                r.fields["event"] = {"role": "VENUE", "text": raw, "span": [vd.unit.start, vd.unit.end],
+                                     "line": vd.unit.line, "score": round(vd.score, 2), "via": "festival-like venue segment"}
             raw = ""
         if raw:
             r.venue, r.venue_how = tc(raw), "line"

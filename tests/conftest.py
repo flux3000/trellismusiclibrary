@@ -13,6 +13,10 @@ import os
 import tempfile
 import pytest
 
+# The suite never opens the real Atlas (assets/atlas/atlas.sqlite). Tests that want an
+# Atlas build the tiny fixture one (tests/fixtures/atlas_fixture.py) and hand it in.
+os.environ["TRELLIS_ATLAS"] = "off"
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))

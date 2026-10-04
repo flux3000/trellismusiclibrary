@@ -5110,7 +5110,7 @@ a.member-chip-name:hover { color: var(--accent); }
    redesign sheet). minmax(0,…) on the flexible tracks rather than plain fr, so
    a narrow panel shrinks the two text fields instead of overflowing the form. */
 .ingest-row-ident {
-  grid-template-columns: 72px 48px 48px minmax(0, 1.6fr) minmax(0, 1.2fr);
+  grid-template-columns: 72px 48px 48px minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
   gap: 10px;
 }
 /* Quality, Source, Lineage — that order. Lineage is the long one and takes
@@ -8870,6 +8870,7 @@ select.set-input { max-width: 480px; }
 .set-about { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 6px 16px; margin: 0; }
 .set-about dt { font-size: 11.5px; color: var(--t3); }
 .set-about dd { font-size: 11.5px; color: var(--t1); margin: 0; min-width: 0; }
+.set-about-credit { font-size: 11.5px; color: var(--t3); margin: 10px 0 0; }
 /* Paths are raw technical strings — one of the few places mono still belongs. */
 .set-path { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
 .set-about-tag {

@@ -197,7 +197,7 @@ def update_performance(performance_id):
               "end_year", "end_month", "end_day", "venue_id", "event_id",
               "city", "state", "country", "notes"]:
         if f in data:
-            setattr(p, f, data[f])
+            setattr(p, f, ((data[f] or "").strip() or None) if f == "stage" else data[f])
 
     db.session.flush()
     pending_venue_image_cleanup = []

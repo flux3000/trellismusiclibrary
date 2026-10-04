@@ -33,6 +33,7 @@ from app.utils.personnel import sync_performance_personnel
 from app.utils.venues import is_placeholder_venue_name
 from app.models.venue import Venue
 from app.models.event import Event
+from app.utils.event_names import clean_event_name, event_key
 from app.models.genre import Genre
 from app.models.performance import Performance
 from app.models.recording import Recording, RecordingFingerprint
@@ -1006,6 +1007,9 @@ def _confirm_payload_from_resolved(resolved, scan):
         "start_month":        date.get("month"),
         "start_day":          date.get("day"),
         "venue_name":         resolved.venue.value,
+        "event_name":         resolved.event.value,
+        "event_create":       False,      # unattended: link to an existing Event, never create one
+        "stage":              resolved.stage.value,
         "city":               resolved.city.value,
         "state":              resolved.state.value,
         "country":            resolved.country.value,
@@ -1036,8 +1040,8 @@ def resolver_json_for_storage(resolver_result):
 
 
 # Blanket ("applies to every recording below") keys -> where they land.
-_BLANKET_FIELDS = ("artist", "venue", "city", "state", "country", "source",
-                   "source_tag", "lineage")
+_BLANKET_FIELDS = ("artist", "venue", "event", "stage", "city", "state", "country",
+                   "source", "source_tag", "lineage")
 
 
 def apply_blanket_values(resolved, payload, applied):
@@ -1045,8 +1049,8 @@ def apply_blanket_values(resolved, payload, applied):
     Overwrite the scan's inference with staged blanket values (Review & Ingest
     precedence: a value the person typed beats whatever the tags or info file
     said). Resolved fields are replaced before the verdict so a staged artist
-    clears needs_artist; event/notes/ids have no Resolved field and go
-    straight onto the confirm payload (payload may be None before it exists).
+    clears needs_artist; notes and ids have no Resolved field and go straight
+    onto the confirm payload (payload may be None before it exists).
     """
     if not applied:
         return
@@ -1072,6 +1076,9 @@ def apply_blanket_values(resolved, payload, applied):
     if applied.get("event"):
         payload["event_name"] = applied["event"]
         payload["event_id"] = None
+        payload["event_create"] = True        # a person typed it
+    if applied.get("stage"):
+        payload["stage"] = applied["stage"]
     if applied.get("notes"):
         payload["notes"] = applied["notes"]
 
@@ -1360,6 +1367,22 @@ def _store_non_music_signal(tracks, library_root, folder_path):
              force=True)
 
 
+def _find_event(name):
+    """The existing Event a name refers to: the exact name (any case), else the one whose
+    normalised key matches ("Telluride BG Festival" and "30th Telluride Bluegrass
+    Festival" both find "Telluride Bluegrass Festival"). Lowest id wins a tie."""
+    exact = db.session.query(Event).filter(func.lower(Event.name) == name.lower()).order_by(Event.id).first()
+    if exact:
+        return exact
+    key = event_key(name)
+    if not key:
+        return None
+    for eid, ename in db.session.query(Event.id, Event.name).order_by(Event.id):
+        if event_key(ename) == key:
+            return db.session.get(Event, eid)
+    return None
+
+
 def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     """
     Resolve or create the full object chain, then ingest the recording.
@@ -1385,6 +1408,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
       "info_file_content":  "...",
       "event_name":         "Bonnaroo 2009",  # optional — name-resolved to Event record
       "event_id":           null,             # optional — use existing Event ID directly
+      "stage":              "Harbor Stage",   # optional — Performance.stage (new performances)
       "resolver_result":    {...},  # optional -- the scan's `resolved` dict, stored
                                      # (minus tracks) on recording.resolver_json
       "ai_result":          {...},  # optional — raw AI Assist result if run pre-confirm,
@@ -1444,6 +1468,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     country     = (data.get("country")    or "").strip() or None
     venue_name  = (data.get("venue_name") or "").strip() or None
     event_name  = (data.get("event_name") or "").strip() or None
+    stage       = (data.get("stage") or "").strip() or None
     start_year  = data.get("start_year")
     start_month = data.get("start_month")
     start_day   = data.get("start_day")
@@ -1539,12 +1564,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     if event_id_in:
         event = db.session.get(Event, int(event_id_in))
     elif event_name:
-        event = db.session.query(Event).filter(
-            func.lower(Event.name) == event_name.lower()
-        ).first()
-        if not event:
+        event = _find_event(event_name)
+        # A person reviewed the wizard form, so it may create. An unattended ingest
+        # (auto_confirm) only links to an Event that exists until chunk 6 gives the
+        # reader a confidence to gate creation on.
+        if not event and data.get("event_create", True) and clean_event_name(event_name):
             event = Event(
-                name    = event_name,
+                name    = clean_event_name(event_name),
                 city    = city    or None,
                 state   = state   or None,
                 country = country or None,
@@ -1579,6 +1605,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             artist_id = artist.id,
             venue_id     = venue.id  if venue  else None,
             event_id     = event.id  if event  else None,
+            stage        = stage,
             start_year   = start_year,
             start_month  = start_month,
             start_day    = start_day,
@@ -1983,6 +2010,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         "artist_id":        artist.id,
         "folder_name":         folder_name,
         "event_id":            event.id if event else None,
+        "stage":               performance.stage,
         "checksum_mismatches": checksum_mismatches,
         "tag_errors":          tag_errors,
         "image_errors":        image_errors,

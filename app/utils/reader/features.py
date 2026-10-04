@@ -513,7 +513,7 @@ def _mk_units(line_obj, library):
     return out, label
 
 
-def build_doc(text, library=None, n_audio=None, hints=None):
+def build_doc(text, library=None, n_audio=None, hints=None, atlas=None):
     library = library or LibraryIndex.empty()
     hints = hints or {}
     text = re.sub(r"\r(?!\n)", "\n", text or "")      # old-Mac line ends; same length, spans stay valid
@@ -671,7 +671,7 @@ def build_doc(text, library=None, n_audio=None, hints=None):
             u.pos, u.n_in_line = p, n
         units.extend(L.units)
     doc = Doc(text or "", lines, units, n_audio, track_start, runs)
-    _features(doc, library, hints)
+    _features(doc, library, hints, atlas)
     return doc
 
 
@@ -819,7 +819,7 @@ def _unit_features(u, L, doc, library, hints, idx):
         f["agree_hint_venue"] = 1.0
 
 
-def _features(doc, library, hints):
+def _features(doc, library, hints, atlas=None):
     lines_by_nb = {L.nb: L for L in doc.lines}
     for idx, u in enumerate(doc.units):
         L = lines_by_nb[u.nb]
@@ -843,3 +843,166 @@ def _features(doc, library, hints):
             u.feats["next_line_place"] = 1.0
         if u.pos == 0 and prv is not None and prv.has_date:
             u.feats["prev_line_date"] = 1.0
+    if atlas is not None:
+        _atlas_features(doc, atlas, hints)
+
+
+# ── the Atlas (shipped reference data) ───────────────────────────────────────
+#
+# The Atlas is evidence, never an authority, and the library always outranks it:
+#   - a unit the library has already spoken for (any lib_* feature) gets no atl_* feature;
+#   - if the library names an artist, a venue or an event anywhere in the file, the
+#     Atlas adds no evidence of that kind anywhere in the file;
+#   - every atl_* weight is smaller than the smallest lib_* weight for the same role
+#     (weights.py; tests/test_atlas_features.py keeps it so).
+# Exact matches are cheap and run for every header unit; fuzzy matches run for a few.
+
+_ATL_SKIP = ("source_kw", "recording_verb", "equip_word", "notes_word", "has_gt", "has_clock",
+             "prose", "w8p")
+_ATL_FUZZY_BUDGET = 4
+_ATL_MIN_ONE_WORD_ACT = 3          # a one-word act must have this much MusicBrainz history
+
+
+def _atlas_features(doc, atlas, hints):
+    units = [u for u in doc.units if u.kind == "seg"]
+    lib = {
+        "artist": any("lib_artist_exact" in u.feats or "lib_artist_core" in u.feats for u in units),
+        "venue": any("lib_venue" in u.feats or "lib_venue_in" in u.feats for u in units),
+        "event": any("lib_event" in u.feats for u in units),
+    }
+    show_keys, show_events = _atlas_show(atlas, hints) if not (lib["venue"] and lib["event"]) else (set(), set())
+    if lib["venue"]:
+        show_keys = set()
+    if lib["event"]:
+        show_events = set()
+    doc_cities, doc_countries = _doc_places(doc)
+    budget = _ATL_FUZZY_BUDGET
+    for u in units:
+        f = u.feats
+        if any(k.startswith("lib_") for k in f) or "in_place" in f:
+            continue
+        if f.get("after_track_start") or f.get("line_late") or any(f.get(k) for k in _ATL_SKIP):
+            continue
+        core = _strip_wrap(_PAREN_TAIL_RE.sub("", u.text))
+        n = len(_words(core))
+        if not core or n > 6:
+            continue
+        if show_keys and _key_in(norm_key(core), show_keys):
+            f["atl_show_place"] = 1.0
+        if show_events and n >= 2 and _key_in(norm_key(core), show_events, contained=True):
+            f["atl_show_event"] = 1.0
+        found = False
+        if not lib["artist"]:
+            for c in atlas.artist(core, limit=3, fuzzy=False):
+                if n == 1 and (c.extra.get("popularity") or 0) < _ATL_MIN_ONE_WORD_ACT:
+                    continue
+                f["atl_artist"] = 1.0 if c.how in ("exact", "squashed") else 0.8
+                found = True
+                break
+        if not lib["venue"]:
+            for c in atlas.venue(core, limit=3, fuzzy=False):
+                if not _atlas_place_fits(atlas, c, f, doc_cities, doc_countries):
+                    continue
+                f["atl_venue"] = 1.0 if n >= 2 else 0.5
+                found = True
+                break
+        if not lib["event"]:
+            for c in atlas.event(core, limit=3, fuzzy=False):
+                f["atl_event"] = 1.0 if n >= 2 else 0.5
+                found = True
+                break
+        if f.get("person_name") or f.get("has_instr"):
+            if atlas.musician(core, limit=1):
+                f["atl_musician"] = 1.0
+                found = True
+        if found or budget <= 0 or n < 2 or len(core) < 6 or f.get("has_digit") or u.nb > 6:
+            continue
+        # nothing matched exactly: one fuzzy try, at the kind this unit looks like
+        budget -= 1
+        venue_like = bool(f.get("venue_word"))
+        event_like = bool(f.get("event_word"))
+        if not lib["event"] and event_like:
+            c = atlas.event(core, limit=1)
+            if c:
+                f["atl_event_fz"] = c[0].score
+        elif not lib["venue"] and venue_like:
+            c = [x for x in atlas.venue(core, limit=3)
+                 if _atlas_place_fits(atlas, x, f, doc_cities, doc_countries)]
+            if c:
+                f["atl_venue_fz"] = c[0].score
+        elif not lib["artist"] and not venue_like and n <= 4:
+            c = atlas.artist(core, limit=1)
+            if c:
+                f["atl_artist_fz"] = c[0].score
+
+
+def _atlas_show(atlas, hints):
+    """(place keys, event keys) of the shows the Atlas lists for this act on this exact day.
+    hints: show_artist and show_date (y, m, d), set by parse_info_file from the text itself; the
+    plain artist and date hints (tags, folder name) work too. A partial date gives nothing."""
+    h = hints or {}
+    art, date = h.get("show_artist") or h.get("artist"), h.get("show_date") or h.get("date")
+    if not art or not date or not all(date):
+        return set(), set()
+    places, events = set(), set()
+    for ep in atlas.event_place(art, date):
+        if not ep.get("exact"):
+            continue
+        if ep.get("place_id") is not None:
+            places.update(atlas.place_keys(ep["place_id"]))
+        events.add(norm_key(ep.get("event") or ""))
+    events.discard("")
+    return places, events
+
+
+def _atlas_show_place_keys(atlas, hints):
+    return _atlas_show(atlas, hints)[0]
+
+
+def _key_in(key, keys, contained=False):
+    """key is one of keys; with `contained`, or a whole-word run inside one of them."""
+    if key in keys:
+        return True
+    if contained:
+        pad = f" {key} "
+        return any(pad in f" {k} " for k in keys)
+    return False
+
+
+def _doc_places(doc):
+    """Normalised city names and country names the text's own place lines state."""
+    cities, countries = set(), set()
+    for L in doc.lines:
+        pl = L.place
+        if pl is None:
+            continue
+        if pl.city:
+            cities.add(norm_key(pl.city))
+        if pl.country:
+            countries.add(norm_key(pl.country))
+    return cities, countries
+
+
+_ATL_INSTITUTION_KINDS = {"school"}
+
+
+def _atlas_place_fits(atlas, c, f, doc_cities, doc_countries):
+    """An Atlas place is evidence for a text segment only when the text does not contradict it:
+    it sits in a town the text names (or, text naming only a country, in that country), and an
+    institution (a university) needs a venue word as well. No place in the text: no objection."""
+    if c.extra.get("place_kind") in _ATL_INSTITUTION_KINDS and not f.get("venue_word"):
+        return False
+    if doc_cities:
+        keys = atlas.place_area_keys(c.id)
+        if c.extra.get("city"):
+            keys.add(norm_key(c.extra["city"]))
+        if keys:
+            return bool(keys & doc_cities) or any(f" {d} " in f" {k} " or f" {k} " in f" {d} "
+                                                  for d in doc_cities for k in keys)
+    elif doc_countries and c.extra.get("country"):
+        from .place import _country_display
+        try:
+            return norm_key(_country_display(c.extra["country"])) in doc_countries
+        except KeyError:
+            return True
+    return True

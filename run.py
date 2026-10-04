@@ -941,6 +941,11 @@ if __name__ == "__main__":
     if os.environ.get("TRELLIS_SELFTEST") == "1":
         first_run_setup()
         print(f"selftest ok — {Config.DB_PATH}")
+        # The Atlas (Resolver v2): a missing or unreadable file is not a failure of
+        # the app, so this reports it and carries on; tools/build_macos.sh reads
+        # the line and says whether the bundle shipped with it.
+        from app.atlas import lookup as _atlas_lookup
+        print(_atlas_lookup.status()[1])
         sys.exit(0)
 
     # Ctrl-C should kill the process even while PyWebView owns the main thread

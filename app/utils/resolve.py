@@ -108,6 +108,8 @@ class Resolved:
     date: Field
     artist: Field
     venue: Field
+    event: Field
+    stage: Field
     city: Field
     state: Field
     country: Field
@@ -129,6 +131,8 @@ class Resolved:
             "date":        self.date.to_dict(),
             "artist":      self.artist.to_dict(),
             "venue":       self.venue.to_dict(),
+            "event":       self.event.to_dict(),
+            "stage":       self.stage.to_dict(),
             "city":        self.city.to_dict(),
             "state":       self.state.to_dict(),
             "country":     self.country.to_dict(),
@@ -286,6 +290,21 @@ def _resolve_venue_field(scan):
 
     source = "tags" if "tags" in cands else "info"
     return Field(value=cands[source], source=source, candidates=dict(cands), conflict=False)
+
+
+def _resolve_info_only_field(scan, key):
+    """event / stage: what the info file's header states. Tags carry neither, and the
+    folder name is not read for them, so there is one source and no conflict to track.
+    The festival is an Event, "Harbor Stage" is the performance's Stage; neither is
+    ever the venue (the reader already keeps them apart)."""
+    v = scan["suggestions"]["from_info_file"].get(key)
+    v = v.strip() if isinstance(v, str) else v
+    if key == "event":
+        from app.utils.event_names import clean_event_name
+        v = clean_event_name(v)
+    if not v:
+        return Field()
+    return Field(value=v, source="info", candidates={"info": v}, conflict=False)
 
 
 def _resolve_location_fields(scan, venue_field):
@@ -479,6 +498,8 @@ def resolve(scan, *, library_root=None, placement=None):
         date=date_f,
         artist=artist_f,
         venue=venue_f,
+        event=_resolve_info_only_field(scan, "event"),
+        stage=_resolve_info_only_field(scan, "stage"),
         city=loc["city"],
         state=loc["state"],
         country=loc["country"],

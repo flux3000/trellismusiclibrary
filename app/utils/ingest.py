@@ -1442,6 +1442,7 @@ _TC_LOWER = frozenset({
     'in', 'of', 'on', 'to', 'up', 'as', 'is', 'it', 'if', 'so', 'vs',
 })
 
+_TC_ORDINAL_RE = re.compile(r'^\d+(?:st|nd|rd|th)\W*$', re.I)
 _TC_INITIALS_RE = re.compile(r'^(\W*)([^\W\d_](?:\.[^\W\d_])+)(\.?\W*)$')
 _TC_APOS = "'\u2019"
 
@@ -1472,6 +1473,9 @@ def title_case(s):
     for i, w in enumerate(s.split()):
         if normalize:
             w = w.lower()
+        if _TC_ORDINAL_RE.match(w):             # "3rd", "30th": never "3Rd"
+            out.append(w.lower())
+            continue
         m = _TC_INITIALS_RE.match(w)
         if m:
             out.append(m.group(1) + m.group(2).upper() + m.group(3))
@@ -2233,7 +2237,7 @@ def _read_text_auto(file_path):
 
 
 def parse_info_file(file_path, known_artists=None, known_venues=None, text=None, *,
-                    library=None, n_audio=None, durations=None, hints=None):
+                    library=None, n_audio=None, durations=None, hints=None, atlas=None):
     """
     Parse a ROIO info/text file and extract structured metadata suggestions.
 
@@ -2250,8 +2254,11 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
                         feature for an unnumbered setlist).
         durations:      seconds per audio file in order, when known; printed track
                         times are aligned against them (result["track_alignment"]).
-        hints:          {"artist": ..., "venue": ...} the tags or folder name state,
-                        as agreement features for the decoder.
+        hints:          {"artist": ..., "venue": ..., "date": (y, m, d)} the tags or folder
+                        name state, as agreement features for the decoder.
+        atlas:          an app.atlas.lookup.Atlas (shipped reference data) as weaker
+                        evidence than the library; None reads without it, so this
+                        function stays pure.
 
     `text` exists so a rescan can re-run the inference over the reviewer's
     EDITED info file without first writing it to their disk. The alternative
@@ -2372,8 +2379,22 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
 
     # Roles: every segment of the text gets one (reader/decode.py), and the
     # artist, event, stage and venue are read off them (reader/billing.py).
-    doc, decoded = decode_text(raw, library, n_audio, hints)
+    doc, decoded = decode_text(raw, library, n_audio, hints, atlas)
     reading = read_billing(doc, decoded, library, title_case)
+
+    # The show index: an artist and an exact date the text itself states can name the place an
+    # MB event was held. Asked once the artist is known; the file is read again with that as a hint.
+    show_eps = []
+    if atlas is not None:
+        _sd = _parse_date("\n".join(header_lines))
+        _sa = reading.artist or (hints or {}).get("artist")
+        if _sa and _sd and _sd[0] and _sd[1] and _sd[2]:
+            show_eps = [e for e in atlas.event_place(_sa, (_sd[0], _sd[1], _sd[2])) if e.get("exact")]
+            if show_eps:
+                _h = dict(hints or {})
+                _h.update({"show_artist": _sa, "show_date": (_sd[0], _sd[1], _sd[2])})
+                doc, decoded = decode_text(raw, library, n_audio, _h, atlas)
+                reading = read_billing(doc, decoded, library, title_case)
 
     if not known_artists and not library.is_empty:
         known_artists = library.artist_names()
@@ -2447,6 +2468,29 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             if pr.has_region_or_country:
                 result["state"] = pr.state or None
                 result["country"] = pr.country or None
+
+    # Atlas fills, only where the text left a gap: a show the Atlas lists names its place's
+    # town and region; a bare city gets its country (and state) when that is not a guess.
+    if atlas is not None:
+        from app.utils.reader.atlas_fill import fill_place
+        from app.utils.reader.place import _country_display as _cd
+        if show_eps and not result["city"] and show_eps[0].get("place_id") is not None:
+            _vk0 = _norm_key_simple(result["venue"]) if result["venue"] else ""
+            _pi = atlas.place_info(show_eps[0]["place_id"])
+            _names = {_norm_key_simple(k) for k in atlas.place_keys(show_eps[0]["place_id"])}
+            if _pi.get("city") and (not _vk0 or _vk0 in _names):
+                result["city"] = _pi["city"]
+                if not result["country"] and _pi.get("country"):
+                    try:
+                        result["country"] = _cd(_pi["country"])
+                    except KeyError:
+                        pass
+        if result["city"] and not result["country"]:
+            _st, _co = fill_place(atlas, result["city"], result["venue"])
+            if _co:
+                result["country"] = _co
+                if _st and not result["state"]:
+                    result["state"] = _st
 
     # A venue is never the city it sits in, nor the artist's own name.
     if result["venue"]:
@@ -2607,7 +2651,9 @@ def build_scan_payload(folder_path, info_override=None):
     info_file_content = None
     parsed_candidates = []
     from app.utils.reader.library import current_library
+    from app.atlas.lookup import current_atlas
     _lib = current_library()
+    _atlas = current_atlas()
     _n_audio = len(files.get("audio_files") or []) or None
     _durs = [t.get("duration") for t in from_tags.get("tracks", [])]
     _durs = _durs if _durs and all(isinstance(d, (int, float)) and d > 0 for d in _durs) else None
@@ -2622,7 +2668,7 @@ def build_scan_payload(folder_path, info_override=None):
             use_text = info_override.get("content") or ""
             override_used = True
         parsed = parse_info_file(tf["path"], text=use_text, library=_lib, n_audio=_n_audio,
-                                 durations=_durs)
+                                 durations=_durs, atlas=_atlas)
         log_step(job, "parsed info file",
                  tf["filename"] + (" (edited text)" if use_text is not None else ""))
         entry  = {
@@ -2660,7 +2706,8 @@ def build_scan_payload(folder_path, info_override=None):
     # which is a different and much more misleading answer.
     if info_override and not override_used and (info_override.get("content") or "").strip():
         content = info_override["content"]
-        parsed  = parse_info_file(None, text=content, library=_lib, n_audio=_n_audio, durations=_durs)
+        parsed  = parse_info_file(None, text=content, library=_lib, n_audio=_n_audio, durations=_durs,
+                                  atlas=_atlas)
         parsed_candidates.insert(0, {
             "filename": override_name or "info.txt",
             "score": 0,

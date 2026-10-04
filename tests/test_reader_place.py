@@ -171,3 +171,13 @@ def test_state_is_filled_for_canada_and_australia_only():
     assert _parse_location("Sydney, NSW, Australia") == ("Sydney", "NSW", "Australia")
     assert _parse_location("Munich, Bavaria, Germany")[1] in ("", None)
     assert _parse_location("Paris, France")[1] in ("", None)
+
+
+def test_common_city_abbreviations_read_as_the_city():
+    from app.utils.reader.place import peel
+    for text, city, st in (("Fillmore, SF", "San Francisco", "CA"), ("Warfield, SF, CA", "San Francisco", "CA"),
+                           ("Troubadour, L.A.", "Los Angeles", "CA"), ("Tipitina's, Nola", "New Orleans", "LA"),
+                           ("Electric Factory, Philly", "Philadelphia", "PA")):
+        r = peel(text, False)
+        assert (r.city, r.state, r.country) == (city, st, "US"), text
+    assert peel("Baton Rouge, LA", False).city == "Baton Rouge"      # LA alone stays Louisiana

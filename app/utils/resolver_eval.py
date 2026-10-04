@@ -309,15 +309,43 @@ def library_for(item):
     return _LIB["full"].without_performance(pid) if pid is not None else LibraryIndex.empty()
 
 
+ATLAS_MODES = ("none", "fixture", "real")      # or a path to an atlas.sqlite
+_ATLAS = {"mode": "none", "tmp": None}
+
+
+def set_atlas_mode(mode):
+    """none: no Atlas (default, so numbers never depend on a local file); fixture: the tiny test Atlas;
+    real: the app's own (assets/atlas/atlas.sqlite or $TRELLIS_ATLAS); or a path to an atlas.sqlite."""
+    from app.atlas import lookup
+    _ATLAS["mode"] = mode
+    if mode == "none":
+        lookup.set_atlas(None)
+    elif mode == "fixture":
+        import tempfile
+        from tests.fixtures.atlas_fixture import build_fixture
+        if _ATLAS["tmp"] is None:
+            _ATLAS["tmp"] = tempfile.mkdtemp(prefix="atlas-fixture-")
+        path = str(Path(_ATLAS["tmp"]) / "atlas.sqlite")
+        build_fixture(path)
+        lookup.set_atlas(path)
+    elif mode == "real":
+        lookup.reset_atlas()
+    else:
+        lookup.set_atlas(mode)
+
+
 def _parse(item):
     from app.utils.ingest import parse_info_file
+    from app.atlas.lookup import current_atlas
     return parse_info_file(None, text=item.get("info_text") or "", library=library_for(item),
-                           n_audio=int(item.get("n_audio") or 0) or None)
+                           n_audio=int(item.get("n_audio") or 0) or None,
+                           atlas=current_atlas() if _ATLAS["mode"] != "none" else None)
 
 
 def venue_or_event(r):
     """Corpus convention: a festival-only file carries the festival as its venue
-    (Resolved has no event field until chunk 4)."""
+    (gold in G1 to G3 was written that way). Resolved has its own event field since
+    chunk 4, so the convention now lives only here, in how a prediction is scored."""
     return r.get("venue") or r.get("event")
 
 
@@ -356,9 +384,8 @@ def build_scan(item):
         "tracks": tag_tracks,
     }
     keys = ("artist", "artist_match", "year", "month", "day", "venue", "venue_match",
-            "city", "state", "country", "source", "lineage")
+            "city", "state", "country", "source", "lineage", "event", "stage")
     from_info = {k: parsed.get(k) for k in keys}
-    from_info["venue"] = venue_or_event(parsed)
     from_info["tracks"] = [{"number": t["number"], "title": t["title"],
                             "songwriter": t.get("songwriter")}
                            for t in parsed.get("tracks", [])]
@@ -406,6 +433,7 @@ def predict_resolve(item):
     p["date"] = (d.get("year"), d.get("month"), d.get("day"))
     for k in ("venue", "event", "stage", "city", "state", "country", "source"):
         p[k] = val(k)
+    p["venue"] = p["venue"] or p["event"]          # corpus convention, as in predict_reader
     # Confidence arrives in chunk 6; until then every value is "confident".
     conf = {k: (getattr(getattr(res, k, None), "confidence", None) or "confident")
             for k in FIELDS if hasattr(res, k)}
@@ -476,9 +504,11 @@ def aggregate(results):
     return {"fields": fields, "auto_ingest": auto}
 
 
-def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None, library="none"):
+def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None, library="none",
+             atlas="none"):
     """Score every item in a tier. mode is 'reader' or 'resolve'; library is 'none' or 'loo'."""
     set_library_mode(library)
+    set_atlas_mode(atlas)
     items, meta = load_tier(tier, corpus_dir, fixtures_dir)
     if limit:
         items = items[:limit]
@@ -495,9 +525,12 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
         results.append(score_item(it, pred, status, conf))
     errors = sum(1 for r in results if "_error" in r["pred"])
     ms = sorted(times)
-    timing = {"p50_ms": statistics.median(ms) if ms else None,
-              "p95_ms": ms[min(len(ms) - 1, int(len(ms) * 0.95))] if ms else None}
-    return {"tier": tier, "mode": mode, "library": library, "n": len(items), "errors": errors,
+    q = lambda f: ms[min(len(ms) - 1, int(len(ms) * f))] if ms else None
+    timing = {"p50_ms": statistics.median(ms) if ms else None, "p95_ms": q(0.95),
+              "p90_ms": q(0.90), "p99_ms": q(0.99), "max_ms": ms[-1] if ms else None,
+              "mean_ms": statistics.fmean(ms) if ms else None,
+              "slowest": sorted(((t, i) for i, t in enumerate(times)), reverse=True)[:5]}
+    return {"tier": tier, "mode": mode, "library": library, "atlas": str(atlas), "n": len(items), "errors": errors,
             "meta": meta, "timing": timing, "when": datetime.now().strftime("%Y-%m-%d %H:%M"),
             **aggregate(results), "items": results}
 
@@ -510,7 +543,8 @@ def _pct(x):
 
 def format_report(rep):
     snap = rep["meta"].get("snapshot_date")
-    head = (f"{rep['tier']} ({rep['mode']}{'' if rep.get('library', 'none') == 'none' else ', library ' + rep['library']})  n={rep['n']}"
+    head = (f"{rep['tier']} ({rep['mode']}{'' if rep.get('library', 'none') == 'none' else ', library ' + rep['library']}"
+            f"{'' if rep.get('atlas', 'none') == 'none' else ', atlas ' + rep['atlas']})  n={rep['n']}"
             + (f"  snapshot {snap}" if snap else "") + f"  run {rep['when']}")
     out = [head]
     if rep["errors"]:
@@ -541,9 +575,23 @@ def format_report(rep):
     return "\n".join(out)
 
 
+def format_timing(rep, items_label=lambda i: str(i)):
+    """--timing: the whole latency distribution and the slowest items, so a p95 can be
+    reproduced and compared (same Atlas file, same library mode, warm cache after pass 1)."""
+    import sqlite3
+    t = rep["timing"]
+    out = [f"timing  {rep['tier']} {rep['mode']}  n={rep['n']}  library {rep.get('library')}  atlas {rep.get('atlas')}",
+           f"  SQLite {sqlite3.sqlite_version}",
+           f"  mean {t['mean_ms']:.2f}  p50 {t['p50_ms']:.2f}  p90 {t['p90_ms']:.2f}  p95 {t['p95_ms']:.2f}  "
+           f"p99 {t['p99_ms']:.2f}  max {t['max_ms']:.2f}  (ms per item)"]
+    out += [f"  slowest: item {i} {ms:.1f} ms" for ms, i in t["slowest"]]
+    return "\n".join(out)
+
+
 def _run_key(rep):
     lib = rep.get("library", "none")
-    return f"{rep['tier']}:{rep['mode']}" + ("" if lib == "none" else f":{lib}")
+    atl = rep.get("atlas", "none")
+    return f"{rep['tier']}:{rep['mode']}" + ("" if lib == "none" else f":{lib}") + ("" if atl == "none" else f":atlas-{atl}")
 
 
 def load_last_run(corpus_dir=None):
@@ -601,9 +649,14 @@ def main(argv=None):
     mode.add_argument("--resolve", action="store_true", help="scan payload through resolve()")
     ap.add_argument("--library", choices=LIBRARY_MODES, default="none",
                     help="none: empty library; loo: leave-one-out (never the full library)")
+    ap.add_argument("--atlas", default="none",
+                    help="none (default) | fixture | real | PATH: which Atlas the reader may consult")
     ap.add_argument("--diff", action="store_true", help="print items that changed verdict since the last run")
     ap.add_argument("--corpus", help="corpus folder (default ~/Workshop/dev/resolver-corpus)")
     ap.add_argument("--limit", type=int)
+    ap.add_argument("--timing", type=int, nargs="?", const=1, metavar="PASSES",
+                    help="print the latency distribution; with PASSES > 1 the tier runs that many "
+                         "times and the last (warm) pass is the one reported")
     ap.add_argument("--no-write", action="store_true", help="do not update last_run.json")
     ap.add_argument("--json", action="store_true", help="print the report as JSON")
     ap.add_argument("--export-g1", action="store_true", help="write corpus/g1.jsonl from the snapshot")
@@ -615,13 +668,17 @@ def main(argv=None):
         print(f"g1.jsonl: {meta['n']} items from snapshot dated {meta['snapshot_date']}")
         return 0
 
-    rep = run_tier(args.tier, "resolve" if args.resolve else "reader",
-                   corpus_dir=args.corpus, limit=args.limit, library=args.library)
+    for _ in range(max(1, args.timing or 1)):
+        rep = run_tier(args.tier, "resolve" if args.resolve else "reader",
+                       corpus_dir=args.corpus, limit=args.limit, library=args.library, atlas=args.atlas)
     changes = diff_runs(load_last_run(args.corpus).get(_run_key(rep)), rep) if args.diff else None
     if args.json:
         print(json.dumps({k: v for k, v in rep.items() if k != "items"}, indent=2))
     else:
         print(format_report(rep))
+        if args.timing:
+            print()
+            print(format_timing(rep))
     if args.diff:
         print()
         print(format_diff(changes))

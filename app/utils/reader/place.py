@@ -80,6 +80,8 @@ _DE = {"01": ("Baden-Württemberg", ["baden wuerttemberg", "baden württemberg"]
 _AMBIGUOUS_NAMES = {"washington", "new york", "georgia", "victoria", "berlin",
                     "hamburg", "bremen", "luxembourg"}
 
+_CITY_ABBREVS = {"sf": ("San Francisco", "CA"), "la": ("Los Angeles", "CA"),
+                 "philly": ("Philadelphia", "PA"), "nola": ("New Orleans", "LA")}
 _DC_ALIASES = {"washdc", "washingtondc", "wdc"}   # a whole segment that names the city AND the region
 
 _ISO3 = {rec["iso3"]: iso for iso, rec in _COUNTRIES.items()}
@@ -127,7 +129,8 @@ def _norm_city(s):
     s = re.sub(r"[^a-z0-9' ]+", " ", s).replace("'", "")
     words = [{"st": "saint", "ft": "fort", "mt": "mount"}.get(w, w) for w in s.split()]
     out = " ".join(words)
-    return "new york" if out in ("nyc", "new york city") else out
+    return {"nyc": "new york", "new york city": "new york", "sf": "san francisco", "philly": "philadelphia",
+            "nola": "new orleans"}.get(out, out)
 
 
 @lru_cache(maxsize=1)
@@ -232,6 +235,9 @@ def _region_cands(tok):
         out.append(_Cand("region", "US", "NY", "NY", "NY", builtin_city="New York"))
     if key in _DC_ALIASES:
         out.append(_Cand("region", "US", "DC", "DC", "DC", builtin_city="Washington"))
+    if tok[:1].isupper() and ((key in _CITY_ABBREVS and key != "la") or (key == "la" and "." in tok)):
+        city, st = _CITY_ABBREVS[key]
+        out.append(_Cand("region", "US", st, st, st, builtin_city=city))
     if code_form and up in _US:
         out.append(_Cand("region", "US", up, up, up, code_form=True, free=True,
                          builtin_city="Washington" if up == "DC" else ""))
@@ -507,6 +513,9 @@ def _peel_clause(segs, work, city_only):
     r.city = _nice(city) if city else ""
     if r.city and _norm_city(r.city) == "new york":
         r.city = "New York"            # NYC, New York City
+    elif r.city and _norm_city(r.city) in ("san francisco", "philadelphia", "new orleans") and \
+            r.city.lower().replace(".", "") in ("sf", "philly", "nola"):
+        r.city = {"sf": "San Francisco", "philly": "Philadelphia", "nola": "New Orleans"}[r.city.lower().replace(".", "")]
     r.city_validated = bool(validated and city)
     spans = [e["span"] for e in ev]
     start = min(s for s, _ in spans)

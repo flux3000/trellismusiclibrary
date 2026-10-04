@@ -6714,6 +6714,7 @@ const App = (() => {
     const perfName   = perf?.artist || ''
     const perfId     = perf?.artist_id || null
     const eventStr   = perf?.event_name || ''
+    const stageStr   = perf?.stage || ''
     setNavCurrent(dateStr || perfName || 'Recording')
 
     // Small "go to its own page" nav icons (2026-07-23) — same treatment for
@@ -7103,6 +7104,9 @@ const App = (() => {
             ${canEdit
               ? `<span class="rec-dot">·</span><span class="rec-f rec-f-event pp-editable${eventStr ? '' : ' pp-empty'}" id="rec-f-event" title="Click to set the festival/event this show is part of">${eventStr ? esc(eventStr) : 'Add event'}</span>`
               : (eventStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(eventStr)}</span>` : '')}
+            ${canEdit
+              ? `<span class="rec-dot">·</span><span class="rec-f rec-f-stage pp-editable${stageStr ? '' : ' pp-empty'}" id="rec-f-stage">${stageStr ? esc(stageStr) : 'Add stage'}</span>`
+              : (stageStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(stageStr)}</span>` : '')}
           </div>`}
           <div class="rec-musicians-row" id="rec-musicians"></div>
           ${sourceLineageRow}
@@ -7763,6 +7767,17 @@ const App = (() => {
           if (e.key === 'Enter') { e.preventDefault(); commitEvent({ id: null, name: input.value.trim() }) }
           else if (e.key === 'Escape') { committed = true; reload() }
         })
+      })
+
+      // Stage → inline text (optional, Performance.stage)
+      makeInlineEditable(document.getElementById('rec-f-stage'), {
+        placeholder: 'Add stage',
+        get: () => perf.stage || '',
+        onSave: async v => {
+          v = v.trim()
+          try { await API.performances.update(perf.id, { stage: v || null }); perf.stage = v || null }
+          catch (e) { alert('Failed: ' + e.message) }
+        },
       })
 
       // Notes → inline multiline (recording-level)
@@ -9349,7 +9364,7 @@ const App = (() => {
   const _INGEST_FIELD_LABEL = {
     date: 'date', artist: 'artist', venue: 'venue', city: 'city',
     state: 'state', country: 'country', source: 'source', lineage: 'lineage',
-    source_tag: 'source tag', shnid: 'shnid', album: 'album',
+    source_tag: 'source tag', shnid: 'shnid', album: 'album', stage: 'stage',
   }
   const _INGEST_REASON_LABEL = {
     needs_artist:        'No artist found',
@@ -9741,7 +9756,7 @@ const App = (() => {
   // busy, the staged values `applied`, and the derived `typed`/`state`).
   function _applyAllHtml(cx) {
     const aa = cx.aa
-    const anyApplied = !!(aa.event.trim() || aa.artist.trim() || aa.venue.name.trim()
+    const anyApplied = !!(aa.event.trim() || aa.stage.trim() || aa.artist.trim() || aa.venue.name.trim()
       || aa.city.trim() || aa.state.trim() || aa.country.trim()
       || aa.source.trim() || aa.source_tag.trim() || aa.lineage.trim() || aa.notes.trim())
     // Locked exactly like the Add Recording form's own venue picker: an id
@@ -9810,6 +9825,11 @@ const App = (() => {
                  <input type="text" id="lq-apply-event"
                         value="${esc(aa.event)}" ${cx.busy ? 'disabled' : ''}>
                </div>
+               <div class="ingest-field">
+                 <label>Stage</label>
+                 <input type="text" id="lq-apply-stage"
+                        value="${esc(aa.stage)}" ${cx.busy ? 'disabled' : ''}>
+               </div>
              </div>
              <div class="ingest-field">
                <label>Venue</label>
@@ -9870,7 +9890,7 @@ const App = (() => {
   function _wireApplyAll(cx) {
     // Plain text/textarea fields — same input/blur pattern as the Event field
     // always used.
-    ;[['lq-apply-event', 'event'], ['lq-apply-source', 'source'], ['lq-apply-source-tag', 'source_tag'],
+    ;[['lq-apply-event', 'event'], ['lq-apply-stage', 'stage'], ['lq-apply-source', 'source'], ['lq-apply-source-tag', 'source_tag'],
       ['lq-apply-lineage', 'lineage'], ['lq-apply-notes', 'notes'],
       ['lq-apply-city', 'city'], ['lq-apply-state', 'state'], ['lq-apply-country', 'country'],
     ].forEach(([id, key]) => {
@@ -10337,7 +10357,7 @@ const App = (() => {
   const _INGEST_SNAPSHOT_KEYS = [
     'artist_name', 'start_year', 'start_month', 'start_day',
     'end_year', 'end_month', 'end_day', 'venue_name', 'city', 'state',
-    'country', 'source', 'quality', 'lineage', 'notes', 'event_name',
+    'country', 'source', 'quality', 'lineage', 'notes', 'event_name', 'stage',
   ]
   // Queue-level values → this form (Ryan, 2026-09-02).
   //
@@ -10388,6 +10408,7 @@ const App = (() => {
     { key: 'state',     form: 'state',       live: 'f-state' },
     { key: 'country',   form: 'country',     live: 'f-country' },
     { key: 'event',     form: 'event_name',  live: 'f-event-name' },   // + id
+    { key: 'stage',     form: 'stage',       live: 'f-stage' },
     { key: 'source',    form: 'source',      live: 'f-source' },
     { key: 'source_tag', form: 'source_tag', live: 'f-source-tag' },
     { key: 'lineage',   form: 'lineage',     live: 'f-lineage' },
@@ -10502,6 +10523,7 @@ const App = (() => {
       venue_name: g('f-venue-name'), city: g('f-city'), state: g('f-state'),
       country: g('f-country'), source: g('f-source'), quality: g('f-quality'),
       lineage: g('f-lineage'), notes: g('f-notes'), event_name: g('f-event-name'),
+      stage: g('f-stage'),
     }
     return _ingestFormSnapshot(live) !== f._inferred
   }
@@ -10846,6 +10868,7 @@ const App = (() => {
       f.end_day         = ''
       f.event_name      = ''
       f.event_id        = null
+      f.stage           = rv('stage') || ''
       // Genre is never inferred from tags or the info file. It is a controlled
       // vocabulary keyed to the ACT, so the only honest sources are the act's
       // existing row (filled in by initAddArtistMembers) or a human pick.
@@ -11160,6 +11183,10 @@ const App = (() => {
                   <input type="hidden" id="f-event-id" value="${esc(String(f.event_id || ''))}" />
                   <div class="event-dropdown" id="f-event-dropdown" style="display:none"></div>
                 </div>
+              </div>
+              <div class="ingest-field">
+                <label>Stage</label>
+                <input type="text" id="f-stage" value="${esc(f.stage || '')}" autocomplete="off" />
               </div>
             </div>
             <div id="end-date-toggle-row" style="margin-top:3px">
@@ -12370,6 +12397,7 @@ const App = (() => {
       f.country         = document.getElementById('f-country').value.trim()
       f.event_name      = document.getElementById('f-event-name').value.trim()
       f.event_id        = parseInt(document.getElementById('f-event-id').value) || null
+      f.stage           = document.getElementById('f-stage').value.trim()
       // Genre: an id for an existing genre, or a name for one the user
       // explicitly chose to create. A NAME WITH NO ID that was merely typed and
       // never confirmed through the create row is discarded here rather than
@@ -14705,7 +14733,7 @@ const App = (() => {
   // run (PUT .../applied) and come back in the run payload, so they survive a
   // reload and reach the worker.
   const _biEmptyAa = () => ({
-    event: '', artist: '', venue: { id: null, name: '' },
+    event: '', stage: '', artist: '', venue: { id: null, name: '' },
     city: '', state: '', country: '', source: '', source_tag: '', lineage: '', notes: '',
   })
   let _biAa = _biEmptyAa()
@@ -14716,7 +14744,7 @@ const App = (() => {
   function _biAaFromApplied(a) {
     const aa = _biEmptyAa()
     if (!a) return aa
-    for (const k of ['artist', 'city', 'state', 'country', 'event', 'source', 'source_tag', 'lineage', 'notes']) aa[k] = a[k] || ''
+    for (const k of ['artist', 'city', 'state', 'country', 'event', 'stage', 'source', 'source_tag', 'lineage', 'notes']) aa[k] = a[k] || ''
     aa.venue = { id: a.venue_id || null, name: a.venue || '' }
     return aa
   }
@@ -16494,6 +16522,7 @@ const App = (() => {
             <dt>Library data</dt><dd class="set-path">${esc(about.database || '')}</dd>
             <dt>Audio files</dt><dd class="set-path">${esc(about.library_root || '')}</dd>
           </dl>
+          <p class="set-about-credit">Place data from GeoNames (geonames.org), CC BY 4.0.</p>
         </section>
       </div>`)
 

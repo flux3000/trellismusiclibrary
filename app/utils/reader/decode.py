@@ -142,6 +142,6 @@ def decode(doc):
     return out
 
 
-def decode_text(text, library=None, n_audio=None, hints=None):
-    doc = build_doc(text, library, n_audio, hints)
+def decode_text(text, library=None, n_audio=None, hints=None, atlas=None):
+    doc = build_doc(text, library, n_audio, hints, atlas)
     return doc, decode(doc)

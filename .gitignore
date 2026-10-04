@@ -94,3 +94,10 @@ install.json
 # Installed builds write them to Application Support instead.
 /images/
 /trellis_root.json
+
+# The Atlas (Resolver v2, chunk 4): the shipped reference database, tens of MB,
+# rebuilt by `python3 -m app.atlas.build` before a release. Never committed;
+# the build and the packager read it from here.
+assets/atlas/atlas.sqlite
+assets/atlas/*.building
+assets/atlas/atlas.sqlite.updating

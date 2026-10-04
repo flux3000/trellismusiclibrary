@@ -69,10 +69,25 @@ find "$APP" -name 'libsndfile*' | grep -q . \
 echo
 echo "── Startup self-test ──────────────────────────────────────────"
 SELFTEST_DIR=$(mktemp -d)
-if TRELLIS_DATA_DIR="$SELFTEST_DIR" TRELLIS_SELFTEST=1 \
-     "$APP/Contents/MacOS/${APP_NAME}" 2>&1 | sed 's/^/  /'; then
+if SELFTEST_OUT=$(TRELLIS_DATA_DIR="$SELFTEST_DIR" TRELLIS_SELFTEST=1 \
+     "$APP/Contents/MacOS/${APP_NAME}" 2>&1); then
+  echo "$SELFTEST_OUT" | sed 's/^/  /'
   echo "  ✓ the app starts"
+  # The Atlas is optional at run time (the reader works without it) but a release
+  # carries it, so a bundle that cannot open it fails the build. A deliberate
+  # Atlas-less build says so with TRELLIS_ALLOW_NO_ATLAS=1.
+  if echo "$SELFTEST_OUT" | grep -q '^atlas ok'; then
+    echo "  ✓ the Atlas opens"
+  elif [[ "${TRELLIS_ALLOW_NO_ATLAS:-}" == "1" ]]; then
+    echo "  - the Atlas did not open (allowed: TRELLIS_ALLOW_NO_ATLAS=1)" >&2
+  else
+    echo "  ✗ THE ATLAS DID NOT OPEN (see the atlas line above)." >&2
+    echo "    Build it with: python3 -m app.atlas.build, then rebuild the app." >&2
+    rm -rf "$SELFTEST_DIR"
+    exit 1
+  fi
 else
+  echo "$SELFTEST_OUT" | sed 's/^/  /'
   echo
   echo "  ✗ THE APP DOES NOT START. The output above is the real error —" >&2
   echo "    a missing data file or hidden import. Add it to trellis.spec." >&2
