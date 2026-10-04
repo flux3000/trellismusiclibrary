@@ -1,0 +1,13 @@
+{"created": 1700000000, "server": "ia800000.us.archive.org", "dir": "/1/items/gd77-05-08.sbd.miller.97065.flac16",
+ "metadata": {"identifier": "gd77-05-08.sbd.miller.97065.flac16", "mediatype": "etree", "collection": ["GratefulDead", "etree"],
+   "creator": "Grateful Dead", "date": "1977-05-08", "venue": "Barton Hall, Cornell University", "coverage": "Ithaca, NY",
+   "source": "Master Reel > Nak 550 > Betty Cantor-Jackson", "lineage": "reel > DAT > CD > EAC > flac", "taper": "Betty Cantor-Jackson", "transferer": "Miller"},
+ "files": [
+  {"name": "gd77-05-08d1t01.flac", "source": "original", "format": "Flac", "size": "30000000", "length": "312.5", "track": "01", "title": "Mississippi Half-Step"},
+  {"name": "gd77-05-08d1t02.flac", "source": "original", "format": "Flac", "size": "30000000", "length": "5:12", "track": "02", "title": "Jack Straw"},
+  {"name": "gd77-05-08d1t01.shn", "source": "original", "format": "Shorten", "size": "30000000"},
+  {"name": "gd77-05-08.sbd.miller.97065.ffp.txt", "source": "original", "format": "Text", "size": "900"},
+  {"name": "gd77-05-08.sbd.miller.97065.txt", "source": "original", "format": "Text", "size": "2100"},
+  {"name": "gd77-05-08.sbd.miller.97065_meta.xml", "source": "original", "format": "Metadata"},
+  {"name": "gd77-05-08d1t01.mp3", "source": "derivative", "format": "VBR MP3", "size": "5000000"}
+ ]}

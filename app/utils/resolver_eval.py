@@ -196,6 +196,147 @@ def judge_field(field, gold, pred):
     return judge_text(gold, pred)
 
 
+# ── Archive tiers (chunk 7): G3 catalog key, G2 metadata key ─────────────────
+# The key is not in Trellis's field shapes, so the place fields are scored against the
+# key's own strings. G3: venue and location are one string ("Venue, City, ST", sometimes
+# "Event, Venue, City, ST"). G2: free-text venue and coverage, uploader-typed and noisy.
+
+def _act_key(name):
+    from app.utils.artists import _act_key as k
+    return k(name)
+
+
+_ART_RANK = {"right": 0, "variant": 1, "partial": 2, "wrong": 3, "empty": 4, None: 5}
+
+
+def judge_artist_archive(gold, pred):
+    """judge_artist, plus: the same act after _act_key normalisation counts as a variant."""
+    # The catalog heading can name several billings of one act: "Del McCoury / Del McCoury Band".
+    parts = [x.strip() for x in str(gold).split(" / ")] if gold and " / " in str(gold) else [gold]
+    best = None
+    for part in parts:
+        j = judge_artist(part, pred)
+        if j in ("partial", "wrong") and part is not False:
+            g, p = _act_key(part), _act_key(pred)
+            if g and p and g == p:
+                j = "variant"
+        if best is None or _ART_RANK.get(j, 9) < _ART_RANK.get(best, 9):
+            best = j
+    return best
+
+
+def _parts(raw):
+    return [x for x in (norm(p) for p in re.split(r"[,;]", str(raw or ""))) if x]
+
+
+def judge_catalog_venue(raw, venue, event=None, city=None, state=None):
+    """
+    G3 venue. right: venue + location, normalised as one string, equals the key (in any of
+    the natural orders), or the resolved venue or the resolved event equals one comma part
+    of it (event-plus-venue strings). partial: words contained. None: the key is empty.
+    """
+    gold_full = norm(raw)
+    if not gold_full:
+        return None
+    pv, pe = norm(venue), norm(event)
+    if not pv and not pe:
+        return "empty"
+    parts = _parts(raw)
+    for combo in ((venue, city, state), (event, venue, city, state), (event, venue),
+                  (venue, city), (event, city, state)):
+        joined = norm(", ".join(str(x) for x in combo if x))
+        if joined and joined == gold_full:
+            return "right"
+    if pv in parts or pe in parts:
+        return "right"
+    for x in (pv, pe):
+        if x and (_has_words(x, gold_full) or any(_has_words(p, x) for p in parts)):
+            return "partial"
+    return "wrong"
+
+
+def _state_tokens(raw):
+    toks = {_canon_state(x) for x in re.split(r"[,;]", str(raw or "")) if x.strip()}
+    toks |= {_canon_state(w) for w in norm(raw).split()}
+    return toks
+
+
+def judge_in_string(field, pred, haystack, needs_location_part=True):
+    """city or state appears in the key's string. right / wrong / empty; None when the key
+    gives nothing to check against (G3: no location part, so no city or state to find)."""
+    h = norm(haystack)
+    if not h:
+        return None
+    p = norm(pred)
+    if field == "state":
+        toks = _state_tokens(haystack)
+        if needs_location_part and not (toks & set(_US_STATES.values())):
+            return None
+        if not p:
+            return "empty"
+        return "right" if _canon_state(pred) in toks else "wrong"
+    if p and _has_words(p, h):
+        return "right"
+    if needs_location_part and len(_parts(haystack)) < 2:
+        return None
+    return "empty" if not p else "wrong"
+
+
+def judge_loose_venue(gold, pred):
+    """G2 venue: equal -> right; one contains the other, or half the words of the shorter
+    one are shared -> partial; else wrong. Loose on purpose: the key is noisy."""
+    g, p = norm(gold), norm(pred)
+    if not g:
+        return None
+    if not p:
+        return "empty"
+    if g == p:
+        return "right"
+    if _has_words(g, p) or _has_words(p, g):
+        return "partial"
+    gw, pw = set(g.split()), set(p.split())
+    if gw and pw and len(gw & pw) / min(len(gw), len(pw)) >= 0.5:
+        return "partial"
+    return "wrong"
+
+
+def judge_date_archive(gold, pred, century_inferred=False):
+    """judge_date; when the key's century was only inferred (00-26 -> 20xx), a prediction
+    that differs from it by the century alone is not scorable (the key may be the wrong one)."""
+    j = judge_date(gold, pred)
+    if j == "wrong" and century_inferred:
+        g, p = _date_tuple(gold), _date_tuple(pred)
+        if g and p and p[0] and g[0] % 100 == p[0] % 100 and g[1:] == p[1:]:
+            return None
+    return j
+
+
+def judge_item(tier, item, pred):
+    """Per-field judgments. G1/G4 use judge_field; G2 and G3 use the archive rules above."""
+    gold = item.get("gold") or {}
+    j = {f: judge_field(f, gold.get(f), pred.get(f)) for f in FIELDS}
+    if tier not in ("G2", "G3"):
+        return j
+    j["artist"] = judge_artist_archive(gold.get("artist"), pred.get("artist"))
+    infer = bool((item.get("archive_meta") or {}).get("century_inferred"))
+    j["date"] = judge_date_archive(gold.get("date"), pred.get("date"), infer)
+    # The corpus convention folds a festival-only file into `venue` (venue_or_event), so the
+    # resolved event is offered to the G3 rule as a separate string and nothing else changes.
+    pv = pred.get("venue")
+    ev = pred.get("event")
+    if tier == "G3" and gold.get("venue_raw"):
+        raw = gold["venue_raw"]
+        j["venue"] = judge_catalog_venue(raw, pv, ev, pred.get("city"), pred.get("state"))
+        j["city"] = judge_in_string("city", pred.get("city"), raw)
+        j["state"] = judge_in_string("state", pred.get("state"), raw)
+    elif tier == "G2":
+        j["venue"] = judge_loose_venue(gold.get("venue"), pv)
+        cov = gold.get("coverage_raw")
+        j["city"] = judge_in_string("city", pred.get("city"), cov, needs_location_part=False) if cov else None
+        j["state"] = judge_in_string("state", pred.get("state"), cov, needs_location_part=False) if cov else None
+    return j
+
+
 # ── Loading tiers ────────────────────────────────────────────────────────────
 
 def _read_jsonl(path):
@@ -226,7 +367,7 @@ def load_tier(tier, corpus_dir=None, fixtures_dir=None):
     corpus = Path(corpus_dir or DEFAULT_CORPUS)
     path = corpus / f"{tier.lower()}.jsonl"
     if not path.exists():
-        raise FileNotFoundError(f"{path} not found (G1: run --export-g1; G2/G3 come in chunk 7)")
+        raise FileNotFoundError(f"{path} not found (G1: run --export-g1; G2/G3: python3 -m app.utils.resolver_corpus g2|g3)")
     meta = {"source": str(path)}
     meta_path = corpus / f"{tier.lower()}.meta.json"
     if meta_path.exists():
@@ -491,9 +632,8 @@ def is_wrong(field, judgment):
     return judgment in WRONG_FOR.get(field, ("wrong",))
 
 
-def score_item(item, pred, status=None, conf=None, assess=None):
-    gold = item.get("gold") or {}
-    judgments = {f: judge_field(f, gold.get(f), pred.get(f)) for f in FIELDS}
+def score_item(item, pred, status=None, conf=None, assess=None, tier=None):
+    judgments = judge_item(tier, item, pred)
     # A required field that is wrong: artist wrong or only partly right, date wrong.
     # (A partly-right artist still files the recording under the wrong act.)
     auto_wrong = None
@@ -572,7 +712,7 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
             pred, status, conf, assess = _empty_pred(), None, None, None
             pred["_error"] = f"{type(exc).__name__}: {exc}"
         times.append((time.perf_counter() - t0) * 1000)
-        results.append(score_item(it, pred, status, conf, assess))
+        results.append(score_item(it, pred, status, conf, assess, tier=tier))
     errors = sum(1 for r in results if "_error" in r["pred"])
     ms = sorted(times)
     q = lambda f: ms[min(len(ms) - 1, int(len(ms) * f))] if ms else None
@@ -740,6 +880,12 @@ def format_report(rep):
     out = [head]
     if rep["errors"]:
         out.append(f"!! {rep['errors']} item(s) raised; they score as empty")
+    if rep["tier"] == "G2":
+        out.append("note: G2 is NOISY. The key is Internet Archive metadata typed by uploaders; "
+                   "artist and date compared exactly, venue and coverage loosely. Not comparable with G1 or G3.")
+    if rep["tier"] == "G3":
+        out.append("note: G3 key is the bluegrassarchive.com catalog. Venue and location are scored as one "
+                   "string; city and state are checked as appearing in it; inferred-century dates are not scored.")
     if rep["mode"] == "resolve" and rep["tier"] == "G1":
         out.append("note: folder_name is the original folder name and may state a date or source")
     out.append("")
