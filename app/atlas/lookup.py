@@ -329,7 +329,7 @@ class Atlas:
     def event_place(self, artist, date):
         """
         Shows the Atlas knows for this act on this day: [{"place_id", "place", "city",
-        "country", "event", "date", "act", "exact"}], where `date` is (y, m, d),
+        "country", "event", "kind", "date", "act", "exact"}], where `date` is (y, m, d),
         {"year", "month", "day"} or "YYYY-MM-DD" (month and day may be None; a partial
         date matches every show in that year or month and reports exact=False).
         Empty when the Atlas knows no such show.
@@ -343,17 +343,17 @@ class Atlas:
         ck = S.act_core(artist)
         prefix = f"{y:04d}" + (f"-{m:02d}" if m else "") + (f"-{d:02d}" if m and d else "")
         rows = self._q(
-            "select distinct e.id, e.name, e.begin_date, e.end_date, p.id, p.name, p.city, p.country, a.name "
+            "select distinct e.id, e.name, e.begin_date, e.end_date, p.id, p.name, p.city, p.country, a.name, e.kind "
             "from act_name n join act a on a.id = n.act_id "
             "join event_act ea on ea.act_id = n.act_id join event e on e.id = ea.event_id "
             "left join place p on p.id = e.place_id "
             "where (n.key = ? or n.ck = ?) and e.begin_date like ?",
             (nk, ck or nk, f"{y:04d}%"))
         out = []
-        for eid, ename, b, e, pid, pname, city, country, aname in rows:
+        for eid, ename, b, e, pid, pname, city, country, aname, ekind in rows:
             if not _covers(b, e, prefix):
                 continue
-            out.append({"event_id": eid, "event": ename, "date": b, "place_id": pid, "place": pname,
+            out.append({"event_id": eid, "event": ename, "kind": ekind, "date": b, "place_id": pid, "place": pname,
                         "city": city, "country": country, "act": aname, "exact": len(prefix) == 10})
         out.sort(key=lambda r: (not r["exact"], r["date"] or "", r["event_id"]))
         return out

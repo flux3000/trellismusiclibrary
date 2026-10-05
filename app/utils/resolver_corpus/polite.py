@@ -173,7 +173,10 @@ class PoliteFetcher:
         host = (p.hostname or "").lower()
         if not any(host == h or host.endswith("." + h) for h in self.hosts):
             raise ValueError(f"refusing host outside the allow-list: {host}")
-        if urllib.parse.unquote(p.path).lower().endswith(AUDIO_EXTS):
+        path = urllib.parse.unquote(p.path).lower()
+        # archive.org identifiers can end in ".flac" etc.; the /metadata/ API
+        # returns JSON whatever the identifier says, so it is never audio.
+        if not path.startswith("/metadata/") and path.endswith(AUDIO_EXTS):
             raise ValueError(f"refusing to fetch audio or an archive: {url}")
 
     # -- the one entry point ---------------------------------------------------

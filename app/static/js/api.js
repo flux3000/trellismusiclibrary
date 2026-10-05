@@ -445,6 +445,10 @@ const API = (() => {
       // true` because api/share.py DOES expose a proxy route for these
       // (recordings/images/<id>), unlike venues/musicians/events.
       ...entityImageApi('recordings', { contextual: true }),
+      // Copy the artist's primary image into this recording and make it the
+      // recording's primary (2026-10-04). Idempotent server-side.
+      useArtistImage: (id) => post(`/api/recordings/${id}/images/from-artist`, {}),
+      useVenueImage:  (id) => post(`/api/recordings/${id}/images/from-venue`, {}),
     },
 
     // ── Tracks ───────────────────────────────────────────────────────────────

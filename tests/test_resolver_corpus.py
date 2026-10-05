@@ -691,3 +691,19 @@ def test_g3_artist_heading_with_slashes_scores_each_billing():
     assert j("Del McCoury / Del McCoury Band / Del & Friends", "Del McCoury Band") == "right"
     assert j("Bela Fleck / Flecktones / Friends", "Bela Fleck") in ("right", "variant")
     assert j("Bela Fleck / Flecktones", "Doc Watson") == "wrong"
+
+
+def test_metadata_url_for_identifier_ending_in_audio_ext_is_allowed():
+    from app.utils.resolver_corpus.polite import PoliteFetcher
+    import inspect, tempfile, pathlib
+    sig = inspect.signature(PoliteFetcher)
+    kw = {}
+    if "cache_dir" in sig.parameters:
+        kw["cache_dir"] = pathlib.Path(tempfile.mkdtemp())
+    if "hosts" in sig.parameters:
+        kw["hosts"] = ("archive.org",)
+    f = PoliteFetcher(**kw)
+    f.check_url("https://archive.org/metadata/ween2000-06-29.dvda.flac")
+    import pytest
+    with pytest.raises(ValueError):
+        f.check_url("https://archive.org/download/x/track01.flac")

@@ -58,9 +58,9 @@ def test_nested_unreadable_show_is_failed_not_vanished(app, tmp_path):
     root = tmp_path / "Library"
     root.mkdir()
     _flac(root / "Artist" / "a1977-05-08" / "01.flac",
-          ARTIST="A", DATE="1977-05-08", VENUE="V")
+          ARTIST="Artist", DATE="1977-05-08", VENUE="V")
     _flac(root / "Artist" / "a1977-05-09" / "01.flac",
-          ARTIST="A", DATE="1977-05-09", VENUE="V")
+          ARTIST="Artist", DATE="1977-05-09", VENUE="V")
     _flac(root / "Solo" / "s1977-05-10" / "01.flac",
           ARTIST="A", DATE="1977-05-10", VENUE="V")
     os.chmod(root / "Artist" / "a1977-05-09", 0)

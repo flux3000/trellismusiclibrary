@@ -42,13 +42,13 @@ OVERALL = {
 TONE = {
     "excellent": "Natural, well-balanced tone. The frequency balance never "
                  "calls attention to itself.",
-    "good":      "Slightly colored but comfortable — a mild tilt you stop "
+    "good":      "Slightly colored but comfortable, a mild tilt you stop "
                  "noticing within a minute.",
     "fair":      "Noticeably colored. A little bright and thin, or a little "
                  "thick, without being fatiguing.",
     "poor":      "Clearly unbalanced. Expect boominess or an edgy top end "
                  "that grows tiring over a full show.",
-    "bad":       "Poor balance — hollow, honky or harsh enough to be the "
+    "bad":       "Poor balance, hollow, honky or harsh enough to be the "
                  "first thing you notice.",
     "severe":    "Severely unbalanced. Tinny, muddy or boxy to the point of "
                  "being hard to sit through.",
@@ -58,13 +58,13 @@ TONE = {
 NOISE = {
     "excellent": "Essentially silent behind the music.",
     "good":      "Very clean. Any hiss sits well below the performance.",
-    "fair":      "Mild background hiss — audible in quiet passages, easy to "
+    "fair":      "Mild background hiss, audible in quiet passages, easy to "
                  "ignore once the music starts.",
     "poor":      "Noticeable hiss or hum. Present through quiet moments and "
                  "obvious between songs.",
     "bad":       "Intrusive noise. Hiss or mains hum competes with quiet "
                  "passages.",
-    "severe":    "Heavy noise — a constant layer of hiss or hum across the "
+    "severe":    "Heavy noise, a constant layer of hiss or hum across the "
                  "whole performance.",
 }
 
@@ -75,7 +75,7 @@ DYNAMICS = {
     "good":      "Good dynamic range with only light compression.",
     "fair":      "Somewhat compressed. Loud and quiet passages sit closer "
                  "together than they should.",
-    "poor":      "Noticeably squashed — typically a tape deck's automatic "
+    "poor":      "Noticeably squashed, typically a tape deck's automatic "
                  "gain control riding the level.",
     "bad":       "Heavily compressed. Flat, with little sense of light and "
                  "shade.",
@@ -87,7 +87,7 @@ GROUPS = {"tone": TONE, "noise": NOISE, "dynamics": DYNAMICS}
 
 GROUP_LABEL = {"tone": "Tone", "noise": "Noise", "dynamics": "Dynamics"}
 GROUP_BLURB = {
-    "tone":     "Frequency balance — the boominess, tinniness and hollowness "
+    "tone":     "Frequency balance, the boominess, tinniness and hollowness "
                 "that make many live recordings unpleasant. Half the score.",
     "noise":    "Hiss, mains hum and background noise sitting under the music.",
     "dynamics": "How much life is left in the loud-to-quiet range, or how "
@@ -134,7 +134,7 @@ def cutoff_verdict(f):
         # "short" is what fits in the quick-glance bar; "verdict" is the fuller
         # phrasing used in the tooltip heading.
         short = (tier or "MP3").split(" / ")[0]
-        return {"khz": khz, "verdict": f"Lossy source — {tier or 'MP3'}",
+        return {"khz": khz, "verdict": f"Lossy source, {tier or 'MP3'}",
                 "short": short, "state": "bad",
                 "detail": f"A sharp encoder wall sits at {khz} kHz with nothing "
                           "above it. This was encoded to a lossy format at some "
@@ -148,7 +148,7 @@ def cutoff_verdict(f):
              "rather than a sharp encoder wall.")
         state = "good"
     elif edge >= 11000:
-        d = ("Some high end missing, but it rolls off gradually — the signature "
+        d = ("Some high end missing, but it rolls off gradually, the signature "
              "of tape or a limited capture chain, not lossy encoding.")
         state = "ok"
     elif edge >= 7000:
@@ -173,7 +173,7 @@ METRICS = [
     ("crowd_snr_db", {
         "label": "Crowd / room noise", "unit": " dB",
         "about": "How far the music sits above the noise floor in 250–2500 Hz, "
-                 "the band an audience occupies — chatter, shouting, applause. "
+                 "the band an audience occupies, chatter, shouting, applause. "
                  "Added 2026-07-31 because the engine was blind within audience "
                  "tapes; this is the best AUD predictor found (r = +0.32).",
         "scale": [(15, "bad",  "Audience competing with the band"),
@@ -188,12 +188,12 @@ METRICS = [
                  "are steady and easy to ignore; a room full of people talking "
                  "is not. Two recordings can share a noise floor where one is "
                  "benign and the other ruins the show. Measured and shown, "
-                 "but not currently a scored input — crowd/room noise (above) "
+                 "but not currently a scored input, crowd/room noise (above) "
                  "is the scored audience-tape signal.",
-        "scale": [(4,  "good", "Steady — hiss-like, easy to ignore"),
+        "scale": [(4,  "good", "Steady, hiss-like, easy to ignore"),
                   (6,  "ok",   "Mildly variable"),
-                  (8,  "poor", "Fluctuating — live room audible"),
-                  (99, "bad",  "Very unsteady — intrusive audience")],
+                  (8,  "poor", "Fluctuating, live room audible"),
+                  (99, "bad",  "Very unsteady, intrusive audience")],
     }),
     ("modulation_index", {
         "label": "Clarity (articulation)", "unit": "",
@@ -217,7 +217,7 @@ METRICS = [
         "label": "Presence balance", "unit": " dB",
         "about": "How loud the 2–6 kHz presence region is versus the low mids. "
                  "Human hearing peaks around 2–5 kHz, so an excess here reads "
-                 "as tinny and fatiguing. NOTE: measured but NOT scored — "
+                 "as tinny and fatiguing. NOTE: measured but NOT scored, "
                  "against 113 graded recordings this correlates +0.06 with "
                  "listening quality, and its old curve caused the 2026-07-30 "
                  "Danny Gatton inversion.",
@@ -240,7 +240,7 @@ METRICS = [
         "label": "Midrange scoop", "unit": " dB",
         "about": "Whether the 250–800 Hz body sits below both its neighbours. "
                  "A scoop can make a recording sound hollow and boxy. NOTE: "
-                 "measured but NOT scored — against 113 graded recordings "
+                 "measured but NOT scored, against 113 graded recordings "
                  "this correlates -0.02 with listening quality, essentially "
                  "no signal, so it was removed from Tone in the 2026-07-31 "
                  "rework alongside presence balance.",
@@ -278,7 +278,7 @@ METRICS = [
         # Grade means bear the rungs out: A+ -29.7, A -29.9, A- -36.1,
         # B+ -34.3, B -39.3. The A/B separation sits right around -35.
         "label": "HF energy ratio", "unit": " dB",
-        "about": "Energy above 8 kHz relative to the whole signal — whether "
+        "about": "Energy above 8 kHz relative to the whole signal, whether "
                  "there is any top end at all, as opposed to where it stops "
                  "(that is Frequency cutoff). Half the Tone score. Restored to "
                  "scoring 2026-07-28 after the engine proved unable to see "
@@ -292,8 +292,8 @@ METRICS = [
     }),
     ("mid_snr_db", {
         "label": "Signal-to-noise", "unit": " dB",
-        "about": "How far the music sits above the noise floor across 1–8 kHz "
-                 "— the band carrying most musical information and where hiss "
+        "about": "How far the music sits above the noise floor across 1–8 kHz, "
+                 "the band carrying most musical information and where hiss "
                  "is most audible.",
         "scale": [(12, "bad",  "Heavy hiss"),
                   (16, "poor", "Noticeable hiss"),
@@ -314,7 +314,7 @@ METRICS = [
     }),
     ("crest_factor_db", {
         "label": "Crest factor", "unit": " dB",
-        "about": "Peak level minus average level — how much dynamic range "
+        "about": "Peak level minus average level, how much dynamic range "
                  "survives. Low values mean compression, often a tape deck's "
                  "automatic gain control crushing the room.",
         "scale": [(9,  "bad",  "Heavily compressed"),
@@ -327,9 +327,9 @@ METRICS = [
     ("hf_edge_hz", {
         "label": "Frequency cutoff", "unit": " Hz",
         "about": "The highest frequency still carrying real musical content, "
-                 "after subtracting the noise floor. Measured and shown — it "
+                 "after subtracting the noise floor. Measured and shown, it "
                  "also drives the quick-glance cutoff badge at the top of the "
-                 "card — but not currently a scored input here; WHERE the "
+                 "card, but not currently a scored input here; WHERE the "
                  "signal stops is a different question from HF energy ratio "
                  "(above), which is scored and asks whether there's any top "
                  "end at all.",
@@ -342,9 +342,9 @@ METRICS = [
     ("lufs_integrated", {
         "label": "Loudness", "unit": " LUFS",
         "about": "Perceived loudness on the broadcast standard scale. Only "
-                 "extremes matter — very quiet wastes headroom, very loud "
+                 "extremes matter, very quiet wastes headroom, very loud "
                  "means someone squashed it. Measured and shown, but not "
-                 "currently a scored input — crest factor (above) is the "
+                 "currently a scored input, crest factor (above) is the "
                  "scored compression signal.",
         "scale": [(-26, "poor", "Very quiet"),
                   (-20, "ok",   "Quiet"),
@@ -356,7 +356,7 @@ METRICS = [
         "label": "DC offset", "unit": "", "dp": 5, "abs": True,
         "about": "Whether the waveform sits off-centre instead of swinging "
                  "symmetrically around zero. Caused by a faulty converter or "
-                 "preamp. It wastes headroom and clicks at edit points — but "
+                 "preamp. It wastes headroom and clicks at edit points, but "
                  "it is fixable in seconds with a high-pass filter, so it "
                  "never affects the score.",
         "scale": [(0.001, "good", "Centered"),
@@ -484,7 +484,7 @@ def metric_rows(f, scored_only=False):
 
     `scored_only=True` drops every zero-weight reading. Triage passes it: a
     number on the triage page is there to justify a meter, and five of the
-    eleven justify nothing (Ryan, 2026-08-28 — "if something does not
+    eleven justify nothing (Ryan, 2026-08-28, "if something does not
     contribute to the score, remove that metric from view here"). View
     Recording still shows the full set, where the question is "what IS this
     recording" rather than "why this score".

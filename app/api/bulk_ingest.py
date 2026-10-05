@@ -437,10 +437,20 @@ def items(run_id):
     else:
         order = BulkIngestItem.id.asc()
     total = q.count()
-    rows = (q.order_by(order)
-            .offset((page - 1) * per_page)
-            .limit(per_page)
-            .all())
+    if status == "review":
+        # One row per unconfirmed act first (settle it once and the rest of its rows clear),
+        # then the rest in discovery order.
+        ordered = bulk_ingest_run.lead_first(
+            q.with_entities(BulkIngestItem.id, BulkIngestItem.meta)
+            .order_by(order).all())
+        by_id = {it.id: it for it in
+                 q.filter(BulkIngestItem.id.in_(ordered[(page - 1) * per_page:page * per_page])).all()}
+        rows = [by_id[i] for i in ordered[(page - 1) * per_page:page * per_page] if i in by_id]
+    else:
+        rows = (q.order_by(order)
+                .offset((page - 1) * per_page)
+                .limit(per_page)
+                .all())
 
     # Recording artwork for imported rows (2026-10-01): the completed tabs
     # show it at the left of each row. One batched query, not one per row.
@@ -510,6 +520,8 @@ def _item_meta_fields(it):
         "source":    meta.get("source"),
         "lineage":   meta.get("lineage"),
         "title":     meta.get("title"),
+        "track_count": meta.get("track_count"),
+        "tracks":      meta.get("tracks") or [],
         # Metadata band for the unified ingest queue table (2026-09-27) --
         # computed once at extraction time (bulk_ingest_run.py::process),
         # never here, so listing a page of items is still one query.

@@ -340,7 +340,8 @@ def recording_detail(recording_id):
         # already approved above, so "visible" is already the only case this
         # payload gets built for. See _peer_row/_peer_summary for the list
         # payloads (they reuse recording_row/recording_summary unchanged).
-        "image_url":        _primary_recording_image_url(rec, url_prefix="/api/share/recordings/images"),
+        "image_url":        _primary_recording_image_url(rec, url_prefix="/api/share/recordings/images",
+                                                         artist_url_prefix=_SHARE_IMG_URL, venue_url_prefix=None),
         "tracks": [
             {
                 "id":           t.id,
@@ -441,7 +442,8 @@ def _peer_image_urls(recs):
     into _peer_row()/_peer_summary() for every recording in a LIST response.
     Mirrors batch_recording_image_urls(), just with the share-door prefix."""
     return batch_recording_image_urls([r.id for r in recs],
-                                      url_prefix=_SHARE_RECORDING_IMG_URL)
+                                      url_prefix=_SHARE_RECORDING_IMG_URL,
+                                      artist_url_prefix=_SHARE_IMG_URL, venue_url_prefix=None)
 
 
 def _peer_row(rec, card=False, image_url=_serialize_UNSET):
@@ -470,7 +472,8 @@ def _peer_row(rec, card=False, image_url=_serialize_UNSET):
     batched, exactly like recording_row()'s own local default.
     """
     if image_url is _serialize_UNSET:
-        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL)
+        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL,
+                                                 artist_url_prefix=_SHARE_IMG_URL, venue_url_prefix=None)
     row = recording_row(rec, card=card, image_url=image_url)
     row["is_favorite"] = False
     return row
@@ -479,7 +482,8 @@ def _peer_row(rec, card=False, image_url=_serialize_UNSET):
 def _peer_summary(rec, image_url=_serialize_UNSET):
     """recording_summary, same reasoning as _peer_row."""
     if image_url is _serialize_UNSET:
-        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL)
+        image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL,
+                                                 artist_url_prefix=_SHARE_IMG_URL, venue_url_prefix=None)
     row = recording_summary(rec, image_url=image_url)
     if "is_favorite" in row:
         row["is_favorite"] = False
@@ -1268,10 +1272,17 @@ def search():
     # unrewritten local path here 404s on the consumer's OWN library instead,
     # or collides with one of their own image ids (S2).
     _local_img_prefix = "/api/recordings/images/"
+    _local_artist_img_prefix = "/api/artists/images/"
     def _rewrite_image_url(r):
         u = r.get("image_url")
         if u and u.startswith(_local_img_prefix):
             r = {**r, "image_url": _SHARE_RECORDING_IMG_URL + u[len(_local_img_prefix) - 1:]}
+        elif u and u.startswith(_local_artist_img_prefix):
+            # The artist link of the image chain (own image, else the artist's).
+            r = {**r, "image_url": _SHARE_IMG_URL + u[len(_local_artist_img_prefix) - 1:]}
+        elif u and u.startswith("/api/venues/images/"):
+            # A peer cannot reach venue images: the share door has no route.
+            r = {**r, "image_url": None}
         return r
     recordings = [_rewrite_image_url(r) for r in raw["recordings"] if r["id"] in visible_recs]
     # Albums (studio records) go through the same visibility filter and image

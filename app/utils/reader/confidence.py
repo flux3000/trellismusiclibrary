@@ -73,7 +73,8 @@ COUNTRY_SCORE = {"text": 8.0, "derived": 7.0, "atlas": 4.0}
 
 # Agreement is evidence: each independent source beyond the first that states the same
 # value adds this much to it, up to AGREE_CAP extra sources. Independent sources are the
-# ones below; the library and Atlas features inside an info candidate's score are not.
+# ones below (plus a library row marked "independent": the text is exactly an act a person has
+# confirmed, see resolve._resolve_artist_field); the library and Atlas features inside an info candidate's score are not.
 INDEPENDENT_SOURCES = ("info", "tags", "folder", "parent", "archive")
 AGREE_BONUS = {"artist": 3.0, "date": 2.0, "venue": 3.0, "city": 2.0, "state": 2.0, "country": 2.0}
 AGREE_CAP = 2

@@ -100,12 +100,12 @@ def test_logit_is_score_against_every_rival_and_none():
 
 # ── the shipped calibration file ─────────────────────────────────────────────
 
-def test_calibration_file_matches_the_evidence_tables_and_says_g1_only():
+def test_calibration_file_matches_the_evidence_tables_and_names_its_corpora():
     doc = C.load_calibration(force=True)
     assert doc["none_scores"] == C.NONE_SCORE, "evidence tables changed: refit with --calibrate --write-calibration"
     assert doc["tables"] == {"date_weight": C.DATE_WEIGHT, "agree_bonus": C.AGREE_BONUS,
                              "agree_cap": C.AGREE_CAP}, "evidence tables changed: refit"
-    assert "G1 only" in doc["corpus_note"] and doc["corpus"] == "G1"
+    assert doc["corpus"] == "G1+G3" and "G3" in doc["corpus_note"]      # chunk 7b: refit on G1 plus G3
     assert set(doc["fields"]) == set(C.CALIBRATED_FIELDS)
     assert doc["method"]["target"] == 0.005 and doc["method"]["folds"] == 5
     for name, m in doc["fields"].items():

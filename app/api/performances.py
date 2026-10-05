@@ -17,7 +17,7 @@ from app.models.artist import Artist
 from app.models.performance_personnel import PerformancePersonnel
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_summary
-from app.utils.artists import resolve_or_create_artist
+from app.utils.artists import mark_artist_confirmed, resolve_or_create_artist
 from app.utils.personnel import (
     resolve_performance_personnel, sync_performance_personnel,
     set_performance_personnel_mode,
@@ -77,6 +77,8 @@ def get_performance(performance_id):
         "artist_id": p.artist_id,
         "artist":    p.artist.name,
         "artist_image_id":   _primary_image_id(p.artist),
+        # The venue's face, offered in the recording image picker (2026-10-04).
+        "venue_image_id":    v.images[0].id if (v and v.images) else None,
         "artist_genre_color": _perf_genre.color if _perf_genre else None,
         # Back-compat shape (id/name pairs) for the existing recording-page
         # Musicians pill row — now the RESOLVED show lineup (act roster with
@@ -156,6 +158,7 @@ def update_performance(performance_id):
     if new_name and new_name.lower() != p.artist.name.lower():
         old_artist_id = p.artist_id
         artist = resolve_or_create_artist(new_name)
+        mark_artist_confirmed(artist)
         p.artist_id = artist.id
         db.session.flush()
         prune_artist_if_orphaned(old_artist_id)

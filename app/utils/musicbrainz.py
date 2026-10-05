@@ -258,7 +258,8 @@ def lookup_details(mbid):
     """
     if not mbid:
         return None
-    data = _get(f"artist/{mbid}", {"inc": "url-rels+artist-rels"})
+    # +genres rides the same request (Ryan, 2026-10-05): fills an empty genre on match.
+    data = _get(f"artist/{mbid}", {"inc": "url-rels+artist-rels+genres"})
     if not data:
         return None
 
@@ -294,6 +295,9 @@ def lookup_details(mbid):
     out["links"]    = links
     out["members"]  = members
     out["related"]  = related
+    genres = [g for g in data.get("genres") or [] if g.get("name")]
+    genres.sort(key=lambda g: -(g.get("count") or 0))
+    out["genres"]   = [g["name"] for g in genres]
     return out
 
 
@@ -309,9 +313,11 @@ def apply_to_artist(artist, summary, links=None, status="matched"):
     that makes every other automatic claim less believable.
 
     Does NOT commit — the caller owns the transaction, matching every other
-    mutation helper in the app. Does not touch name, bio, genre or members:
-    those are Ryan's fields, and MusicBrainz is not allowed to overwrite a
-    human's curation.
+    mutation helper in the app. Does not touch name, bio or members: those
+    are Ryan's fields, and MusicBrainz is not allowed to overwrite a human's
+    curation. Genre is filled only when EMPTY, from the artist's MusicBrainz
+    genres, matching an existing genre or else creating one (Ryan,
+    2026-10-05, extending the 2026-10-01 album rule to live acts).
     """
     from datetime import datetime, timezone
     artist.mbid              = summary.get("mbid")
@@ -332,12 +338,13 @@ def apply_to_artist(artist, summary, links=None, status="matched"):
     # `links` stay STORED but are no longer displayed (Ryan, 2026-08-07): their
     # job is telling future ingest/enrichment jobs where to look for information
     # about this act, not giving the user a list to read.
-    artist.mb_extra_json     = json.dumps({
-        "name":    summary.get("name"),
-        "related": summary.get("related") or [],
-    })
+    extra = {"name": summary.get("name"), "related": summary.get("related") or []}
+    if "genres" in summary:                 # lookup_details() fetched them
+        extra["genres_checked"] = True
+    artist.mb_extra_json     = json.dumps(extra)
     artist.mb_status         = status
     artist.mb_checked_at     = datetime.now(timezone.utc)
+    apply_genre_to_artist(artist, summary.get("genres"))
     return artist
 
 
@@ -778,6 +785,44 @@ def release_genres(release_group_id, artist_mbid=None):
             genres.sort(key=lambda g: -(g.get("count") or 0))
             return [g["name"] for g in genres]
     return []
+
+
+# An artist matched before 2026-10-05 was matched without fetching genres.
+# `genres_checked` in mb_extra_json records that a genre fetch happened, so the
+# mb_artist follow-up does it once per artist and never again (Ryan,
+# 2026-10-05). No column and no date: the flag is part of the MusicBrainz blob.
+def _extra(artist):
+    try:
+        return json.loads(artist.mb_extra_json or "{}") or {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def owes_artist_genre(artist):
+    """True for a matched/linked artist with no genre whose genres were never
+    fetched. The same rule as enqueue_followups()' SQL filter."""
+    if artist is None or artist.genre_id is not None or not artist.mbid:
+        return False
+    if artist.mb_status not in ("matched", "linked"):
+        return False
+    return not _extra(artist).get("genres_checked")
+
+
+def fill_artist_genre(artist):
+    """Fetch the artist's MusicBrainz genres and fill an EMPTY genre. Sets
+    genres_checked so it runs once. No-op when lookups are off or the breaker has
+    tripped (left owing, so a later run retries). Does not commit. Never raises."""
+    from datetime import datetime, timezone
+    if not owes_artist_genre(artist) or not enabled() or tripped():
+        return None
+    try:
+        g = apply_genre_to_artist(artist, release_genres(None, artist.mbid))
+        artist.mb_extra_json = json.dumps({**_extra(artist), "genres_checked": True})
+        artist.mb_checked_at = datetime.now(timezone.utc)
+        return g
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("MusicBrainz genre fill failed for artist %s: %s", artist.id, e)
+        return None
 
 
 def _genre_key(name):

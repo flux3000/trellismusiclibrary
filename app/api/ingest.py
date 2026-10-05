@@ -28,7 +28,7 @@ _AUDIO_EXTS = {'.flac', '.mp3', '.wav', '.aiff', '.aif', '.m4a', '.ogg', '.ape',
 from app.extensions import db
 from app.models.artist import Artist
 from app.models.musician import Musician, Membership
-from app.utils.artists import resolve_or_create_artist
+from app.utils.artists import mark_artist_confirmed, resolve_or_create_artist
 from app.utils.personnel import sync_performance_personnel
 from app.utils.venues import is_placeholder_venue_name
 from app.models.venue import Venue
@@ -404,7 +404,8 @@ PHASES = {
 #                non-music signal + Full (librosa) analysis. Live only when
 #                enqueued automatically; see run_audio_pass().
 #   "mb_artist"  a MusicBrainz lookup for one artist still at "never looked
-#                up", deferred off the interactive ingest path.
+#                up", deferred off the interactive ingest path; or, for a
+#                matched artist with no genre, one genre fetch (2026-10-05).
 #   "mb_release" a MusicBrainz release lookup for one studio recording
 #                still at "never looked up" (mb_release_status IS NULL).
 #                Never enqueued for a live recording.
@@ -688,9 +689,14 @@ def _handle_mb_artist(artist_id):
     from app.utils import musicbrainz as _mb
 
     artist = db.session.get(Artist, artist_id)
-    if not artist or artist.mb_status is not None:
+    if not artist:
         return
-    _mb.try_match_artist(artist)
+    if artist.mb_status is None:
+        _mb.try_match_artist(artist)
+    elif _mb.owes_artist_genre(artist):
+        _mb.fill_artist_genre(artist)
+    else:
+        return
     db.session.commit()
 
 
@@ -796,7 +802,9 @@ def enqueue_followups():
                   track carrying a non_music_score. Never a studio recording.
                   Re-derived from state rather than "everything": a library
                   already scored and signalled is not re-analysed at boot.
-      mb_artist   every artist whose MusicBrainz status is "never looked up".
+      mb_artist   every artist whose MusicBrainz status is "never looked up",
+                  plus every matched/linked artist with no genre whose genres
+                  were never fetched (owes_artist_genre()).
       mb_release  every STUDIO recording whose release status is "never
                   looked up". Never a live recording.
       images      every recording (any kind) with no recording_image rows and
@@ -846,8 +854,12 @@ def enqueue_followups():
     audio_n = sum(1 for rid in audio_ids
                   if _enqueue(app, "audio", rid, run_of_rec.get(rid)))
 
+    owes_genre = (Artist.mb_status.in_(("matched", "linked"))
+                  & Artist.genre_id.is_(None) & Artist.mbid.isnot(None)
+                  & func.json_extract(func.coalesce(Artist.mb_extra_json, "{}"),
+                                      "$.genres_checked").is_(None))
     artist_ids = [aid for (aid,) in (
-        db.session.query(Artist.id).filter(Artist.mb_status.is_(None))
+        db.session.query(Artist.id).filter(or_(Artist.mb_status.is_(None), owes_genre))
         .order_by(Artist.id).all())]
     mb_n = sum(1 for aid in artist_ids
                if _enqueue(app, "mb_artist", aid, run_of_artist.get(aid)))
@@ -1181,6 +1193,9 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                 "resolved": resolved, "result": None, "duplicate_of": None}
 
     payload = _confirm_payload_from_resolved(resolved, scan)
+    # No person confirmed these values, so nothing is learned from the save (aliases,
+    # queue re-check). "Ingest anyway" is a person's decision to take them as read.
+    payload["unattended"] = not force
     apply_blanket_values(resolved, payload, applied)
     payload["resolver_result"] = resolved.to_dict()
     result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
@@ -1523,6 +1538,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     member_names = member_names_sync or []
     guest_names  = guest_names_sync  or []
     artist = resolve_or_create_artist(artist_name, member_names, lookup=False)
+    if not data.get("unattended"):
+        mark_artist_confirmed(artist)       # a person's save (wizard, review, "Ingest anyway") confirms the act
 
     # ── 2. Genre, on the ARTIST (2026-09-01) ───────────────────────────────
     _apply_artist_genre(artist, data)
@@ -1577,6 +1594,12 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             )
             db.session.add(event)
             db.session.flush()
+
+    # ── 3.6. Learned aliases (Resolver v2, chunk 8) ──────────────────────────
+    # A person's save that differs from what the resolver read teaches the library
+    # the text it quoted. Written in this transaction; never fails the save.
+    from app.utils.aliases import learn_aliases
+    learn_aliases(data, artist, venue)
 
     # ── 4. Find or create Performance ─────────────────────────────────────────
     # A studio recording always gets its OWN Performance (Ryan, 2026-09-27):
@@ -2004,6 +2027,19 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         import traceback as _tb4
         _tb4.print_exc()
         image_errors.append(str(e))
+
+    # A person has settled this act, venue and event: the other review rows of the same
+    # import run that quote the same reading are looked at again (Resolver v2, chunk 8).
+    if not data.get("unattended"):
+        try:
+            from app.utils.aliases import confirmed_keys
+            from app.utils import bulk_ingest_run as _bir
+            _bir.recheck_queue(source_folder, confirmed_keys(
+                data, artist, venue, event.name if event else event_name))
+        except Exception:  # noqa: BLE001 -- never fails a save that already succeeded
+            db.session.rollback()
+            import traceback as _tb5
+            _tb5.print_exc()
 
     return {
         "recording_id":        rec.id,

@@ -32,7 +32,8 @@ from app.models.performance import Performance
 from app.models.artist import Artist
 from app.models.play_log import PlayLog
 from app.models.venue import Venue
-from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recording_tags)
+from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recording_tags,
+                              desired_track_tags)
 from app.utils.folder_naming import rename_recording_folder, unique_file_name
 from app.utils import node_settings
 from app.utils.file_naming import rename_plan, TemplateError
@@ -84,6 +85,27 @@ def _card_eager(query):
         # card=True), so this eager-load has to ride along with every
         # card-bearing query too, same N+1 reasoning as the two above.
         selectinload(Recording.images),
+        selectinload(Recording.performance)
+        .selectinload(Performance.venue)
+        .selectinload(Venue.images),
+    )
+
+
+def _image_chain_eager():
+    """
+    Eager-load what the image chain walks (own images, else the artist's --
+    see serialize._primary_recording_image_url). recording_row() already
+    reads Performance and Artist for the name, so loading them up front costs
+    nothing extra and saves a lazy ArtistImage query per row.
+    """
+    return (
+        selectinload(Recording.images),
+        selectinload(Recording.performance)
+        .selectinload(Performance.artist)
+        .selectinload(Artist.images),
+        selectinload(Recording.performance)
+        .selectinload(Performance.venue)
+        .selectinload(Venue.images),
     )
 
 
@@ -102,7 +124,7 @@ def recent_recordings():
     # row cards. Opt-in for the same reason as waveform: this endpoint also
     # backs the List view's flat table, which needs none of it.
     card = request.args.get("card", "").lower() in ("1", "true", "yes")
-    query = Recording.query.options(selectinload(Recording.images))
+    query = Recording.query.options(*_image_chain_eager())
     if waveform:
         query = query.options(selectinload(Recording.tracks).selectinload(Track.analysis))
     if card:
@@ -316,7 +338,7 @@ def on_this_day():
         month, day = today.month, today.day
     recs = (
         Recording.query
-        .options(selectinload(Recording.images))
+        .options(*_image_chain_eager())
         .join(Performance, Recording.performance_id == Performance.id)
         .filter(Performance.start_month == month,
                 Performance.start_day == day)
@@ -818,6 +840,78 @@ ei.register_image_routes(
 )
 
 
+# ── POST /api/recordings/<id>/images/from-artist | from-venue ────────────────
+# "Use the artist image" / "Use the venue image" (Ryan, 2026-10-04). Copies the
+# source's primary image FILE into this recording's own image folder and makes
+# the copy primary, so the recording keeps its picture if the artist's or
+# venue's photo is later replaced or deleted -- a reference would silently
+# change under it. Credit and caption travel with the copy: a Commons licence
+# credit is part of the image. Idempotent: source_ref "<kind>-image:<id>" is
+# the dedupe key, so choosing the same image twice re-promotes the existing
+# copy instead of stacking duplicates.
+
+def _copy_image_into_recording(rec, src, src_dir, kind):
+    import secrets
+    import shutil
+    if not src:
+        return jsonify({"error": f"This {kind} has no image"}), 404
+
+    ref = f"{kind}-image:{src.id}"
+    existing = next((i for i in rec.images if i.source_ref == ref), None)
+    if existing:
+        ei.set_primary(existing)
+        db.session.commit()
+        return jsonify(ei.image_payload(existing, _RECORDING_IMG_URL))
+
+    src_path = src_dir / src.filename
+    if not src_path.exists():
+        return jsonify({"error": "Image file missing on disk"}), 404
+
+    dest_dir = _recording_images_dir(rec)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    fname = f"img_{secrets.token_hex(6)}{src.ext}"
+    shutil.copyfile(src_path, dest_dir / fname)
+
+    img = RecordingImage(
+        recording_id=rec.id, filename=fname, ext=src.ext,
+        sort_order=max((i.sort_order for i in rec.images), default=-1) + 1,
+        origin=kind, source_ref=ref, caption=src.caption, credit=src.credit,
+    )
+    db.session.add(img)
+    db.session.flush()
+    ei.set_primary(img)
+    db.session.commit()
+    return jsonify(ei.image_payload(img, _RECORDING_IMG_URL))
+
+
+@bp.route("/<int:recording_id>/images/from-artist", methods=["POST"])
+@login_required
+def use_artist_image(recording_id):
+    from app.models.artist_image import ArtistImage
+    from app.api.artists import _artist_images_dir
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    artist = rec.performance.artist if rec.performance else None
+    src = ei.primary_for(ArtistImage, artist.id) if artist else None
+    return _copy_image_into_recording(
+        rec, src, _artist_images_dir(artist) if artist else None, "artist")
+
+
+@bp.route("/<int:recording_id>/images/from-venue", methods=["POST"])
+@login_required
+def use_venue_image(recording_id):
+    from app.models.venue_image import VenueImage
+    from app.api.venues import _venue_images_dir
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    venue = rec.performance.venue if rec.performance else None
+    src = ei.primary_for(VenueImage, venue.id) if venue else None
+    return _copy_image_into_recording(
+        rec, src, _venue_images_dir(venue) if venue else None, "venue")
+
+
 # ── DELETE /api/recordings/<id> ──────────────────────────────────────────────
 
 def _delete_tracks_of_recording(recording_id):
@@ -1292,9 +1386,17 @@ def get_recording_file_tags(recording_id):
     if not rec:
         return jsonify({"error": "Not found"}), 404
     library_root = current_app.config.get("LIBRARY_ROOT", "")
+    tracks = read_recording_tags(rec, library_root)
+    # What Write Tags to Files would put on each file, for the Current/After
+    # view. Same unwrapping as the on-disk read (one value is a bare string).
+    staged = {t.id: {k: (v[0] if isinstance(v, list) and len(v) == 1 else v)
+                     for k, v in tags.items()}
+              for t, tags in desired_track_tags(rec)}
+    for entry in tracks:
+        entry["staged"] = staged.get(entry["track_id"])
     return jsonify({
         "recording_id": rec.id,
-        "tracks":       read_recording_tags(rec, library_root),
+        "tracks":       tracks,
     })
 
 

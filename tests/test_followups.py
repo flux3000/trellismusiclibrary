@@ -421,3 +421,54 @@ def test_bulk_ingest_run_completion_enqueues_audio_for_every_ingested_recording(
     assert item.recording_id is not None
 
     assert ("audio", item.recording_id) in ingest_api._QUEUED_KEYS
+
+
+# ── Genre for artists matched before genres were fetched (Ryan, 2026-10-05) ──
+
+def test_matched_artists_without_genre_are_owed_one_genre_fetch(app, monkeypatch, seeded_ids):
+    from app.models.genre import Genre
+    _neutralize_seed(seeded_ids)
+    jazz = Genre(name="Jazz")
+    _db.session.add(jazz)
+    _db.session.flush()
+    owed = Artist(name="Old Match", mb_status="matched", mbid="m-old",
+                  mb_extra_json='{"name": "Old Match", "related": []}')
+    has_genre = Artist(name="Has Genre", mb_status="linked", mbid="m-g", genre_id=jazz.id)
+    fresh = Artist(name="Fresh Match", mb_status="matched", mbid="m-new",
+                   mb_extra_json='{"genres_checked": true}')
+    no_match = Artist(name="No Match", mb_status="none")
+    _db.session.add_all([owed, has_genre, fresh, no_match])
+    _db.session.commit()
+
+    ingest_api.enqueue_followups()
+    mb_keys = {k for k in ingest_api._QUEUED_KEYS if k[0] == "mb_artist"}
+    assert mb_keys == {("mb_artist", owed.id)}
+
+    monkeypatch.setattr(_mb, "enabled", lambda: True)
+    monkeypatch.setattr(_mb, "release_genres", lambda rg, mbid: ["progressive bluegrass"])
+    ingest_api._handle_item("mb_artist", owed.id)
+    _db.session.refresh(owed)
+    assert _db.session.get(Genre, owed.genre_id).name == "Progressive Bluegrass"
+    assert not _mb.owes_artist_genre(owed)
+
+    # An act MusicBrainz gives no genre is also fetched only once.
+    bare = Artist(name="No Genres On MB", mb_status="matched", mbid="m-bare")
+    _db.session.add(bare)
+    _db.session.commit()
+    monkeypatch.setattr(_mb, "release_genres", lambda rg, mbid: [])
+    ingest_api._handle_item("mb_artist", bare.id)
+    _db.session.refresh(bare)
+    assert bare.genre_id is None and not _mb.owes_artist_genre(bare)
+
+    ingest_api._QUEUED_KEYS.clear()
+    ingest_api.enqueue_followups()
+    assert not {k for k in ingest_api._QUEUED_KEYS if k[0] == "mb_artist"}
+
+
+def test_genre_fetch_with_lookups_off_leaves_the_artist_owing(app, seeded_ids):
+    _neutralize_seed(seeded_ids)
+    a = Artist(name="Offline", mb_status="matched", mbid="m-x")
+    _db.session.add(a)
+    _db.session.commit()
+    ingest_api._handle_item("mb_artist", a.id)     # lookups are disabled under test
+    assert a.genre_id is None and _mb.owes_artist_genre(a)

@@ -211,6 +211,8 @@ def _agree_src(row):
     if not row:
         return None
     src = row.get("source")
+    if src == "library" and row.get("independent"):
+        return "library"                     # an act a person confirmed, matched exactly
     if src == "folder" and row.get("extractor") == "folder tree":
         return "parent"                      # the artist folder it was filed under
     return src if src in _conf.INDEPENDENT_SOURCES else None
@@ -494,6 +496,11 @@ def _resolve_artist_field(scan, *, library_root=None, placement=None):
                    [_row("tags", cands["tags"], None, None, "tag", _conf.TAGS_SCORE["artist"], "")])
     if "info" in cands:
         _add_info_groups(groups, "artist", cased["info"], from_info)
+        if _info_evidence(from_info).get("artist_confirmed"):
+            # a person already confirmed this act under exactly this name: a source of its own
+            # (it adds no score of its own, only the agreement bonus beside the info candidate)
+            groups.add(_nkey(cands["info"]), 0.0, cased["info"],
+                       [dict(_row("library", cands["info"], None, None, "library", 0.0, ""), independent=True)])
     if "folder" in cands:
         groups.add(_nkey(cands["folder"]), _conf.FOLDER_ARTIST_SCORE, cased["folder"],
                    [_row("folder", cands["folder"], None, None, "folder tree", _conf.FOLDER_ARTIST_SCORE, "")])

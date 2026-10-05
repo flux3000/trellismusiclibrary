@@ -145,6 +145,15 @@ def remove_membership_stint(membership_id):
     return True
 
 
+def mark_artist_confirmed(artist):
+    """A person has confirmed this act: stamp confirmed_at once. Never clears it, never touched by
+    an unattended save (callers only call this for a person's save or edit)."""
+    if artist is not None and getattr(artist, "confirmed_at", None) is None:
+        from datetime import datetime, timezone
+        artist.confirmed_at = datetime.now(timezone.utc)
+    return artist
+
+
 def resolve_or_create_artist(name, member_names=None, lookup=True):
     """
     Find an Artist by name (case-insensitive) or create it. On create, seed

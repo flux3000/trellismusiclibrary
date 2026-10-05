@@ -368,6 +368,9 @@
                           padding at all (Ryan, 2026-08-27) */
   --header-h:   58px;   /* +12px, Ryan 2026-08-23 */
   --r-sm: 4px;
+  /* Square image elements (Ryan, 2026-10-04): recording, artist, venue and
+     event pictures, thumbnails and tiles. One token so the corner is one edit. */
+  --r-img: 3px;
   --r-md: 8px;
   --r-lg: 12px;
 }
@@ -590,7 +593,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* Disabled rather than hidden: a control that vanishes when it has nothing to
    do makes the row jump, and the greyed arrow is itself the answer to "can I
    go back from here?". */
-.hdr-btn:disabled { opacity: 0.3; cursor: default; }
+.hdr-btn:disabled { opacity: 0.4; cursor: default; }
 .hdr-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* Draggable divider between sidebar and main content */
@@ -1033,6 +1036,8 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 .iq-expand-val { font-size: 12px; color: var(--t1); }
 .iq-expand-mono { font-family: var(--font-mono); font-size: 10px; color: var(--t3); word-break: break-all; }
 .iq-tracklist { display: flex; flex-direction: column; gap: 2px; }
+.iq-track { color: var(--t0); }
+.iq-track-n { color: var(--t2); font-variant-numeric: tabular-nums; margin-right: 6px; }
 
 /* ── Entity pages (Artist / Venue / Musician / Genre / Collection) ───────────
    .artist-head and .pp-name-row were removed 2026-08-07 when every one of
@@ -1060,7 +1065,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
    square, so the override below is a harmless no-op kept for the day this
    reverses rather than deleted. */
 .pp-portrait-img, .pp-portrait-blank {
-  width: 104px; height: 104px; border-radius: var(--r-md);
+  width: 104px; height: 104px; border-radius: var(--r-img);
   border: 3px solid var(--ring, var(--bd-1)); background: var(--bg-3);
   display: block; object-fit: cover;
 }
@@ -1082,8 +1087,8 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 /* Venue portraits and gallery tiles are SQUARE (Ryan, 2026-08-07) — rounded
    rather than circular, so a venue never reads as an artist. */
 .venue-page .pp-portrait-img,
-.venue-page .pp-portrait-blank { border-radius: var(--r-md); }
-.venue-page .pp-ph { border-radius: var(--r-md); }
+.venue-page .pp-portrait-blank { border-radius: var(--r-img); }
+.venue-page .pp-ph { border-radius: var(--r-img); }
 
 /* Create forms — one look for New venue / artist / musician. Deliberately
    narrow: these ask for a name and little else, because everything is editable
@@ -1324,7 +1329,7 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   gap: 12px; max-width: 720px;
 }
 .pp-ph {
-  position: relative; aspect-ratio: 1; border-radius: var(--r-sm); overflow: hidden;
+  position: relative; aspect-ratio: 1; border-radius: var(--r-img); overflow: hidden;
   border: 1px solid var(--bd-1); background: var(--bg-3);
 }
 .pp-ph.is-primary { border: 2px solid var(--accent); }
@@ -1714,7 +1719,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    wants. It now spans the name AND date lines, which is also why the meta block
    opposite it aligns to the date line rather than the name. */
 .rec-header-photo {
-  width: 84px; height: 84px; border-radius: var(--r-md); object-fit: cover;
+  width: 131px; height: 131px; border-radius: var(--r-img); object-fit: cover;
   border: 2px solid var(--genre-fg, var(--bd-1)); background: var(--bg-2);
   display: block;
 }
@@ -1723,21 +1728,31 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    everywhere it appears. */
 .rec-header-photo--initials {
   display: flex; align-items: center; justify-content: center;
-  font-size: 26px; font-weight: 600; letter-spacing: 0.02em;
+  font-size: 41px; font-weight: 600; letter-spacing: 0.02em;
   color: var(--t2);
 }
 
-/* Cover art slot (Studio Records spec v1, chunk 5) -- a second, clickable
-   square beside the artist avatar, same size/border treatment. The "+"
-   placeholder (admin, no image yet) reuses .rec-header-photo--initials'
-   centered-glyph layout rather than a new class. */
-.rec-header-cover { cursor: pointer; }
-.rec-cover-empty {
-  font-size: 30px; font-weight: 400; color: var(--t3);
-  border-style: dashed;
+/* The square opens the image modal when there is something to open. */
+.rec-header-avatar--btn { cursor: pointer; }
+
+/* Recording image modal. .modal-card's 380px is too narrow for a zoomed image
+   and the gallery grid, so this card sets its own width and lets the two
+   regions scroll independently. */
+.img-modal {
+  width: min(760px, 94vw); max-height: 90vh;
+  display: flex; flex-direction: column;
 }
-.rec-photos-wrap { margin: 4px 0 0; }
-.rec-photos-wrap.hidden { display: none; }
+.img-modal-zoom {
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px; background: var(--bg-0); overflow: auto; max-height: 58vh;
+}
+.img-modal-zoom[hidden] { display: none; }
+.img-modal-zoom img {
+  max-width: 100%; max-height: 54vh; object-fit: contain;
+  border-radius: var(--r-img); cursor: zoom-in; display: block;
+}
+.img-modal-zoom img.is-actual { max-width: none; max-height: none; cursor: zoom-out; }
+.img-modal-gal { padding: 14px 16px; overflow: auto; border-top: 1px solid var(--bd-0); }
 
 /* Recording metadata block — Source / Lineage / Quality. Borderless since
    2026-08-18 (Ryan): it was a bordered two-tab panel, but with Fidelity moved
@@ -2034,11 +2049,13 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 /* ── Slide-in right panel ─────────────────────────────────────────────────── */
 
+/* The index column's width: the tab list at the panel's right edge. */
+:root { --idx-w: 92px; }
 .slide-panel {
   display: flex;
   flex-direction: row;
   flex-shrink: 0;
-  width: 28px;            /* collapsed: the rail, nothing else */
+  width: 0;               /* collapsed: nothing. The toggle sits above, outside. */
   transition: width 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   /* Same ground as the Main Area (Ryan, 2026-08-21). The panel used to sit on
@@ -2048,14 +2065,14 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
      thing separating panel from track list, which is all the separation it
      needed. */
   background: var(--bg-2);
-  border-left: 1px solid var(--bd-1);
 }
 /* --rec-panel-w is shared with the Record Header's meta block above, so the two
-   line up down the right side of the view. The +28px is the rail's column,
-   which it keeps in both states. */
+   line up down the right side of the view. The index column is added to it, so
+   the content keeps the width it had. */
 .slide-panel.open {
-  width: calc(var(--rec-panel-w) + 28px);
+  width: calc(var(--rec-panel-w) + var(--idx-w));
   min-width: 288px;
+  border-left: 1px solid var(--bd-1);
 }
 
 .slide-panel-body {
@@ -2111,16 +2128,18 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .slide-panel--htabs .rev-raw-section { padding: 16px 20px 18px; }
 .slide-panel--htabs .rq-wrap         { padding: 18px 20px 24px; }
 .slide-panel--htabs .filetags-json   { padding: 18px 20px; }
+.ft-wrap { padding: 14px 20px 18px; }
 .slide-panel--htabs .cksum-summary   { padding: 14px 20px; }
 .slide-panel--htabs .cksum-rows      { padding: 6px 20px 18px; }
 .slide-panel--htabs .ai-results      { padding: 14px 20px 18px; }
 .slide-panel--htabs .info-panel-empty { padding: 36px 24px; }
 
-/* ── Horizontal tab variant (Ryan, 2026-08-18) ────────────────────────────
-   Applied as a MODIFIER rather than changing .slide-tabs outright, because the
-   ingest Review screen reuses these same classes and its layout was not part of
-   this change. Extending it there is one class on the wrapper. */
-/* Row of two: the permanent rail, then the tabs+panes column. */
+/* ── Details panel layout ─────────────────────────────────────────────────
+   Tabs are an index column at the panel's right edge (Ryan, 2026-10-04): plain
+   horizontal labels, one per row, so any number of tabs fits and nothing is
+   rotated (rotated text was dropped 2026-08-18: it cannot wrap and ran out of
+   height). The row above the content holds only the active pane's actions.
+   Both pages build the column from detailsTabsHtml(). */
 .slide-panel--htabs { flex-direction: row; }
 .slide-panel-main {
   flex: 1;
@@ -2130,47 +2149,43 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   overflow: hidden;
 }
 /* The panel body is CLIPPED by the panel's width, never display:none'd
-   (Ryan, 2026-08-28 — "strange flickering when clicking to close").
-   display:none took effect on the first frame of the close: the body vanished
-   instantly, which left the rail as the only child of a panel that was still
-   at its full open width, so the rail snapped to the panel's LEFT edge and
-   then travelled back to the right as the width animated. Clipping instead
-   keeps the rail's 28px column pinned for the whole transition and lets the
-   content slide out under it, which is what a drawer is supposed to look like.
+   (Ryan, 2026-08-28: "strange flickering when clicking to close"). display:none
+   took effect on the first frame of the close and the content vanished while the
+   panel was still at full width; clipping lets the content slide out as the
+   width animates, which is what a drawer is supposed to look like.
 
    visibility still goes hidden, so the tabs inside a collapsed panel stay out
-   of the keyboard order and out of a screen reader — but only AFTER the slide
-   finishes (transition-delay), so it cannot cause the flicker again. */
+   of the keyboard order and out of a screen reader, but only AFTER the slide
+   finishes (transition-delay). */
 .slide-panel--htabs .slide-panel-main { visibility: visible; transition: visibility 0s; }
 .slide-panel--htabs:not(.open) .slide-panel-main {
   visibility: hidden;
   transition: visibility 0s 0.22s;
 }
-.slide-panel--htabs .slide-tabs {
-  width: auto;
-  flex: 1 1 auto;
-  min-width: 0;
-  flex-direction: row;
-  align-items: stretch;
-  padding: 0 4px;
+.slide-index {
+  width: var(--idx-w);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
-  border-left: none;
-  /* The rule under the row belongs to .slide-tabrow now, so it runs the full
-     width of the panel rather than stopping where the tabs stop. */
-  border-bottom: none;
-  overflow-x: auto;
+  padding: 10px 0;
+  border-left: 1px solid var(--bd-1);
+  overflow-y: auto;
   scrollbar-width: none;
 }
-.slide-panel--htabs .slide-tabs::-webkit-scrollbar { display: none; }
-.slide-panel--htabs .slide-tab {
+.slide-index::-webkit-scrollbar { display: none; }
+.slide-panel--index .slide-tab {
   writing-mode: horizontal-tb;
   transform: none;
-  padding: 9px 9px 8px;
+  text-align: left;
   white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  border-radius: 3px 3px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 8px 8px 8px 12px;
+  border-left: 2px solid transparent;
+  border-radius: 0 3px 3px 0;
 }
-.slide-panel--htabs .slide-tab.active { border-bottom-color: var(--accent); }
+.slide-panel--index .slide-tab.active { border-left-color: var(--accent); background: var(--bg-3); }
 /* Unwritten metadata: the database knows something the FLAC files do not.
    Amber, matching .pane-act--staged on the button that resolves it, and a dot
    so the signal survives at 9px where a colour shift alone is easy to miss. */
@@ -2186,51 +2201,29 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 .slide-tab--staged.active { color: var(--amber); }
 
-/* Action row — its own band directly under the tab strip, one pane's controls
-   at a time. Every pane's action is the same size, weight and place, which is
-   the whole point: Re-Analyze, Write Tags, Re-validate, AI Assist and Edit File
-   are the same kind of thing and used to look like four different kinds.
-
-   A row rather than the right end of the tab strip (2026-08-21): squeezed in
-   beside five tabs, a label like "Write Tags to Files" pushed the strip into
-   horizontal scrolling and the action could end up off-screen. It hides itself
-   whenever the active pane has no action, so panes that need no toolbar do not
-   pay for one. */
-/* Tabs and their actions share ONE row (Ryan, 2026-08-28: "the large bar that
-   only has the small button"). The actions had a 36px band of their own, which
-   is a lot of chrome to spend on one 22px control.
-
-   They went into a band of their own on 08-21 because, crammed in beside five
-   tabs, a long label ("Write Tags to Files") pushed the strip into horizontal
-   scrolling and the action could scroll out of sight. That objection is
-   answered here by structure rather than by a second row: the tabs scroll
-   inside .slide-tabs, the actions sit in a fixed slot OUTSIDE that scroller,
-   so the action is always visible and it is the tabs that give way. */
-.slide-tabrow {
-  display: flex;
-  align-items: stretch;
-  border-bottom: 1px solid var(--bd-1);
-  flex-shrink: 0;
-}
+/* Action row: one pane's controls at a time, at the top of the content, at the
+   panel's full width (the tabs are in the index column, so nothing competes for
+   it). Every pane's action is the same size, weight and place. It wraps rather
+   than clipping, and hides itself when the active pane has no action. */
 .pane-acts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  justify-content: flex-end;   /* Ryan, 2026-08-21 — actions hang off the right */
-  padding: 0 12px 0 10px;
-  flex: 0 1 auto;
+  justify-content: flex-end;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--bd-1);
+  flex-shrink: 0;
   min-width: 0;
 }
-/* Give-way order as the panel narrows: the TAB STRIP first (flex-shrink 100
-   against this half's 1), then the status text down to its ellipsis, and the
-   buttons never. The tabs can afford to go first because they scroll, so
-   nothing there becomes unreachable; a clipped Save or Cancel would be.
-   min-width:0 on .pane-acts is load-bearing — it is what lets the pressure
-   reach the status instead of stopping at the half's min-content. Measured at
-   510 / 440 / 400 / 340 / 300 / 240 / 212px: buttons fully on screen at every
-   one, 212px being the narrowest the drag handle allows. */
-.slide-panel--htabs .slide-tabs { flex-shrink: 100; }
 .pane-acts .pane-act { flex: 0 0 auto; }
+/* The pane's name, left, on the same line as the text below (20px content inset). */
+.pane-title {
+  margin-right: auto; padding-left: 8px;
+  font-size: 9px; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--t1);
+}
+.pane-acts { min-height: 40px; }
 .pane-acts[hidden] { display: none; }
 .pane-acts > [hidden] { display: none; }
 
@@ -2257,6 +2250,23 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .pane-act:hover:not(:disabled) { color: var(--t0); border-color: var(--bd-2); background: var(--bg-3); }
 .pane-act:disabled { opacity: 0.45; cursor: default; }
 .pane-act--primary { color: var(--accent); border-color: var(--accent-dim2, var(--bd-2)); }
+/* Research buttons, everywhere (Ryan, 2026-10-04): a colour no other button uses
+   (accent = primary, amber = staged, red = danger). --research follows the
+   active palette's --blue. The icon may vary by surface; this does not. */
+:root { --research: var(--blue); }
+.research-btn,
+.pane-act.research-btn,
+.btn.research-btn {
+  color: var(--research);
+  border-color: color-mix(in srgb, var(--research) 55%, transparent);
+  background: color-mix(in srgb, var(--research) 12%, transparent);
+}
+.pane-act.research-btn:hover:not(:disabled),
+.btn.research-btn:hover:not(:disabled) {
+  color: var(--research);
+  border-color: var(--research);
+  background: color-mix(in srgb, var(--research) 22%, transparent);
+}
 /* Unwritten metadata changes are waiting for this button — same signal the old
    .btn-staged carried, in this bar's vocabulary. */
 .pane-act--staged {
@@ -2285,64 +2295,31 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   white-space: nowrap;
   margin-right: 2px;
 }
-/* The rail is always shown (Ryan, 2026-08-21) and toggles the panel both ways.
-   It keeps a fixed 28px column so opening the panel doesn't shift it, and it
-   carries the border that used to sit on .slide-panel itself. */
-.slide-rail { display: none; }
-.slide-panel--htabs .slide-rail {
-  display: block;
-  width: 28px;
-  flex-shrink: 0;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  transform: rotate(180deg);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-  /* Reads as a control, not as chrome (Ryan, 2026-08-21). It was --t3 text on
-     --bg-0 — the quietest colour on the darkest ground, against a panel that
-     is now the same shade as the page, so it disappeared.
-     It is a raised strip on its own lighter ground with a border to bound it,
-     square-cornered and flush to the column — the rounded, inset variant was
-     tried on 2026-08-21 and Ryan preferred this. */
-  font-size: 9.5px;
-  letter-spacing: 0.14em;
-  color: var(--t1);
-  background: var(--bg-3);
-  border: 1px solid var(--bd-2);
-  border-radius: 0;
-  cursor: pointer;
-  padding: 10px 3px;
-  user-select: none;
-  transition: color .12s, background .12s, border-color .12s;
-}
-.slide-panel--htabs .slide-rail:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--bg-3);
-}
-/* Open state is pressed-in: the accent border says "this is what is showing",
-   and the inset shadow gives it the depth a toggle needs to look toggled. */
-.slide-panel--htabs.open .slide-rail {
-  color: var(--accent);
-  border-color: var(--accent-dim2, var(--bd-2));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
-}
-.slide-rail:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-/* Vertical tab strip */
-.slide-tabs {
-  width: 28px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
+/* Show/hide Details: a bordered square with the panel glyph, above the panel at
+   the right (Ryan, 2026-10-04; it replaced the vertical DETAILS rail). Lives in
+   the page's action bar / Add Recording's top bar, outside the sliding panel, so
+   it holds still in both states. Accent while the panel is open. */
+.panel-toggle {
+  display: inline-flex;
   align-items: center;
-  padding: 10px 0;
-  gap: 4px;
-  border-left: 1px solid var(--bd-1);
-  background: transparent;   /* inherits the panel's ground — see .slide-panel */
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 26px;
+  margin-left: auto;
+  color: var(--t2);
+  background: transparent;
+  border: 1px solid var(--bd-1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color .12s, border-color .12s, background .12s;
 }
+.panel-toggle .tic { width: 15px; height: 15px; }
+.panel-toggle:hover { color: var(--t0); border-color: var(--bd-2); background: var(--bg-3); }
+.panel-toggle[aria-expanded="true"] { color: var(--accent); border-color: var(--accent-dim2, var(--bd-2)); }
+.panel-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.action-bar .panel-toggle { margin-right: -16px; }
+.ingest-topbar-line .panel-toggle { margin-left: 0; }
 
 .slide-tab {
   writing-mode: vertical-rl;
@@ -2397,26 +2374,19 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
    the original sizes. The bigger play glyph stayed. */
 .track-row {
   display: grid;
-  grid-template-columns: 16px 24px 34px minmax(0, 2fr) minmax(0, 1.1fr) auto 60px 44px;
+  /* play | number | title | note | songwriter | time. The number column is
+     only as wide as two digits, so play->number and number->title sit close. */
+  grid-template-columns: 16px 16px minmax(0, 2fr) minmax(0, 1.1fr) 150px 44px;
   align-items: center;
   gap: 8px;
   padding: 9px 24px;
-  cursor: pointer;
   border-radius: var(--r-sm);
   margin: 1px 6px;
   transition: background 0.1s;
 }
+/* Only these three start playback (see wirePlaybackTrackRowClicks). */
+.track-row .track-play, .track-row .track-num, .track-row .track-title-wrap { cursor: pointer; }
 
-/* Disc + disc-track ("2-03"), blank on a single-disc recording (spec 6.4) */
-.track-disc-col {
-  font-size: 11px; color: var(--t2); font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums; text-align: right;
-}
-
-/* Set label, click-to-edit for admins via makeInlineEditable() (spec 6.4) */
-.track-set-col {
-  font-size: 11px; color: var(--t2); min-width: 0; text-align: right;
-}
 
 /* Set-group header row inside the grouped track list (mockup panel 4e) */
 .track-set-header {
@@ -2426,11 +2396,13 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 /* Note (right of title, muted) + Songwriter (right-aligned, before duration) */
+/* Same 6px side padding in both modes (editable cells have it anyway), so the
+   column headers line up with the text whether or not the cell is editable. */
 .track-note-col {
-  font-size: 11px; color: var(--t3); min-width: 0;
+  font-size: 11px; color: var(--t2); min-width: 0; padding: 2px 6px;
 }
 .track-sw-col {
-  font-size: 11px; color: var(--t2); text-align: right; min-width: 0; max-width: 180px;
+  font-size: 11px; color: var(--t2); text-align: right; min-width: 0; padding: 2px 6px;
 }
 .track-title--editable { cursor: text; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }
 .track-title--editable:hover { background: var(--bg-2); }
@@ -2440,6 +2412,13 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   color: var(--t0); border-radius: var(--r-sm); padding: 1px 5px;
 }
 
+/* Column header row: muted, small, never highlighted. */
+.track-head { padding-top: 6px; padding-bottom: 6px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--t3); }
+.track-head:hover { background: none; }
+.track-head-note, .track-head-sw { padding: 0 6px; }
+.track-head-sw { text-align: right; }
+.track-head-dur { text-align: right; }
 .track-row:hover { background: var(--bg-4); }
 .track-row.playing { background: var(--accent-dim); }
 
@@ -3708,16 +3687,15 @@ input[type="range"].progress-bar {
    nothing that reads as a required step in front of the button. */
 .ai-ask { padding: 4px 0 2px; }
 .ai-ask-input {
-  width: 100%; margin-top: 8px; padding: 7px 10px;
-  background: var(--bg-1); color: var(--t0);
-  border: 1px solid var(--bd-0); border-radius: 4px;
+  width: 100%; margin-top: 10px; padding: 8px 10px;
+  background: var(--bg-0); color: var(--t0);
+  border: 1px solid var(--bd-2); border-radius: 4px;
   font-family: inherit; font-size: 12px;
 }
-.ai-ask-input::placeholder { color: var(--t3); }
+.ai-ask-input::placeholder { color: var(--t2); }
+.ai-ask .ai-assist-hint { color: var(--t1); }
 .ai-ask-input:focus { outline: none; border-color: var(--accent); }
-/* Empty until the estimate resolves, and it may never resolve. No min-height:
-   a reserved empty strip in a panel that usually fills it reads as a bug. */
-.ai-ask-note { margin-top: 6px; font-size: 10.5px; color: var(--t3); }
+.ai-ask-go { margin-top: 10px; }
 
 /* The human's own question, answered above the routine findings. */
 .ai-res-answer .ai-summary { color: var(--t0); }
@@ -4091,7 +4069,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .nav-fav-row:hover { background: var(--bg-1); }
 .nav-fav-avatar {
-  width: 20px; height: 20px; border-radius: var(--r-sm); flex-shrink: 0;
+  width: 20px; height: 20px; border-radius: var(--r-img); flex-shrink: 0;
   object-fit: cover; background: var(--bg-3);
 }
 /* Initials fallback — same idiom as heroPortraitHtml()'s, shrunk down: with
@@ -4219,6 +4197,8 @@ a.member-chip-name:hover { color: var(--accent); }
 .actions-item .caret-ic,
 .lq-act .caret-ic,
 .pp-actions-btn .caret-ic { margin-left: 4px; vertical-align: -1px; }
+/* The chevron is display:block by default, which put it on its own line. */
+.actions-item .caret-ic { display: inline-block; }
 
 /* Sidebar dimension caret. 9px → 13px with a real hit target (2026-08-02). */
 .nav-caret {
@@ -4308,15 +4288,11 @@ a.member-chip-name:hover { color: var(--accent); }
 
 /* ── Flat compact recording table (library, catalog, collection) ──────────────── */
 .rec-table { padding: 4px 0 20px; }
-/* Recording-artwork thumbnail column (Studio Records spec v1, chunk 5).
-   Reserved ONLY when at least one row in this rendered list actually has an
-   image (`.has-thumbs`, set by flatRowHtml()/recTableHeadHtml()'s caller) --
-   a live-only library, which is most of them, must not lose 50px of every
-   row and taller rows to a column nothing will ever draw in (S10). Base
-   rule (no thumb column) first, `.has-thumbs` variant beneath it. */
+/* Recording image column. Every row has one (Ryan, 2026-10-04): the
+   recording's image, else the artist's, else the artist's initials. */
 .rec-row--flat {
   display: grid;
-  grid-template-columns: 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
+  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
   align-items: center;
   gap: 10px;
   padding: 5px 20px;
@@ -4325,44 +4301,37 @@ a.member-chip-name:hover { color: var(--accent); }
   font-size: 12px;
 }
 .rec-row--flat.with-artist {
-  grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
-}
-.rec-row--flat.has-thumbs {
-  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
-}
-.rec-row--flat.has-thumbs.with-artist {
   grid-template-columns: var(--thumb-sm) 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
 .rec-row--flat:hover { background: var(--bg-1); }
 .rec-artist-cell { color: var(--t0); font-weight: 450; }
 .rec-date-added { text-align: right; color: var(--t3); font-variant-numeric: tabular-nums; }
-/* Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
-   placeholder when a row has no image, so the cell is simply empty, same
-   rule as the artist avatar column above it. */
+/* Recording image thumbnail: the image, or the artist's initials when the
+   recording and its artist have none (Ryan, 2026-10-04). */
 .rec-thumb-sm {
   width: var(--thumb-sm); height: var(--thumb-sm);
-  border-radius: var(--r-md); object-fit: cover;
+  border-radius: var(--r-img); object-fit: cover;
   background: var(--bg-2); display: block;
+}
+.rec-thumb-sm--initials {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600; color: var(--t2);
+  background: var(--bg-4); border: 1px solid var(--bd-1);
 }
 
 /* Header row paired with .rec-row--flat — same grid, mostly blank; "Added" sorts. */
 .rec-table-head {
   display: grid;
-  grid-template-columns: 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
+  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
   align-items: center;
   gap: 10px;
   padding: 0 20px 4px;
   font-size: 10px;
 }
 .rec-table-head.with-artist {
-  grid-template-columns: 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
-}
-.rec-table-head.has-thumbs {
-  grid-template-columns: var(--thumb-sm) 92px minmax(0,1fr) 130px 40px 34px 54px 46px 78px 22px 28px;
-}
-.rec-table-head.has-thumbs.with-artist {
   grid-template-columns: var(--thumb-sm) 160px 92px minmax(0,1fr) 120px 40px 34px 54px 46px 78px 22px 28px;
 }
+
 .rec-th-added {
   background: none; border: none; padding: 0; margin: 0;
   color: var(--t3); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
@@ -4963,7 +4932,8 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .track-qmenu-note:focus { border-color: var(--accent); }
 
-.track-qmenu-songwriter {
+.track-qmenu-songwriter,
+.track-qmenu-set {
   width: 100%;
   font-family: inherit;
   font-size: 12px;
@@ -4974,7 +4944,8 @@ a.member-chip-name:hover { color: var(--accent); }
   padding: 5px 8px;
   box-sizing: border-box;
 }
-.track-qmenu-songwriter:focus { border-color: var(--accent); }
+.track-qmenu-songwriter:focus,
+.track-qmenu-set:focus { border-color: var(--accent); }
 
 /* ── Expandable track detail row (edit view) ─────────────────────────────── */
 
@@ -5161,16 +5132,17 @@ a.member-chip-name:hover { color: var(--accent); }
      an element can only be transitioned between two widths if it owns them.
      The drag handle overwrites this inline; _ingestPanelOpen stashes and
      restores that inline value around a collapse so the rule below can win. */
-  flex: 0 0 34%;
-  min-width: 28px;
+  /* 34% as before for the content, plus the index column. */
+  flex: 0 0 calc(34% - 28px + var(--idx-w));
+  min-width: 0;
   overflow: hidden;
   background: var(--bg-2);   /* was --bg-1; matches the panel on View Recording */
   transition: flex-basis 0.22s cubic-bezier(0.4, 0, 0.2, 1),
               width      0.22s cubic-bezier(0.4, 0, 0.2, 1);
 }
-/* Collapsed: the rail and nothing else, arrived at by sliding. */
+/* Collapsed: nothing (the toggle is in the top bar), arrived at by sliding. */
 .ingest-review-raw:not(.open) {
-  flex-basis: 28px;
+  flex-basis: 0;
 }
 /* Mid-drag there is nothing to animate towards — without this every mousemove
    would ease over 220ms and the divider would feel like it was on elastic. */
@@ -5430,9 +5402,9 @@ a.member-chip-name:hover { color: var(--accent); }
 /* Info file switcher (shown when folder has multiple .txt candidates) */
 .info-file-switcher {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  padding: 6px 0 8px;
+  padding: 7px 12px 7px 20px;   /* same inset as the pane title above */
   border-bottom: 1px solid var(--bd-1);
-  margin-bottom: 8px;
+  flex-shrink: 0;
 }
 .info-file-switcher-label {
   font-size: 10px; color: var(--t2); text-transform: uppercase; letter-spacing: 0.05em;
@@ -7297,7 +7269,7 @@ a.member-chip-name:hover { color: var(--accent); }
    artists has one today, so the card is designed to look finished
    WITHOUT it — the element is simply absent, never a placeholder silhouette. */
 .rec-card-photo {
-  width: 52px; height: 52px; border-radius: var(--r-md); object-fit: cover;
+  width: 52px; height: 52px; border-radius: var(--r-img); object-fit: cover;
   margin: 2px auto 10px; display: block;
   border: 2px solid var(--genre-fg, var(--bd-1));
   background: var(--bg-2);
@@ -7308,7 +7280,7 @@ a.member-chip-name:hover { color: var(--accent); }
    position at the top of the card -- a square image rather than the small
    round artist photo. Only rendered when the recording has one. */
 .rec-card-cover {
-  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: var(--r-md);
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: var(--r-img);
   margin: 0 0 10px; display: block;
   border: 1px solid var(--genre-fg, var(--bd-1));
   background: var(--bg-2);
@@ -7406,7 +7378,7 @@ a.member-chip-name:hover { color: var(--accent); }
 
 .rec-rowcard-avatar { display: flex; align-items: center; }
 .rec-rowcard-photo {
-  width: 38px; height: 38px; border-radius: var(--r-md); object-fit: cover;
+  width: 38px; height: 38px; border-radius: var(--r-img); object-fit: cover;
   border: 2px solid var(--genre-fg, var(--bd-1)); background: var(--bg-2);
   display: block;
 }
@@ -7542,7 +7514,6 @@ a.member-chip-name:hover { color: var(--accent); }
   font-variant-numeric: tabular-nums;
   margin-left: auto;   /* was .rq-grp-weight's slot until 2026-08-28 */
 }
-.rq-grp-txt { font-size: 11.5px; color: var(--t2); line-height: 1.45; }
 
 /* Advanced metrics: collapsed by default behind a caret (Ryan, 2026-08-18).
    On the triage card these are the point — you are deciding whether to ingest.
@@ -7569,7 +7540,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .rq-caret { display: inline-block; transition: transform 0.15s; }
 .rq-adv-toggle.open .rq-caret { transform: rotate(90deg); }
 
-.rq-adv { display: none; padding: 6px 0 2px 10px; border-left: 1px solid var(--bd-0); margin-top: 6px; }
+.rq-adv { display: none; padding: 6px 0 2px; margin-top: 6px; }
 .rq-adv.open { display: block; }
 
 .rq-mrow {
@@ -7580,15 +7551,12 @@ a.member-chip-name:hover { color: var(--accent); }
   padding: 3px 0;
   font-size: 11px;
 }
-.rq-mlabel { color: var(--t2); }
-.rq-mval { font-family: var(--font-ui); font-variant-numeric: tabular-nums; text-align: right; }
-.rq-mverdict { color: var(--t3); font-size: 10.5px; }
+.rq-mlabel { color: var(--t0); }
+.rq-mval { font-family: var(--font-ui); font-variant-numeric: tabular-nums; text-align: right; color: var(--t0); }
+.rq-mverdict { color: var(--t1); font-size: 10.5px; }
 /* Five of the eleven readings carry ZERO weight. Showing them at equal visual
    standing implied they all move the number, which is how the 2026-07-30 Gatton
    confusion started — so they are dimmed and starred instead. */
-.rq-mrow--unscored { opacity: 0.62; }
-.rq-star { color: var(--t3); margin-left: 2px; }
-.rq-star-note { font-size: 10px; color: var(--t3); font-style: italic; padding: 6px 0 0; }
 
 .rq-issues { margin-top: 14px; }
 .rq-issues h4 {
@@ -7603,7 +7571,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .rq-clean {
   margin-top: 14px;
   font-size: 11px;
-  color: var(--t3);
+  color: var(--t1);
   line-height: 1.5;
 }
 
@@ -8005,7 +7973,7 @@ body.drive-offline img[src*="/api/venues/images/"] {
   /* Lineage wraps under Source rather than fighting it for a narrow row. */
   .rec-sl-item--lineage { flex-basis: 100%; }
   .rec-sl-item--release { flex-basis: 100%; }
-  .slide-panel.open { width: calc(52% + 28px); }
+  .slide-panel.open { width: calc(52% + var(--idx-w)); }
 }
 
 /* ── ≤900px: Side Panel overlays the Track List ──────────────────────────── */
@@ -8032,8 +8000,8 @@ body.drive-offline img[src*="/api/venues/images/"] {
   .track-panel { min-width: 0; }
 
   .rec-detail-header { padding-left: 18px; }
-  .rec-header-photo  { width: 64px; height: 64px; }
-  .rec-header-photo--initials { font-size: 20px; }
+  .rec-header-photo  { width: 100px; height: 100px; }
+  .rec-header-photo--initials { font-size: 31px; }
 }
 
 /* ── ≤640px: phone ──────────────────────────────────────────────────────── */
@@ -8047,11 +8015,12 @@ body.drive-offline img[src*="/api/venues/images/"] {
   /* Track rows keep number, title and duration. Note and songwriter are
      archivist columns and are the first thing off the row. */
   .track-row {
-    grid-template-columns: 16px 22px minmax(0, 1fr) auto;
+    grid-template-columns: 16px 18px minmax(0, 1fr) auto;
     padding: 9px 14px;
     gap: 8px;
   }
   .track-note-col, .track-sw-col { display: none; }
+  .track-head { display: none; }
 
   /* Transport survives; the volume group does not. */
   .player-bar { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 12px 10px; gap: 10px; }
@@ -8059,13 +8028,33 @@ body.drive-offline img[src*="/api/venues/images/"] {
 
   .rec-detail-header { padding: 8px 14px 14px; }
   .rec-header-main   { gap: 10px; }
-  .rec-header-photo  { width: 52px; height: 52px; }
-  .rec-header-photo--initials { font-size: 17px; }
+  .rec-header-photo  { width: 81px; height: 81px; }
+  .rec-header-photo--initials { font-size: 26px; }
   .rec-detail-header h2 { font-size: 16px; }
 
   .action-bar { flex-wrap: wrap; row-gap: 6px; }
 
   .slide-panel.open { width: 100%; }
+
+  /* Index column -> a scrolling strip along the top of the panel. */
+  .slide-panel--index { flex-direction: column-reverse; }
+  .slide-index {
+    width: auto;
+    flex-direction: row;
+    gap: 2px;
+    padding: 0 6px;
+    border-left: 0;
+    border-bottom: 1px solid var(--bd-1);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .slide-panel--index .slide-tab {
+    padding: 9px 9px 8px;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 3px 3px 0 0;
+  }
+  .slide-panel--index .slide-tab.active { border-bottom-color: var(--accent); background: transparent; }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -8492,7 +8481,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 .top-tile {
   position: relative; display: block;
   flex: 0 0 var(--tops-tile, 168px); height: var(--tops-tile, 168px);
-  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-md);
+  background: var(--bg-3); border: 1px solid var(--bd-0); border-radius: var(--r-img);
   overflow: hidden; text-decoration: none; color: inherit;
   transition: border-color .12s;
 }
@@ -8653,7 +8642,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 }
 .brow:hover { background: var(--bg-3); }
 .brow-av {
-  width: 24px; height: 24px; border-radius: var(--r-sm);
+  width: 24px; height: 24px; border-radius: var(--r-img);
   display: flex; align-items: center; justify-content: center;
   font-size: 9px; font-weight: 600; color: var(--t2);
   background: var(--bg-4); border: 1.5px solid var(--genre-fg, var(--bd-1));
@@ -8967,8 +8956,8 @@ select.set-input { max-width: 480px; }
    the colour, which doubles as a live preview of what tints every card its
    artists appear on. */
 .dim-grid--round  .dim-tile-art { border-radius: 50%; }
-.dim-grid--square .dim-tile-art { border-radius: var(--r-sm); }
-.dim-grid--swatch .dim-tile-art { border-radius: var(--r-sm); flex-basis: 26px; height: 26px; }
+.dim-grid--square .dim-tile-art { border-radius: var(--r-img); }
+.dim-grid--swatch .dim-tile-art { border-radius: var(--r-img); flex-basis: 26px; height: 26px; }
 
 .dim-tile-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .dim-tile-name { font-size: 13px; font-weight: 500; color: var(--t0); }
@@ -9435,3 +9424,24 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
    no frame, no fill. */
 #bi-applyall .lq-applyall { border: 0; padding: 4px 0 8px; margin-bottom: 4px; }
 #bi-applyall .lq-applyall.is-closed { padding: 4px 0; }
+
+/* ── Tags pane: Current / After ───────────────────────────────────────────── */
+.ft-head, .ft-table { font-size: 11px; }
+.ft-head {
+  display: grid; grid-template-columns: 24% 38% 38%;
+  padding: 0 0 6px; color: var(--t3);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.ft-grp { border-top: 1px solid var(--bd-1); }
+.ft-grp summary {
+  cursor: pointer; padding: 8px 0 6px; color: var(--t1);
+  font-size: 11px; font-weight: 600; list-style-position: inside;
+}
+.ft-table { width: 100%; table-layout: fixed; border-collapse: collapse; margin-bottom: 8px; }
+.ft-table td { padding: 3px 0; vertical-align: top; overflow-wrap: anywhere; }
+.ft-k { width: 24%; color: var(--t2); font-family: var(--font-mono); font-size: 10.5px; }
+.ft-c, .ft-a { width: 38%; padding-right: 8px; color: var(--t2); }
+.ft-row--changed .ft-c, .ft-row--removed .ft-c { color: var(--t3); text-decoration: line-through; }
+.ft-row--changed .ft-a, .ft-row--added .ft-a { color: var(--amber); }
+.ft-row--removed .ft-k, .ft-row--added .ft-k, .ft-row--changed .ft-k { color: var(--t0); }
+.ft-err { padding: 6px 0; font-size: 11px; color: var(--red); }

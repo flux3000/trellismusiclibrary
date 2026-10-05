@@ -69,6 +69,12 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
 
+    # ── Schema upgrades (2026-10-05) ───────────────────────────
+    # Additive, idempotent, one transaction each; every mode, before anything queries Artist.
+    with app.app_context():
+        from app.utils.schema_upgrades import ensure_artist_confirmed_at
+        ensure_artist_confirmed_at(db.engine)
+
     # ── Install Epoch (2026-09-18) ─────────────────────────────
     # Runs for every mode this factory builds, including SERVER_MODE — placed
     # before that branch's early return rather than after it. Non-fatal by

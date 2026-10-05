@@ -29,7 +29,7 @@ from app.models.recording import Recording
 from app.utils.serialize import recording_summary, batch_recording_image_urls
 from app.utils.ingest import _sanitize_path
 from app.utils.artists import (
-    set_artist_members, add_membership_stint,
+    set_artist_members, mark_artist_confirmed, add_membership_stint,
     update_membership_stint_bounds, remove_membership_stint,
 )
 from app.utils import musicbrainz, commons
@@ -379,6 +379,7 @@ def create_artist():
     if db.session.query(Artist).filter(func.lower(Artist.name) == name.lower()).first():
         return jsonify({"error": "Artist already exists"}), 409
     p = Artist(name=name, sort_name=data.get("sort_name"), bio=data.get("bio"))
+    mark_artist_confirmed(p)
     db.session.add(p)
     db.session.flush()
     # Musicians are optional — only set members if the caller supplied any.
@@ -413,6 +414,7 @@ def update_artist(artist_id):
         set_artist_members(p, data["members"])
     if data.get("resources") is not None:
         _set_resources(p, data["resources"])
+    mark_artist_confirmed(p)
     db.session.commit()
     return jsonify({"id": p.id})
 

@@ -1422,9 +1422,10 @@ def staging_features():
     from app.utils.quality import interpret_full
     payload = qs.serialize(row, include_features=True)
     try:
-        # Same triage surface as the poll above, so the same filter.
-        payload["interpretation"] = interpret_full(payload, payload.get("features") or {},
-                                                   scored_only=True)
+        # NOT filtered to scored metrics (Ryan, 2026-10-04): this endpoint feeds
+        # the Quality pane on Add Recording, which must list the same metrics as
+        # View Recording's. Only the triage card's poll above keeps scored_only.
+        payload["interpretation"] = interpret_full(payload, payload.get("features") or {})
     except Exception:  # noqa: BLE001
         # Plain-English rendering must never take down the metrics panel.
         _tb.print_exc()

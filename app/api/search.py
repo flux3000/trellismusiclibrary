@@ -39,7 +39,9 @@ from app.models.artist import Artist
 from app.models.quality import RecordingQuality
 from app.models.recording import Recording
 from app.models.recording_image import RecordingImage
+from app.models.artist_image import ArtistImage
 from app.models.venue import Venue
+from app.models.venue_image import VenueImage
 from app.utils import search as se
 from app.utils.format import format_partial_date
 
@@ -139,6 +141,38 @@ def build_search_index():
     ):
         rec_image_ids.setdefault(rid, iid)
 
+    # Link two of the image chain (own image, else the artist's -- see
+    # serialize.py): one grouped query for each artist's primary image id.
+    artist_image_ids = {}
+    for aid, iid, _is_primary in (
+        db.session.query(ArtistImage.artist_id, ArtistImage.id,
+                         ArtistImage.is_primary)
+        .order_by(ArtistImage.artist_id, ArtistImage.is_primary.desc(),
+                  ArtistImage.sort_order, ArtistImage.id)
+        .all()
+    ):
+        artist_image_ids.setdefault(aid, iid)
+
+    # Link three: the venue's primary image.
+    venue_image_ids = {}
+    for vid, iid, _is_primary in (
+        db.session.query(VenueImage.venue_id, VenueImage.id,
+                         VenueImage.is_primary)
+        .order_by(VenueImage.venue_id, VenueImage.is_primary.desc(),
+                  VenueImage.sort_order, VenueImage.id)
+        .all()
+    ):
+        venue_image_ids.setdefault(vid, iid)
+
+    def _image_url(r):
+        if r.id in rec_image_ids:
+            return f"/api/recordings/images/{rec_image_ids[r.id]}"
+        if r.artist_id in artist_image_ids:
+            return f"/api/artists/images/{artist_image_ids[r.artist_id]}"
+        if r.venue_id in venue_image_ids:
+            return f"/api/venues/images/{venue_image_ids[r.venue_id]}"
+        return None
+
     recordings = [
         {
             "id":                  r.id,
@@ -160,8 +194,7 @@ def build_search_index():
             "source":              r.source,
             "quality":             r.quality,
             "listening_quality":   r.listening_quality,
-            "image_url": (f"/api/recordings/images/{rec_image_ids[r.id]}"
-                          if r.id in rec_image_ids else None),
+            "image_url": _image_url(r),
         }
         for r in rows
     ]

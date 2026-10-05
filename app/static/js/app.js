@@ -562,11 +562,11 @@ const App = (() => {
   // Only icons actually in use belong here. A grab-bag of unused glyphs is how
   // icons end up sprinkled on everything.
   const ICONS = {
-    // AI Assist (2026-08-28). Was U+2728 SPARKLES, drawn by the OS colour
-    // emoji font at its own weight, baseline and palette — the same objection
-    // that got the speaker emoji out of the player bar on 08-23. Lucide
-    // 'sparkles', so it strokes and colours like every other icon here.
-    'sparkles':     '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+    // Research (2026-10-04). Lucide 'brain' replaced 'sparkles' on every Research
+    // button; the colour is what ties those buttons together, the glyph may vary
+    // with the surface. Details panel toggle: Lucide 'panel-right'.
+    'brain':        '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/>',
+    'panel-right':  '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
     // Preview transport on Add Recording (2026-08-28). Lucide 'skip-back' /
     // 'skip-forward' — the SAME two glyphs the player bar draws inline in
     // index.html, so the two transports cannot drift apart. Kept here as well
@@ -632,6 +632,29 @@ const App = (() => {
            `fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" ` +
            `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ` +
            `aria-hidden="true">${d}</svg>`
+  }
+
+  // The Details panel's tabs, in ONE order for View Recording and Add Recording
+  // (Ryan, 2026-10-04). `attr` is the data attribute each page's wiring reads
+  // (data-pane / data-ipane) and `prefix` the pane-id prefix ('' / 'isp-').
+  // Resolver exists only when the recording has resolver data; Research only
+  // where the user can run it.
+  const DETAILS_TABS = [
+    ['info', 'Info File'], ['quality', 'Quality'], ['resolver', 'Resolver'],
+    ['filetags', 'Tags'], ['checksums', 'Checksums'], ['ai', 'Research'],
+  ]
+  function detailsTabsHtml(attr, prefix, { resolver, research, staged }) {
+    return DETAILS_TABS
+      .filter(([k]) => (k !== 'resolver' || resolver) && (k !== 'ai' || research))
+      .map(([k, label]) => `<button class="slide-tab${k === 'ai' ? ' slide-tab--ai' : ''}` +
+        `${k === 'filetags' && staged ? ' slide-tab--staged' : ''}" ${attr}="${prefix}${k}">${label}</button>`)
+      .join('')
+  }
+  // Show/hide the Details panel. Sits above the panel at the right, and stays
+  // put in both states because it lives outside the panel that slides.
+  function panelToggleHtml(id) {
+    return `<button class="panel-toggle" id="${id}" title="Show/hide details" ` +
+           `aria-label="Show/hide details" aria-expanded="false">${icon('panel-right')}</button>`
   }
 
   // The app's ONE chevron. Lucide 'chevron-right', rotated by
@@ -1953,8 +1976,8 @@ const App = (() => {
           </span>
         </div>
         <div class="nav-records" id="nav-records-collections"></div>
-        ${_otherArchivesHtml()}
         <div class="nav-favorites" id="nav-favorites-flat"></div>
+        ${_otherArchivesHtml()}
       </div>
       <div class="nav-dims-foot">
         ${_dimSection('venues', icon('map-pin'), 'Venues')}
@@ -2042,8 +2065,19 @@ const App = (() => {
   // Back-compat alias — call sites still say loadArtistList().
   const loadArtistList = renderSidebar
 
+  // ── Recording image: one rule everywhere (Ryan, 2026-10-04) ──────────────────
+  // The server resolves the chain (the recording's own image, else its
+  // artist's -- see serialize._primary_recording_image_url) into `image_url`.
+  // What is left for the client is the last link: no url means the artist's
+  // initials. Every surface that draws a recording's image takes its initials
+  // from here, so the three-step rule has one implementation on each side.
+  function recInitials(r) {
+    return String(r?.artist || '?').split(/\s+/).filter(Boolean)
+      .slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  }
+
   // ── Shared compact recording row (one line, all show info) ───────────────────
-  function flatRowHtml(r, showArtist, hasThumbs) {
+  function flatRowHtml(r, showArtist) {
     const id      = recIdentity(r)
     // Studio: date cell is the year (or blank), the venue cell carries the
     // title instead (falling back to the artist when there is no title),
@@ -2055,16 +2089,14 @@ const App = (() => {
     const venueText = id.isStudio ? id.lead : (r.venue || '(unknown venue)')
     const runtime = fmtRuntime(r.duration_sec)
     const inc     = r.is_complete ? '' : '<span class="rec-inc" title="Incomplete recording">inc</span>'
-    // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
-    // placeholder when the row has no image, matching the rule already
-    // applied above to the artist avatar column. `hasThumbs` (S10) is
-    // whether ANY row in this rendered list has an image -- reserving the
-    // column for a list where none of them do (a live-only library, most of
-    // them) costs every row 50px for nothing.
-    const thumb   = r.image_url ? `<img class="rec-thumb-sm" src="${esc(r.image_url)}" alt="" loading="lazy">` : '<span></span>'
+    // Every row carries the image column: the recording's image, else the
+    // artist's, else the artist's initials (Ryan, 2026-10-04).
+    const thumb   = r.image_url
+      ? `<img class="rec-thumb-sm" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : `<span class="rec-thumb-sm rec-thumb-sm--initials">${esc(recInitials(r))}</span>`
     return `
-      <div class="rec-row rec-row--flat ${showArtist ? 'with-artist' : ''}${hasThumbs ? ' has-thumbs' : ''}" data-rec-id="${r.id}">
-        ${hasThumbs ? thumb : ''}
+      <div class="rec-row rec-row--flat ${showArtist ? 'with-artist' : ''}" data-rec-id="${r.id}">
+        ${thumb}
         ${showArtist ? `<span class="rec-artist-cell truncate">${esc(r.artist || '')}</span>` : ''}
         <span class="rec-date truncate">${esc(date)}</span>
         <span class="rec-venue truncate">${esc(venueText)}</span>
@@ -2084,10 +2116,10 @@ const App = (() => {
   // Minimal header row paired with flatRowHtml's grid — every cell is blank
   // except "Added", which doubles as a click-to-sort toggle (default: unsorted,
   // i.e. whatever order the page already puts rows in).
-  function recTableHeadHtml(showArtist, hasThumbs) {
+  function recTableHeadHtml(showArtist) {
     return `
-      <div class="rec-table-head ${showArtist ? 'with-artist' : ''}${hasThumbs ? ' has-thumbs' : ''}">
-        ${hasThumbs ? '<span></span>' : ''}
+      <div class="rec-table-head ${showArtist ? 'with-artist' : ''}">
+        <span></span>
         ${showArtist ? '<span></span>' : ''}
         <!-- One blank cell per data column before "Added": date, venue, location,
              source, quality, runtime, tracks. The rating column was removed
@@ -2108,7 +2140,6 @@ const App = (() => {
     const btn  = head?.querySelector('.rec-th-added')
     const arrow = head?.querySelector('.rec-th-arrow')
     if (!mountEl || !btn) return
-    const hasThumbs = rows.some(r => r.image_url)
     let dir = null   // null = default order; 'asc' | 'desc' once clicked
     btn.addEventListener('click', () => {
       dir = dir === 'desc' ? 'asc' : 'desc'
@@ -2116,7 +2147,7 @@ const App = (() => {
         const av = a.created_at || '', bv = b.created_at || ''
         return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av)
       })
-      mountEl.innerHTML = sorted.map(r => flatRowHtml(r, showArtist, hasThumbs)).join('')
+      mountEl.innerHTML = sorted.map(r => flatRowHtml(r, showArtist)).join('')
       wireRecordingRows(mountEl)
       arrow.textContent = dir === 'asc' ? '▲' : '▼'
     })
@@ -2366,6 +2397,13 @@ const App = (() => {
   //                                    licence bridges, and three of them do
   //                                    not exist. A link-out is honest about
   //                                    being a search box. See photoSearchTiles.
+  //   suggest    {url, tag, action, run} | array of them | null | fn(images) -> same
+  //                                  — images that are NOT in the gallery yet,
+  //                                    each drawn as a tile with a single action.
+  //                                    The recording image modal offers the
+  //                                    artist's and the venue's picture this way; `run` copies
+  //                                    it in and the gallery redraws.
+  //   hideNote   boolean            — omit the line of help text under the grid
   //   onChange   fn(images)         — called after any mutation, so a hero
   //                                   portrait or tab badge can follow along
   //
@@ -2385,6 +2423,9 @@ const App = (() => {
       // Link-outs are an editing affordance too — a listener has nowhere to put
       // what they'd find, so they follow the same gate as the drop zone.
       const links = galEditable ? (opts.linkTiles || []) : []
+      const sgRaw = galEditable ? (typeof opts.suggest === 'function' ? opts.suggest(images) : opts.suggest) : null
+      const sgList = [].concat(sgRaw || []).filter(Boolean)
+      const sg = sgList.length ? sgList : null
       box.innerHTML = `
         <div class="pp-gal" data-gal="1">
           ${images.map(img => `
@@ -2397,6 +2438,14 @@ const App = (() => {
                 ${img.is_primary ? '' : `<button type="button" class="pp-ph-btn" data-act="primary">Make primary</button>`}
                 <button type="button" class="pp-ph-btn" data-act="delete">Delete</button>
               </div>` : ''}
+            </div>`).join('')}
+          ${sgList.map((g, n) => `
+            <div class="pp-ph pp-ph--suggest" data-suggest="${n}">
+              <img src="${esc(g.url)}" alt="" loading="lazy">
+              <span class="pp-ph-tag">${esc(g.tag)}</span>
+              <div class="pp-ph-acts">
+                <button type="button" class="pp-ph-btn" data-act="suggest">${esc(g.action)}</button>
+              </div>
             </div>`).join('')}
           ${galEditable ? `<div class="pp-drop" data-drop="1">
             <span class="pp-drop-plus">${icon('plus')}</span>
@@ -2421,13 +2470,13 @@ const App = (() => {
         <input type="file" data-input="1" multiple
                accept="image/png,image/jpeg,image/webp" style="display:none" />
         <div class="pp-fetch-msg" data-msg="1"></div>
-        <div class="pp-gal-note">${
+        ${opts.hideNote ? '' : `<div class="pp-gal-note">${
           !galEditable
             ? (images.length ? '' : 'No photos yet.')
             : images.length
               ? 'The primary photo is the one shown on this page and on cards.'
-              : 'No photos yet. The primary photo appears on this page and on cards.'
-        }</div>`
+              : sg ? '' : 'No photos yet. The primary photo appears on this page and on cards.'
+        }</div>`}`
 
       const input = box.querySelector('[data-input]')
       const msg   = box.querySelector('[data-msg]')
@@ -2441,6 +2490,10 @@ const App = (() => {
         const btn = e.target.closest('.pp-ph-btn')
         if (!btn) return
         e.preventDefault()
+        if (btn.dataset.act === 'suggest') {
+          try { await sgList[Number(btn.closest('.pp-ph').dataset.suggest)].run(); await refresh() } catch (err) { alert('Failed: ' + err.message) }
+          return
+        }
         const id = Number(btn.closest('.pp-ph').dataset.imgId)
         try {
           if (btn.dataset.act === 'primary') await opts.api.setPrimaryImage(id)
@@ -2577,6 +2630,87 @@ const App = (() => {
     const initials = String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
     return `<div class="pp-portrait-blank" style="--ring:${ring}">${esc(initials)}</div>`
+  }
+
+  // ══ Recording image modal ═════════════════════════════════════════════════
+  //
+  // Opened from the square in the View Recording header (Ryan, 2026-10-04).
+  // Top: the current image, large, for a close look; click it to toggle
+  // between fit and actual size. Below, for an editor: the same photo gallery
+  // the Artist and Venue pages use (upload, make primary, delete, the Commons
+  // and Google link-outs), plus the artist's picture as a one-click choice --
+  // choosing it COPIES the file into the recording, so the recording keeps its
+  // image if the artist's is later replaced. A listener, or a peer, gets the
+  // zoomed image and nothing else.
+  //
+  // opts: { recordingId, rec, artistImageId, venueImageId, artistName, linkQualifier,
+  //         onChange }   -- `rec` is the page's own object and is updated here.
+  function openRecordingImageModal(opts) {
+    const { recordingId, rec } = opts
+    // Peers receive no `images` array (the share door sends image_url only), so
+    // its absence is what marks a context with nothing to edit.
+    const editable = canEditLibrary() && Array.isArray(rec.images)
+    const wrap = document.createElement('div')
+    wrap.className = 'modal-overlay'
+    wrap.innerHTML = `
+      <div class="modal-card img-modal" role="dialog" aria-modal="true">
+        <div class="img-modal-zoom" id="img-modal-zoom"></div>
+        ${editable ? '<div class="img-modal-gal"><div id="img-modal-gal"></div></div>' : ''}
+        <div class="modal-footer">
+          <button class="btn btn-sm btn-ghost" id="img-modal-close">Close</button>
+        </div>
+      </div>`
+    document.body.appendChild(wrap)
+
+    const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
+    const onKey = e => { if (e.key === 'Escape') close() }
+    document.addEventListener('keydown', onKey)
+    wrap.querySelector('#img-modal-close').addEventListener('click', close)
+    wrap.addEventListener('click', e => { if (e.target === wrap) close() })
+
+    const zoomBox = wrap.querySelector('#img-modal-zoom')
+    function renderZoom() {
+      zoomBox.hidden = !rec.image_url
+      zoomBox.innerHTML = rec.image_url
+        ? `<img src="${esc(rec.image_url)}" alt="">` : ''
+      zoomBox.querySelector('img')?.addEventListener('click', e => e.target.classList.toggle('is-actual'))
+    }
+    renderZoom()
+    if (!editable) return
+
+    // The recording's image after any change is the SERVER's answer (own
+    // image, else the artist's), not a second copy of that rule in the client.
+    let firstCall = true
+    async function sync(imgs) {
+      if (firstCall) { firstCall = false; return }   // the gallery reports its initial state
+      rec.images = imgs
+      try { rec.image_url = (await API.recordings.get(recordingId)).image_url } catch (_) {}
+      renderZoom()
+      if (opts.onChange) opts.onChange()
+    }
+
+    createPhotoGallery({
+      mountId: 'img-modal-gal', api: API.recordings, entityId: recordingId,
+      images: rec.images, hideNote: true,
+      linkTiles: photoSearchTiles(opts.artistName, opts.linkQualifier),
+      // Offered until the recording's primary already IS that picture.
+      suggest: imgs => {
+        const primary = (imgs || []).find(i => i.is_primary)
+        const out = []
+        if (opts.artistImageId && primary?.origin !== 'artist') out.push({
+          url: API.artists.imageUrl(opts.artistImageId),
+          tag: 'Artist', action: 'Use as image',
+          run: () => API.recordings.useArtistImage(recordingId),
+        })
+        if (opts.venueImageId && primary?.origin !== 'venue') out.push({
+          url: API.venues.imageUrl(opts.venueImageId),
+          tag: 'Venue', action: 'Use as image',
+          run: () => API.recordings.useVenueImage(recordingId),
+        })
+        return out
+      },
+      onChange: sync,
+    })
   }
 
   // ══ Shared "create entity" form ════════════════════════════════════════════
@@ -3215,9 +3349,8 @@ const App = (() => {
     if (!rows.length) {
       return `<div class="empty-state" style="min-height:180px"><div class="empty-title">${esc(empty)}</div></div>`
     }
-    const hasThumbs = rows.some(r => r.image_url)
-    return recTableHeadHtml(showArtist, hasThumbs)
-         + `<div class="rec-table" id="${mountId}">${rows.map(r => flatRowHtml(r, showArtist, hasThumbs)).join('')}</div>`
+    return recTableHeadHtml(showArtist)
+         + `<div class="rec-table" id="${mountId}">${rows.map(r => flatRowHtml(r, showArtist)).join('')}</div>`
   }
 
   async function renderCollectionsIndex() {
@@ -3593,8 +3726,7 @@ const App = (() => {
           track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
           kind: r.kind, title: r.title,
         })))
-      const hasThumbs = rowObjs.some(r => r.image_url)
-      const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
+      const rows = rowObjs.map(r => flatRowHtml(r, false)).join('')
       if (!rows) return ''
       return `<div class="pp-group">
         <div class="pp-group-head"><a href="#/artist/${g.artist.id}">${esc(g.artist.name)}</a></div>
@@ -3630,8 +3762,7 @@ const App = (() => {
           track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
           kind: r.kind, title: r.title,
         })))
-      const hasThumbs = rowObjs.some(r => r.image_url)
-      const rows = rowObjs.map(r => flatRowHtml(r, false, hasThumbs)).join('')
+      const rows = rowObjs.map(r => flatRowHtml(r, false)).join('')
       if (!rows) return ''
       // "Guest" tag only when every appearance under this act name is
       // actually is_guest=True (2026-07-23 fix — this section is really "not
@@ -3966,9 +4097,7 @@ const App = (() => {
       .map(w => w[0]).join('').toUpperCase()
     const av = r.image_url
       ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
-      : r.image_id
-        ? `<img class="brow-av brow-av--img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
-        : `<span class="brow-av">${esc(initials)}</span>`
+      : `<span class="brow-av">${esc(initials)}</span>`
     const dateText = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
     const main = id.isStudio
       ? `<span class="brow-title">${esc(r.title || '')}</span>`
@@ -4461,9 +4590,7 @@ const App = (() => {
     // (Ryan, 2026-10-01: the square is the recording's image).
     const av = r.image_url
       ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
-      : r.image_id
-        ? `<img class="brow-av brow-av--img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
-        : `<span class="brow-av">${esc(initials)}</span>`
+      : `<span class="brow-av">${esc(initials)}</span>`
     // Column order (Ryan, 2026-10-01): Image, Artist, Date, Venue, Location
     // left; Rating, Source right. Genre spine removed. Source and rating
     // are reserved cells, always emitted even when empty, so a graded row
@@ -4741,8 +4868,7 @@ const App = (() => {
   // back to the artist's initials only when a studio record has no title.
   function _albumTileHtml(r) {
     const id = recIdentity(r)
-    const initials = String(id.lead || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-      .map(w => w[0]).join('').toUpperCase()
+    const initials = recInitials(r)
     const c = r.genre_color || 'var(--bg-4)'
     const art = r.image_url
       ? `<img class="top-img" src="${esc(r.image_url)}" alt="" loading="lazy">`
@@ -5049,8 +5175,7 @@ const App = (() => {
   // release (label · catalog number) when MusicBrainz knows it.
   function _albumRowHtml(r) {
     const id = recIdentity(r)
-    const initials = String(id.lead || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-      .map(w => w[0]).join('').toUpperCase()
+    const initials = recInitials(r)
     const c = r.genre_color || 'var(--t2)'
     const av = r.image_url
       ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
@@ -5216,7 +5341,7 @@ const App = (() => {
                  they never asked for. It also lands here, beside the roster it
                  is about, rather than up on the Description header. -->
             <div class="pp-lineup-ai">
-              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn" id="pp-lineup-run">${icon('sparkles')} Research lineup</button>
+              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn research-btn" id="pp-lineup-run">${icon('brain')} Research lineup</button>
               <span class="pp-sec-msg" id="pp-lineup-msg"></span>
             </div>
             <div class="pp-lineup-results" id="pp-lineup-results"></div>
@@ -5228,7 +5353,7 @@ const App = (() => {
                  made because a biography is low-stakes and freely re-editable. -->
             <div class="pp-sec-row">
               <div class="pp-sec">Description</div>
-              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn" id="pp-dossier-run">${icon('sparkles')} AI Assist</button>
+              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn research-btn" id="pp-dossier-run">${icon('brain')} Research</button>
               <span class="pp-sec-msg" id="pp-dossier-msg"></span>
             </div>
             <input type="text" class="ai-ask-input pp-ai-ask" id="pp-ai-question" autocomplete="off"
@@ -5947,12 +6072,12 @@ const App = (() => {
             ? `<div class="ai-res-title">Answer</div><p class="ai-summary">${esc(stripCitations(result.answer))}</p>`
             : ''
         }
-        btn.textContent = 'AI Assist'
+        btn.innerHTML = icon('brain') + ' Research'
         btn.disabled = false
       } catch (e) {
         clearInterval(tick)
         msg.className = 'pp-sec-msg is-err'
-        msg.textContent = 'AI Assist failed: ' + e.message
+        msg.textContent = 'Research failed: ' + e.message
         btn.disabled = false
       }
     }
@@ -6128,7 +6253,7 @@ const App = (() => {
     if (lineupResult && (lineupResult.members || []).length) {
       renderLineupResults(lineupResult)
       const lb = document.getElementById('pp-lineup-run')
-      if (lb) lb.innerHTML = icon('sparkles') + ' Research lineup again'
+      if (lb) lb.innerHTML = icon('brain') + ' Research lineup again'
       const lm = document.getElementById('pp-lineup-msg')
       if (lm) lm.textContent = 'Saved from an earlier run'
     }
@@ -6154,7 +6279,7 @@ const App = (() => {
       // A previous run exists on the record. Nothing is rendered from it any
       // more — the description it produced is already saved — but the label
       // should say this isn't the first pass.
-      document.getElementById('pp-dossier-run').textContent = 'AI Assist'
+      document.getElementById('pp-dossier-run').innerHTML = icon('brain') + ' Research'
     }
 
     onAdminClick('pp-delete', async () => {
@@ -6278,13 +6403,11 @@ const App = (() => {
       const secs = Math.round((Date.now() - t0) / 1000)
       const msg = /no_api_key/.test(e.message)
         ? 'No Anthropic API key set. Add one in Settings.'
-        : `AI Assist failed after ${secs}s: ${esc(e.message)}`
+        : `Research failed after ${secs}s: ${esc(e.message)}`
       body.innerHTML = `<div class="ai-assist-cta">
         <p class="ai-res-note" style="color:var(--red)">${msg}</p>
-        ${aiAskBoxHtml('Research the web to verify and fill this recording\'s metadata.')}
-        <button class="btn btn-primary btn-sm iq-ai-btn" id="btn-ai-assist-retry">${icon('sparkles')} Try again</button>
+        ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist-retry', 'Try again'))}
       </div>`
-      paintAiAskNote()
       document.getElementById('btn-ai-assist-retry')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
     }
   }
@@ -6451,28 +6574,20 @@ const App = (() => {
   // The expectation line replaces a cost tooltip nobody hovered. Tokens, not
   // currency, and a range rather than a figure: how many searches the model
   // decides it needs is not knowable in advance.
-  function aiAskBoxHtml(hint) {
+  // The Research pane's header (text from Ryan, 2026-10-04).
+  const RESEARCH_HINT = 'Use your Anthropic account to research this recording and help fill in its metadata. ' +
+    'Trellis will retrieve as much as it can about the show; if you have specific requests enter them here.'
+  function researchBtnHtml(id, label) {
+    return `<button class="btn btn-sm iq-ai-btn research-btn" id="${id}">${icon('brain')} ${label}</button>`
+  }
+  function aiAskBoxHtml(hint, actionHtml = '') {
     return `
       <div class="ai-ask">
         <div class="ai-assist-hint">${esc(hint)}</div>
         <input type="text" class="ai-ask-input" id="ai-question" autocomplete="off"
                placeholder="Anything specific you want checked? (optional)" />
-        <div class="ai-ask-note" id="ai-ask-note"></div>
+        ${actionHtml ? `<div class="ai-ask-go">${actionHtml}</div>` : ''}
       </div>`
-  }
-
-  // Fills #ai-ask-note once the estimate lands. Separate from the markup above
-  // because the estimate is async and the box must render immediately.
-  function paintAiAskNote() {
-    const el = document.getElementById('ai-ask-note')
-    if (!el) return
-    const paint = est => {
-      const node = document.getElementById('ai-ask-note')
-      if (!node || !est || est.low_tokens == null) return
-      node.textContent = `${aiTokenRange(est)}. Billed by Anthropic to your key.`
-    }
-    if (_aiEstimate) paint(_aiEstimate)
-    else aiEstimatePromise().then(paint)
   }
 
   // Read + clear the question. Cleared on read so a question asked about one
@@ -6558,7 +6673,7 @@ const App = (() => {
       ? `<div class="ai-res-section"><div class="ai-res-title">Sources</div>${r.sources.map(s => `<p class="ai-res-note"><a class="ai-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></p>`).join('')}</div>` : ''
 
     const rerunBtn = opts.showRerun
-      ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run AI Assist again">Run again</button>` : ''
+      ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run Research again">Run again</button>` : ''
 
     // The human's own question is answered FIRST, above the machine's routine
     // findings. If someone asked something, that is what they opened this
@@ -6704,10 +6819,8 @@ const App = (() => {
       const pane = document.getElementById('ai-results')
       if (!pane) return
       pane.innerHTML = `<div class="ai-assist-cta">
-        ${aiAskBoxHtml('Run again. A question here tells it where to look.')}
-        <button class="btn btn-primary btn-sm iq-ai-btn" id="btn-ai-rerun-go">${icon('sparkles')} Research again</button>
+        ${aiAskBoxHtml('Run again. A question here tells it where to look.', researchBtnHtml('btn-ai-rerun-go', 'Research again'))}
       </div>`
-      paintAiAskNote()
       document.getElementById('ai-question')?.focus()
       document.getElementById('btn-ai-rerun-go')?.addEventListener('click', () =>
         startRecAiAssist(recordingId, rec, perf))
@@ -6811,28 +6924,37 @@ const App = (() => {
     const canEdit  = canEditLibrary()
     const resolverPaneHtml = buildResolverPaneHtml(rec.resolver_json)
     const editHint = canEdit ? ' title="Click title to rename · right-click for flags"' : ''
-    // Set cell is content for everyone (the label always renders) and a
-    // click-to-edit control only for admins -- makeInlineEditable() itself
-    // gates the control on canEditLibrary(), same as Note/Songwriter above.
+    // Set no longer has a cell: it is edited from the track's right-click menu.
+    // The set group headers in the list still show it.
+    // No disc-track cell (Ryan, 2026-10-04), even when the metadata has discs.
     function trackRowHtml(t) {
       const isPlaying  = t.id === state.playingTrackId
       const playingCls = isPlaying ? ' playing' : ''
       const playIcon   = icon(isPlaying ? 'pause' : 'play')
-      const discLabel  = t.disc_number
-        ? `${t.disc_number}-${String(t.disc_track_number || '').padStart(2, '0')}`
-        : ''
       return `
         <div class="track-row${playingCls}" data-track-id="${t.id}" data-flags="${(t.flags||[]).join(',')}"${editHint}>
           <span class="track-play">${playIcon}</span>
           <span class="track-num">${String(t.track_number || '').padStart(2,'0')}</span>
-          <span class="track-disc-col">${esc(discLabel)}</span>
           <span class="track-title-wrap">
             <span class="track-title truncate${canEdit ? ' track-title--editable' : ''}">${trackTitleInnerHtml(t)}</span>
           </span>
           <span class="track-note-col truncate${canEdit ? ' pp-editable' : ''}${t.notes ? '' : ' pp-empty'}" id="t-note-${t.id}" title="${esc(t.notes || (canEdit ? 'Click to add a note' : ''))}">${esc(t.notes || (canEdit ? '—' : ''))}</span>
           <span class="track-sw-col truncate${canEdit ? ' pp-editable' : ''}${t.songwriter ? '' : ' pp-empty'}" id="t-sw-${t.id}" title="${esc(t.songwriter || (canEdit ? 'Click to add a songwriter' : ''))}">${esc(t.songwriter || (canEdit ? '—' : ''))}</span>
-          <span class="track-set-col truncate${canEdit ? ' pp-editable' : ''}${t.set_number ? '' : ' pp-empty'}" id="t-set-${t.id}" title="${esc(t.set_number || (canEdit ? 'Click to set the set' : ''))}">${esc(t.set_number || (canEdit ? '—' : ''))}</span>
           <span class="track-dur">${fmtDuration(t.duration)}</span>
+        </div>`
+    }
+    // Column headers for everything after the title (Ryan, 2026-10-04): same
+    // grid as .track-row so they sit over their cells. Play, number and title
+    // need none. The disc cell is blank on a single-disc recording.
+    function trackHeadHtml() {
+      if (!(rec.tracks || []).length) return ''
+      return `
+        <div class="track-row track-head" aria-hidden="true">
+          <span></span><span></span>
+          <span class="track-head-title">Title</span>
+          <span class="track-head-note">Notes</span>
+          <span class="track-head-sw">Songwriter</span>
+          <span class="track-head-dur">Time</span>
         </div>`
     }
     // Groups form by set_number label in first-appearance order -- the same
@@ -7030,7 +7152,7 @@ const App = (() => {
             <button class="actions-item" role="menuitem" data-act="official">${
               rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>
             <button class="actions-item" role="menuitem" data-act="kind">${
-              rec.kind === 'studio' ? 'Mark as Live Recording' : 'Mark as Album'}</button>
+              rec.kind === 'studio' ? 'Classify as Live Recording' : 'Classify as Album'}</button>
             <!-- Move to — same two destinations as the triage queue's Move,
                  deliberately: Workshop and Backlog are the two real folders a
                  show goes back to, and having a different vocabulary before
@@ -7044,24 +7166,22 @@ const App = (() => {
               ${triageDestButtons('actions')}
             </div>` : ''}`}
             <div class="actions-sep"></div>
-            <button class="actions-item actions-item--danger" role="menuitem" data-act="delete">Delete Recording…</button>
+            <button class="actions-item actions-item--danger" role="menuitem" data-act="delete">Delete Recording</button>
           </div>
         </div>` : ''}
       </div>`
 
-    // Cover art (Studio Records spec v1, chunk 5) -- every kind, not
-    // studio-only (S9): step 13 ingests folder and embedded art for a live
-    // recording too, and a live show with taper art deserves the same
-    // header slot a studio release gets. Same slot/size treatment
-    // (.rec-header-avatar / 84px) as the artist avatar it sits beside.
-    function primaryRecordingImage() {
-      const imgs = rec.images || []
-      if (!imgs.length) return null
-      return imgs.find(i => i.is_primary) || imgs[0]
-    }
-    const showCoverSlot = !!(primaryRecordingImage() || (!rec.images && rec.image_url) || canEdit)
-    const coverBlockHtml = showCoverSlot ? `
-      <div class="rec-header-avatar rec-header-cover" id="rec-cover" role="button" tabindex="0"></div>` : ''
+    // The recording's ONE square (Ryan, 2026-10-04). It used to be two -- the
+    // artist's avatar and a separate cover slot -- and is now the recording's
+    // image by the chain the server resolves into rec.image_url: its own image,
+    // else the artist's, else the artist's initials. Clicking it opens the image
+    // modal (zoom, and for an editor the gallery). Genre-colour ring, as the
+    // artist avatar it replaces had. Not a button when there is nothing to open:
+    // initials only, and no edit rights.
+    const imageClickable = !!(rec.image_url || canEdit)
+    const coverBlockHtml = `
+      <div class="rec-header-avatar${imageClickable ? ' rec-header-avatar--btn' : ''}" id="rec-cover"
+           style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}"${imageClickable ? ' role="button" tabindex="0"' : ''}></div>`
 
     // Studio heading + sub-line (Ryan, 2026-09-27 — owner-approved design).
     // The album title takes the h2 that a live recording gives the artist;
@@ -7118,17 +7238,9 @@ const App = (() => {
              it 2026-08-27). -->
         <div class="rec-header-main">
         <div class="rec-header-left">
-          <!-- Artist avatar (Ryan, 2026-08-18; squared 2026-08-27) — to the
-               left of the name and date lines, spanning both. Same
-               perfPhotoHtml() the cards and the Artist hero use, so an act
-               has one face everywhere; falls back to the initials disc, which
-               is the NORMAL appearance rather than an error state (62 of 173
-               artists are photographed). Ringed in the artist's genre
-               colour, matching the card treatment. -->
+          <!-- Recording image (see coverBlockHtml) — to the left of the name
+               and date lines, spanning both. -->
           ${coverBlockHtml}
-          ${!isStudioKind ? `<div class="rec-header-avatar" style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}">
-            ${perfPhotoHtml({ image_id: perf?.artist_image_id, artist: perfName }, 'rec-header-photo')}
-          </div>` : ''}
           <div class="rec-header-lines">
           ${isStudioKind ? studioTitleHtml : `
           <div class="rec-name-row">
@@ -7171,7 +7283,6 @@ const App = (() => {
         </div>
         </div>
       </div>
-      <div class="rec-photos-wrap hidden" id="rec-photos-wrap"><div id="rec-photos"></div></div>
       <div class="action-bar">
         <!-- Playback actions only — editing/admin actions live at the bottom -->
         <button class="btn btn-ghost btn-sm" id="btn-play-all">Play All</button>
@@ -7180,10 +7291,11 @@ const App = (() => {
           <span class="skip-toggle-track"></span>
           <span class="skip-toggle-label">Skip Non-Music</span>
         </label>` : ''}
+        ${canEdit ? panelToggleHtml('slide-rail') : ''}
       </div>
       <div class="detail-panels" id="detail-panels">
         <div class="track-panel" id="track-panel">
-          ${trackRows || '<div class="info-panel-empty">No tracks</div>'}
+          ${trackHeadHtml()}${trackRows || '<div class="info-panel-empty">No tracks</div>'}
         </div>
 
         <!-- The Details pane is an ADMIN surface and is not rendered at all in
@@ -7193,80 +7305,24 @@ const App = (() => {
              and the transport. Removing it also gives the track list the full
              width, which is the point of the mode. -->
         ${canEdit ? `
-        <!-- Slide-in right panel — the Details pane.
-             Horizontal tab strip (Ryan, 2026-08-18). The vertical strip ran
-             out of vertical room once a fifth tab arrived, and it degraded
-             badly on a short browser window — rotated text cannot wrap or
-             ellipsize. Horizontal tabs scroll sideways instead, which is a
-             graceful failure.
-
-             The vertical DETAILS rail is now PERMANENT (Ryan, 2026-08-21).
-             It used to appear only while collapsed, which left "click the
-             active tab again" as the sole way back to a full-width track
-             list — a gesture nothing on the page advertises. The rail is a
-             visible, always-present toggle: click to hide, click to show.
-             That also makes it the natural affordance for the listener
-             layout, where Details is the thing you usually want out of the
-             way.
-
-             DOM note: the rail is a sibling of .slide-panel-main (tabs +
-             panes) rather than living inside it, so it keeps its own fixed
-             28px column in both states.
-
-             It sits AFTER the panel body, i.e. against the window's right
-             edge (Ryan, 2026-08-28). It used to lead, which put it on the
-             panel's inner edge: the panel grows leftwards when it opens, so
-             the rail travelled the panel's whole width every time it was
-             clicked. A toggle that jumps out from under the cursor when you
-             press it is a bad toggle. Pinned to the outer edge it holds still
-             in both states and only the panel body moves, which is also how
-             Add Recording draws it. -->
-        <div class="slide-panel slide-panel--htabs" id="slide-panel">
+        <!-- Slide-in right panel: the Details pane. Tabs are an index column at
+             its right edge (detailsTabsHtml, shared with Add Recording); the
+             show/hide toggle is in the action bar above, outside the panel, so
+             it stays put while the panel slides (Ryan, 2026-10-04). -->
+        <div class="slide-panel slide-panel--htabs slide-panel--index" id="slide-panel">
           <div class="slide-panel-main">
 
-          <!-- Two rows: navigation, then actions (Ryan, 2026-08-21).
-               Every pane used to repeat its own name in a .slide-pane-header
-               directly under the tab that already said it, and each pane put
-               its action somewhere different — Analyze Audio inside the Quality
-               report, AI Assist as a call-to-action block in its pane,
-               Re-validate in a pane header, Write Tags all the way down in the
-               page's bottom row. The pane headers are gone and every action now
-               uses .pane-act in one place.
-               That place is a row of its OWN, under the tabs, rather than the
-               right end of the tab strip: crammed in beside five tabs the
-               longer labels ("Write Tags to Files") pushed the strip into
-               horizontal scrolling, so the action could scroll out of sight —
-               and an action bar you have to scroll to find is worse than the
-               scattered buttons it replaced. The row hides itself when the
-               active pane has nothing to offer. -->
-          <div class="slide-tabrow">
-          <div class="slide-tabs">
-            <!-- Info File leads and is the default. It is the taper's own
-                 document — the one artifact that arrived with the recording,
-                 and the thing you open a show to read. Quality is a machine
-                 opinion and can wait one click. -->
-            <button class="slide-tab" data-pane="info">Info File</button>
-            <!-- "Quality", not "Listening Quality" — the tab is a label in a
-                 row of one-or-two-word labels. The score itself is still
-                 called Listening Quality everywhere it is described. -->
-            <button class="slide-tab" data-pane="quality">Quality</button>
-            <!-- The tab itself goes amber when the database holds metadata the
-                 FLAC files do not (Ryan, 2026-08-22). The Write Tags button was
-                 already marked, but it only exists while you are LOOKING at the
-                 File Tags pane — so the one signal that mattered was invisible
-                 from every other tab. -->
-            <button class="slide-tab${stagedCount > 0 ? ' slide-tab--staged' : ''}" data-pane="filetags">File Tags</button>
-            <button class="slide-tab" data-pane="checksums">Checksums</button>
-            ${resolverPaneHtml ? `<button class="slide-tab" data-pane="resolver">Resolver</button>` : ''}
-            ${canEdit ? `<button class="slide-tab slide-tab--ai" data-pane="ai">AI Assist</button>` : ''}
-          </div>
-
-          <!-- Action row. Every action for every pane is rendered once here and
-               shown by data-for as the pane changes, rather than being
-               re-created on each switch — so ids stay stable and existing
+          <!-- Actions for the active pane (and the staged-edits note), one pane's
+               controls at a time. Tabs live in the index column at the right
+               (Ryan, 2026-10-04), so this row has the panel's full width and the
+               longest cluster (the note plus Write Tags and Rename) fits on one
+               line. Every action for every pane is rendered once here and shown
+               by data-for as the pane changes, so ids stay stable and existing
                wiring (markStaged's #btn-write-tags, wireReanalyze) keeps
-               working with no lookup churn. -->
+               working with no lookup churn. The row hides itself when the active
+               pane has nothing to offer. -->
           <div class="pane-acts" id="pane-acts">
+              <span class="pane-title" id="pane-title"></span>
               ${canEdit ? `
               <span class="pane-act-status" id="rec-info-save-status" data-for="info"></span>
               <button class="pane-act act-suppressed" id="btn-rec-save-info" data-for="info" hidden disabled>Save to File</button>
@@ -7282,9 +7338,6 @@ const App = (() => {
                       title="Rename the files on disk to match a naming scheme">Rename Files</button>` : ''}
               <button class="pane-act" id="btn-cksum-revalidate" data-for="checksums"
                       title="Re-check against the files on disk">Re-validate</button>
-              ${canEdit ? `
-              <button class="pane-act pane-act--primary" id="btn-ai-assist" data-for="ai">${icon('sparkles')} AI Assist</button>` : ''}
-          </div>
           </div>
 
           <div class="slide-panel-body" id="slide-panel-body">
@@ -7334,13 +7387,15 @@ const App = (() => {
                  the other reason the button had to move out of it. -->
             <div class="slide-pane" id="sp-ai">
               <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                ${aiAskBoxHtml("Research the web to verify and fill this recording's metadata.")}
+                ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))}
               </div></div>
             </div>` : ''}
 
           </div>
           </div>
-          <button class="slide-rail" id="slide-rail" title="Show/hide details" aria-expanded="false">Details</button>
+          <nav class="slide-index" aria-label="Details">
+            ${detailsTabsHtml('data-pane', '', { resolver: !!resolverPaneHtml, research: canEdit, staged: stagedCount > 0 })}
+          </nav>
         </div>
         ` : ''}
 
@@ -7378,7 +7433,11 @@ const App = (() => {
     // grouping is markup only and must never touch how playback finds a row.
     function wirePlaybackTrackRowClicks() {
       mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
-        row.addEventListener('click', () => {
+        row.addEventListener('click', e => {
+          // Only the play button, the number and the title start or pause a
+          // track (Ryan, 2026-10-04). Notes, Songwriter, Set and the gaps
+          // between cells do nothing, so editing a cell never plays the row.
+          if (!e.target.closest('.track-play, .track-num, .track-title-wrap')) return
           if (row.classList.contains('track-row--skipped')) return
           const tid = parseInt(row.dataset.trackId)
           if (tid === Player.currentId()) {
@@ -7494,6 +7553,38 @@ const App = (() => {
       if (box) box.innerHTML = recPersonnelHtml(perf.personnel || [], false)
     }
 
+    // ── Recording image (Ryan, 2026-10-04) ───────────────────────────────
+    // Outside the canEdit block on purpose: Playback mode and peers must see the
+    // image too (it was absent there). The modal itself gates editing.
+    // Draws rec.image_url -- already the resolved chain (own image, else the
+    // artist's) -- or the artist's initials. Peers get the same field from
+    // the share door with peer URLs, so one branch serves both contexts.
+    function renderCoverSlot() {
+      const el = document.getElementById('rec-cover')
+      if (!el) return
+      el.innerHTML = rec.image_url
+        ? `<img class="rec-header-photo" src="${esc(rec.image_url)}" alt="Cover">`
+        : `<span class="rec-header-photo rec-header-photo--initials">${esc(recInitials({ artist: perfName }))}</span>`
+    }
+    renderCoverSlot()
+    const coverEl = document.getElementById('rec-cover')
+    if (coverEl?.getAttribute('role') === 'button') {
+      coverEl.addEventListener('click', () => openRecordingImageModal({
+        recordingId, rec, artistImageId: perf?.artist_image_id || null,
+        venueImageId: perf?.venue_image_id || null,
+        artistName: perfName,
+        // Narrows the link-out searches: an album by its title, a live show
+        // by its venue and year.
+        linkQualifier: rec.kind === 'studio'
+          ? [rec.title, 'album cover'].filter(Boolean).join(' ')
+          : [venueStr, perf?.start_year].filter(Boolean).join(' '),
+        onChange: renderCoverSlot,
+      }))
+      coverEl.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); coverEl.click() }
+      })
+    }
+
     // Delegated from the view shell rather than one container: Quality now sits
     // in the top action row and Source/Lineage down beside Members, so there is
     // no single ancestor of all three but the view itself.
@@ -7517,6 +7608,11 @@ const App = (() => {
       document.querySelector('.slide-tab[data-pane="filetags"]')?.classList.toggle('slide-tab--staged', on)
       document.getElementById('tags-staged-note')?.classList.toggle('act-suppressed', !on)
       syncPaneActs()
+      // The Current/After table is built from the database as of the last load,
+      // so a new edit made while that pane is on screen has to refresh it.
+      if (on && document.getElementById('sp-filetags')?.classList.contains('active')) {
+        loadFileTags(recordingId)
+      }
     }
     function markStaged() { setTagsStaged(true) }
     function refreshTrackRow(t) {
@@ -7584,10 +7680,20 @@ const App = (() => {
           openTrackMenu(track, ev.clientX, ev.clientY, {
             flagsOnly: true,
             showOfficial: true,
+            showSet: true,
             onChange: async (t) => {
               try { await API.tracks.update(t.id, { flags: t.flags, is_official: t.is_official }); markStaged() }
               catch (e) { console.error(e) }
               refreshTrackRow(t)
+            },
+            // Saving a Set never touches disk, tags or track_number (spec
+            // section 6.4) and re-renders the WHOLE list, since grouping and
+            // every set's derived position can change from one edit. No
+            // markStaged(): write_flac_tags writes no set tag (N6, 2026-09-25).
+            onSet: async (t) => {
+              try { await API.tracks.update(t.id, { set_number: t.set_number }) }
+              catch (e) { alert('Failed: ' + e.message) }
+              renderTrackList()
             },
           })
         })
@@ -7616,24 +7722,6 @@ const App = (() => {
             refreshTrackRow(track)
           },
         })
-        // Set — click-to-edit; empty clears it. Saving never touches disk,
-        // tags or track_number (spec section 6.4) — it re-renders the WHOLE
-        // list, not just this row, since grouping and every set's derived
-        // per-set position can change from a single edit.
-        makeInlineEditable(document.getElementById(`t-set-${track.id}`), {
-          placeholder: '—',
-          get: () => track.set_number || '',
-          onSave: async v => {
-            v = v.trim() || null
-            track.set_number = v
-            // No markStaged() (N6, review 2026-09-25): write_flac_tags writes
-            // no set tag, so editing the Set cell has nothing for Write Tags
-            // to write and must not turn that button amber.
-            try { await API.tracks.update(track.id, { set_number: v }) }
-            catch (e) { alert('Failed: ' + e.message) }
-            renderTrackList()
-          },
-        })
       })
     }
     wireEditableTrackRows()
@@ -7644,7 +7732,7 @@ const App = (() => {
     function renderTrackList() {
       trackRows = buildTrackListHtml()
       const panel = document.getElementById('track-panel')
-      if (panel) panel.innerHTML = trackRows || '<div class="info-panel-empty">No tracks</div>'
+      if (panel) panel.innerHTML = trackHeadHtml() + (trackRows || '<div class="info-panel-empty">No tracks</div>')
       wirePlaybackTrackRowClicks()
       wireEditableTrackRows()
       applySkipFilter()
@@ -7847,46 +7935,6 @@ const App = (() => {
           rec.title = v
           renderRecordingView(recordingId)
         },
-      })
-
-      // ── Cover art (Studio Records spec v1, chunk 5) ─────────────────────
-      // Same size/slot as the artist avatar beside it (.rec-header-avatar,
-      // 84px). Clicking it opens the shared gallery in a collapsible panel
-      // beneath the header rather than a tab, since this page has no tab
-      // strip of its own. "Cover" (S7) is used only as the <img>'s alt text.
-      let recGallery = null
-      function renderCoverSlot() {
-        const el = document.getElementById('rec-cover')
-        if (!el) return
-        const primary = primaryRecordingImage()
-        if (primary) {
-          el.innerHTML = `<img class="rec-header-photo" src="${esc(API.recordings.imageUrl(primary.id))}" alt="Cover">`
-        } else if (!rec.images && rec.image_url) {
-          // Peer context (S9): the share door's recording_detail payload
-          // carries image_url but not the id-keyed images array ("artwork
-          // follows the recording"), so render straight from that url
-          // rather than needing an id renderCoverSlot has no way to get.
-          el.innerHTML = `<img class="rec-header-photo" src="${esc(rec.image_url)}" alt="Cover">`
-        } else if (canEdit) {
-          el.innerHTML = `<div class="rec-header-photo rec-header-photo--initials rec-cover-empty">+</div>`
-        }
-      }
-      renderCoverSlot()
-      document.getElementById('rec-cover')?.addEventListener('click', () => {
-        const wrap = document.getElementById('rec-photos-wrap')
-        if (!wrap) return
-        const opening = wrap.classList.contains('hidden')
-        wrap.classList.toggle('hidden')
-        if (opening && !recGallery) {
-          recGallery = createPhotoGallery({
-            mountId: 'rec-photos', api: API.recordings, entityId: recordingId,
-            images: rec.images || [],
-            onChange: imgs => { rec.images = imgs; renderCoverSlot() },
-          })
-        }
-      })
-      document.getElementById('rec-cover')?.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.target.click() }
       })
 
       // ── Release block (Studio Records spec v1, chunk 3) ─────────────────
@@ -8175,7 +8223,6 @@ const App = (() => {
       // Scoped inside this block (like the header editors above) since applying
       // a proposal needs perf.id. Non-editors never get the pane in the DOM.
       document.getElementById('btn-ai-assist')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
-      paintAiAskNote()   // fills the token-range line once the estimate lands
       // Saved research from a prior run — render it immediately instead of the CTA.
       if (rec.ai_research) {
         renderRecAiResults(rec.ai_research, document.getElementById('ai-results'), recordingId, rec, perf)
@@ -8574,7 +8621,11 @@ const App = (() => {
                          !el.classList.contains('pane-act-note')
         if (!el.hidden && isAction) any = true
       })
-      if (row) row.hidden = !any
+      // The row always shows: it carries the pane's title even with no action.
+      const tab = document.querySelector(`.slide-tab[data-pane="${pane}"]`)
+      const title = document.getElementById('pane-title')
+      if (title && tab) title.textContent = tab.textContent
+      if (row) row.hidden = false
     }
 
     // ── Actions menu ────────────────────────────────────────────────────────
@@ -8626,6 +8677,11 @@ const App = (() => {
     })()
 
     // ── Slide panel tab wiring ───────────────────────────────────────────────
+    // Declared HERE, before the IIFE below: its last line calls openPane(), which
+    // calls loadQualityPane() when Quality was the last pane open, and that reads
+    // this flag. Declared further down it was still in its temporal dead zone,
+    // so the pane sat on "Loading..." with a ReferenceError (Ryan, 2026-10-04).
+    let _qualityLoaded = false
     ;(function () {
       const panel = document.getElementById('slide-panel')
       if (!panel) return
@@ -8710,7 +8766,6 @@ const App = (() => {
     // behind a caret. On the triage card the metrics are the point — you are
     // deciding whether to ingest. Here you are usually deciding whether to
     // press play, and the verdict answers that on its own.
-    let _qualityLoaded = false
     async function loadQualityPane() {
       if (_qualityLoaded) return
       _qualityLoaded = true
@@ -8860,8 +8915,11 @@ const App = (() => {
           const key = `${String(t.track_number || '').padStart(2, '0')} · ${t.title || ''}`
           obj[key] = t.error ? { error: t.error } : (t.tags || {})
         })
-        const json = JSON.stringify(obj, null, 2)
-        body.innerHTML = `<pre class="filetags-json">${esc(json)}</pre>`
+        // Staged edits: Current/After. Nothing staged: the plain on-disk view.
+        const diff = fileTagsDiffHtml(data.tracks || [])
+        body.innerHTML = diff
+          ? `<div class="ft-wrap">${diff}</div>`
+          : `<pre class="filetags-json">${esc(JSON.stringify(obj, null, 2))}</pre>`
       } catch (e) {
         body.innerHTML = `<div class="info-panel-empty">Failed to read tags: ${esc(e.message || '')}</div>`
       }
@@ -8881,6 +8939,56 @@ const App = (() => {
         }
       })
     })
+  }
+
+  // Tags pane, Current/After (Ryan, 2026-10-04). `tracks` is the tags endpoint's
+  // list: per track, `tags` (on disk) and `staged` (what Write Tags to Files would
+  // write). A full outer join per track, so every tag on disk and every tag that
+  // would be written appears. A tag that would be removed keeps its current value
+  // (struck through) with an empty After; a new tag has an empty Current. Rows
+  // identical on every track form one "All tracks" block instead of repeating.
+  // Returns '' when nothing differs, so the caller keeps the plain on-disk view.
+  function fileTagsDiffHtml(tracks) {
+    const show = v => v == null ? '' : (Array.isArray(v) ? v.join('; ') : String(v))
+    const label = t => `${String(t.track_number || '').padStart(2, '0')} · ${t.title || ''}`
+    const joined = tracks.filter(t => t.tags && t.staged).map(t => {
+      const keys = [...new Set([...Object.keys(t.tags), ...Object.keys(t.staged)])].sort()
+      return { t, rows: keys.map(k => {
+        const hasC = k in t.tags, hasA = k in t.staged
+        const c = show(t.tags[k]), a = show(t.staged[k])
+        const state = !hasC ? 'added' : !hasA ? 'removed' : c === a ? 'same' : 'changed'
+        return { k, c, a, state, sig: [k, c, a, state].join('\u0000') }
+      }) }
+    })
+    if (!joined.some(j => j.rows.some(r => r.state !== 'same'))) return ''
+
+    // Rows every track shares, in identical form.
+    let common = null
+    if (joined.length > 1) {
+      for (const j of joined) {
+        const sigs = new Set(j.rows.map(r => r.sig))
+        common = common ? new Set([...common].filter(x => sigs.has(x))) : sigs
+      }
+    }
+    const isCommon = r => !!common && common.has(r.sig)
+    const row = r => `<tr class="ft-row ft-row--${r.state}"><td class="ft-k">${esc(r.k)}</td>` +
+      `<td class="ft-c">${esc(r.c)}</td><td class="ft-a">${esc(r.a)}</td></tr>`
+    const group = (title, rows, open) => !rows.length ? '' : `
+      <details class="ft-grp"${open ? ' open' : ''}>
+        <summary>${esc(title)}</summary>
+        <table class="ft-table"><tbody>${rows.map(row).join('')}</tbody></table>
+      </details>`
+
+    const shared = common ? joined[0].rows.filter(isCommon) : []
+    const perTrack = joined.map(j => {
+      const rows = j.rows.filter(r => !isCommon(r))
+      return group(label(j.t), rows, rows.some(r => r.state !== 'same'))
+    }).join('')
+    const unreadable = tracks.filter(t => !t.tags || !t.staged).map(t =>
+      `<div class="ft-err">${esc(label(t))}: ${esc(t.error || '')}</div>`).join('')
+    return `
+      <div class="ft-head"><span>Tag</span><span>Current</span><span>After</span></div>
+      ${group('All tracks', shared, true)}${perTrack}${unreadable}`
   }
 
   // ── Ingest wizard ─────────────────────────────────────────────────────────
@@ -9030,6 +9138,7 @@ const App = (() => {
     ingest.form       = {}
     ingest.tracks     = []
     ingest.aiResult   = null
+    ingest.aiApplied  = {}
     ingest.returnTo   = null
   }
 
@@ -9193,9 +9302,9 @@ const App = (() => {
                       poor: 'var(--amber)', bad: 'var(--red)' }
   const _stateColour = s => _LQ_STATE[s] || 'var(--t2)'
 
-  const _fmt1 = v => (v == null ? '—' : Number(v).toFixed(1))
+  const _fmt1 = v => (v == null ? 'n/a' : Number(v).toFixed(1))
   const _fmtN = (v, unit, dp) =>
-    v == null ? '—' : `${Number(v).toFixed(dp == null ? 1 : dp)}${unit || ''}`
+    v == null ? 'n/a' : `${Number(v).toFixed(dp == null ? 1 : dp)}${unit || ''}`
 
   // Group weights, shown per meter as "35% of score". Mirrors GROUP_WEIGHTS in
   // app/utils/quality/quality_scoring.py — update both together.
@@ -9239,7 +9348,7 @@ const App = (() => {
     // The dev surface in tools/ still shows the full decimal.
     const head = `
       <div class="rq-head">
-        <span class="lq-verdict lq-verdict--${esc(band)}">${_LQ_BAND_TEXT[band] || '—'}</span>
+        <span class="lq-verdict lq-verdict--${esc(band)}">${_LQ_BAND_TEXT[band] || ''}</span>
       </div>`
 
     // Quick facts line — format, bitrate, cutoff. Same strip the triage card
@@ -9268,13 +9377,12 @@ const App = (() => {
 
     const metricRow = m => {
       const hasScale = m.scale && m.scale.length
-      const col = hasScale ? _stateColour(m.state) : 'var(--t1)'
       const dp  = m.dp != null ? m.dp : (m.unit === ' Hz' ? 0 : 1)
       const shown = m.abs ? Math.abs(m.value) : m.value
       return `
-        <div class="rq-mrow${m.scored ? '' : ' rq-mrow--unscored'}" title="${esc(m.about || '')}">
-          <span class="rq-mlabel">${esc(m.label)}${m.scored ? '' : '<span class="rq-star">*</span>'}</span>
-          <span class="rq-mval" style="color:${col}">${_fmtN(shown, m.unit, dp)}</span>
+        <div class="rq-mrow" title="${esc(m.about || '')}">
+          <span class="rq-mlabel">${esc(m.label)}</span>
+          <span class="rq-mval">${_fmtN(shown, m.unit, dp)}</span>
           <span class="rq-mverdict">${esc(m.verdict || '')}</span>
         </div>`
     }
@@ -9289,15 +9397,11 @@ const App = (() => {
         </div>
         <div class="lq-meter"><div class="lq-meter-fill"
              style="width:${g.score || 0}%;background:${_lqColour(g.score)}"></div></div>
-        <div class="rq-grp-txt">${esc(g.text || '')}</div>
         ${rows.length ? `
           <button class="rq-adv-toggle" aria-expanded="false">
             <span class="rq-caret">${chevronIcon()}</span>${rows.length} metric${rows.length === 1 ? '' : 's'}
           </button>
-          <div class="rq-adv">${rows.map(metricRow).join('')}
-            ${rows.some(m => !m.scored) ? `<div class="rq-star-note">* measured and shown, but
-              carries no weight in the score.</div>` : ''}
-          </div>` : ''}
+          <div class="rq-adv">${rows.map(metricRow).join('')}</div>` : ''}
       </div>`
     }).join('')
 
@@ -9315,8 +9419,7 @@ const App = (() => {
           ${it.issues.map(i => `<div class="rq-issue"><b>${esc(i.issue)}</b>: ${esc(i.detail)}
             (−${i.deduction}) <span>${esc(i.text || '')}</span></div>`).join('')}
          </div>`
-      : `<div class="rq-clean">No technical issues detected. No clipping, dead channel,
-           phase problem or dropouts.</div>`
+      : `<div class="rq-clean">No technical issues detected.</div>`
 
     // Add Recording passes { spectrogram: false }: a spectrogram is drawn from
     // a track that has been analysed and given an id, and nothing on that page
@@ -9672,15 +9775,12 @@ const App = (() => {
       <div class="lq-mrow${m.scored ? '' : ' lq-mrow--unscored'}">
         <span class="lq-minfo lq-tip" style="${hasScale
           ? `color:${col};border-color:${col}` : ''}">i</span>
-        <span class="lq-mlabel">${esc(m.label)}${
-          m.scored ? '' : '<span class="lq-star">*</span>'}</span>
+        <span class="lq-mlabel">${esc(m.label)}</span>
         <span class="lq-mval" style="color:${col}">${_fmtN(shown, m.unit, dp)}</span>
         <span class="lq-mverdict">${esc(m.verdict || '')}</span>
         <span class="lq-tipbox">
           <div class="tt">${esc(m.label)}: ${esc(m.verdict || '')}</div>
           <div class="ab">${esc(m.about || '')}</div>
-          ${m.scored ? '' : `<div class="ab" style="margin-top:6px;color:var(--t2)">
-            Measured and shown, but carries no weight in the score.</div>`}
           ${hasScale ? `<div class="th">Ranges</div>${ladder}` : ''}
         </span>
       </div>`
@@ -9696,7 +9796,6 @@ const App = (() => {
         </div>
         <div class="lq-meter"><div class="lq-meter-fill"
              style="width:${g.score || 0}%;background:${_lqColour(g.score)}"></div></div>
-        <div class="lq-grp-txt">${esc(g.text || '')}</div>
         ${(byGroup[g.key] || []).length
           ? `<div class="lq-adv">${byGroup[g.key].map(metricRow).join('')}</div>` : ''}
       </div>`).join('')
@@ -9716,8 +9815,7 @@ const App = (() => {
       <div class="lq-issues"><h4>Technical Issues</h4>
         ${it.issues.map(i => `<div class="lq-issue"><b>${esc(i.issue)}</b>: ${esc(i.detail)}
           (−${i.deduction}) <span>${esc(i.text || '')}</span></div>`).join('')}
-      </div>` : `<div class="lq-clean"><span class="lq-dot"></span>No technical issues detected.
-        no clipping, dead channel, phase problem or dropouts.</div>`
+      </div>` : `<div class="lq-clean"><span class="lq-dot"></span>No technical issues detected.</div>`
 
     // Each sampled track gets its own row with an inline player slot directly
     // beneath it (2026-08-02). Playback used to hand off to the global player
@@ -10306,9 +10404,15 @@ const App = (() => {
         <span class="track-qmenu-label">Songwriter</span>
         <input class="track-qmenu-songwriter" type="text" placeholder="Songwriter…" value="${esc(track.songwriter || '')}" />
       </div>`
+    const setRow = opts.showSet ? `
+      <div class="track-qmenu-field">
+        <span class="track-qmenu-label">Set</span>
+        <input class="track-qmenu-set" type="text" value="${esc(track.set_number || '')}" />
+      </div>` : ''
     menu.innerHTML = `
       <div class="track-qmenu-title">${esc(String(track.track_number || '').padStart(2, '0'))} · ${esc(track.title || '')}</div>
       ${detailGrid}
+      ${setRow}
       <div class="track-qmenu-field">
         <span class="track-qmenu-label">Flags</span>
         <div class="flag-pill-row track-qmenu-flags">${flagPills}</div>
@@ -10363,6 +10467,24 @@ const App = (() => {
       })
     }
 
+    // Set -- commit on Enter / blur, empty clears it. Chained onto _commit so
+    // closing the menu with the field still focused saves it too.
+    const setEl = menu.querySelector('.track-qmenu-set')
+    if (setEl) {
+      const commitSet = () => {
+        const v = setEl.value.trim() || null
+        if (v === (track.set_number || null)) return
+        track.set_number = v
+        opts.onSet?.(track)
+      }
+      const prior = menu._commit
+      menu._commit = () => { prior?.(); commitSet() }
+      setEl.addEventListener('keydown', e => {
+        e.stopPropagation()
+        if (e.key === 'Enter') { e.preventDefault(); commitSet(); _closeTrackMenu() }
+      })
+    }
+
     setTimeout(() => {
       document.addEventListener('mousedown', _trackMenuOutside)
       document.addEventListener('keydown', _trackMenuEsc)
@@ -10384,11 +10506,19 @@ const App = (() => {
     const body = document.querySelector('#ingest-slide-panel #ai-results')
     if (!body) return
 
-    body.innerHTML = buildAiResultsHtml(r)
+    body.innerHTML = buildAiResultsHtml(r, { showRerun: true })
 
     body.querySelectorAll('.ai-apply-btn').forEach(b =>
       b.addEventListener('click', () => { toggleApplyProposal(r.proposals[parseInt(b.dataset.idx)], b); reScore() }))
     document.getElementById('ai-apply-tracks')?.addEventListener('click', () => applyAiTrackTitles(r.track_titles || []))
+    // Run again goes back to the ask box, as on View Recording.
+    document.getElementById('btn-ai-rerun')?.addEventListener('click', () => {
+      body.innerHTML = `<div class="ai-assist-cta">
+        ${aiAskBoxHtml('Run again. A question here tells it where to look.', researchBtnHtml('btn-ai-assist', 'Research again'))}
+      </div>`
+      document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
+      document.getElementById('ai-question')?.focus()
+    })
     // No auto-apply, regardless of confidence — see renderRecAiResults above
     // for why (2026-07-20, AI Assist Refinement spec). Every proposal needs
     // an explicit click on its own Apply button.
@@ -10669,7 +10799,7 @@ const App = (() => {
         catch (e) { if (/unknown job/.test(e.message)) throw new Error('Job was lost (did the app restart?)'); throw e }
         if (s.status === 'done')  return s.result
         if (s.status === 'error') throw new Error(s.error)
-        if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('AI Assist timed out after 5 minutes')
+        if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('Research timed out after 5 minutes')
       }
     })()
   }
@@ -10714,7 +10844,10 @@ const App = (() => {
                        !el.classList.contains('pane-act-note')
       if (!el.hidden && isAction) any = true
     })
-    row.hidden = !any
+    const tab = document.querySelector(`#ingest-slide-panel .slide-tab[data-ipane="${paneId}"]`)
+    const title = document.getElementById('ingest-pane-title')
+    if (title && tab) title.textContent = tab.textContent
+    row.hidden = false
   }
 
   /** Open or collapse the details panel, as a slide.
@@ -10809,12 +10942,16 @@ const App = (() => {
   }
 
   async function startAiAssist() {
-    const btn  = document.getElementById('btn-ai-assist')
     const body = ensureAiPane()
     if (!body) return
+    // The Research button lives in the ask box, which a run replaces, so every
+    // state that ends a run puts the box (and its button) back.
+    const askAgain = note => {
+      body.innerHTML = note + aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))
+      document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
+    }
     switchIngestPane('isp-ai')
     const question = takeAiQuestion()   // read before the spinner overwrites the pane
-    if (btn) { btn.disabled = true; btn.textContent = '… researching' }
     body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web. This can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
     const t0 = Date.now()
     try {
@@ -10825,15 +10962,9 @@ const App = (() => {
     } catch (e) {
       const secs = Math.round((Date.now() - t0) / 1000)
       console.error('AI Assist error after', secs, 's:', e)
-      if (/no_api_key/.test(e.message)) {
-        body.innerHTML = `<p class="ai-res-note">No Anthropic API key set. Add one in Settings.</p>`
-      } else {
-        body.innerHTML = `<p class="ai-res-note" style="color:var(--red)">AI Assist failed after ${secs}s: ${esc(e.message)}</p>`
-          + aiAskBoxHtml('Research the web to verify and fill this recording\'s metadata.')
-        paintAiAskNote()
-      }
-    } finally {
-      if (btn) { btn.disabled = false; btn.innerHTML = icon('sparkles') + ' AI Assist' }
+      askAgain(/no_api_key/.test(e.message)
+        ? `<p class="ai-res-note">No Anthropic API key set. Add one in Settings.</p>`
+        : `<p class="ai-res-note" style="color:var(--red)">Research failed after ${secs}s: ${esc(e.message)}</p>`)
     }
   }
 
@@ -11029,7 +11160,7 @@ const App = (() => {
     const textCandidates = ingest.scan.text_file_candidates || []
     const textSwitcher = textCandidates.length > 1
       ? `<div class="info-file-switcher">
-          <span class="info-file-switcher-label">Info file:</span>
+          <span class="info-file-switcher-label">Multiple:</span>
           ${textCandidates.map((tf, i) => `
             <button class="info-file-btn ${i === (ingest._activeTextIdx || 0) ? 'active' : ''}"
                     data-idx="${i}">${esc(tf.filename)}</button>`).join('')}
@@ -11056,7 +11187,7 @@ const App = (() => {
     // the box, so it opens unlocked and the Edit button already says Cancel.
     const infoLocked = !!(ingest.scan.info_file_content || '').trim()
     const resolverPaneHtml = buildResolverPaneHtml(ingest.scan.resolved)
-    const infoText = `${textSwitcher}<textarea class="rev-info-text rev-info-edit${infoLocked ? ' rev-info-text--locked' : ''}" id="rev-info-edit"
+    const infoText = `<textarea class="rev-info-text rev-info-edit${infoLocked ? ' rev-info-text--locked' : ''}" id="rev-info-edit"
       ${infoLocked ? 'readonly' : ''}
       placeholder="No info file found. Paste or type one in.">${esc(ingest.scan.info_file_content || '')}</textarea>`
 
@@ -11165,6 +11296,7 @@ const App = (() => {
           ${_queueValuesCount() ? `<button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-apply-queue"
                   title="Overwrite this form's Artist, Venue, Event and the rest with the values applied to the whole queue">
             ${icon('plus', 'lq-browse-ic')} Apply Queue Values</button>` : ''}
+          ${panelToggleHtml('ingest-slide-rail')}
         </div>
       </div>
       <div class="ingest-review-shell">
@@ -11401,29 +11533,20 @@ const App = (() => {
              The old quality bar is gone: it was 34px of chrome for one rating
              and one button. The rating is a chip in the topbar, the button is
              a pane action. -->
-        <div class="ingest-review-raw slide-panel--htabs open" id="ingest-slide-panel">
+        <div class="ingest-review-raw slide-panel--htabs slide-panel--index open" id="ingest-slide-panel">
           <div class="slide-panel-main">
-            <div class="slide-tabrow">
-            <div class="slide-tabs" id="ingest-tab-rail">
-              ${resolverPaneHtml ? `<button class="slide-tab" data-ipane="isp-resolver">Resolver</button>` : ''}
-              <button class="slide-tab" data-ipane="isp-info">Info File</button>
-              <button class="slide-tab" data-ipane="isp-quality">Quality</button>
-              <button class="slide-tab" data-ipane="isp-filetags">File Tags</button>
-              <button class="slide-tab" data-ipane="isp-checksums">Checksums</button>
-              <button class="slide-tab slide-tab--ai" data-ipane="isp-ai">AI Assist</button>
-            </div>
             <!-- Same three info-file controls, in the same order, as View
                  Recording (Ryan, 2026-08-28). Save leads and is suppressed
                  while the file is locked; the status sits between them. -->
             <div class="pane-acts" id="ingest-pane-acts">
+              <span class="pane-title" id="ingest-pane-title"></span>
               <span class="pane-act-status" id="info-file-save-status" data-for="isp-info"></span>
               <button class="pane-act act-suppressed" id="btn-save-info-file" data-for="isp-info" hidden disabled>Save to File</button>
               <button class="pane-act" id="btn-ingest-info-edit" data-for="isp-info">Edit File</button>
-              <button class="pane-act pane-act--primary" id="btn-ai-assist" data-for="isp-ai">${icon('sparkles')} AI Assist</button>
-            </div>
             </div>
             <div class="slide-panel-body" id="ingest-panes">
               <div class="slide-pane active" id="isp-info">
+                ${textSwitcher}
                 <div class="slide-pane-scroll"><div class="rev-raw-section">${infoText}</div></div>
               </div>
               <!-- Quality: the triage pass's numbers, fetched lazily. Nothing
@@ -11450,12 +11573,14 @@ const App = (() => {
                    never advertises the feature. -->
               <div class="slide-pane" id="isp-ai">
                 <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                  ${aiAskBoxHtml("Research the web to verify and fill this recording's metadata.")}
+                  ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))}
                 </div></div>
               </div>
             </div>
           </div>
-          <button class="slide-rail" id="ingest-slide-rail" title="Show/hide details" aria-expanded="true">Details</button>
+          <nav class="slide-index" id="ingest-tab-rail" aria-label="Details">
+            ${detailsTabsHtml('data-ipane', 'isp-', { resolver: !!resolverPaneHtml, research: true, staged: false })}
+          </nav>
         </div>
 
       </div>
@@ -11790,6 +11915,7 @@ const App = (() => {
               editing.value !== (ingest._infoBaseline || '') &&
               !confirm('Discard unsaved changes to the info file?')) return
           ingest._activeTextIdx = idx
+          ingest._keepPane = 'isp-info'   // the re-render must not bounce to Resolver
           const chosen = candidates[idx]
 
           // Swap active scan data so re-renders pick it up
@@ -11979,6 +12105,7 @@ const App = (() => {
         ingest.form = { members: [], guests: [] }
         ingest.tracks = []
         ingest.aiResult = null
+        ingest.aiApplied = {}
         // Through renderIngestStep, not renderIngestReview directly — the step
         // renderer is what reinstalls the in-page Back handler and repaints the
         // header's nav buttons. Calling the view straight would leave Back
@@ -12390,7 +12517,6 @@ const App = (() => {
     })
 
     document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
-    paintAiAskNote()   // fills the token-range line once the estimate lands
 
     // Details panel: horizontal tabs + the permanent rail, same gestures as
     // View Recording. Clicking the ACTIVE tab collapses the panel, which is the
@@ -12418,7 +12544,10 @@ const App = (() => {
       // survives moving between recordings, same rule as recPanelOpen on
       // View Recording. switchIngestPane sets the active tab and pane.
       _ingestQualityLoaded = false
-      const _firstPane = document.getElementById('isp-resolver') ? 'isp-resolver' : 'isp-info'
+      const _firstPane = ingest._keepPane && document.getElementById(ingest._keepPane)
+        ? ingest._keepPane
+        : document.getElementById('isp-resolver') ? 'isp-resolver' : 'isp-info'
+      delete ingest._keepPane
       if (state.ingestPanelOpen === false) _ingestPanelOpen(false)
       else switchIngestPane(_firstPane)
     })()
@@ -12509,6 +12638,8 @@ const App = (() => {
         // the result along so it lands on the new recording instead of being
         // lost the moment confirm creates the row (2026-07-14 bug: it wasn't).
         ai_result: ingest.aiResult || null,
+        // Fields whose value the person applied from an AI proposal (they may learn aliases).
+        ai_accepted: Object.keys(ingest.aiApplied || {}),
         resolver_result: ingest.scan?.resolved || null,
       }
       // ⚠ NO blanket-value fallback here any more (2026-09-03).
@@ -12587,7 +12718,7 @@ const App = (() => {
       mainContent.querySelector('.ingest-review-shell'),
       document.getElementById('ingest-slide-panel'),
       document.getElementById('rev-divider'),
-      240, 300, { side: 'right' }
+      304, 300, { side: 'right' }
     )
   }
 
@@ -12718,7 +12849,7 @@ const App = (() => {
     const activeId = Player.currentId()
     const playing  = activeId != null && Player.isPlaying()
 
-    document.querySelectorAll('.track-row').forEach(el => {
+    document.querySelectorAll('.track-row[data-track-id]').forEach(el => {
       const isActive = parseInt(el.dataset.trackId) === activeId && playing
       el.classList.toggle('playing', isActive)
       el.querySelector('.track-play').innerHTML = icon(isActive ? 'pause' : 'play')
@@ -13145,14 +13276,13 @@ const App = (() => {
     const artists = g.artists || []
 
     const perfSectionsHtml = artists.map(p => {
-      const hasThumbs = (p.recordings || []).some(r => r.image_url)
       return `
       <div class="genre-artist-section">
         <div class="genre-artist-head">
           <a class="genre-artist-name" href="#/artist/${p.id}">${esc(p.name)}</a>
           <span class="genre-artist-count">${p.recording_count} recording${p.recording_count !== 1 ? 's' : ''}</span>
         </div>
-        <div class="rec-table">${p.recordings.map(r => flatRowHtml(r, false, hasThumbs)).join('')}</div>
+        <div class="rec-table">${p.recordings.map(r => flatRowHtml({ ...r, artist: p.name }, false)).join('')}</div>
       </div>`
     }).join('')
 
@@ -14265,13 +14395,16 @@ const App = (() => {
       recording_id: it.recording_id,
       // Completed tabs only: the recording's image at the left (2026-10-01).
       thumb: _biTab !== 'queue' && it.status === 'ingested'
-        ? { url: it.image_url || null, initials: String(it.title || it.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() }
+        ? { url: it.image_url || null, initials: String(it.artist || it.title || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() }
         : null,
       status_text: statusText,
       detail: {
         artist: it.artist, date: it.date_text, venue: it.venue,
         location: it.location, source: it.source, lineage: it.lineage,
-        tracksText: null, issuesHtml: '',
+        tracksText: it.track_count != null ? String(it.track_count) : null,
+        trackListing: (it.tracks || []).map(t =>
+          `<div class="iq-track"><span class="iq-track-n">${esc(String(t.n ?? '').padStart(2, '0'))}</span> ${esc(t.title)}</div>`).join(''),
+        issuesHtml: '',
         path: it.rel_path,
       },
     }
@@ -17123,7 +17256,9 @@ const App = (() => {
       const where = [item.venue, item.city, item.state].filter(Boolean).join(' · ')
       // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
       // placeholder when the recording has no image.
-      const thumb = item.image_url ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">` : ''
+      const thumb = item.image_url
+        ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">`
+        : `<span class="rec-thumb-sm rec-thumb-sm--initials">${esc(recInitials({ artist: item.artist }))}</span>`
       return `<div class="search-row" data-hash="${esc(item.hash)}">
                 <span class="search-row-date">${esc(item.date || '—')}</span>
                 ${thumb}
@@ -17139,7 +17274,9 @@ const App = (() => {
       // year; never a venue slot (a studio record has none). No title: the
       // name slot falls back to the artist, so the meta line is the year
       // alone -- repeating the artist there would read as an echo.
-      const thumb = item.image_url ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">` : ''
+      const thumb = item.image_url
+        ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">`
+        : `<span class="rec-thumb-sm rec-thumb-sm--initials">${esc(recInitials({ artist: item.artist }))}</span>`
       const meta = item.title ? [item.artist, item.year].filter(Boolean).join(' · ') : (item.year || '')
       return `<div class="search-row" data-hash="${esc(item.hash)}">
                 ${thumb}

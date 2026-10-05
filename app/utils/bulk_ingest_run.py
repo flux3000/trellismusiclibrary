@@ -76,6 +76,10 @@ _dedup_cache = {"map": None}
 # (see start_run) may hold new folders. discover() is idempotent.
 _REDISCOVER = set()
 
+# Run ids reopened by recheck_queue: they already hold every item, so the worker need
+# not walk the folder again before working them.
+_SKIP_DISCOVER = set()
+
 # A folder that is still downloading is skipped, left pending and not looked
 # at again for this long, so the worker moves on to other items instead of
 # spinning on it.
@@ -598,6 +602,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             meta_band = "red"
 
         date = (resolved.date.value if resolved else None) or {}
+        track_count, track_titles = _scan_tracks(resolved.scan if resolved else None)
         # 2026-09-27 progress/log redesign: the log's expand panel needs
         # these fields without a per-item re-scan -- stash whatever the
         # resolver found, win or lose (a review/failed item still has
@@ -607,6 +612,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "date_text": format_partial_date(date.get("year"), date.get("month"),
                                              date.get("day")),
             "venue":     resolved.venue.value if resolved else None,
+            "event":     resolved.event.value if resolved else None,
             "city":      resolved.city.value if resolved else None,
             "state":     resolved.state.value if resolved else None,
             "country":   resolved.country.value if resolved else None,
@@ -615,6 +621,8 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "title":     resolved.album.value if resolved else None,
             "meta_band": meta_band,
             "listening_quality": quality,
+            "track_count":  track_count,
+            "tracks":       track_titles,
         })
 
         # BulkIngestItem.reason is a single String(32) column -- there is
@@ -688,6 +696,21 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         item.ingest_requested = False
         db.session.commit()
         traceback.print_exc()
+
+
+def _scan_tracks(scan):
+    """(count, [{n, title}]) for the log's expand panel. Titles come from the
+    info file when it lists tracks, else from the files' own tags; both are
+    what the review page would show. Capped so the meta blob stays small."""
+    if not scan:
+        return None, []
+    sug = scan.get("suggestions") or {}
+    info = (sug.get("from_info_file") or {}).get("tracks") or []
+    tags = (sug.get("from_tags") or {}).get("tracks") or []
+    rows = ([{"n": t.get("number"), "title": t.get("title")} for t in info]
+            or [{"n": t.get("track_number"), "title": t.get("title")} for t in tags])
+    rows = [r for r in rows if r["title"]][:200]
+    return scan.get("audio_file_count"), rows
 
 
 def _score_before_ingest(folder_abs, base):
@@ -821,6 +844,102 @@ def _reconcile_review_items(run=None):
     return reconciled
 
 
+# ── Queue re-check after a person confirms an act, venue or event (chunk 8) ──
+# A review row waits on a reading ("Sam Bush Band", "Wilkes Commnity College").
+# Once a person has settled that reading on one row, every other waiting row that
+# quotes the same text should not ask again. Re-checking is just re-processing:
+# the row goes back to pending and the worker reads the folder again, now against
+# a library that holds the confirmed row and its learned alias. The worker then
+# does what the run's mode says (Import Automatically ingests a row that reaches
+# the verdict, Review First parks it Ready), and the run's staged blanket values
+# still overwrite whatever it reads, so human-set values stay locked.
+
+# Reasons no confirmation of an act, venue or event can change.
+_NOT_RECHECKABLE = ("unsupported_format", "move_failed", "duplicate_content", "unreadable",
+                    "no_audio", _DOWNLOADING, _CONVERTING)
+
+
+def _meta_dict(item):
+    try:
+        v = json.loads(item.meta) if item.meta else {}
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def recheck_queue(folder_path, keys):
+    """After a person's save of `folder_path`: put the other review rows of the same run that
+    share a confirmed reading back to pending. `keys` is {"artist"|"venue"|"event": {norm keys}}
+    (app.utils.aliases.confirmed_keys). A folder that is not in a listed run changes nothing.
+    Returns the item ids sent back."""
+    from app.utils.reader.library import norm_key
+    if not folder_path or not keys:
+        return []
+    want = os.path.realpath(str(folder_path))
+    run, own = None, None
+    for r in listed_runs():
+        rel = os.path.relpath(want, item_base(r.root))
+        if rel == ".." or rel.startswith(".." + os.sep):
+            continue
+        rp = _norm_rel(rel) if rel != "." else "."
+        own = (db.session.query(BulkIngestItem)
+               .filter(BulkIngestItem.run_id == r.id,
+                       BulkIngestItem.rel_path == rp,
+                       BulkIngestItem.status.in_(_QUEUE_WAITING + ("in_progress",)))
+               .first())
+        if own:
+            run = r
+            break
+    if run is None:
+        return []
+    sent = []
+    for it in (db.session.query(BulkIngestItem)
+               .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "review",
+                       BulkIngestItem.ingest_requested.is_(False),
+                       BulkIngestItem.id != own.id)):
+        reasons = (it.reason or "").split(",")
+        if set(reasons) & set(_NOT_RECHECKABLE):
+            continue
+        if not any(f in r for r in reasons for f in ("artist", "venue", "event")):
+            continue
+        meta = _meta_dict(it)
+        if any(meta.get(f) and norm_key(meta[f]) in ks for f, ks in keys.items()):
+            it.status = "pending"
+            it.reason = None
+            it.detail = None
+            sent.append(it.id)
+    if sent:
+        if run.status == "done":
+            run.status = "running"
+            run.finished_at = None
+            _SKIP_DISCOVER.add(run.id)
+        db.session.commit()
+        _start_worker()
+    return sent
+
+
+def lead_first(rows):
+    """Order review rows so one row per unconfirmed act comes first, then the rest in their
+    existing (id) order. `rows` is [(id, meta json)] in id order; returns the ids. An act is
+    unconfirmed while the library cannot resolve its reading (an Artist row, a learned alias, or the act core); rows with no reading are not leads.
+    Stable and one pass: the first row of each reading leads it."""
+    from app.utils.reader.library import current_library, norm_key
+    ix = current_library()
+    seen, lead, rest = set(), [], []
+    for rid, meta in rows:
+        try:
+            a = (json.loads(meta) if meta else {}).get("artist")
+        except ValueError:
+            a = None
+        k = norm_key(a) if isinstance(a, str) else ""
+        if k and k not in seen and ix.artist_match(a) is None:
+            seen.add(k)
+            lead.append(rid)
+        else:
+            rest.append(rid)
+    return lead + rest
+
+
 def _pick_run(discovered):
     """
     The running run the worker should serve next, or None.
@@ -838,6 +957,10 @@ def _pick_run(discovered):
             .order_by(BulkIngestRun.id.asc())
             .all())
     for r in runs:
+        if r.id in _SKIP_DISCOVER:
+            _SKIP_DISCOVER.discard(r.id)
+            if r.id not in _REDISCOVER:
+                discovered.add(r.id)
         if r.id not in discovered or r.id in _REDISCOVER:
             discover(r)
             discovered.add(r.id)

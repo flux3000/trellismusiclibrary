@@ -175,7 +175,9 @@ def cross_validate(samples, folds, k=5, train_target=TRAIN_TARGET):
 
 
 def build_calibration(samples_by_field, folds, *, k=5, train_target=TRAIN_TARGET, corpus="G1",
-                      snapshot=None, n_items=None, populations=(), notes=()):
+                      snapshot=None, n_items=None, populations=(), notes=(),
+                      corpus_note="G1 only. G3 does not exist yet; chunk 7 recalibrates on G1 plus G3.",
+                      fold_key="gold artist"):
     """The calibration.json document: a final model per field, fitted on everything, with
     the held-out numbers beside it."""
     fields, folds_models = {}, {}
@@ -189,12 +191,12 @@ def build_calibration(samples_by_field, folds, *, k=5, train_target=TRAIN_TARGET
                          "n_scored": len({(s["item"], s["pop"]) for s in samples}),
                          "in_sample": evaluate(final, samples), "held_out": held}
     doc = {"version": 1, "fit_date": date.today().isoformat(), "corpus": corpus,
-           "corpus_note": "G1 only. G3 does not exist yet; chunk 7 recalibrates on G1 plus G3.",
+           "corpus_note": corpus_note,
            "snapshot": snapshot, "n_items": n_items, "populations": list(populations),
            "method": {"bins": "fixed edges on the logit, share right per bin made monotone (PAV)",
                       "edges": EDGES, "thresholds": "tau on the calibrated probability and m on the margin; "
                       "most right values kept confident with confident-but-wrong under the target in every population",
-                      "folds": k, "fold_key": "gold artist", "target": TARGET,
+                      "folds": k, "fold_key": fold_key, "target": TARGET,
                       "train_target": train_target,
                       "wrong": "artist: wrong or partial; other fields: wrong"},
            "none_scores": dict(C.NONE_SCORE),

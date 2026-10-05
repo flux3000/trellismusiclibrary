@@ -23,17 +23,37 @@ _N = len(W.ROLES)
 
 # feature -> [(role index, weight)]
 _BY_FEATURE = {}
-for _f, _role, _w in W.EMISSION:
-    _BY_FEATURE.setdefault(_f, []).append((_R[_role], _w))
-_BIAS = [W.BIAS[r] for r in W.ROLES]
-_TRANS = [[W.D] * _N for _ in range(_N)]
-_START = [W.D] * _N
-for (_a, _b), _w in W.TRANSITIONS.items():
-    if _a == "START":
-        _START[_R[_b]] = _w
-    else:
-        _TRANS[_R[_a]][_R[_b]] = _w
+_BIAS = []
+_TRANS = []
+_START = []
 _ALLOWED = {k: sorted(_R[r] for r in v) for k, v in W.ALLOWED.items()}
+
+
+def set_weights(emission=None, bias=None, transitions=None, d=None):
+    """Use these tables instead of reader/weights.py (the fitter and the harness do this to
+    score a fold's weights). Any argument left None keeps the shipped table; calling with no
+    arguments puts the shipped tables back. emission: [(feature, role, weight)]; bias:
+    {role: weight}; transitions: {(role or "START", role): weight}; d: default transition."""
+    emission = W.EMISSION if emission is None else emission
+    bias = W.BIAS if bias is None else bias
+    transitions = W.TRANSITIONS if transitions is None else transitions
+    d = W.D if d is None else d
+    by = {}
+    for f, role, w in emission:
+        by.setdefault(f, []).append((_R[role], w))
+    _BY_FEATURE.clear()
+    _BY_FEATURE.update(by)
+    _BIAS[:] = [bias[r] for r in W.ROLES]
+    _TRANS[:] = [[d] * _N for _ in range(_N)]
+    _START[:] = [d] * _N
+    for (a, b), w in transitions.items():
+        if a == "START":
+            _START[_R[b]] = w
+        else:
+            _TRANS[_R[a]][_R[b]] = w
+
+
+set_weights()
 _NEG = float("-inf")
 
 

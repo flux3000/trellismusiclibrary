@@ -218,15 +218,26 @@ def judge_artist_archive(gold, pred):
         j = judge_artist(part, pred)
         if j in ("partial", "wrong") and part is not False:
             g, p = _act_key(part), _act_key(pred)
-            if g and p and g == p:
-                j = "variant"
+            if g and p and (g == p or g.replace(" ", "") == p.replace(" ", "")):
+                j = "variant"      # "Mc Govern String Band" is "McGovern String Band" (2026-10-05)
         if best is None or _ART_RANK.get(j, 9) < _ART_RANK.get(best, 9):
             best = j
     return best
 
 
-def _parts(raw):
-    return [x for x in (norm(p) for p in re.split(r"[,;]", str(raw or ""))) if x]
+# Spelling variants of the same venue word that the catalog and a taper's text disagree on
+# (Theater/Theatre, Center/Centre, Fairground/Fairgrounds). Scoring only: not a reader rule.
+_VENUE_WORDS = {"theatre": "theater", "centre": "center", "grounds": "ground", "fairgrounds": "fairground",
+                "ft": "fort", "mtn": "mountain", "mt": "mount",
+                "st": "saint", "ctr": "center", "ave": "avenue"}      # 2026-10-05: plain abbreviations the 20-row G3 check found scored wrong
+
+
+def _vnorm(s):
+    return " ".join(_VENUE_WORDS.get(w, w) for w in norm(s).split())
+
+
+def _parts(raw, canon=norm):
+    return [x for x in (canon(p) for p in re.split(r"[,;]", str(raw or ""))) if x]
 
 
 def judge_catalog_venue(raw, venue, event=None, city=None, state=None):
@@ -235,16 +246,20 @@ def judge_catalog_venue(raw, venue, event=None, city=None, state=None):
     the natural orders), or the resolved venue or the resolved event equals one comma part
     of it (event-plus-venue strings). partial: words contained. None: the key is empty.
     """
-    gold_full = norm(raw)
+    gold_full = _vnorm(raw)
     if not gold_full:
         return None
-    pv, pe = norm(venue), norm(event)
+    pv, pe = _vnorm(venue), _vnorm(event)
     if not pv and not pe:
         return "empty"
-    parts = _parts(raw)
+    parts = _parts(raw, _vnorm)
+    # "DelFest" and "Del Fest" are one name: compare with the spaces removed too (2026-10-05)
+    sq = lambda t: t.replace(" ", "")
+    if (pv and sq(pv) in {sq(p) for p in parts}) or (pe and sq(pe) in {sq(p) for p in parts}):
+        return "right"
     for combo in ((venue, city, state), (event, venue, city, state), (event, venue),
                   (venue, city), (event, city, state)):
-        joined = norm(", ".join(str(x) for x in combo if x))
+        joined = _vnorm(", ".join(str(x) for x in combo if x))
         if joined and joined == gold_full:
             return "right"
     if pv in parts or pe in parts:
@@ -329,6 +344,9 @@ def judge_item(tier, item, pred):
         j["venue"] = judge_catalog_venue(raw, pv, ev, pred.get("city"), pred.get("state"))
         j["city"] = judge_in_string("city", pred.get("city"), raw)
         j["state"] = judge_in_string("state", pred.get("state"), raw)
+        # The catalog's source is a lineage chain ("SBD>Dat>CD>EAC>Flac"), not Trellis's source
+        # type (SBD, AUD, ...): the two never compare, so the key says nothing about this field.
+        j["source"] = None
     elif tier == "G2":
         j["venue"] = judge_loose_venue(gold.get("venue"), pv)
         cov = gold.get("coverage_raw")
@@ -372,7 +390,36 @@ def load_tier(tier, corpus_dir=None, fixtures_dir=None):
     meta_path = corpus / f"{tier.lower()}.meta.json"
     if meta_path.exists():
         meta.update(json.loads(meta_path.read_text(encoding="utf-8")))
-    return _read_jsonl(path), meta
+    items = _read_jsonl(path)
+    if tier == "G3":
+        for it in items:
+            repair_catalog_artist(it)
+    return items, meta
+
+
+def repair_catalog_artist(item):
+    """The catalog heading of some acts lost its first one to four letters ("y Strings" for
+    Billy Strings, "rew Emmitt Band / ..." for Drew Emmitt Band). The folder the show sits in
+    is named for the act and carries the whole name: a heading part that is a mid-word tail of
+    that folder's name is put back. Scoring and fitting both read the repaired name; the
+    original stays in archive_meta."""
+    meta = item.get("archive_meta") or {}
+    folder = str(meta.get("artist_dir") or "").replace("&", "and")
+    gold = item.get("gold") or {}
+    parts = str(gold.get("artist") or "").split(" / ")
+    fl = folder.lower()
+    out = []
+    for p in parts:
+        pl = p.lower()
+        cut = len(fl) - len(pl)
+        if p and 1 <= cut <= 4 and fl.endswith(pl) and fl[cut - 1].isalpha() and fl[cut].isalpha():
+            p = folder[:cut] + p
+        out.append(p)
+    fixed = " / ".join(out)
+    if fixed != gold.get("artist"):
+        meta["artist_catalog_heading"] = gold.get("artist")
+        gold["artist"] = fixed
+    return item
 
 
 # ── G1 export ────────────────────────────────────────────────────────────────
@@ -448,15 +495,53 @@ def _empty_pred():
 # performance's venue/event/act rows count only if another performance also uses
 # them. There is deliberately no mode that scores with the full library.
 LIBRARY_MODES = ("none", "loo")
-_LIB = {"mode": "none", "full": None, "rec_perf": None, "db": None}
+_LIB = {"mode": "none", "full": None, "rec_perf": None, "db": None, "corpus": None,
+        "g3": None, "g3_pid": None, "g3_confirmed": True}
+
+_STATE_CODE = re.compile(r"^[A-Za-z]{2}$")
 
 
-def set_library_mode(mode, db=None):
+def set_g3_confirmed(flag):
+    """G3 leave-one-out: treat the other shows' artists as confirmed (simulates one reviewed
+    show per act) or not at all. G1 library rows always count as confirmed (a person saved them)."""
+    _LIB["g3_confirmed"] = bool(flag)
+    _LIB["g3"] = _LIB["g3_pid"] = None
+
+
+def set_library_mode(mode, db=None, corpus_dir=None):
     if mode not in LIBRARY_MODES:
         raise ValueError(f"library mode must be one of {LIBRARY_MODES}")
     _LIB["mode"] = mode
     _LIB["db"] = db
-    _LIB["full"] = _LIB["rec_perf"] = None
+    _LIB["corpus"] = corpus_dir
+    _LIB["full"] = _LIB["rec_perf"] = _LIB["g3"] = _LIB["g3_pid"] = None
+
+
+def _g3_library(corpus_dir):
+    """The G3 leave-one-out source: one Artist row per gold act and one Venue row per
+    (name, city, state) read from the catalog's own "Venue, City, ST" string, one
+    performance per show. The catalog string is split generically (first comma part is the
+    name, the last is a state when it is two letters, the one before it the city); nothing
+    here is keyed on a particular site beyond the corpus's own gold shape."""
+    from app.utils.reader.library import LibraryIndex
+    items, _ = load_tier("G3", corpus_dir)
+    artists, venues, perfs, pid_of = {}, {}, [], {}
+    for n, it in enumerate(items, 1):
+        g = it.get("gold") or {}
+        a = str(g.get("artist") or "").split(" / ")[0].strip()
+        aid = artists.setdefault(norm(a), (len(artists) + 1, a))[0] if a else None
+        vid = None
+        parts = [x.strip() for x in str(g.get("venue_raw") or "").split(",") if x.strip()]
+        if parts:
+            state = parts[-1] if len(parts) >= 2 and _STATE_CODE.match(parts[-1]) else None
+            city = parts[-2] if state and len(parts) >= 3 else None
+            key = (norm(parts[0]), norm(city), norm(state))
+            vid = venues.setdefault(key, (len(venues) + 1, parts[0], city, state, "US" if state else None))[0]
+        perfs.append((n, aid, vid, None))
+        pid_of[str(it.get("id"))] = n
+    ix = LibraryIndex.from_rows(list(artists.values()), [], [], list(venues.values()), [], perfs)
+    ix.confirmed = frozenset(ix.artists) if _LIB["g3_confirmed"] else frozenset()
+    return ix, pid_of
 
 
 def library_for(item):
@@ -464,10 +549,16 @@ def library_for(item):
     from app.utils.reader.library import LibraryIndex
     if _LIB["mode"] != "loo":
         return LibraryIndex.empty()
+    if (item.get("archive_meta") or {}).get("tier") == "G3":
+        if _LIB["g3"] is None:
+            _LIB["g3"], _LIB["g3_pid"] = _g3_library(_LIB["corpus"])
+        pid = _LIB["g3_pid"].get(str(item.get("id")))
+        return _LIB["g3"].without_performance(pid) if pid is not None else LibraryIndex.empty()
     if _LIB["full"] is None:
         import sqlite3
         path = _LIB["db"] or str(Path(__file__).resolve().parents[2] / "db" / "_cowork.db")
         _LIB["full"] = LibraryIndex.from_snapshot(path)
+        _LIB["full"].confirmed = frozenset(_LIB["full"].artists)     # every saved act counts as confirmed
         con = sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
         try:
             _LIB["rec_perf"] = {str(r[0]): r[1] for r in con.execute("select id, performance_id from recording")}
@@ -695,7 +786,7 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
              atlas="none", only_ids=None):
     """Score every item in a tier. mode is 'reader' or 'resolve'; library is 'none' or 'loo'.
     only_ids restricts the run to those item ids (the held-out fold of a cross-validation)."""
-    set_library_mode(library)
+    set_library_mode(library, corpus_dir=corpus_dir)
     set_atlas_mode(atlas)
     items, meta = load_tier(tier, corpus_dir, fixtures_dir)
     if only_ids is not None:
@@ -1012,6 +1103,19 @@ def main(argv=None):
     ap.add_argument("--write-calibration", action="store_true",
                     help="with --calibrate: write app/utils/reader/calibration.json")
     ap.add_argument("--train-target", type=float, help="with --calibrate: the rate the fit aims for (default 0.0025)")
+    ap.add_argument("--fit-weights", action="store_true",
+                    help="fit the decoder weights on G1+G3 (grouped folds), recalibrate, report held-out "
+                         "(app/utils/resolver_fit.py); add --write to update weights_fitted.py and calibration.json")
+    ap.add_argument("--folds", type=int, default=10, help="with --fit-weights: grouped folds (default 10)")
+    ap.add_argument("--epochs", type=int, default=10, help="with --fit-weights: perceptron epochs")
+    ap.add_argument("--out", help="with --fit-weights: folder for report.json and the fitted artefacts")
+    ap.add_argument("--write", action="store_true", help="with --fit-weights: write weights_fitted.py and calibration.json")
+    ap.add_argument("--weights", choices=("shipped", "fitted", "handset"), default="shipped",
+                    help="decoder weights for this run: the shipped reader/weights.py (default), the fitted "
+                         "table (reader/weights_fitted.py) or the hand-set table (reader/weights_handset.py)")
+    ap.add_argument("--g3-confirmed", choices=("yes", "no"), default="yes",
+                    help="with --library loo: treat the other G3 shows' artists as confirmed (default yes)")
+    ap.add_argument("--no-fit", action="store_true", help="with --fit-weights: calibration only, no weight fits")
     ap.add_argument("--db", help="snapshot path for --export-g1 (default db/_cowork.db)")
     args = ap.parse_args(argv)
 
@@ -1019,6 +1123,10 @@ def main(argv=None):
         meta = export_g1(args.db, args.corpus)
         print(f"g1.jsonl: {meta['n']} items from snapshot dated {meta['snapshot_date']}")
         return 0
+
+    if args.fit_weights:
+        from app.utils import resolver_fit
+        return resolver_fit.main(args)
 
     if args.calibrate:
         rep = calibrate(args.corpus, atlas="real", train_target=args.train_target,
@@ -1028,6 +1136,11 @@ def main(argv=None):
             print("\nwrote app/utils/reader/calibration.json")
         return 0
 
+    set_g3_confirmed(args.g3_confirmed == "yes")
+    if args.weights in ("handset", "fitted"):
+        from app.utils.reader import decode as _dec
+        from app.utils.reader.fit import Model as _Model
+        _dec.set_weights(*(_Model.handset() if args.weights == "handset" else _Model.fitted()).tables())
     for _ in range(max(1, args.timing or 1)):
         rep = run_tier(args.tier, "resolve" if args.resolve else "reader",
                        corpus_dir=args.corpus, limit=args.limit, library=args.library, atlas=args.atlas)

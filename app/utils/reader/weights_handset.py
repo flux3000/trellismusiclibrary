@@ -11,8 +11,8 @@ plus the role's BIAS. The decoder then picks the best whole-file labelling
 (Viterbi), so a name that follows "with" is a MEMBER because the transition
 CONNECTOR -> MEMBER is strong, not because a special rule says so.
 
-They are hand-set. Chunk 7 fitted a table from the evaluation corpora
-(weights_fitted.py, kept for comparison); Ryan chose to ship these hand-set values. Units are log-score points: +3 is "clearly", +6 "decisively".
+They are hand-set to work on day one; chunk 7 fits them offline from the
+evaluation corpus. Units are log-score points: +3 is "clearly", +6 "decisively".
 """
 
 ROLES = ("TITLE", "ARTIST", "CONNECTOR", "MEMBER", "VENUE", "EVENT", "STAGE", "PLACE",

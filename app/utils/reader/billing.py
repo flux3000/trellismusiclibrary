@@ -184,6 +184,11 @@ def read_billing(doc, dec, library=None, title_case=None):
                 r.artist, r.artist_how = act, "library act"
                 r.fields["artist"]["via"] = "library act with these members"
         am = library.artist_match(raw)
+        alias_act = library.artist_alias_name(raw)
+        if alias_act and r.artist_how == "line":
+            # text a person once corrected: the act they saved (the evidence still quotes the text)
+            r.artist, r.artist_how = alias_act, "library alias"
+            r.fields["artist"]["via"] = "learned alias"
         if not (am and am[1] == "exact") and len(members) >= 2:
             act = library.act_for_members(members) or library.act_for_members(members + [raw])
             if act:
@@ -282,6 +287,10 @@ def read_billing(doc, dec, library=None, title_case=None):
             r.fields["venue"] = {"role": "VENUE", "text": raw, "span": [vd.unit.start, vd.unit.end],
                                  "line": vd.unit.line, "score": round(vd.score, 2),
                                  "runner_up": {"value": vd.runner_up[0], "score": round(vd.runner_up[1], 2)}}
+            alias_venue = library.venue_alias_name(raw)
+            if alias_venue:
+                r.venue, r.venue_how = alias_venue, "library alias"
+                r.fields["venue"]["via"] = "learned alias"
     if r.venue is None and st_venue:
         r.venue, r.venue_how = tc(st_venue), "line"
         r.fields["venue"] = {"role": "STAGE", "text": st_venue, "via": "place named in a stage line",

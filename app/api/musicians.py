@@ -17,7 +17,7 @@ from app.models.recording import Recording
 from app.models.performance_personnel import PerformancePersonnel
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_summary
-from app.utils.artists import resolve_or_create_artist
+from app.utils.artists import mark_artist_confirmed, resolve_or_create_artist
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
 from app.api.system import require_library
@@ -239,6 +239,7 @@ def add_artist_association(musician_id):
         if not name:
             return jsonify({"error": "artist_id or artist_name required"}), 400
         artist = resolve_or_create_artist(name)
+    mark_artist_confirmed(artist)
 
     exists = db.session.query(Membership).filter_by(
         artist_id=artist.id, musician_id=musician_id).first()

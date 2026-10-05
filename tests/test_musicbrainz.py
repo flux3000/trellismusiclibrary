@@ -110,7 +110,7 @@ def test_summarise_tolerates_missing_optional_blocks():
 def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     """MusicBrainz may fill its own columns and nothing else.
 
-    name/bio/genre/members are Ryan's. An external database silently rewriting
+    name/bio/members are Ryan's (genre is filled only when empty; see below). An external database silently rewriting
     a hand-corrected act name would be the same class of bug as the AI Assist
     auto-apply that was removed in July.
     """
@@ -131,6 +131,64 @@ def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     assert p.mb_type == "Group"
     assert p.mb_status == "matched"
     assert "wikipedia" in p.mb_links_json
+
+
+# ── Artist genre from MusicBrainz (Ryan, 2026-10-05) ─────────────────────────
+
+def _bare_artist(name="Genre Test Act", genre_id=None):
+    from app.extensions import db as _db
+    from app.models.artist import Artist
+    a = Artist(name=name, genre_id=genre_id)
+    _db.session.add(a)
+    _db.session.flush()
+    return a
+
+
+def test_lookup_details_returns_artist_genres_by_votes(monkeypatch):
+    seen = {}
+    def fake_get(path, params):
+        seen["inc"] = params["inc"]
+        return {"id": "a1", "name": "Hot Rize",
+                "genres": [{"name": "country", "count": 1}, {"name": "progressive bluegrass", "count": 4}]}
+    monkeypatch.setattr(mb, "_get", fake_get)
+    assert mb.lookup_details("a1")["genres"] == ["progressive bluegrass", "country"]
+    assert "genres" in seen["inc"]
+
+
+def test_match_fills_empty_genre_with_an_existing_one(app):
+    from app.extensions import db as _db
+    from app.models.genre import Genre
+    g = Genre(name="Bluegrass")
+    _db.session.add(g)
+    _db.session.flush()
+    a = _bare_artist()
+    mb.apply_to_artist(a, {"mbid": "a1", "genres": ["progressive bluegrass", "bluegrass"]})
+    assert a.genre_id == g.id
+
+
+def test_match_creates_a_genre_when_none_fits(app):
+    from app.extensions import db as _db
+    from app.models.genre import Genre
+    a = _bare_artist()
+    mb.apply_to_artist(a, {"mbid": "a1", "genres": ["progressive bluegrass"]}, status="linked")
+    assert _db.session.get(Genre, a.genre_id).name == "Progressive Bluegrass"
+
+
+def test_match_never_replaces_a_genre_a_person_set(app):
+    from app.extensions import db as _db
+    from app.models.genre import Genre
+    g = Genre(name="Jazz")
+    _db.session.add(g)
+    _db.session.flush()
+    a = _bare_artist(genre_id=g.id)
+    mb.apply_to_artist(a, {"mbid": "a1", "genres": ["hard bop"]})
+    assert a.genre_id == g.id
+
+
+def test_match_with_no_genres_leaves_genre_empty(app):
+    a = _bare_artist()
+    mb.apply_to_artist(a, {"mbid": "a1"})
+    assert a.genre_id is None
 
 
 # ── Safety rails ────────────────────────────────────────────────────────────

@@ -385,6 +385,25 @@ def is_festival_like(text):
     return False
 
 
+# What an Event is (Ryan, 2026-10-05): a collection of performances comprising a festival
+# or other single ticketed-or-free event. Its purpose is the historical context of the
+# night: where, with whom, what the experience was. A tour ("Fall Tour 2019"), a
+# residency or a billing note ("Opened for The Strokes") is not an event.
+_NOT_EVENT_RE = re.compile(r"\btours?\b|\bresidency\b|\bopen(?:ed|ing|er|s)?\s+for\b"
+                           r"|\bsupporting\b|\bsupport\s+(?:for|slot|act)\b", re.I)
+_EVENT_KINDS = {"festival", "convention/expo"}     # MusicBrainz event types that are events
+
+
+def counts_as_event(name, kind=None):
+    """The one test for "is this an Event", for Atlas events (with their MusicBrainz
+    `kind`) and for text alike. MusicBrainz "concert" is mostly single shows and tours
+    ("The Strokes at Glasgow Barrowland"), so it counts only when the name itself reads
+    like a festival."""
+    if not name or _NOT_EVENT_RE.search(name):
+        return False
+    return (kind or "").lower() in _EVENT_KINDS or is_festival_like(name)
+
+
 def _mk_units(line_obj, library):
     """Units of a normal line: dates, quotes, a trailing parenthetical and the
     place carved out first, then each remaining piece segmented."""
@@ -752,7 +771,9 @@ def _unit_features(u, L, doc, library, hints, idx):
         f["has_gt"] = 1.0
     toks = _tokens(t)
     tset = set(toks)
-    if is_festival_like(t):
+    if _NOT_EVENT_RE.search(t):
+        f["not_event"] = 1.0
+    elif is_festival_like(t):
         f["event_word"] = 1.0
     elif tset & VENUE_WORDS:
         f["venue_word"] = 1.0
@@ -908,6 +929,8 @@ def _atlas_features(doc, atlas, hints):
                 break
         if not lib["event"]:
             for c in atlas.event(core, limit=3, fuzzy=False):
+                if not counts_as_event(c.name, c.extra.get("event_kind")):
+                    continue
                 f["atl_event"] = 1.0 if n >= 2 else 0.5
                 found = True
                 break
@@ -922,7 +945,8 @@ def _atlas_features(doc, atlas, hints):
         venue_like = bool(f.get("venue_word"))
         event_like = bool(f.get("event_word"))
         if not lib["event"] and event_like:
-            c = atlas.event(core, limit=1)
+            c = [x for x in atlas.event(core, limit=3)
+                 if counts_as_event(x.name, x.extra.get("event_kind"))]
             if c:
                 f["atl_event_fz"] = c[0].score
         elif not lib["venue"] and venue_like:
@@ -950,7 +974,8 @@ def _atlas_show(atlas, hints):
             continue
         if ep.get("place_id") is not None:
             places.update(atlas.place_keys(ep["place_id"]))
-        events.add(norm_key(ep.get("event") or ""))
+        if counts_as_event(ep.get("event"), ep.get("kind")):
+            events.add(norm_key(ep.get("event") or ""))
     events.discard("")
     return places, events
 

@@ -161,28 +161,55 @@ def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
 
 
 _RECORDING_IMG_URL = "/api/recordings/images"
+_ARTIST_IMG_URL = "/api/artists/images"
+_VENUE_IMG_URL = "/api/venues/images"
 
 
-def _primary_recording_image_url(rec, url_prefix=_RECORDING_IMG_URL):
+# The recording image is a CHAIN, resolved here and nowhere else (Ryan,
+# 2026-10-04): the recording's own primary image, else its artist's primary
+# image, else its venue's primary image, else None -- and None is drawn
+# client-side as the artist's initials.
+# Every list, card, row and search result reads `image_url`, so one rule
+# serves them all. A caller in a peer context passes the share-door prefixes
+# for the links of the chain: an unprefixed local path would silently
+# resolve against the consumer's own library. A peer cannot reach venue
+# images at all (the share door has no route for them), so the share door
+# passes venue_url_prefix=None and that link is skipped.
+
+def _primary_recording_image_url(rec, url_prefix=_RECORDING_IMG_URL,
+                                 artist_url_prefix=_ARTIST_IMG_URL,
+                                 venue_url_prefix=_VENUE_IMG_URL):
     """
     Url of rec's primary image (or its oldest, same fallback primary_for()
-    uses), or None. Reads rec.images directly -- fine for a single-object
-    caller (one extra query), but a LIST caller should batch instead (see
-    batch_recording_image_urls()) and pass the result in as recording_row/
-    recording_summary's `image_url` param, so this never runs per row.
+    uses), else its artist's primary image, else None. Reads relationships
+    directly -- fine for a single-object caller, but a LIST caller should
+    batch instead (see batch_recording_image_urls()) and pass the result in
+    as recording_row/recording_summary's `image_url` param, so this never
+    runs per row.
     """
     imgs = rec.images
-    if not imgs:
-        return None
-    primary = next((i for i in imgs if i.is_primary), imgs[0])
-    return f"{url_prefix}/{primary.id}"
+    if imgs:
+        primary = next((i for i in imgs if i.is_primary), imgs[0])
+        return f"{url_prefix}/{primary.id}"
+    perf = rec.performance
+    artist = perf.artist if perf else None
+    aid = _primary_image_id(artist)
+    if aid:
+        return f"{artist_url_prefix}/{aid}"
+    venue = perf.venue if perf else None
+    if venue_url_prefix and venue is not None and venue.images:
+        return f"{venue_url_prefix}/{venue.images[0].id}"
+    return None
 
 
-def batch_recording_image_urls(recording_ids, url_prefix=_RECORDING_IMG_URL):
+def batch_recording_image_urls(recording_ids, url_prefix=_RECORDING_IMG_URL,
+                               artist_url_prefix=_ARTIST_IMG_URL,
+                               venue_url_prefix=_VENUE_IMG_URL):
     """
-    {recording_id: image_url} for every id in recording_ids that has at
-    least one image, via ONE grouped query -- primary first, then oldest,
-    same ordering primary_for() and _primary_recording_image_url() use.
+    {recording_id: image_url} for every id in recording_ids that resolves to
+    an image by the chain above, via a grouped query per link (own images, then
+    the artist images, then the venue images of whatever is left) -- primary first, then oldest, same
+    ordering primary_for() and _primary_recording_image_url() use.
 
     Mirrors artists.py::all_recordings()'s ArtistImage batching (one grouped
     query read for a whole catalog dump, rather than selectinload()ing every
@@ -190,7 +217,11 @@ def batch_recording_image_urls(recording_ids, url_prefix=_RECORDING_IMG_URL):
     letting a big list of recording rows lazy-load rec.images one at a time.
     """
     from app.extensions import db
+    from app.models.artist_image import ArtistImage
+    from app.models.performance import Performance
+    from app.models.recording import Recording
     from app.models.recording_image import RecordingImage
+    from app.models.venue_image import VenueImage
     recording_ids = list(recording_ids)
     if not recording_ids:
         return {}
@@ -204,7 +235,57 @@ def batch_recording_image_urls(recording_ids, url_prefix=_RECORDING_IMG_URL):
         .all()
     ):
         winners.setdefault(rid, iid)
-    return {rid: f"{url_prefix}/{iid}" for rid, iid in winners.items()}
+    out = {rid: f"{url_prefix}/{iid}" for rid, iid in winners.items()}
+
+    # Link two: recordings with no image of their own inherit the artist's.
+    missing = [rid for rid in recording_ids if rid not in out]
+    if missing:
+        artist_of = dict(
+            db.session.query(Recording.id, Performance.artist_id)
+            .join(Performance, Performance.id == Recording.performance_id)
+            .filter(Recording.id.in_(missing))
+            .all()
+        )
+        artist_ids = set(artist_of.values())
+        artist_img = {}
+        if artist_ids:
+            for aid, iid, _is_primary in (
+                db.session.query(ArtistImage.artist_id, ArtistImage.id,
+                                 ArtistImage.is_primary)
+                .filter(ArtistImage.artist_id.in_(artist_ids))
+                .order_by(ArtistImage.artist_id, ArtistImage.is_primary.desc(),
+                          ArtistImage.sort_order, ArtistImage.id)
+                .all()
+            ):
+                artist_img.setdefault(aid, iid)
+        for rid, aid in artist_of.items():
+            if aid in artist_img:
+                out[rid] = f"{artist_url_prefix}/{artist_img[aid]}"
+
+    # Link three: still nothing, so the venue's picture, where the caller can
+    # serve one (a peer cannot, and passes None).
+    missing = [rid for rid in recording_ids if rid not in out]
+    if missing and venue_url_prefix:
+        venue_of = {rid: vid for rid, vid in
+                    db.session.query(Recording.id, Performance.venue_id)
+                    .join(Performance, Performance.id == Recording.performance_id)
+                    .filter(Recording.id.in_(missing), Performance.venue_id.isnot(None))
+                    .all()}
+        venue_img = {}
+        if venue_of:
+            for vid, iid, _is_primary in (
+                db.session.query(VenueImage.venue_id, VenueImage.id,
+                                 VenueImage.is_primary)
+                .filter(VenueImage.venue_id.in_(set(venue_of.values())))
+                .order_by(VenueImage.venue_id, VenueImage.is_primary.desc(),
+                          VenueImage.sort_order, VenueImage.id)
+                .all()
+            ):
+                venue_img.setdefault(vid, iid)
+        for rid, vid in venue_of.items():
+            if vid in venue_img:
+                out[rid] = f"{venue_url_prefix}/{venue_img[vid]}"
+    return out
 
 
 def _primary_image_id(artist):

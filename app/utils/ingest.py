@@ -1285,8 +1285,8 @@ def read_recording_tags(recording, library_root):
     out = []
     for track in sorted(recording.tracks, key=lambda t: t.track_number):
         abs_path = os.path.join(library_root, recording.folder_path, track.file_path)
-        entry = {"track_number": track.track_number, "title": track.title,
-                 "tags": None, "error": None}
+        entry = {"track_id": track.id, "track_number": track.track_number,
+                 "title": track.title, "tags": None, "error": None}
         try:
             audio = open_tags(abs_path)
             if audio is None:
@@ -1305,6 +1305,36 @@ def read_recording_tags(recording, library_root):
         except Exception as e:                       # noqa: BLE001 — surface any read error
             entry["error"] = f"Error: {e}"
         out.append(entry)
+    return out
+
+
+def desired_track_tags(recording):
+    """
+    The exact tags write_flac_tags puts on each file: [(track, {TAG: value})].
+    Single source for the writer and for the Tags pane's Current/After view, so
+    what the pane promises is what Write Tags to Files does. Values are a str,
+    or a list for the multi-valued PERFORMER.
+    """
+    tracks = recording.tracks  # ordered by track_number via relationship
+    container_tags, track_total = build_recording_tags(recording)
+
+    disc_numbers = [t.disc_number for t in tracks if t.disc_number is not None]
+    disc_total   = max(disc_numbers) if disc_numbers else None
+
+    out = []
+    for track in tracks:
+        tags = dict(container_tags)
+        tags["TITLE"]       = track.title
+        tags["TRACKNUMBER"] = str(track.track_number)
+        tags["TRACKTOTAL"]  = track_total
+        if track.disc_number is not None:
+            tags["DISCNUMBER"] = str(track.disc_number)
+            tags["DISCTOTAL"]  = str(disc_total)
+        if track.songwriter:
+            tags["COMPOSER"] = track.songwriter
+        if track.notes and track.notes.strip():
+            tags["COMMENT"] = track.notes.strip()
+        out.append((track, tags))
     return out
 
 
@@ -1327,40 +1357,20 @@ def write_flac_tags(recording, library_root):
     Returns:
         (n_written, errors) where errors is a list of (filename, message) tuples.
     """
-    tracks = recording.tracks  # ordered by track_number via relationship
-    container_tags, track_total = build_recording_tags(recording)
-
-    disc_numbers = [t.disc_number for t in tracks if t.disc_number is not None]
-    disc_total   = max(disc_numbers) if disc_numbers else None
-
     n_written = 0
     errors    = []
 
-    for track in tracks:
+    for track, tags in desired_track_tags(recording):
         abs_path = os.path.join(library_root, recording.folder_path, track.file_path)
         try:
             audio = open_tags(abs_path)
             if audio is None:
                 raise MutagenError("Unsupported audio format")
 
-            # Clear all existing tags
+            # Clear all existing tags, then write exactly the desired set
             audio.clear()
-
-            # Container tags
-            for tag_key, value in container_tags.items():
+            for tag_key, value in tags.items():
                 audio[tag_key] = value
-
-            # Track-specific tags
-            audio["TITLE"]       = track.title
-            audio["TRACKNUMBER"] = str(track.track_number)
-            audio["TRACKTOTAL"]  = track_total
-            if track.disc_number is not None:
-                audio["DISCNUMBER"] = str(track.disc_number)
-                audio["DISCTOTAL"]  = str(disc_total)
-            if track.songwriter:
-                audio["COMPOSER"] = track.songwriter
-            if track.notes and track.notes.strip():
-                audio["COMMENT"] = track.notes.strip()
 
             audio.save()
             n_written += 1
@@ -2408,7 +2418,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
     if reading.artist:
         result["artist"] = reading.artist
         fa = reading.fields.get("artist", {})
-        if reading.artist_how in ("library act", "members match"):
+        if reading.artist_how in ("library act", "members match", "library alias"):
             result["artist_match"] = reading.artist
         else:
             result["artist_match"] = _fuzzy_match(fa.get("text") or reading.artist, known_artists or [])
@@ -2609,8 +2619,12 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
                         "confidence": (loc_pr.confidence if loc_pr else ""),
                         "validated": bool(loc_pr.city_validated) if loc_pr else False}
 
+    artist_confirmed = bool(
+        reading.artist and library.artist_confirmed((reading.fields.get("artist") or {}).get("text")
+                                                    or reading.artist))
     result["evidence"] = {
         "library": not library.is_empty,
+        "artist_confirmed": artist_confirmed,
         "fields": reading.fields,
         "cands": reading.cands,
         "date": date_ev,

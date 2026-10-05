@@ -1,18 +1,22 @@
 """
-Hand-set weights for the role decoder (Resolver v2, chunk 3, 2026-10-03).
+Weights for the role decoder (Resolver v2, chunk 7b, 2026-10-05): FITTED.
 
 Every number the decoder uses is in this file, as readable rows:
 
     EMISSION    (feature, role, weight)   how much a feature favours a role for one segment
     TRANSITIONS (previous role, role): weight   how likely a role is to follow another
 
-A segment's score for a role is the sum of weight * value over its features,
-plus the role's BIAS. The decoder then picks the best whole-file labelling
-(Viterbi), so a name that follows "with" is a MEMBER because the transition
-CONNECTOR -> MEMBER is strong, not because a special rule says so.
+A segment's score for a role is the sum of weight * value over its features, plus the
+role's BIAS. The decoder then picks the best whole-file labelling (Viterbi), so a name that
+follows "with" is a MEMBER because the transition CONNECTOR -> MEMBER is strong, not because
+a special rule says so. Units are log-score points: +3 is "clearly", +6 "decisively".
 
-They are hand-set. Chunk 7 fitted a table from the evaluation corpora
-(weights_fitted.py, kept for comparison); Ryan chose to ship these hand-set values. Units are log-score points: +3 is "clearly", +6 "decisively".
+The rows are the chunk 3 hand-set table (weights_handset.py) with the ARTIST emission rows
+moved by an averaged perceptron fitted on the evaluation corpora G1 and G3 (reader/fit.py).
+A weight moves little when few rows touched it and never more than 3 points from its
+hand-set value. Every other row is still hand-set: fitting them as well made the venue field
+worse on held-out acts (see the module docstring of fit.py). Refit after any change to the
+features, then recalibrate: python3 -m app.utils.resolver_eval --fit-weights --write
 """
 
 ROLES = ("TITLE", "ARTIST", "CONNECTOR", "MEMBER", "VENUE", "EVENT", "STAGE", "PLACE",
@@ -39,57 +43,57 @@ ALLOWED = {
 
 EMISSION = [
     # ── ARTIST ────────────────────────────────────────────────────────────
-    ("line0",             "ARTIST",  3.0),
-    ("line1",             "ARTIST",  0.3),
-    ("line2_3",           "ARTIST", -0.5),
-    ("line4_8",           "ARTIST", -2.5),
-    ("line_late",         "ARTIST", -4.5),
-    ("block_later",       "ARTIST", -1.5),
-    ("first_in_line",     "ARTIST",  0.5),
-    ("lib_artist_exact",  "ARTIST",  4.0),
-    ("lib_artist_core",   "ARTIST",  2.5),
-    ("lib_musician",      "ARTIST",  1.0),
+    ("line0",             "ARTIST", 2.97),
+    ("line1",             "ARTIST", -0.89),
+    ("line2_3",           "ARTIST", -2.57),
+    ("line4_8",           "ARTIST", -3.38),
+    ("line_late",         "ARTIST", -2.93),
+    ("block_later",       "ARTIST", 1.26),
+    ("first_in_line",     "ARTIST", -0.6),
+    ("lib_artist_exact",  "ARTIST", 2.96),
+    ("lib_artist_core",   "ARTIST", 2.01),
+    ("lib_musician",      "ARTIST", 1.89),
     ("agree_hint_artist", "ARTIST",  4.0),
-    ("label_artist",      "ARTIST",  5.0),
-    ("next_is_connector", "ARTIST",  1.5),
-    ("title_case",        "ARTIST",  0.3),
-    ("all_caps",          "ARTIST",  0.3),
-    ("w5_7",              "ARTIST", -1.0),
+    ("label_artist",      "ARTIST", 4.98),
+    ("next_is_connector", "ARTIST", -0.79),
+    ("title_case",        "ARTIST", 1.59),
+    ("all_caps",          "ARTIST", -0.3),
+    ("w5_7",              "ARTIST", -0.87),
     ("w8p",               "ARTIST", -3.0),
-    ("venue_word",        "ARTIST", -3.0),
-    ("event_word",        "ARTIST", -3.5),
+    ("venue_word",        "ARTIST", -1.38),
+    ("event_word",        "ARTIST", -4.04),
     ("stage_word",        "ARTIST", -4.0),
-    ("title_word",        "ARTIST", -2.5),
-    ("quoted",            "ARTIST", -4.0),
-    ("has_digit",         "ARTIST", -1.5),
+    ("title_word",        "ARTIST", -1.52),
+    ("quoted",            "ARTIST", -4.02),
+    ("has_digit",         "ARTIST", -1.76),
     ("has_clock",         "ARTIST", -3.0),
     ("has_gt",            "ARTIST", -4.0),
-    ("source_kw",         "ARTIST", -2.5),
+    ("source_kw",         "ARTIST", -2.53),
     ("recording_verb",    "ARTIST", -3.0),
-    ("equip_word",        "ARTIST", -3.0),
-    ("notes_word",        "ARTIST", -2.0),
-    ("in_place",          "ARTIST", -5.0),
+    ("equip_word",        "ARTIST", -3.01),
+    ("notes_word",        "ARTIST", -1.96),
+    ("in_place",          "ARTIST", -5.59),
     ("lib_venue",         "ARTIST", -3.0),
     ("lib_event",         "ARTIST", -3.0),
     ("has_instr",         "ARTIST", -2.0),
     ("label_other",       "ARTIST", -5.0),
     ("after_track_start", "ARTIST", -6.0),
-    ("prev_is_connector", "ARTIST", -1.0),
-    ("sec_personnel",     "ARTIST", -3.0),
+    ("prev_is_connector", "ARTIST", -4.0),
+    ("sec_personnel",     "ARTIST",  0.0),
     ("sec_lineage",       "ARTIST", -3.0),
 
-    ("hard_after_first",  "ARTIST", -3.5),
+    ("hard_after_first",  "ARTIST", -3.77),
     ("soft_line0",        "VENUE",  -4.0),
-    ("soft_after_first",  "ARTIST",  2.0),     # "A, B, C" billed on one line: cancels ARTIST -> ARTIST
+    ("soft_after_first",  "ARTIST", 0.87),     # "A, B, C" billed on one line: cancels ARTIST -> ARTIST
     ("after_at",          "ARTIST", -3.5),
-    ("paren_tail",        "ARTIST", -3.0),
+    ("paren_tail",        "ARTIST", -4.72),
 
     # ── ATLAS (shipped reference data): evidence weaker than the library's ─
     # Every weight here is below the smallest lib_* weight for its role
     # (tests/test_atlas_features.py keeps that true), and reader/features.py gives
     # the Atlas no say wherever the library has already spoken.
-    ("atl_artist",        "ARTIST",  2.0),
-    ("atl_artist_fz",     "ARTIST",  1.0),
+    ("atl_artist",        "ARTIST", 0.12),
+    ("atl_artist_fz",     "ARTIST", -0.63),
     ("atl_musician",      "ARTIST",  0.5),
     ("atl_musician",      "MEMBER",  1.5),
     ("atl_venue",         "VENUE",   2.0),
@@ -101,8 +105,8 @@ EMISSION = [
     ("atl_event_fz",      "EVENT",   1.2),
     ("atl_artist",        "VENUE",  -1.5),
     ("atl_artist",        "TITLE",  -1.0),
-    ("atl_venue",         "ARTIST", -1.5),
-    ("atl_event",         "ARTIST", -1.5),
+    ("atl_venue",         "ARTIST", -1.59),
+    ("atl_event",         "ARTIST", -1.67),
     ("atl_event",         "VENUE",  -1.5),
 
     # ── TITLE (tour or show banner) ───────────────────────────────────────
@@ -195,7 +199,7 @@ EMISSION = [
 
     # ── EVENT ─────────────────────────────────────────────────────────────
     ("event_word",        "EVENT",   5.0),
-    ("not_event",         "EVENT",  -8.0),   # a tour, residency or billing note (2026-10-05)
+    ("not_event",         "EVENT",  -8.0),   # added 2026-10-05 with the hand-set row; not fitted
     ("lib_event",         "EVENT",   5.0),
     ("label_event",       "EVENT",   5.0),
     ("w8p",               "EVENT",  -2.0),
