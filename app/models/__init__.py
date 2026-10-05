@@ -26,3 +26,4 @@ from .node_setting import NodeSetting
 from .bulk_ingest import BulkIngestRun, BulkIngestItem
 from .download_job import DownloadJob
 from .alias import VenueAlias, ArtistAlias
+from .lomax import LomaxRun, LomaxProposal

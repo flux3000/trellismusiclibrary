@@ -34,9 +34,7 @@ from app.utils.artists import (
 )
 from app.utils import musicbrainz, commons
 from app.utils import entity_images as ei
-from app.utils.artist_research import run_artist_research
-from app.utils.ai_assist import AiAssistError
-from app.utils.prefs import get_api_key, get_pref
+from app import lomax
 from app.api.system import require_library
 
 bp = Blueprint("artists", __name__)
@@ -289,13 +287,13 @@ def get_artist(artist_id):
         # the legacy image_ext column.
         "has_image": bool(p.images),
         "images":    [_image_payload(i) for i in p.images],
-        "dossier":   json.loads(p.dossier_json) if p.dossier_json else None,
+        "dossier":   lomax.latest_result("artist", p.id, ("artist",), not_mode="lineup"),
         # The last lineup-research pass, so it survives navigating away
         # (Ryan, 2026-09-07). Deliberately NOT added to app/api/share.py: a
         # roster proposal awaiting review is the owner's working state, not
         # catalog metadata a peer has any use for — and every field added to
         # the peer surface is another way THE THREE LISTS drift apart.
-        "lineup":    json.loads(p.lineup_json) if p.lineup_json else None,
+        "lineup":    lomax.latest_result("artist", p.id, ("artist",), not_mode="bio"),
         # Genre (2026-08-02) — a proper dimension, one FK, nullable. null
         # until Ryan assigns one by hand (no AI suggestion for this field).
         # `color` (2026-08-07) drives the Browse cards' colour flair.
@@ -422,19 +420,8 @@ def update_artist(artist_id):
 @bp.route("/ai-estimate")
 @login_required
 def ai_estimate():
-    """
-    Rough TOKEN cost of one AI Assist pass. No currency figure — see
-    ai_assist.py's usage-reporting comment for why that was removed.
-
-    A RANGE, not a figure: usage tracks how many web searches the model decides
-    it needs, which isn't knowable up front. Quoting a single number would be a
-    promise we can't keep. No longer takes the model into account, because a
-    token count is a property of the work rather than of who is billed.
-    """
-    from app.utils.ai_assist import estimate_tokens, MAX_SEARCHES
-    low, high = estimate_tokens()
-    return jsonify({"low_tokens": low, "high_tokens": high,
-                    "max_searches": MAX_SEARCHES})
+    """Rough TOKEN range of one Artist History run, no currency (see app/lomax/core.py)."""
+    return jsonify(lomax.estimate("artist", "research"))
 
 
 # ── MusicBrainz match resolution (2026-08-07) ────────────────────────────────
@@ -720,114 +707,6 @@ def delete_artist_image(image_id):
     if not img:
         return jsonify({"error": "Not found"}), 404
     return ei.handle_delete(img, _artist_images_dir(img.artist))
-
-
-# ── Dossier — AI-drafted biography + suggested resource links (2026-07-22) ──
-# Background job, same shape as ingest.py's AI Assist (_AI_JOBS / poll):
-# the synchronous Anthropic call is too slow for the webview's fetch timeout,
-# so this starts a daemon thread and the client polls for the result. On
-# success the raw result is persisted to Artist.dossier_json — nothing
-# else is auto-applied (see artist_research.py's module docstring).
-_DOSSIER_JOBS = {}  # job_id -> {"status": running|done|error, "result"/"error"}
-
-
-def _artist_context(p):
-    """
-    What the DB already knows about this act, handed to the model as ground
-    truth so it does not spend searches re-deriving it (2026-09-07).
-
-    MusicBrainz aliases matter more here than they look: same-name acts are the
-    main way this research goes wrong, and origin + active years + aliases is
-    usually what separates two of them.
-    """
-    extra = {}
-    if p.mb_extra_json:
-        try:
-            extra = json.loads(p.mb_extra_json) or {}
-        except (ValueError, TypeError):
-            extra = {}
-    return {
-        "aliases":           [a for a in (extra.get("aliases") or []) if a][:8],
-        "mb_type":           p.mb_type,
-        "mb_area":           p.mb_area,
-        "mb_begin":          p.mb_begin,
-        "mb_end":            p.mb_end,
-        "mb_disambiguation": p.mb_disambiguation,
-        "genre":             p.genre.name if p.genre else None,
-        "members":           [a.name for a in p.musicians],
-    }
-
-
-def _run_dossier_job(job_id, artist_id, artist_name, current_bio, api_key, model, app,
-                     mode="bio", question=None, context=None):
-    import traceback as _tb
-    try:
-        result = run_artist_research(
-            artist_name, current_bio, api_key, model,
-            context=context, question=question, mode=mode)
-        _DOSSIER_JOBS[job_id] = {"status": "done", "result": result}
-        try:
-            with app.app_context():
-                p = db.session.get(Artist, artist_id)
-                # Each mode owns its own column. Sharing one would mean a
-                # lineup run silently destroying the last biography research,
-                # and vice versa.
-                if p and mode == "bio":
-                    p.dossier_json = json.dumps(result)
-                    db.session.commit()
-                elif p and mode == "lineup":
-                    p.lineup_json = json.dumps(result)
-                    db.session.commit()
-        except Exception:
-            _tb.print_exc()   # best-effort — client already has the result via the job dict
-    except AiAssistError as e:
-        _DOSSIER_JOBS[job_id] = {"status": "error", "error": str(e)}
-    except Exception as e:  # noqa: BLE001
-        _tb.print_exc()
-        _DOSSIER_JOBS[job_id] = {"status": "error", "error": "Unexpected error: %s" % e}
-
-
-@bp.route("/<int:artist_id>/dossier", methods=["POST"])
-@login_required
-def start_dossier(artist_id):
-    import threading
-    import uuid
-
-    data = request.get_json(silent=True) or {}
-    mode = "lineup" if data.get("mode") == "lineup" else "bio"
-
-    p = db.session.get(Artist, artist_id)
-    if not p:
-        return jsonify({"error": "Not found"}), 404
-    api_key = get_api_key(current_user.id)
-    if not api_key:
-        return jsonify({"error": "no_api_key"}), 428
-    model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
-
-    context = _artist_context(p)
-    job_id = uuid.uuid4().hex
-    _DOSSIER_JOBS[job_id] = {"status": "running"}
-    threading.Thread(
-        target=_run_dossier_job,
-        args=(job_id, artist_id, p.name, p.bio or "", api_key, model, current_app._get_current_object()),
-        kwargs={"mode": mode, "question": data.get("question"), "context": context},
-        daemon=True,
-    ).start()
-    return jsonify({"job_id": job_id}), 202
-
-
-@bp.route("/<int:artist_id>/dossier/<job_id>", methods=["GET"])
-@login_required
-def dossier_status(artist_id, job_id):
-    job = _DOSSIER_JOBS.get(job_id)
-    if not job:
-        return jsonify({"error": "unknown job"}), 404
-    if job["status"] == "running":
-        return jsonify({"status": "running"})
-    _DOSSIER_JOBS.pop(job_id, None)   # deliver terminal state once, then discard
-    if job["status"] == "error":
-        return jsonify({"status": "error", "error": job["error"]})
-    return jsonify({"status": "done", "result": job["result"]})
 
 
 @bp.route("/<int:artist_id>/members/<int:musician_id>/stints", methods=["POST"])

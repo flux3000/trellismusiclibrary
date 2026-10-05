@@ -13,12 +13,13 @@ from app.utils.prefs import (get_pref, set_pref, has_api_key,
 
 bp = Blueprint("preferences", __name__)
 
-_ALLOWED_MODELS = {"claude-sonnet-5", "claude-haiku-4-5"}
+from app.lomax.core import MODEL_FALLBACK  # the one default model
+_ALLOWED_MODELS = {MODEL_FALLBACK, "claude-haiku-4-5"}
 
 
 def _snapshot(uid):
     return {
-        "ai_model":             get_pref(uid, "ai_model", "claude-sonnet-5"),
+        "ai_model":             get_pref(uid, "ai_model", MODEL_FALLBACK),
         "has_api_key":          has_api_key(uid),
         "keychain_available":   _HAS_KEYRING,
         # Server-owned, not a user preference — surfaced here so the frontend

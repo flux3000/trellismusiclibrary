@@ -63,6 +63,7 @@ from app.utils.serialize import (
 )
 from app.utils.rate_limit import rate_limited
 from app.utils.format import format_partial_date
+from app import lomax
 from app.api.stream import _serve_file
 from app.utils import transcode as tx
 
@@ -551,7 +552,7 @@ def artist_detail(artist_id):
         "resources": [{"id": r.id, "label": r.label, "url": r.url} for r in p.resources],
         "has_image": bool(p.images),
         "images":    [ei.image_payload(i, _SHARE_IMG_URL) for i in p.images],
-        "dossier":   _json.loads(p.dossier_json) if p.dossier_json else None,
+        "dossier":   lomax.latest_result("artist", p.id, ("artist",), not_mode="lineup"),
         "genre":     {"id": p.genre.id, "name": p.genre.name,
                       "color": p.genre.color} if p.genre else None,
         "musicbrainz": {
@@ -706,6 +707,7 @@ def venue_detail(venue_id):
         "state":             v.state,
         "country":           v.country,
         "bio":               v.bio,
+        "history":           v.history,
         # Counts over the VISIBLE set — see the rule at the top of this section.
         "performance_count": len(perfs),
         "recording_count":   len(recordings),

@@ -305,6 +305,12 @@ class Atlas:
         r = self._q("select name from place where id=?", (place_id,))
         return r[0][0] if r else None
 
+    def place_names(self, place_id):
+        """[(name, kind, start_year, end_year)] every name a place has carried, official first."""
+        return self._q("select name, kind, start_year, end_year from place_name where place_id=? "
+                       "order by case kind when 'official' then 0 when 'former' then 1 else 2 end, "
+                       "start_year, name", (place_id,))
+
     def place_info(self, place_id):
         """{"city", "region", "country", "kind"} of a place, or {}."""
         r = self._q("select city, region, country, kind from place where id=?", (place_id,))

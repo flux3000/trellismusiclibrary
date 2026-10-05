@@ -2960,8 +2960,9 @@ def build_scan_payload(folder_path, info_override=None):
             _placement = _node_settings.get_file_handling().get("placement")
         except Exception:
             pass
-        resp["resolved"] = _resolve_scan(
-            resp, library_root=_library_root, placement=_placement).to_dict()
+        from app.utils.sources_plain import with_sources_plain as _with_sources_plain
+        resp["resolved"] = _with_sources_plain(_resolve_scan(
+            resp, library_root=_library_root, placement=_placement).to_dict())
     except Exception as e:  # noqa: BLE001
         # Missing app context is already absorbed by the two inner guards and
         # resolve() itself is pure, so reaching here means a real resolver bug.

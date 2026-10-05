@@ -47,8 +47,7 @@ from app.utils.bulk_ingest import (folder_format, _READABLE_AUDIO_EXTS,
 from app.utils.resolve import resolve, find_duplicates, verdict, Field as ResolvedField
 from app.utils.file_naming import flattens
 from app.utils.folder_naming import build_folder_name
-from app.utils.ai_assist import run_ai_assist, AiAssistError
-from app.utils.prefs import get_api_key, get_pref
+from app import lomax
 from app.utils import node_settings
 from app.utils.health import compute_health
 from app.utils.checksums import (
@@ -70,43 +69,6 @@ def health():
     projected post-AI score) and gets back {score, band, factors}.
     """
     return jsonify(compute_health(request.get_json() or {}))
-
-
-# In-memory AI-research jobs. The research call is far too slow (30-90s) to hold
-# a synchronous HTTP request open — the webview aborts the fetch at ~60s. So we run
-# it in a background thread and let the client poll for the result.
-_AI_JOBS = {}  # job_id -> {"status": running|done|error, "result"/"error", "t0"}
-
-
-def _run_ai_job(job_id, folder_path, current, api_key, model, *, recording_id=None,
-                app=None, question=None, prior=None):
-    import time as _time
-    import traceback as _tb
-    t0 = _time.time()
-    try:
-        result = run_ai_assist(folder_path, current, api_key, model,
-                               question=question, prior=prior)
-        _AI_JOBS[job_id] = {"status": "done", "result": result}
-        print("[ai-assist] job %s ok in %.1fs" % (job_id[:8], _time.time() - t0), flush=True)
-        # Persist to the recording, if this run was for an already-saved one.
-        # Best-effort: a save failure shouldn't hide a successful research result
-        # from the client, which already has it in _AI_JOBS.
-        if recording_id and app is not None:
-            try:
-                with app.app_context():
-                    from app.models.recording import Recording
-                    rec = db.session.get(Recording, recording_id)
-                    if rec:
-                        rec.ai_research_json = json.dumps(result)
-                        db.session.commit()
-            except Exception:
-                _tb.print_exc()
-    except AiAssistError as e:
-        _AI_JOBS[job_id] = {"status": "error", "error": str(e)}
-        print("[ai-assist] job %s failed after %.1fs: %s" % (job_id[:8], _time.time() - t0, e), flush=True)
-    except Exception as e:  # noqa: BLE001
-        _tb.print_exc()
-        _AI_JOBS[job_id] = {"status": "error", "error": "Unexpected error: %s" % e}
 
 
 # resolve_similar_artist_ids / _act_key / _ARTIST_SIMILARITY / _ACT_NOISE_WORDS
@@ -228,120 +190,6 @@ def save_info_file():
         return jsonify({"error": "Could not write file: %s" % e}), 500
 
     return jsonify({"ok": True, "filename": os.path.basename(target_path)})
-
-
-@bp.route("/ai-assist", methods=["POST"])
-@login_required
-def ai_assist():
-    """
-    POST /api/ingest/ai-assist
-    Kick off an AI research job (background thread) and return a job id
-    immediately. Poll GET /api/ingest/ai-assist/<job_id> for the result.
-
-    Body: { folder_path, current: {...}, question?: "..." }
-
-    `question` is the archivist's optional pre-run question. It rides in this
-    existing body rather than getting an endpoint of its own — a question asked
-    BEFORE the run is just more context for the one call we were already
-    making, which is the whole reason it was chosen over a chat surface
-    (Ryan, 2026-09-07).
-    """
-    import threading
-    import uuid
-
-    data        = request.get_json() or {}
-    folder_path = (data.get("folder_path") or "").strip()
-    if not folder_path or not os.path.isdir(folder_path):
-        return jsonify({"error": "Invalid or inaccessible folder path"}), 400
-
-    api_key = get_api_key(current_user.id)
-    if not api_key:
-        # 428 → frontend routes the user to add their key in Settings.
-        return jsonify({"error": "no_api_key"}), 428
-    model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
-
-    job_id = uuid.uuid4().hex
-    _AI_JOBS[job_id] = {"status": "running"}
-    # Key/model are resolved here (request context); the thread needs no DB access.
-    threading.Thread(
-        target=_run_ai_job,
-        args=(job_id, folder_path, data.get("current") or {}, api_key, model),
-        kwargs={"question": data.get("question")},
-        daemon=True,
-    ).start()
-    return jsonify({"job_id": job_id}), 202
-
-
-@bp.route("/ai-assist-recording/<int:recording_id>", methods=["POST"])
-@login_required
-def ai_assist_recording(recording_id):
-    """Run AI research for an already-saved recording (background job). Builds the
-    `current` metadata from the DB — run_ai_assist reads no files."""
-    import threading
-    import uuid
-    from app.models.recording import Recording
-    from app.utils.format import format_partial_date
-
-    data = request.get_json(silent=True) or {}
-    rec = db.session.get(Recording, recording_id)
-    if not rec:
-        return jsonify({"error": "Not found"}), 404
-    p = rec.performance
-    v = p.venue if p else None
-    current = {
-        "artist":  (p.artist.name if (p and p.artist) else ""),
-        "date":    format_partial_date(p.start_year, p.start_month, p.start_day) if p else "",
-        "venue":   (v.name if v else ""),
-        "city":    (v.city if v else (p.city if p else "")),
-        "state":   (v.state if v else (p.state if p else "")),
-        "country": (v.country if v else (p.country if p else "")),
-        "source":  rec.source or "",
-        "lineage": rec.lineage or "",
-        "tracks":  [{"number": t.track_number, "title": t.title, "duration": t.duration}
-                    for t in rec.tracks],
-        "info_file_content": rec.info_file_content or "",
-    }
-
-    api_key = get_api_key(current_user.id)
-    if not api_key:
-        return jsonify({"error": "no_api_key"}), 428
-    model = get_pref(current_user.id, "ai_model") or "claude-sonnet-5"
-
-    # A re-run gets the PREVIOUS run's findings back (see _prior_summary): the
-    # saved blob is right here, and without it a second pass re-searches
-    # everything the first one already found and is free to contradict it.
-    prior = None
-    if rec.ai_research_json:
-        try:
-            prior = json.loads(rec.ai_research_json)
-        except (ValueError, TypeError):
-            prior = None   # a corrupt blob is a reason to skip the recap, not to fail the run
-
-    job_id = uuid.uuid4().hex
-    _AI_JOBS[job_id] = {"status": "running"}
-    threading.Thread(
-        target=_run_ai_job,
-        args=(job_id, rec.folder_path or "", current, api_key, model),
-        kwargs={"recording_id": recording_id, "app": current_app._get_current_object(),
-                "question": data.get("question"), "prior": prior},
-        daemon=True,
-    ).start()
-    return jsonify({"job_id": job_id}), 202
-
-
-@bp.route("/ai-assist/<job_id>", methods=["GET"])
-@login_required
-def ai_assist_status(job_id):
-    """Poll an AI research job. Returns running, or done+result / error (one-shot)."""
-    job = _AI_JOBS.get(job_id)
-    if not job:
-        return jsonify({"error": "unknown job"}), 404
-    if job["status"] == "running":
-        return jsonify({"status": "running"})
-    _AI_JOBS.pop(job_id, None)  # deliver terminal state once, then discard
-    if job["status"] == "error":
-        return jsonify({"status": "error", "error": job["error"]})
-    return jsonify({"status": "done", "result": job["result"]})
 
 
 _INGEST_JOBS = {}  # job_id -> {status, phase, copied, total, result, error}
@@ -1426,8 +1274,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
       "stage":              "Harbor Stage",   # optional — Performance.stage (new performances)
       "resolver_result":    {...},  # optional -- the scan's `resolved` dict, stored
                                      # (minus tracks) on recording.resolver_json
-      "ai_result":          {...},  # optional — raw AI Assist result if run pre-confirm,
-                                     # saved as-is to ai_research_json (see run_ai_assist)
+      "ai_result":          {...},  # optional — a research result the page holds, filed as a done
+                                     # Lomax run when no run on this folder exists (see app.lomax)
       "fingerprints":       [{"type":"ffp","filename":"...","content":"..."}],
       "tracks": [
         {"track_number":1,"title":"Dark Star","set_number":"Set 1","duration":1200,"filename":"t01.flac"}
@@ -1772,12 +1620,9 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
 
     # ── 7. Create Recording ───────────────────────────────────────────────────
     rec_is_official = bool(data.get("is_official", False))
-    # AI Assist may already have been run pre-confirm (Add Recording's own
-    # "AI Assist" button, before the recording even exists) — if so, the
-    # frontend sends the raw result back as "ai_result" so it isn't lost the
-    # moment Confirm creates the row. Same shape/storage as the post-save
-    # path (app.api.ingest._run_ai_job), just written synchronously here
-    # instead of after a background job.
+    # Research may already have been run pre-confirm (Add Recording's own button, before the
+    # recording exists). The run is a Lomax folder run, re-pointed below; "ai_result" is the
+    # page's copy, filed only when no run on this folder was found.
     ai_result = data.get("ai_result")
     # etree_shnid was already validated/coerced to int-or-None at the top of
     # this function (R3, review 2026-09-25) -- reads straight through here.
@@ -1797,11 +1642,14 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         notes                = data.get("notes"),
         title                = data.get("title") or None,
         kind                 = rec_kind,
-        ai_research_json     = json.dumps(ai_result) if ai_result else None,
         resolver_json        = resolver_json_for_storage(data.get("resolver_result")),
     )
     db.session.add(rec)
     db.session.flush()
+    # Lomax runs made on this folder before it was saved now belong to the recording; a result the
+    # page holds from a run it never filed is kept as a done run (replaces ai_research_json).
+    if not lomax.repoint_folder(source_folder, rec.id) and ai_result:
+        lomax.adopt_result(rec.id, ai_result, user_id)
 
     # ── 8. Create Tracks ──────────────────────────────────────────────────────
     # file_path stores the NEW flattened+renamed name (what move_to_library

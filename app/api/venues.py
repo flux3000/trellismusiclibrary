@@ -108,6 +108,7 @@ def get_venue(venue_id):
         "state":             v.state,
         "country":           v.country,
         "bio":               v.bio,
+        "history":           v.history,
         "performance_count": len(v.performances),
         "recording_count":   len(recordings),
         "recordings":        recordings,
@@ -168,7 +169,7 @@ def update_venue(venue_id):
     if not v:
         return jsonify({"error": "Not found"}), 404
     data = request.get_json()
-    for field in ["name", "city", "state", "country", "bio"]:
+    for field in ["name", "city", "state", "country", "bio", "history"]:
         if field in data:
             setattr(v, field, data[field])
     db.session.commit()

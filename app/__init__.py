@@ -72,8 +72,10 @@ def create_app(config_class=Config):
     # ── Schema upgrades (2026-10-05) ───────────────────────────
     # Additive, idempotent, one transaction each; every mode, before anything queries Artist.
     with app.app_context():
-        from app.utils.schema_upgrades import ensure_artist_confirmed_at
+        from app.utils.schema_upgrades import ensure_artist_confirmed_at, ensure_lomax, ensure_venue_history
         ensure_artist_confirmed_at(db.engine)
+        ensure_venue_history(db.engine)
+        ensure_lomax(db.engine)
 
     # ── Install Epoch (2026-09-18) ─────────────────────────────
     # Runs for every mode this factory builds, including SERVER_MODE — placed
@@ -191,6 +193,8 @@ def create_app(config_class=Config):
 
     # Archive Downloads (2026-10-01): catalog browsing + the download queue.
     # After the SERVER_MODE return above, so a share node never has them.
+    from app.api.lomax     import bp as lomax_bp
+    app.register_blueprint(lomax_bp,     url_prefix="/api/lomax")
     from app.api.archive   import bp as archive_bp
     from app.api.downloads import bp as downloads_bp
     app.register_blueprint(archive_bp,   url_prefix="/api/archive")

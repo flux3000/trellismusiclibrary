@@ -99,17 +99,17 @@ def test_performance_event_association(api, seeded_ids):
 
 
 def test_recording_ai_research_serialization(api, seeded_ids):
-    """GET /api/recordings/<id> surfaces the persisted AI Assist blob (2026-07-13
-    revival of ai_research_json — null until a research pass has run, then the
-    parsed JSON of the latest run)."""
+    """GET /api/recordings/<id> surfaces the latest done Lomax run's result (formerly the
+    ai_research_json blob) — null until a research pass has run, then its parsed JSON."""
     rec_id = seeded_ids["recording_id"]
 
     resp = api.get(f"/api/recordings/{rec_id}")
     assert resp.status_code == 200
     assert resp.get_json()["ai_research"] is None
 
-    rec = _db.session.get(Recording, rec_id)
-    rec.ai_research_json = '{"thinking": "test", "proposals": []}'
+    from app.models.lomax import LomaxRun
+    _db.session.add(LomaxRun(skill="recording", subject_type="recording", subject_id=rec_id, status="done",
+                             result_json='{"thinking": "test", "proposals": []}'))
     _db.session.commit()
 
     resp = api.get(f"/api/recordings/{rec_id}")
@@ -382,9 +382,9 @@ def test_do_confirm_omitted_members_key_does_not_wipe_inherited_roster(app, db, 
 def test_do_confirm_persists_pre_save_ai_result(app, db, tmp_path):
     """A recording ingested after running AI Assist pre-confirm (Add
     Recording's own button, before the row exists) should land with
-    ai_research_json already populated — it was previously dropped on the
-    floor because the confirm payload never carried it (Ryan, 2026-07-14:
-    'the result was not saved with the database submission')."""
+    a done Lomax run already on it — it was previously dropped on the floor because the
+    confirm payload never carried it (Ryan, 2026-07-14: 'the result was not saved with the
+    database submission')."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
@@ -410,14 +410,13 @@ def test_do_confirm_persists_pre_save_ai_result(app, db, tmp_path):
     }
     result = _do_confirm(data, uid, None)
     rec = _db.session.get(Recording, result["recording_id"])
-    assert rec.ai_research_json is not None
-    saved = _json.loads(rec.ai_research_json)
+    from app import lomax
+    saved = lomax.latest_result("recording", rec.id, ("recording",))
     assert saved["proposals"][0]["proposed"] == "1974-07-03"
 
 
-def test_do_confirm_without_ai_result_leaves_ai_research_json_null(app, db, tmp_path):
-    """No AI Assist run pre-confirm — should stay null, not error or default
-    to some empty-but-truthy blob."""
+def test_do_confirm_without_ai_result_files_no_lomax_run(app, db, tmp_path):
+    """No research run pre-confirm — no run is filed, not an empty-but-truthy one."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
@@ -436,7 +435,8 @@ def test_do_confirm_without_ai_result_leaves_ai_research_json_null(app, db, tmp_
     }
     result = _do_confirm(data, uid, None)
     rec = _db.session.get(Recording, result["recording_id"])
-    assert rec.ai_research_json is None
+    from app.models.lomax import LomaxRun
+    assert _db.session.query(LomaxRun).filter_by(subject_id=rec.id).count() == 0
 
 
 def test_check_existing_no_artist_match(api):

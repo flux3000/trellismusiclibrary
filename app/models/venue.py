@@ -18,6 +18,8 @@ class Venue(db.Model):
     state      = db.Column(db.String(64),  nullable=True)
     country    = db.Column(db.String(64),  nullable=True)
     bio        = db.Column(db.Text,        nullable=True)
+    # Written by Lomax Venue History (auto-applies, restorable); see app/lomax/skills/venue.py.
+    history    = db.Column(db.Text,        nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                            onupdate=lambda: datetime.now(timezone.utc))

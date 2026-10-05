@@ -567,6 +567,13 @@ const App = (() => {
     // with the surface. Details panel toggle: Lucide 'panel-right'.
     'brain':        '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/>',
     'panel-right':  '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
+    // Lomax (2026-10-05). The tape-reel mark: two reels on a baseline. 'lomax' is the
+    // 14px form beside the tab name; 'lomax-full' adds hubs and feet for the chat
+    // avatar. Never on a button. 'info' is Lucide 'info', the (i) beside level
+    // toggles and Resolver values.
+    'info':         '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    'lomax':        '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><path d="M3 19h18"/>',
+    'lomax-full':   '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M7 15l2 4"/><path d="M17 15l-2 4"/><path d="M3 19h18"/>',
     // Preview transport on Add Recording (2026-08-28). Lucide 'skip-back' /
     // 'skip-forward' — the SAME two glyphs the player bar draws inline in
     // index.html, so the two transports cannot drift apart. Kept here as well
@@ -637,17 +644,17 @@ const App = (() => {
   // The Details panel's tabs, in ONE order for View Recording and Add Recording
   // (Ryan, 2026-10-04). `attr` is the data attribute each page's wiring reads
   // (data-pane / data-ipane) and `prefix` the pane-id prefix ('' / 'isp-').
-  // Resolver exists only when the recording has resolver data; Research only
+  // Resolver exists only when the recording has resolver data; Lomax only
   // where the user can run it.
   const DETAILS_TABS = [
     ['info', 'Info File'], ['quality', 'Quality'], ['resolver', 'Resolver'],
-    ['filetags', 'Tags'], ['checksums', 'Checksums'], ['ai', 'Research'],
+    ['filetags', 'Tags'], ['checksums', 'Checksums'], ['ai', 'Lomax'],
   ]
   function detailsTabsHtml(attr, prefix, { resolver, research, staged }) {
     return DETAILS_TABS
       .filter(([k]) => (k !== 'resolver' || resolver) && (k !== 'ai' || research))
       .map(([k, label]) => `<button class="slide-tab${k === 'ai' ? ' slide-tab--ai' : ''}` +
-        `${k === 'filetags' && staged ? ' slide-tab--staged' : ''}" ${attr}="${prefix}${k}">${label}</button>`)
+        `${k === 'filetags' && staged ? ' slide-tab--staged' : ''}" ${attr}="${prefix}${k}">${k === 'ai' ? icon('lomax') + ' ' : ''}${label}</button>`)
       .join('')
   }
   // Show/hide the Details panel. Sits above the panel at the right, and stays
@@ -5325,6 +5332,7 @@ const App = (() => {
             <div class="pp-sec">Members</div>
             <div class="pp-musicians" id="pp-musicians"></div>
             <div class="pp-stint-editor" id="pp-stint-editor" style="display:none"></div>
+            <div class="lx-slot" id="pp-lx-members"></div>
 
             <!-- Abbreviation feeds the {artist_abbr} naming token (falls back
                  to lowercase initials when empty) — see app/utils/ingest.py -->
@@ -5333,36 +5341,13 @@ const App = (() => {
             </div>
             <div class="pp-editable ${artist.abbreviation ? '' : 'pp-empty'}" id="pp-abbr" title="Click to edit">${artist.abbreviation ? esc(artist.abbreviation) : 'Add an abbreviation…'}</div>
 
-            <!-- Lineup research is its OWN button, not a section of the
-                 Description's AI Assist (Ryan, 2026-09-07). Two reasons: it is
-                 far more search-hungry than a biography, and AI Assist
-                 overwrites the description — so folding lineup in would make
-                 anyone who wanted tenure dates accept a rewritten description
-                 they never asked for. It also lands here, beside the roster it
-                 is about, rather than up on the Description header. -->
-            <div class="pp-lineup-ai">
-              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn research-btn" id="pp-lineup-run">${icon('brain')} Research lineup</button>
-              <span class="pp-sec-msg" id="pp-lineup-msg"></span>
-            </div>
-            <div class="pp-lineup-results" id="pp-lineup-results"></div>
-
-            <!-- AI Assist sits ON the Description header: it's an enrichment
-                 action for this one field, not a research panel, so it belongs
-                 where its output lands. Clicking it OVERWRITES the description
-                 — a deliberate exception to "AI suggests, human approves",
-                 made because a biography is low-stakes and freely re-editable. -->
+            <!-- Biography. Lomax writes it (and Restore previous undoes that); it is
+                 still click-to-edit. The Restore link is painted by the Lomax view. -->
             <div class="pp-sec-row">
-              <div class="pp-sec">Description</div>
-              <button type="button" class="btn btn-ghost btn-xs iq-ai-btn research-btn" id="pp-dossier-run">${icon('brain')} Research</button>
-              <span class="pp-sec-msg" id="pp-dossier-msg"></span>
+              <div class="pp-sec">Biography</div>
+              <span id="pp-lx-bio"></span>
             </div>
-            <input type="text" class="ai-ask-input pp-ai-ask" id="pp-ai-question" autocomplete="off"
-                   placeholder="Anything specific you want covered? (optional)" />
             <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pp-desc" title="Click to edit">${descText ? esc(artist.bio) : 'Add a description\u2026'}</div>
-            <!-- An answer to the human's question lives here, not in the
-                 description: it is a reply to them, not part of the act's
-                 biography, and pasting it into a saved field would be wrong. -->
-            <div class="pp-ai-answer ai-res-section" id="pp-ai-answer"></div>
 
             <div class="pp-block">
               <h2 class="pp-block-title">MusicBrainz</h2>
@@ -5379,7 +5364,11 @@ const App = (() => {
               <h2 class="pp-block-title">Trusted sources</h2>
               <div class="pp-block-hint">Sites worth trusting for this act specifically: a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and import jobs.</div>
               <div class="pp-resources" id="pp-resources"></div>
-            </div>` },
+              <div class="lx-slot" id="pp-lx-resources"></div>
+            </div>
+
+            <!-- Questions and the ask bar close the page (not pinned). -->
+            <div class="lx-page" id="pp-lx"></div>` },
         { id: 'photos',     label: 'Photos', count: photoCount || null,
           html: '<div id="pp-photos"></div>' },
       ],
@@ -6012,274 +6001,103 @@ const App = (() => {
     }
     renderMusicBrainz()
 
-    // ── AI Assist — biography enrichment, colocated with Description ─────────
-    //
-    // Reduced 2026-08-07 from a full results panel to a single button beside
-    // the Description header. The suggested-resources and pages-consulted
-    // lists are gone: they were interesting once and noise thereafter, and the
-    // act's own Trusted sources list is where curated links belong.
-    //
-    // THIS OVERWRITES THE DESCRIPTION — a deliberate, Ryan-approved exception
-    // to the project's "AI suggests, human approves" rule (see
-    // artist_research.py). That rule exists because a wrong-but-confident
-    // date silently overwrote a recording; a biography is a different risk
-    // class — visible on screen the moment it lands, freely re-editable, and
-    // not a field anything else computes from. The copy-into-place step was
-    // pure friction for the only outcome anyone wanted.
-    async function runDossier() {
-      const btn = document.getElementById('pp-dossier-run')
-      const msg = document.getElementById('pp-dossier-msg')
-      const descEl = document.getElementById('pp-desc')
-      if (!btn || btn.disabled) return
-      btn.disabled = true
-      const t0 = Date.now()
-      msg.className = 'pp-sec-msg'
-      msg.textContent = 'Researching the web… this takes a minute or two'
-      const tick = setInterval(() => {
-        msg.textContent = `Researching the web… ${Math.round((Date.now() - t0) / 1000)}s`
-      }, 1000)
-      const qEl = document.getElementById('pp-ai-question')
-      const question = (qEl?.value || '').trim() || undefined
-      if (qEl) qEl.value = ''   // never silently reuse a question on the next run
-      try {
-        const { job_id } = await API.artists.startDossier(artistId, { question })
-        const result = await pollDossierJob(artistId, job_id, t0)
-        clearInterval(tick)
-
-        const bio = stripCitations(result.biography || '')
-        if (!bio) {
-          msg.textContent = 'No biography could be written for this act.'
-          btn.disabled = false
-          return
-        }
-        artist.bio = bio
-        await saveField({ bio })
-        if (descEl) {
-          descEl.textContent = bio
-          descEl.classList.remove('pp-empty')
-        }
-        msg.className = 'pp-sec-msg is-ok'
-        // formatAiUsage returns an HTML badge, so this must be innerHTML —
-        // textContent rendered the literal <span …> markup on the page.
-        msg.innerHTML = 'Description updated' +
-          (result.usage ? ' · ' + formatAiUsage(result.usage) : '')
-        // An answer to the human's question is not part of the biography and
-        // must not be pasted into it. It gets its own block under the
-        // description, where it can be read and then ignored.
-        const ansBox = document.getElementById('pp-ai-answer')
-        if (ansBox) {
-          ansBox.innerHTML = result.answer
-            ? `<div class="ai-res-title">Answer</div><p class="ai-summary">${esc(stripCitations(result.answer))}</p>`
-            : ''
-        }
-        btn.innerHTML = icon('brain') + ' Research'
-        btn.disabled = false
-      } catch (e) {
-        clearInterval(tick)
-        msg.className = 'pp-sec-msg is-err'
-        msg.textContent = 'Research failed: ' + e.message
-        btn.disabled = false
+    // ── Lomax: biography, members, resources, questions ───────────────────────
+    // The biography is auto-applied by the server (with Restore previous);
+    // members and resources are suggestions to accept. Questions and the ask bar
+    // close the About tab. Every control is edit-only (lomaxActions / lomaxAskBar).
+    {
+      const lxBio = document.getElementById('pp-lx-bio')
+      const lxMem = document.getElementById('pp-lx-members')
+      const lxRes = document.getElementById('pp-lx-resources')
+      const lxAsk = document.getElementById('pp-lx')
+      const alive = () => document.body.contains(lxAsk)
+      const dateParts = str => {
+        const p = String(str || '').trim().split('-')
+        const n = i => (p[i] && /^\d+$/.test(p[i]) ? parseInt(p[i], 10) : null)
+        return [n(0), n(1), n(2)]
       }
-    }
-    document.getElementById('pp-dossier-run')?.addEventListener('click', runDossier)
-
-    // ── Lineup research ──────────────────────────────────────────────────────
-    // Returns date-bounded STINTS for review. NOTHING is applied automatically,
-    // at any confidence: tenure dates are the same failure class as the wrong
-    // date that got auto-apply deleted in the first place (see the AI Assist
-    // Refinement spec), and the internet routinely disagrees with itself about
-    // who was in a band in which year.
-    let lineupRows = []
-    // The last saved pass, straight off the record. Rendering it on load is
-    // the whole point of persisting it: research the human paid tokens for
-    // should still be there when they come back to the page.
-    let lineupResult = artist.lineup || null
-
-    function lineupDates(m) {
-      const a = (m.start || '').trim(), b = (m.end || '').trim()
-      if (!a && !b) return 'entire history of the act'
-      return `${a || '?'} – ${b || 'present'}`
-    }
-
-    // "1974-10-19" -> [1974, 10, 19]; missing parts stay null, which is exactly
-    // what Membership's nullable partial-date columns want.
-    function splitPartialDate(str) {
-      const p = String(str || '').trim().split('-')
-      const n = i => (p[i] && /^\d+$/.test(p[i]) ? parseInt(p[i], 10) : null)
-      return [n(0), n(1), n(2)]
-    }
-
-    // Is this researched stint ALREADY on the roster?
-    //
-    // Derived from the live Membership rows every time it renders, never from
-    // a stored "applied" flag on the saved result. The saved blob is a
-    // proposal; the roster is the truth. A flag would be a second copy of the
-    // same fact, free to disagree with the first the moment someone edits a
-    // tenure by hand or removes a member — which is exactly the drift that
-    // made me argue against persisting this at all. Deriving it removes the
-    // objection instead of arguing with it.
-    function lineupRowApplied(m) {
-      const member = members.find(x => x.name.toLowerCase() === (m.name || '').toLowerCase())
-      if (!member) return false
-      const [sy, sm, sd] = splitPartialDate(m.start)
-      const [ey, em, ed] = splitPartialDate(m.end)
-      return (member.stints || []).some(st =>
-        st.start_year === sy && st.start_month === sm && st.start_day === sd &&
-        st.end_year === ey && st.end_month === em && st.end_day === ed)
-    }
-
-    function renderLineupResults(result) {
-      const box = document.getElementById('pp-lineup-results')
-      if (!box) return
-      lineupRows = result.members || []
-      if (!lineupRows.length) {
-        box.innerHTML = `<p class="ai-res-note">No sourced lineup could be established for this act.</p>`
-        return
+      const onRoster = m => {
+        const member = members.find(x => x.name.toLowerCase() === String(m.name || '').toLowerCase())
+        if (!member) return false
+        const [sy, sm, sd] = dateParts(m.start), [ey, em, ed] = dateParts(m.end)
+        return (member.stints || []).some(st => st.start_year === sy && st.start_month === sm && st.start_day === sd &&
+          st.end_year === ey && st.end_month === em && st.end_day === ed)
       }
-      // A row with no source url is shown but NOT actionable — the prompt is
-      // told this, and it is the only thing keeping an unsourced guess from
-      // being one click from the roster.
-      const rows = lineupRows.map((m, i) => `
-        <div class="pp-lineup-row">
-          <span class="pp-lineup-name">${esc(m.name || '')}</span>
-          <span class="pp-lineup-inst">${esc(m.instrument || '')}</span>
-          <span class="pp-lineup-dates">${esc(lineupDates(m))}</span>
-          <span class="ai-res-conf">${esc(m.confidence || '')}</span>
-          ${m.url ? `<a class="ai-link" href="${esc(m.url)}" target="_blank" rel="noopener">source</a>`
-                  : `<span class="pp-lineup-nosrc" title="No source given, so this cannot be added">no source</span>`}
-          ${lineupRowApplied(m)
-              ? `<span class="pp-lineup-applied">On roster</span>`
-              : (m.url ? `<button class="btn btn-ghost btn-xs pp-lineup-add" data-idx="${i}">Add to roster</button>` : '')}
-          ${m.note ? `<span class="pp-lineup-note">${esc(m.note)}</span>` : ''}
-        </div>`).join('')
-
-      box.innerHTML = `
-        <div class="ai-res-section">
-          <div class="ai-res-title">Lineup found ${formatAiUsage(result.usage)}</div>
-          ${result.answer ? `<p class="ai-summary">${esc(stripCitations(result.answer))}</p>` : ''}
-          ${result.thinking ? `<p class="ai-summary">${esc(stripCitations(result.thinking))}</p>` : ''}
-          <div class="pp-lineup-rows">${rows}</div>
-        </div>`
-
-      box.querySelectorAll('.pp-lineup-add').forEach(btn =>
-        btn.addEventListener('click', () => applyLineupRow(parseInt(btn.dataset.idx), btn)))
-    }
-
-    async function applyLineupRow(idx, btn) {
-      const m = lineupRows[idx]
-      if (!m || !m.name) return
-      btn.disabled = true
-      btn.textContent = 'Adding…'
-      try {
-        // 1. Make sure the person is on the roster. set_artist_members
-        //    creates the Musician if this is a new name, which is why adding
-        //    someone for the first time goes through the plain name list
-        //    rather than the stint endpoint (see api/artists.py::add_stint).
-        let member = members.find(x => x.name.toLowerCase() === m.name.toLowerCase())
-        if (!member) {
-          members.push({ name: m.name })
-          await persistMembers()
-          await refreshRoster()
-          member = members.find(x => x.name.toLowerCase() === m.name.toLowerCase())
-        }
-        if (!member) throw new Error('Could not add ' + m.name + ' to the roster')
-
-        const [sy, sm, sd] = splitPartialDate(m.start)
-        const [ey, em, ed] = splitPartialDate(m.end)
-        const dates = { start_year: sy, start_month: sm, start_day: sd,
-                        end_year: ey, end_month: em, end_day: ed }
-
-        // 2. A person added just now (or a pre-existing "always a member" row)
-        //    carries ONE unbounded stint. Adding a second, bounded stint beside
-        //    it would leave the record saying both "always a member" and "a
-        //    member from 1974 to 1979" — contradictory, and the personnel
-        //    resolver takes the union, so the bounds would do nothing. Fill the
-        //    unbounded row in instead; only a member who already has real dates
-        //    gets a second stint.
-        const stints = member.stints || []
-        const blank = stints.find(isUnbounded)
-        if (blank) await API.artists.updateStint(blank.id, dates)
-        else       await API.artists.addStint(artistId, member.id, dates)
-
-        await refreshRoster()
-        renderMusicians()
-        renderStintEditor()
-        // Repaint from the refreshed roster so every row's On roster / Add
-        // state is recomputed — adding one person can settle another row too,
-        // when the research listed the same stint twice under name variants.
-        renderLineupResults(lineupResult)
-      } catch (e) {
-        btn.disabled = false
-        btn.textContent = 'Add to roster'
-        alert('Could not add: ' + e.message)
+      const parsed = p => { try { return JSON.parse(p.proposed) || {} } catch (_) { return {} } }
+      const paintBio = () => {
+        const el = document.getElementById('pp-desc')
+        if (!el || el.querySelector('textarea, input')) return
+        el.textContent = artist.bio || (canEditLibrary() ? 'Add a description…' : '')
+        el.classList.toggle('pp-empty', !artist.bio)
       }
-    }
 
-    async function runLineup() {
-      const btn = document.getElementById('pp-lineup-run')
-      const msg = document.getElementById('pp-lineup-msg')
-      if (!btn || btn.disabled) return
-      const qEl = document.getElementById('pp-ai-question')
-      const question = (qEl?.value || '').trim() || undefined
-      if (qEl) qEl.value = ''
-      btn.disabled = true
-      const t0 = Date.now()
-      msg.className = 'pp-sec-msg'
-      const tick = setInterval(() => {
-        msg.textContent = `Researching the lineup… ${Math.round((Date.now() - t0) / 1000)}s`
-      }, 1000)
-      msg.textContent = 'Researching the lineup… this takes a minute or two'
-      try {
-        const { job_id } = await API.artists.startDossier(artistId, { mode: 'lineup', question })
-        const result = await pollDossierJob(artistId, job_id, t0)
-        clearInterval(tick)
-        msg.className = 'pp-sec-msg is-ok'
-        msg.textContent = 'Review each person below. Nothing is added until you say so'
-        lineupResult = result
-        renderLineupResults(result)
-      } catch (e) {
-        clearInterval(tick)
-        msg.className = 'pp-sec-msg is-err'
-        msg.textContent = 'Lineup research failed: ' + e.message
-      } finally {
-        btn.disabled = false
-      }
-    }
-    document.getElementById('pp-lineup-run')?.addEventListener('click', runLineup)
+      const c = lomaxController({
+        skill: 'artist', subjectType: 'artist', subjectId: artistId, alive,
+        // The server has already written the accepted value; bring this page's copy in line.
+        afterAccept: async props => {
+          if (props.some(p => p.field === 'member')) { await refreshRoster(); renderMusicians(); renderStintEditor() }
+          if (props.some(p => p.field === 'resource')) {
+            artist = await API.artists.get(artistId)
+            resources = (artist.resources || []).map(r => ({ label: r.label, url: r.url }))
+            renderResources()
+          }
+        },
+        afterRestore: run => {
+          artist.bio = (run.result && run.result.replaced && run.result.replaced.text) || ''
+          paintBio()
+        },
+        // A finished run has already replaced the biography on the server.
+        onDone: run => {
+          const rep = run.result && run.result.replaced
+          if (rep && rep.written) { artist.bio = rep.written; paintBio() }
+        },
+      })
+      c.addView(ctl => {
+        if (!alive()) return false
+        // Restore previous, on the newest run that replaced the biography.
+        const rep = ctl.runs.slice().reverse().find(r => r.status === 'done' && r.result && r.result.replaced)
+        lxRepaint(lxBio, rep ? lomaxRestoreLink(ctl, rep, artist.bio) : '')
 
-    // Paint the saved pass immediately on load. The button says "Research
-    // again" once there is one, so it is clear this is a previous result and
-    // not something that just ran.
-    if (lineupResult && (lineupResult.members || []).length) {
-      renderLineupResults(lineupResult)
-      const lb = document.getElementById('pp-lineup-run')
-      if (lb) lb.innerHTML = icon('brain') + ' Research lineup again'
-      const lm = document.getElementById('pp-lineup-msg')
-      if (lm) lm.textContent = 'Saved from an earlier run'
-    }
+        const run = ctl.latest()
+        const members_ = canEditLibrary() ? lxProps(run).filter(p => p.field === 'member' && lxShown(p)) : []
+        const open = members_.filter(p => lxOpen(p) && !onRoster(parsed(p)))
+        lxRepaint(lxMem, members_.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Member</th><th>Dates</th>` +
+          `<th class="lx-act-td">${open.length ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Add all</button>` : ''}</th></tr></thead><tbody>${
+            members_.map(p => {
+              const m = parsed(p), roster = p.decision === 'accepted' || onRoster(m)
+              const dates = (m.start || m.end) ? `${m.start || '?'} – ${m.end || 'present'}` : ''
+              return `<tr><td><span class="${roster ? 'lx-same' : 'lx-val'}">${esc(m.name || '')}</span>` +
+                `${m.instrument ? ` <span class="${roster ? 'lx-same' : 'lx-val'} lx-inst">${esc(m.instrument)}</span>` : ''}</td>` +
+                `<td><span class="${roster ? 'lx-same' : 'lx-val'}">${esc(dates)}</span></td>` +
+                `<td class="lx-act-td">${roster ? '<span class="lx-roster">On the roster</span>' : lomaxActions(p, { accept: 'Add' })}</td></tr>`
+            }).join('')}</tbody></table>` : '')
 
-    // Token range on the button's tooltip. Fetched rather than hardcoded so a
-    // change to the search budget can't leave a stale promise in the UI, and
-    // fire-and-forget because a failed estimate must never stop the button
-    // working.
-    aiEstimatePromise().then(est => {
-      if (!est || est.low_tokens == null) return
-      const tail = `${aiTokenRange(est)}, depending on how many searches it needs. `
-                 + `Billed by Anthropic to your key.`
-      const b = document.getElementById('pp-dossier-run')
-      if (b) b.title = `Researches the web and rewrites the description. ${tail}`
-      // Lineup research digs harder than a biography does, so it sits at the
-      // top of that range rather than the middle. Saying so is the point of
-      // the line — nobody should be surprised by what a run costs.
-      const l = document.getElementById('pp-lineup-run')
-      if (l) l.title = `Researches who was in this act and when, for review. ${tail}`
-    })
+        const have = new Set(resources.map(r => r.url))
+        const res_ = canEditLibrary() ? lxProps(run).filter(p => p.field === 'resource' && lxShown(p) && (p.decision === 'accepted' || !have.has(parsed(p).url))) : []
+        lxRepaint(lxRes, res_.length ? `<table class="lx-tbl lx-sugg"><tbody>${res_.map(p => {
+          const r = parsed(p)
+          return `<tr><td><a class="lx-val" href="${esc(r.url || '#')}" target="_blank" rel="noopener">${esc(r.label || r.url || '')}</a></td>` +
+            `<td><span class="lx-val lx-inst">${esc(r.url || '')}</span></td><td class="lx-act-td">${lomaxActions(p, { accept: 'Add' })}</td></tr>`
+        }).join('')}</tbody></table>` : '')
 
-    if (artist.dossier) {
-      // A previous run exists on the record. Nothing is rendered from it any
-      // more — the description it produced is already saved — but the label
-      // should say this isn't the first pass.
-      document.getElementById('pp-dossier-run').innerHTML = icon('brain') + ' Research'
+        // Every question asked of this artist, oldest first, with its answer.
+        const asked = ctl.runs.filter(r => r.question && r.status === 'done' && r.result && String(r.result.answer || '').trim())
+        const err = ctl.lastError()
+        const bar = lomaxAskBar({ placeholder: 'Anything else you want to learn? (optional)',
+          note: "Lomax researches this artist's biography, members over the years, and useful links. Add anything else below.",
+          last: run, busy: !!ctl.pending })
+        lxRepaint(lxAsk, !(asked.length || ctl.pending || err || bar) ? '' : `<div class="lx-ask-wrap">
+          ${asked.length ? `<div class="pp-sec">Questions</div><div class="lx-qs">${asked.map(r =>
+            `<div class="lx-qa"><div class="lx-qa-q">${esc(r.question)}</div><div class="lx-answer">${esc(stripCitations(r.result.answer))}</div>` +
+            `<div class="lx-qa-d">${esc(lxDay(r.created_at))}</div></div>`).join('')}</div>` : ''}
+          ${ctl.pending ? lomaxRunState(ctl.pending) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')}
+          ${bar}
+        </div>`)
+        return true
+      })
+      for (const el of [lxBio, lxMem, lxRes, lxAsk]) if (el) el.setAttribute('data-lx-ctl', c.id)
+      c.refresh()
+      c.load()
     }
 
     onAdminClick('pp-delete', async () => {
@@ -6381,35 +6199,6 @@ const App = (() => {
         }
       })
     })
-  }
-
-  // AI Assist on the saved-recording page — open the AI tab, run a research job,
-  // render interactive findings (same Apply/auto-update experience as Add
-  // Recording, adapted for a live record — see renderRecAiResults).
-  async function startRecAiAssist(recordingId, rec, perf) {
-    // The button lives inside the (already-open) AI pane; running replaces it.
-    const body = document.getElementById('ai-results')
-    if (!body) return
-    // Read the question BEFORE the pane is overwritten by the spinner.
-    const question = takeAiQuestion()
-    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web. This can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
-    const t0 = Date.now()
-    try {
-      const { job_id } = await API.ingest.aiAssistRecording(recordingId, { question })
-      const result = await pollAiJob(job_id, t0)
-      if (rec) rec.ai_research = result   // keep local state in sync (server has already saved it)
-      renderRecAiResults(result, body, recordingId, rec, perf)
-    } catch (e) {
-      const secs = Math.round((Date.now() - t0) / 1000)
-      const msg = /no_api_key/.test(e.message)
-        ? 'No Anthropic API key set. Add one in Settings.'
-        : `Research failed after ${secs}s: ${esc(e.message)}`
-      body.innerHTML = `<div class="ai-assist-cta">
-        <p class="ai-res-note" style="color:var(--red)">${msg}</p>
-        ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist-retry', 'Try again'))}
-      </div>`
-      document.getElementById('btn-ai-assist-retry')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
-    }
   }
 
   // ── Checksums pane — .ffp/.md5/.st5 fingerprint verification (View Recording) ──
@@ -6543,288 +6332,659 @@ const App = (() => {
     return hasEvidence ? _resolverPaneFields(resolved) : _resolverPaneConflicts(resolved)
   }
 
-  // ── Shared AI Assist results template — Add Recording + View Recording ────────
-  // One HTML builder for both surfaces so they stay visually/structurally in
-  // sync as the feature evolves; each caller wires its own Apply behavior
-  // (draft form state vs. live API writes — see renderAiResults / renderRecAiResults).
-  // city/state/country are attributes of the Venue record, not the show
-  // (Ryan's call, 2026-07-13) — split into a distinct sub-group so that reads
-  // clearly regardless of where the proposal ends up getting applied.
-  const AI_VENUE_FIELDS = ['city', 'state', 'country']
+  // ── Lomax ─────────────────────────────────────────────────────────────────
+  // Every Lomax surface is built from the helpers in this section, so a new
+  // screen mounts Lomax with one controller and a few calls:
+  //   lomaxController(cfg)      a run list, the one poller, accept/dismiss/restore
+  //   lomaxAskBar(o)            question box, level toggle with (i), Ask Lomax
+  //   lomaxSuggestionCell(p)    the blue value (quiet when Lomax agrees)
+  //   lomaxActions(p)           the check / X column, or "Accepted"
+  //   lomaxSourcesPopover(s)    (i) beside a Trellis value: where it came from
+  //   lomaxRunState(run)        Working with elapsed time, or the error
+  //   lomaxUsageLine(run)       "4 sources · Research · 52k tokens · 4 searches"
+  // Screen roots carry data-lx-ctl="<controller id>"; ONE document-level click
+  // handler (lxOnClick, bottom of this section) serves them all. Every control
+  // is edit-only: canEditLibrary() false renders none of them, and Playback
+  // mode also hides .lx-edit in CSS.
+  const LX_LEVEL_LABEL = { off: 'Off', study: 'Study', research: 'Research' }
+  const LX_LEVEL_TIP = {
+    off: ['Off', ' means no Lomax AI assistance; Trellis will still resolve recording info with a high degree of accuracy.'],
+    study: ['Study', ' asks Lomax AI to peruse the recording files and your Trellis database for details that may help validate or fill out missing information.'],
+    research: ['Research', ' instructs Lomax to also search web resources for show information, setlists, and other context around the recording.'],
+  }
+  const LX_ASK_KEY = 'trellisLomaxAskLevel'      // Study / Research on the ask bars
+  const LX_IMPORT_KEY = 'trellisLomaxLevel'      // Off / Study / Research on Add Recordings
+  const LX_FIELDS = [
+    ['artist', 'Artist'], ['date', 'Date'], ['venue', 'Venue'], ['city', 'City'], ['state', 'State'],
+    ['country', 'Country'], ['event', 'Event'], ['stage', 'Stage'], ['source', 'Source'], ['lineage', 'Lineage'],
+  ]
+  const _lxCtls = new Map()
+  let _lxSeq = 0
+  let _lxTickTimer = null
 
-  // Pre-run token range, fetched once per page and cached. Fire-and-forget:
-  // a failed estimate must never stop a button working, so every consumer
-  // handles the null.
-  let _aiEstimate = null
-  function aiEstimatePromise() {
-    return API.artists.aiEstimate()
-      .then(est => { _aiEstimate = est; return est })
-      .catch(() => null)
+  function lxGet(k) { try { return localStorage.getItem(k) } catch (_) { return null } }
+  function lxSet(k, v) { try { localStorage.setItem(k, v) } catch (_) { /* storage blocked: the level just is not remembered */ } }
+  function lxAskLevel() { return lxGet(LX_ASK_KEY) === 'research' ? 'research' : 'study' }
+  // Off when there is no key, whatever was remembered. appPrefs is null until
+  // first read, which is treated as "has a key" so a cold page is not wrongly locked.
+  function lxHasKey() { return appPrefs ? !!appPrefs.has_api_key : true }
+  function lxImportLevel() {
+    if (!lxHasKey()) return 'off'
+    const v = lxGet(LX_IMPORT_KEY)
+    return v === 'study' || v === 'research' ? v : 'off'
+  }
+  function lxPlural(n, one, many) { return `${n} ${n === 1 ? one : (many || one + 's')}` }
+  function lxTokens(n) { n = Number(n) || 0; return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n) }
+  // The server writes some timestamps without a zone; those are UTC.
+  function lxTs(s) {
+    if (!s) return NaN
+    return Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : s + 'Z')
+  }
+  function lxDay(s) {
+    const t = lxTs(s)
+    if (isNaN(t)) return ''
+    const d = new Date(t), now = new Date()
+    const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+    return same ? 'Today' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  function lxClock(sec) {
+    sec = Math.max(0, Math.floor(sec))
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`
+  }
+  function lxErrText(e) {
+    const m = String((e && e.message) || e || '')
+    if (/no_api_key/.test(m)) return 'Lomax requires your Anthropic key to be set.'
+    return m || 'The run failed.'
   }
 
-  // The ask box: one text field and one honest sentence about what a run
-  // costs, shared by all three AI Assist surfaces so they cannot drift.
-  //
-  // The QUESTION is the whole of the dialogue feature for now (Ryan,
-  // 2026-09-07). Asked BEFORE the run, it is just more context for the one
-  // call we were already making. Asked after, it would be a second call that
-  // resends every web-search result still sitting in the context window —
-  // which is why the chat surface was deferred rather than built.
-  //
-  // The expectation line replaces a cost tooltip nobody hovered. Tokens, not
-  // currency, and a range rather than a figure: how many searches the model
-  // decides it needs is not knowable in advance.
-  // The Research pane's header (text from Ryan, 2026-10-04).
-  const RESEARCH_HINT = 'Use your Anthropic account to research this recording and help fill in its metadata. ' +
-    'Trellis will retrieve as much as it can about the show; if you have specific requests enter them here.'
-  function researchBtnHtml(id, label) {
-    return `<button class="btn btn-sm iq-ai-btn research-btn" id="${id}">${icon('brain')} ${label}</button>`
+  // ── Run data ────────────────────────────────────────────────────────────────
+  const lxProps = run => (run && run.result && Array.isArray(run.result.proposals)) ? run.result.proposals : []
+  // {field: proposal} for the non-track fields.
+  function lxFieldProps(run) {
+    const out = {}
+    for (const p of lxProps(run)) if (p && !String(p.field).startsWith('track.')) out[p.field] = p
+    return out
   }
-  function aiAskBoxHtml(hint, actionHtml = '') {
-    return `
-      <div class="ai-ask">
-        <div class="ai-assist-hint">${esc(hint)}</div>
-        <input type="text" class="ai-ask-input" id="ai-question" autocomplete="off"
-               placeholder="Anything specific you want checked? (optional)" />
-        ${actionHtml ? `<div class="ai-ask-go">${actionHtml}</div>` : ''}
-      </div>`
+  // {number: {title, songwriter, note}} (each a proposal) from "track.N.piece".
+  function lxTrackProps(run) {
+    const out = {}
+    for (const p of lxProps(run)) {
+      const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(String(p && p.field))
+      if (!m) continue
+      ;(out[m[1]] = out[m[1]] || {})[m[2]] = p
+    }
+    return out
   }
+  // What a person can still act on: has an id (a migrated legacy row has none),
+  // is not Lomax agreeing with Trellis, and nobody has decided it.
+  const lxOpen = p => !!(p && p.id && !p.agrees && !p.decision)
+  const lxSuggestions = run => lxProps(run).filter(p => !p.agrees)
 
-  // Read + clear the question. Cleared on read so a question asked about one
-  // run is never silently reused for the next one — a stale question is worse
-  // than none, because it steers the search without the human meaning it to.
-  function takeAiQuestion() {
-    const el = document.getElementById('ai-question')
-    const q = (el?.value || '').trim()
-    if (el) el.value = ''
-    return q || undefined
+  // ── Pieces ──────────────────────────────────────────────────────────────────
+  function lomaxLevelToggle({ level, off, key, disabled }) {
+    const opts = (off ? ['off'] : []).concat(['study', 'research'])
+    const tip = opts.map(o => `<div><b>${LX_LEVEL_TIP[o][0]}</b>${esc(LX_LEVEL_TIP[o][1])}</div>`).join('')
+    return `<span class="lx-level">` +
+      `<span class="seg lx-seg" role="group" aria-label="Lomax level">${opts.map(o =>
+        `<button type="button" class="${o === level ? 'on' : ''}" data-lx-level="${o}" data-lx-key="${key}"${disabled ? ' disabled' : ''}>${LX_LEVEL_LABEL[o]}</button>`).join('')}</span>` +
+      `<span class="lx-tipwrap"><button type="button" class="lx-info" data-lx-tip aria-expanded="false" ` +
+      `aria-label="${off ? 'What Off, Study and Research do' : 'What Study and Research do'}">${icon('info')}</button>` +
+      `<span class="lx-pop lx-pop--tip" role="tooltip" hidden>${tip}</span></span></span>`
   }
 
-  // Shared phrasing for a pre-run token range, so the Artist button tooltip
-  // and the recording-side expectation line cannot drift apart. Rounded to k
-  // for the same reason formatAiUsage rounds: this is a scale, not a quote.
-  function aiTokenRange(est) {
-    const k = n => `${Math.round(n / 1000)}k`
-    return `Typically ${k(est.low_tokens)}–${k(est.high_tokens)} tokens `
-         + `and up to ${est.max_searches} web searches`
-  }
-
-  // Usage badge — reads the usage block ai_assist.py::_usage_summary attaches
-  // to every result. TOKENS AND SEARCHES, never currency (Ryan, 2026-09-07;
-  // see the usage-reporting comment in ai_assist.py for the reasoning).
-  //
-  // Rounded on purpose. "74k tokens" reads as a scale; "73,229 tokens" reads
-  // as a number someone is expected to audit, which is exactly the job
-  // Anthropic's own console does better. Exact counts stay on hover for
-  // anyone who does want to reconcile a run against their bill.
-  //
-  // usage is null only when the response carried no usage object at all —
-  // "not measured", which is not the same as zero, so this renders nothing
-  // rather than claiming a free run.
-  //
-  // An old saved result may still carry `cost_cents` in its persisted blob
-  // (ai_research_json / dossier_json predate this change). Nothing reads it,
-  // and no migration cleans it up — a stale key in a blob costs nothing,
-  // whereas a migration over every AI result to delete one number is real
-  // risk for no gain.
-  function formatAiUsage(usage) {
-    if (!usage) return ''
-    const total = usage.total_tokens
-      ?? ((usage.input_tokens || 0) + (usage.output_tokens || 0))
-    const rounded = total >= 1000 ? `${Math.round(total / 1000)}k` : String(total)
-    const n = usage.web_search_requests || 0
-    const label = `${rounded} tokens` + (n ? ` · ${n} search${n === 1 ? '' : 'es'}` : '')
-    const cached = usage.cache_read_input_tokens || 0
-    const title = `${(usage.input_tokens || 0).toLocaleString()} in / `
-      + `${(usage.output_tokens || 0).toLocaleString()} out tokens`
-      + (cached ? ` · ${cached.toLocaleString()} cached` : '')
-      + (n ? ` · ${n} web search${n === 1 ? '' : 'es'}` : '')
-    return `<span class="ai-usage-badge" title="${esc(title)}">${esc(label)}</span>`
-  }
-
-  function buildAiResultsHtml(r, opts = {}) {
-    const proposals = r.proposals || []
-    const row = (p, i) => `
-      <div class="ai-res-row">
-        <span class="ai-res-field">${esc(p.field)}</span>
-        <span class="ai-res-value">${esc(p.proposed)}
-          <span class="ai-res-conf">${esc(p.confidence || '')}</span>${p.url ? ` <a class="ai-link" href="${esc(p.url)}" target="_blank" rel="noopener">source</a>` : ''}</span>
-        <button class="btn btn-ghost btn-xs ai-apply-btn" data-idx="${i}">Apply</button>
-      </div>`
-    const indexed    = proposals.map((p, i) => ({ p, i }))
-    const perfRows   = indexed.filter(x => !AI_VENUE_FIELDS.includes(x.p.field))
-    const venueRows  = indexed.filter(x =>  AI_VENUE_FIELDS.includes(x.p.field))
-    const propsHtml  = perfRows.map(x => row(x.p, x.i)).join('')
-      + (venueRows.length
-          ? `<div class="ai-res-subhead">Venue details <span class="ai-res-subhead-note">(the venue record, not this show)</span></div>${venueRows.map(x => row(x.p, x.i)).join('')}`
-          : '')
-
-    const tt = r.track_titles || []
-    const trackSection = tt.length
-      ? `<div class="ai-res-section">
-           <div class="ai-res-title">Track Listing <button class="btn btn-ghost btn-xs" id="ai-apply-tracks">Apply to tracks</button></div>
-           <div class="ai-tt-list">${tt.map(t =>
-             `<div class="ai-tt-row"><span class="ai-tt-num">${esc(String(t.number).padStart(2, '0'))}</span><span class="ai-tt-title">${esc(t.title)}</span></div>`).join('')}</div>
-         </div>` : ''
-
-    const notes = (title, items) => items && items.length
-      ? `<div class="ai-res-section"><div class="ai-res-title">${title}</div>${items.map(v => `<p class="ai-res-note">${esc(v)}</p>`).join('')}</div>` : ''
-    const sources = (r.sources || []).length
-      ? `<div class="ai-res-section"><div class="ai-res-title">Sources</div>${r.sources.map(s => `<p class="ai-res-note"><a class="ai-link" href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></p>`).join('')}</div>` : ''
-
-    const rerunBtn = opts.showRerun
-      ? `<button class="btn btn-ghost btn-xs" id="btn-ai-rerun" title="Run Research again">Run again</button>` : ''
-
-    // The human's own question is answered FIRST, above the machine's routine
-    // findings. If someone asked something, that is what they opened this
-    // panel to read.
-    const answer = r.answer
-      ? `<div class="ai-res-section ai-res-answer">
-           <div class="ai-res-title">Answer</div>
-           <p class="ai-summary">${esc(formatAiThinking(r.answer))}</p>
-         </div>` : ''
-
-    return `
-      ${answer}
-      <div class="ai-res-section">
-        <div class="ai-res-title">Metadata Review ${formatAiUsage(r.usage)} ${rerunBtn}</div>
-        ${r.thinking ? `<p class="ai-summary">${esc(formatAiThinking(r.thinking))}</p>` : ''}
-        ${propsHtml || '<p class="ai-res-empty">No field changes proposed.</p>'}
+  // o: {level, placeholder, note, last (run), rows, pin}. The controller is found
+  // from the screen root, so the bar needs no id of its own.
+  function lomaxAskBar(o = {}) {
+    if (!canEditLibrary()) return ''
+    const last = o.last && o.last.finished_at
+      ? `<div class="lx-ask-last">Last run: ${esc(lxDay(o.last.finished_at))} · ${esc(LX_LEVEL_LABEL[o.last.level] || '')}</div>` : ''
+    return `<div class="lx-ask lx-edit${o.pin ? ' lx-ask--pin' : ''}" data-lx-ask>
+      ${o.note ? `<div class="lx-ask-note">${esc(o.note)}</div>` : ''}
+      ${last}
+      <textarea class="lx-q" rows="${o.rows || 2}" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.placeholder || 'Question')}"></textarea>
+      <div class="lx-ask-row">
+        ${lomaxLevelToggle({ level: lxAskLevel(), off: false, key: 'ask' })}
+        <button type="button" class="btn btn-sm btn-primary lx-go" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
       </div>
-      ${trackSection}
-      ${notes('Verify', r.verify_items)}
-      ${notes('Provenance', r.provenance_notes)}
-      ${sources}`
+    </div>`
   }
 
-  // Apply a single AI proposal to the live, saved recording via the same
-  // endpoints the page's own inline editors use. city/state/country land on
-  // the linked Venue when one exists (and it's a real venue — see
-  // isPlaceholderVenue), otherwise on the Performance's own fallback location
-  // fields — mirrors how the app resolves location for display everywhere
-  // else. `venueRef` is a small mutable holder tracking both the linked
-  // venue's id AND name, so a 'venue' proposal applied earlier in the same
-  // batch is visible to a 'city'/'state'/'country' proposal applied right
-  // after it (and so we know whether that venue is a placeholder).
-  async function applyRecProposal(field, value, perf, recordingId, venueRef) {
-    const perfId = perf.id
-    switch (field) {
-      case 'artist':
-        await API.performances.update(perfId, { artist_name: value })
-        invalidateDims('artists', 'musicians')
-        break
-      case 'date': {
-        const p = String(value).split('-')
-        await API.performances.update(perfId, {
-          start_year:  p[0] ? parseInt(p[0]) : null,
-          start_month: p[1] ? parseInt(p[1]) : null,
-          start_day:   p[2] ? parseInt(p[2]) : null,
-        })
-        break
-      }
-      case 'venue': {
-        if (isPlaceholderVenue(value)) {
-          // AI proposing "Unknown Venue"/"TBD" isn't a real answer — don't
-          // create or link a shared placeholder row. Leave venueRef as-is.
-          break
-        }
-        const existing = await API.venues.list(value)
-        let venueId = (existing || []).find(v => v.name.toLowerCase() === value.toLowerCase())?.id
-        if (!venueId) { const c = await API.venues.create({ name: value }); venueId = c.id; invalidateDims('venues') }
-        await API.performances.update(perfId, { venue_id: venueId })
-        venueRef.venue_id = venueId
-        venueRef.venue_name = value
-        break
-      }
-      case 'event': {
-        const existing = await API.events.search(value)
-        let eventId = (existing || []).find(e => e.name.toLowerCase() === value.toLowerCase())?.id
-        if (!eventId) { const c = await API.events.create({ name: value }); eventId = c.id }
-        await API.performances.update(perfId, { event_id: eventId })
-        break
-      }
-      case 'source':
-        await API.recordings.update(recordingId, { source: value, change_note: 'AI Assist' })
-        break
-      case 'city': case 'state': case 'country':
-        // A placeholder-named linked venue ("Unknown Venue", ...) isn't a
-        // real canonical place — never write location onto it (that row is
-        // shared across unrelated shows). Route to the Performance's own
-        // fallback fields instead, same as the no-venue-at-all case.
-        if (venueRef.venue_id && !isPlaceholderVenue(venueRef.venue_name)) {
-          await API.venues.update(venueRef.venue_id, { [field]: value })
-        } else {
-          await API.performances.update(perfId, { [field]: value })
-        }
-        break
+  // The blue value. Lomax agreeing, or an accepted value, is quiet blue; a
+  // rejected one is not shown. Never any confidence or source note.
+  function lomaxSuggestionCell(prop, opts = {}) {
+    if (!prop || prop.decision === 'rejected') return ''
+    const text = opts.text != null ? opts.text : prop.proposed
+    if (text == null || text === '') return ''
+    const quiet = prop.agrees || prop.decision === 'accepted'
+    return `<span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(text)}</span>`
+  }
+
+  // The check / X column. props may be several (a track row: title, songwriter,
+  // note), acted on together by id list.
+  function lomaxActions(props, opts = {}) {
+    if (!canEditLibrary()) return ''
+    const list = (Array.isArray(props) ? props : [props]).filter(Boolean)
+    if (!list.length) return ''
+    const open = list.filter(lxOpen)
+    if (open.length) {
+      const ids = open.map(p => p.id).join(',')
+      return `<span class="lx-acts lx-edit">` +
+        `<button type="button" class="lx-ic lx-ok" data-lx-act="accept" data-lx-ids="${ids}" aria-label="${opts.accept || 'Accept'}" title="${opts.accept || 'Accept'}">${icon('check')}</button>` +
+        `<button type="button" class="lx-ic lx-no" data-lx-act="dismiss" data-lx-ids="${ids}" aria-label="Dismiss" title="Dismiss">${icon('x')}</button></span>`
+    }
+    return list.some(p => p.decision === 'accepted') ? '<span class="lx-done">Accepted</span>' : ''
+  }
+
+  // (i) beside a Trellis value. src is resolved.sources_plain[field]:
+  // {metadata, info_files, folder, reference_match}, each the quoted text a
+  // source offered or null.
+  function lomaxSourcesPopover(src, field) {
+    if (!src) return ''
+    const row = (label, v) => `<div class="lx-src-row"><span class="lx-src-k">${label}</span>` +
+      `<span class="lx-src-v${v ? '' : ' lx-src-none'}">${v ? '“' + esc(v) + '”' : 'None'}</span></div>`
+    return `<span class="lx-tipwrap"><button type="button" class="lx-info" data-lx-tip aria-expanded="false" aria-label="Sources">${icon('info')}</button>` +
+      `<span class="lx-pop" hidden><div class="lx-pop-h">Sources</div>` +
+      row('Metadata', src.metadata) + row('Info Files', src.info_files) + row('Folder', src.folder) +
+      (field === 'venue' && src.reference_match ? row('Matches a known venue', src.reference_match) : '') +
+      `</span></span>`
+  }
+
+  function lomaxAvatar() { return `<span class="lx-av" aria-hidden="true">${icon('lomax-full')}</span>` }
+
+  // Working (with the time it has taken, counted from the server's own start
+  // time so it survives a reload) or the error. A finished run returns ''.
+  // o: {leave: show the leave-the-page line, avatar}
+  function lomaxRunState(run, o = {}) {
+    if (!run) return ''
+    if (run.status === 'queued' || run.status === 'running') {
+      const since = lxTs(run.created_at)
+      return `<div class="lx-state">${o.avatar ? lomaxAvatar() : ''}<div>
+        <div class="lx-working"><b>Working</b><span class="lx-elapsed" data-lx-since="${isNaN(since) ? Date.now() : since}" data-lx-lvl="${esc(LX_LEVEL_LABEL[run.level] || '')}">${lxClock((Date.now() - (isNaN(since) ? Date.now() : since)) / 1000)} · ${esc(LX_LEVEL_LABEL[run.level] || '')}</span></div>
+        ${o.leave ? '<div class="lx-leave">You can leave this page. The result is saved to this recording.</div>' : ''}
+      </div></div>`
+    }
+    if (run.status === 'error') {
+      return `<div class="lx-error" role="alert">${esc(lxErrText({ message: run.error }))}</div>`
+    }
+    return ''
+  }
+
+  function lomaxUsageLine(run) {
+    if (!run) return ''
+    const r = run.result || {}, u = run.usage || r.usage || null
+    const srcs = (r.sources || []).filter(s => s && s.url)
+    const parts = []
+    if (srcs.length) parts.push(`<a href="#" class="lx-srclink" data-lx-act="sources">${lxPlural(srcs.length, 'source')}</a>`)
+    if (LX_LEVEL_LABEL[run.level]) parts.push(esc(LX_LEVEL_LABEL[run.level]))
+    if (u) {
+      const total = u.total_tokens ?? ((u.input_tokens || 0) + (u.output_tokens || 0))
+      parts.push(`${lxTokens(total)} tokens`)
+      if (u.web_search_requests) parts.push(lxPlural(u.web_search_requests, 'search', 'searches'))
+    }
+    if (!parts.length) return ''
+    return `<div class="lx-usage">${parts.join(' · ')}</div>` +
+      (srcs.length ? `<ul class="lx-srclist" hidden>${srcs.map(s =>
+        `<li><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title || s.url)}</a></li>`).join('')}</ul>` : '')
+  }
+
+  // Re-render a Lomax screen without losing what is being typed or where the
+  // reader had scrolled. opts.stick keeps a chat pinned to its newest message.
+  function lxRepaint(el, html, opts = {}) {
+    if (!el) return
+    const q = el.querySelector('.lx-q')
+    const keep = q ? { v: q.value, focus: document.activeElement === q, s: q.selectionStart } : null
+    const scroller = el.classList.contains('lx-scroll') ? el : (el.querySelector('.lx-scroll') || el.closest('.slide-pane-scroll'))
+    const top = scroller ? scroller.scrollTop : 0
+    const atEnd = scroller ? (!el.dataset.lxPainted || scroller.scrollHeight - top - scroller.clientHeight < 40) : false
+    el.innerHTML = html
+    el.dataset.lxPainted = '1'
+    if (scroller) scroller.scrollTop = opts.stick && atEnd ? scroller.scrollHeight : top
+    const q2 = el.querySelector('.lx-q')
+    if (keep && q2 && keep.v) {
+      q2.value = keep.v
+      if (keep.focus) { q2.focus(); try { q2.setSelectionRange(keep.s, keep.s) } catch (_) { /* not focusable */ } }
     }
   }
 
-  // Apply the AI's researched setlist onto a saved recording's tracks.
-  async function applyRecTrackTitles(titles, rec, recordingId) {
-    const jobs = (titles || [])
-      .map(tt => {
-        const track = (rec.tracks || []).find(t => String(t.track_number) === String(tt.number))
-        return (track && tt.title) ? API.tracks.update(track.id, { title: tt.title }) : null
-      })
-      .filter(Boolean)
-    if (jobs.length) await Promise.all(jobs)
-    renderRecordingView(recordingId)
+  // ── The one poller ──────────────────────────────────────────────────────────
+  // Resolves with the finished run, or null when the screen has gone away (or
+  // the run vanished). A dropped request is retried a few times before giving up.
+  async function lomaxWaitRun(id, { alive } = {}) {
+    let failures = 0
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2000))
+      if (alive && !alive()) return null
+      let run
+      try { run = await API.lomax.run(id); failures = 0 }
+      catch (e) {
+        if (/not found|404/i.test(String(e && e.message)) || ++failures >= 5) return null
+        continue
+      }
+      if (run && (run.status === 'done' || run.status === 'error')) return run
+    }
   }
 
-  // Applied fields land immediately (matches every other field on this page's
-  // click-to-edit/auto-save pattern) — no Revert toggle; a full reload
-  // refreshes every affected field at once, so "undo" is just editing again.
-  //
-  // No auto-apply, regardless of confidence (Ryan, 2026-07-20 — AI Assist
-  // Refinement spec, Context Library). A rare Danny Gatton/Cellar Door
-  // 1/25/79 recording got confidently, silently overwritten with a wrong
-  // date twice in a row (a different wrong date each run) — proof the
-  // model's own "high confidence" self-rating isn't trustworthy enough to
-  // act on unsupervised. Every proposal, at every confidence level, now
-  // requires an explicit click on its own Apply button.
-  function renderRecAiResults(r, body, recordingId, rec, perf) {
-    if (!body) return
-    body.innerHTML = buildAiResultsHtml(r, { showRerun: true })
-    const venueRef = { venue_id: perf?.venue_id || null, venue_name: perf?.venue || null }
+  function lxTick() {
+    const els = document.querySelectorAll('[data-lx-since]')
+    if (!els.length) { clearInterval(_lxTickTimer); _lxTickTimer = null; return }
+    const now = Date.now()
+    els.forEach(el => { el.textContent = `${lxClock((now - Number(el.dataset.lxSince)) / 1000)} · ${el.dataset.lxLvl}` })
+  }
+  function lxTickStart() { if (!_lxTickTimer) _lxTickTimer = setInterval(lxTick, 1000) }
 
-    async function applyOne(idx, btn) {
-      const p = (r.proposals || [])[idx]
-      if (!p) return
-      if (btn) { btn.disabled = true; btn.textContent = '…' }
+  // cfg: {skill, subjectType, subjectId | subjectKey, current() (folder only),
+  //   alive() (is the screen still mounted), onChange(c), afterAccept(props, c),
+  //   afterRestore(run, c), onDone(run, c)}
+  function lomaxController(cfg) {
+    const c = { id: ++_lxSeq, cfg, runs: [], pending: null, error: null, loaded: false, blocked: {}, notesAdded: {}, views: new Set() }
+    _lxCtls.set(c.id, c)
+    const alive = () => !cfg.alive || cfg.alive()
+    // Several views can share one controller (Add Recording paints the Resolver
+    // tab and the chat from the same runs). A view returns false once its
+    // element has left the page.
+    const changed = () => {
+      if (!alive()) return
+      if (cfg.onChange) cfg.onChange(c)
+      for (const v of Array.from(c.views)) {
+        try { if (v(c) === false) c.views.delete(v) } catch (e) { console.error(e) }
+      }
+    }
+    c.addView = fn => { c.views.add(fn); return c }
+    c.refresh = changed
+    const query = () => cfg.subjectKey
+      ? { skill: cfg.skill, subject_type: cfg.subjectType, subject_key: cfg.subjectKey }
+      : { skill: cfg.skill, subject_type: cfg.subjectType, subject_id: cfg.subjectId }
+    const put = run => {
+      const i = c.runs.findIndex(r => r.id === run.id)
+      if (i >= 0) c.runs[i] = run; else c.runs.push(run)
+    }
+
+    // The newest finished run is the one with something to act on.
+    c.latest = () => { for (let i = c.runs.length - 1; i >= 0; i--) if (c.runs[i].status === 'done') return c.runs[i]; return null }
+    // The error to show: the newest run's own, else a failed start.
+    c.lastError = () => {
+      const last = c.runs[c.runs.length - 1]
+      if (last && last.status === 'error') return lxErrText({ message: last.error })
+      return c.error
+    }
+    c.wait = async id => {
+      lxTickStart()
+      const run = await lomaxWaitRun(id, { alive })
+      if (!run) { if (!alive()) _lxCtls.delete(c.id); return }
+      c.pending = null
+      put(run)
+      changed()
+      if (run.status === 'done' && cfg.onDone) cfg.onDone(run, c)
+    }
+    c.load = async () => {
+      try { c.runs = ((await API.lomax.runs(query())) || {}).runs || [] } catch (_) { c.runs = [] }
+      c.loaded = true
+      const p = c.runs.slice().reverse().find(r => r.status === 'queued' || r.status === 'running')
+      if (p) { c.pending = p; c.wait(p.id) }
+      changed()
+    }
+    c.ask = async ({ question, level }) => {
+      if (c.pending) return
+      c.error = null
+      const body = { skill: cfg.skill, subject_type: cfg.subjectType, level: level || 'study' }
+      if (question) body.question = question
+      if (cfg.subjectKey) { body.subject_key = cfg.subjectKey; body.current = cfg.current ? cfg.current() : {} }
+      else body.subject_id = cfg.subjectId
+      let run
+      try { run = await API.lomax.start(body) }
+      catch (e) { c.error = lxErrText(e); changed(); return }
+      c.pending = run
+      put(run)
+      changed()
+      c.wait(run.id)
+    }
+    // Record the decision; the server applies an accepted value for a saved
+    // subject. A folder subject is applied by the page (afterAccept), because
+    // the database has nothing yet.
+    c.decide = async (ids, decision) => {
+      const done = []
+      c.error = null
+      for (const id of ids.map(Number)) {
+        try {
+          const p = await API.lomax.decide(id, decision)
+          for (const r of c.runs) {
+            const props = r.result && r.result.proposals
+            const i = props ? props.findIndex(x => x.id === p.id) : -1
+            if (i >= 0) props[i] = p
+          }
+          done.push(p)
+        } catch (e) { c.error = lxErrText(e); break }
+      }
+      if (decision === 'accepted' && done.length && cfg.afterAccept) {
+        try { await cfg.afterAccept(done, c) } catch (e) { c.error = lxErrText(e) }
+      }
+      changed()
+    }
+    c.restore = async runId => {
       try {
-        await applyRecProposal(p.field, p.proposed, perf, recordingId, venueRef)
-        if (btn) { btn.textContent = 'Applied'; btn.classList.add('applied') }
+        const run = await API.lomax.restore(runId)
+        put(run)
+        if (cfg.afterRestore) cfg.afterRestore(run, c)
       } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Apply' }
-        alert('Failed to apply: ' + e.message)
-        throw e
+        if (/edited_since/.test(String(e && e.message))) c.blocked[runId] = true
+        else c.error = lxErrText(e)
+      }
+      changed()
+    }
+    return c
+  }
+  const lxAttr = c => `data-lx-ctl="${c.id}"`
+
+  // A Restore previous link: only while the run's auto-applied text is still
+  // what is on the page (the server refuses once it has been edited).
+  function lomaxRestoreLink(c, run, currentText) {
+    const rep = run && run.result && run.result.replaced
+    if (!rep || run.result.restored_at || c.blocked[run.id] || !canEditLibrary()) return ''
+    if (currentText != null && String(currentText) !== String(rep.written)) return ''
+    return `<button type="button" class="lx-link lx-edit" data-lx-act="restore" data-lx-run="${run.id}">Restore previous</button>`
+  }
+
+  // ── The one click handler ───────────────────────────────────────────────────
+  function lxClosePops(except) {
+    document.querySelectorAll('.lx-pop:not([hidden])').forEach(p => {
+      if (p === except) return
+      p.hidden = true
+      p.parentElement?.querySelector('[data-lx-tip]')?.setAttribute('aria-expanded', 'false')
+    })
+  }
+  // Popovers are position:fixed so a scrolling pane or a table cell cannot clip
+  // them: below the (i) when there is room, above it otherwise, and always
+  // inside the window.
+  function lxPlacePop(pop, tip) {
+    const r = tip.getBoundingClientRect()
+    const w = pop.offsetWidth, h = pop.offsetHeight, m = 8
+    let top = r.bottom + 6
+    if (top + h > window.innerHeight - m) top = Math.max(m, r.top - h - 6)
+    const left = Math.min(Math.max(m, r.left - 8), Math.max(m, window.innerWidth - w - m))
+    pop.style.top = `${top}px`
+    pop.style.left = `${left}px`
+  }
+  function lxOnClick(ev) {
+    const t = ev.target
+    if (!t || !t.closest) return
+    const tip = t.closest('[data-lx-tip]')
+    if (tip) {
+      const pop = tip.parentElement.querySelector('.lx-pop')
+      lxClosePops(pop)
+      if (pop) {
+        pop.hidden = !pop.hidden
+        tip.setAttribute('aria-expanded', String(!pop.hidden))
+        if (!pop.hidden) lxPlacePop(pop, tip)
+      }
+      ev.preventDefault()
+      return
+    }
+    if (!t.closest('.lx-pop')) lxClosePops()
+    const lv = t.closest('[data-lx-level]')
+    if (lv) {
+      if (lv.disabled) return
+      const level = lv.dataset.lxLevel
+      const key = lv.dataset.lxKey
+      lxSet(key === 'import' ? LX_IMPORT_KEY : LX_ASK_KEY, level)
+      document.querySelectorAll(`[data-lx-key="${key}"]`).forEach(b => b.classList.toggle('on', b.dataset.lxLevel === level))
+      if (key === 'import') _lxImportLevelChanged(level)
+      return
+    }
+    const btn = t.closest('[data-lx-act]')
+    if (!btn) return
+    const act = btn.dataset.lxAct
+    if (act === 'sources') {
+      ev.preventDefault()
+      const list = btn.closest('.lx-usage')?.nextElementSibling
+      if (list && list.classList.contains('lx-srclist')) list.hidden = !list.hidden
+      return
+    }
+    if (act === 'show') {
+      const card = btn.closest('.lx-card')
+      if (card) { card.classList.add('open'); btn.hidden = true }
+      return
+    }
+    const root = btn.closest('[data-lx-ctl]')
+    const c = root && _lxCtls.get(Number(root.dataset.lxCtl))
+    if (!c) return
+    if (act === 'ask') {
+      if (c.pending) return
+      const bar = btn.closest('[data-lx-ask]')
+      const q = bar && bar.querySelector('.lx-q')
+      const question = q ? q.value.trim() : ''
+      if (q) q.value = ''
+      c.ask({ question, level: lxAskLevel() })
+    } else if (act === 'accept' || act === 'dismiss' || act === 'accept-all') {
+      btn.disabled = true
+      c.decide(String(btn.dataset.lxIds || '').split(',').filter(Boolean), act === 'dismiss' ? 'rejected' : 'accepted')
+    } else if (act === 'restore') {
+      btn.disabled = true
+      c.restore(Number(btn.dataset.lxRun))
+    } else if (c.cfg.onAct) {
+      c.cfg.onAct(act, btn, c)
+    }
+  }
+  document.addEventListener('click', lxOnClick)
+  document.addEventListener('scroll', ev => {
+    if (!(ev.target && ev.target.closest && ev.target.closest('.lx-pop'))) lxClosePops()
+  }, true)
+  document.addEventListener('keydown', ev => {
+    if (ev.key === 'Escape') lxClosePops()
+    else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && ev.target && ev.target.matches && ev.target.matches('.lx-q')) {
+      ev.target.closest('[data-lx-ask]')?.querySelector('.lx-go')?.click()
+    }
+  })
+
+  // ── Lomax: the recording chat ───────────────────────────────────────────────
+  // View Recording's and Add Recording's Lomax tab. Each message is a fresh
+  // run (the back end hands it a recap of earlier ones), so this is a list of
+  // runs shown as a conversation: the question as a right-aligned bubble, the
+  // answer as a Lomax message. Only the newest finished run can be acted on.
+  const lxPad2 = n => String(n).padStart(2, '0')
+  const lxShown = p => !!p && p.decision !== 'rejected'
+
+  function lxTrackSummary(props) {
+    const n = re => props.filter(p => re.test(p.field)).length
+    return [[n(/\.title$/), 'title'], [n(/\.songwriter$/), 'songwriter'], [n(/\.note$/), 'note']]
+      .filter(([k]) => k).map(([k, w]) => lxPlural(k, w)).join(', ')
+  }
+
+  // The Lomax cell of a track row: title, then "Songwriter: X" and "Note: Y",
+  // all blue. opts.onlyNew drops the pieces Lomax merely agrees with.
+  function lxTrackPiecesHtml(tp, opts = {}) {
+    const ok = p => lxShown(p) && !(opts.onlyNew && p.agrees && p !== tp.title)
+    const out = []
+    if (ok(tp.title)) out.push(`<div>${lomaxSuggestionCell(tp.title)}</div>`)
+    if (ok(tp.songwriter)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.songwriter, { text: 'Songwriter: ' + tp.songwriter.proposed })}</div>`)
+    if (ok(tp.note)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.note, { text: 'Note: ' + tp.note.proposed })}</div>`)
+    return out.join('')
+  }
+  const lxTrackPieces = tp => ['title', 'songwriter', 'note'].map(k => tp[k]).filter(Boolean)
+
+  function lxFieldCardHtml(run, o) {
+    const fp = lxFieldProps(run)
+    const rows = LX_FIELDS.filter(([k]) => fp[k] && !fp[k].agrees && lxShown(fp[k]))
+    if (!rows.length) return ''
+    return `<div class="lx-card"><table class="lx-tbl"><tbody>${rows.map(([k, label]) => {
+      const p = fp[k]
+      return `<tr><th scope="row">${label}</th><td>${p.current ? `<div class="lx-was">${esc(p.current)}</div>` : ''}${lomaxSuggestionCell(p)}</td>` +
+        `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(p)}</td></tr>`
+    }).join('')}</tbody></table></div>`
+  }
+
+  function lxTrackCardHtml(run, o) {
+    const tp = lxTrackProps(run)
+    const rows = Object.keys(tp).map(Number).sort((a, b) => a - b)
+      .map(n => ({ n, pieces: lxTrackPieces(tp[n]).filter(p => !p.agrees && lxShown(p)), tp: tp[n] }))
+      .filter(r => r.pieces.length)
+    if (!rows.length) return ''
+    const all = rows.flatMap(r => r.pieces)
+    const open = all.filter(lxOpen)
+    const SHOW = 3
+    return `<div class="lx-card"><div class="lx-card-h"><span class="lx-card-t">Tracks</span>` +
+      `<span class="lx-card-s">${esc(lxTrackSummary(all))}</span>` +
+      (!o.readonly && open.length && canEditLibrary()
+        ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Accept all</button>` : '') +
+      `</div><table class="lx-tbl"><tbody>${rows.map((r, i) =>
+        `<tr${i >= SHOW ? ' class="lx-more-row"' : ''}><td class="lx-n">${lxPad2(r.n)}</td><td>${lxTrackPiecesHtml(r.tp, { onlyNew: true })}</td>` +
+        `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(r.pieces)}</td></tr>`).join('')}</tbody></table>` +
+      (rows.length > SHOW ? `<button type="button" class="lx-link lx-showall" data-lx-act="show">Show all ${rows.length}</button>` : '') +
+      `</div>`
+  }
+
+  const lxList = items => `<ul class="lx-list">${items.map(v => `<li>${esc(stripCitations(v))}</li>`).join('')}</ul>`
+  function lxEarHtml(run) {
+    const v = (run.result && run.result.verify_items) || []
+    return v.length ? `<div class="lx-sec"><div class="lx-h">Check by ear</div>${lxList(v)}</div>` : ''
+  }
+  function lxKeepHtml(run, c, o) {
+    const v = (run.result && run.result.provenance_notes) || []
+    if (!v.length) return ''
+    const add = o.addNotes && !c.notesAdded[run.id] && canEditLibrary()
+      ? `<button type="button" class="btn btn-ghost btn-sm lx-edit lx-notes" data-lx-act="notes" data-lx-run="${run.id}">Add to Notes</button>` : ''
+    return `<div class="lx-sec"><div class="lx-h">Worth keeping</div>${lxList(v)}${add}</div>`
+  }
+  const lxAnswerHtml = run => {
+    const a = run && run.result && run.result.answer
+    return a && String(a).trim() ? `<div class="lx-answer">${esc(stripCitations(a))}</div>` : ''
+  }
+
+  function lxResultParts(run, c, o) {
+    return [lxAnswerHtml(run), lxFieldCardHtml(run, o), lxTrackCardHtml(run, o), lxEarHtml(run), lxKeepHtml(run, c, o)].filter(Boolean)
+  }
+
+  function lxOldMessage(run, c, o) {
+    const sug = lxSuggestions(run), acc = sug.filter(p => p.decision === 'accepted')
+    const titles = acc.filter(p => /\.title$/.test(p.field)).length
+    const parts = lxResultParts(run, c, Object.assign({}, o, { readonly: true }))
+    const line = sug.length
+      ? `${lxPlural(sug.length, 'suggestion')}, ${acc.length} accepted` + (titles ? ` · ${lxPlural(titles, 'title')} used` : '')
+      : 'Nothing to add'
+    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub lx-card lx-old"><div class="lx-old-h"><span>${esc(line)}</span>` +
+      (parts.length ? `<button type="button" class="lx-link" data-lx-act="show">Show</button>` : '') + `</div>` +
+      lomaxUsageLine(run) + `<div class="lx-old-body">${parts.join('')}</div></div></div>`
+  }
+
+  function lxResultMessage(run, c, o) {
+    const parts = lxResultParts(run, c, Object.assign({}, o, { readonly: false }))
+    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub">${parts.join('') || '<div class="lx-none">Nothing to add</div>'}${lomaxUsageLine(run)}</div></div>`
+  }
+
+  // o: {leave (show the leave-the-page line), addNotes (async fn(text), or null)}
+  function lomaxChatHtml(c, o = {}) {
+    if (!c.loaded) return '<div class="lx-empty">Loading…</div>'
+    const latest = c.latest()
+    let html = '', day = null
+    for (const run of c.runs) {
+      const d = lxDay(run.created_at)
+      if (d && d !== day) { day = d; html += `<div class="lx-day">${esc(d)}</div>` }
+      if (run.question) html += `<div class="lx-me"><div class="lx-me-b">${esc(run.question)}</div></div>`
+      if (run.status === 'done') html += run === latest ? lxResultMessage(run, c, o) : lxOldMessage(run, c, o)
+      else if (run.status === 'error') html += `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub">${lomaxRunState(run)}</div></div>`
+      else html += `<div class="lx-msg">${lomaxRunState(run, { avatar: true, leave: o.leave })}</div>`
+    }
+    if (c.error) html += `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub"><div class="lx-error" role="alert">${esc(c.error)}</div></div></div>`
+    if (!c.runs.length && !c.error) {
+      html = `<div class="lx-empty">${lomaxAvatar()}<div>Lomax checks this recording's details, track titles and songwriters.</div></div>`
+    }
+    return html
+  }
+
+  // Mount the chat into a .slide-pane that holds
+  //   <div class="slide-pane-scroll lx-scroll"></div><div class="lx-bar-slot"></div>
+  // c is an existing controller (Add Recording shares one with its Resolver
+  // tab) or null to make one from ctlCfg. Returns the controller.
+  function lomaxMountChat(pane, ctlCfg, o = {}, c = null) {
+    if (!pane) return null
+    const body = pane.querySelector('.lx-scroll'), bar = pane.querySelector('.lx-bar-slot')
+    const view = ctl => {
+      if (!document.body.contains(pane)) return false
+      lxRepaint(body, lomaxChatHtml(ctl, o), { stick: true })
+      lxRepaint(bar, lomaxAskBar({ placeholder: 'Anything you want checked (optional)', busy: !!ctl.pending }))
+      return true
+    }
+    const own = !c
+    if (own) {
+      c = lomaxController(Object.assign({ alive: () => document.body.contains(pane) }, ctlCfg))
+    }
+    pane.setAttribute('data-lx-ctl', c.id)
+    if (o.addNotes) {
+      const prev = c.cfg.onAct
+      c.cfg.onAct = async (act, btn, ctl) => {
+        if (act !== 'notes') { if (prev) prev(act, btn, ctl); return }
+        const run = ctl.runs.find(r => r.id === Number(btn.dataset.lxRun))
+        if (!run) return
+        btn.disabled = true
+        try {
+          await o.addNotes(((run.result && run.result.provenance_notes) || []).map(stripCitations).join('\n'))
+          ctl.notesAdded[run.id] = true
+        } catch (e) { ctl.error = lxErrText(e) }
+        ctl.refresh()
       }
     }
+    c.addView(view)
+    if (own) c.load(); else view(c)
+    return c
+  }
 
-    body.querySelectorAll('.ai-apply-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        try { await applyOne(parseInt(btn.dataset.idx), btn) }
-        catch (_) { return }
-        renderRecordingView(recordingId)
-      })
+  // Bring the Trellis column up to date with the form, in place. Not a repaint:
+  // a field losing focus fires this just before the click that moved focus, and
+  // replacing the buttons under the pointer would lose that click.
+  function lxSyncResolver(root, o) {
+    if (!root) return
+    root.querySelectorAll('[data-lx-tv]').forEach(el => { el.textContent = o.value(el.dataset.lxTv) || '' })
+    root.querySelectorAll('[data-lx-tt]').forEach(el => {
+      const t = (o.tracks || []).find(x => String(x.track_number) === el.dataset.lxTt)
+      const title = t ? (t.title || '') : ''
+      el.textContent = title
+      el.classList.toggle('lx-dim', !title || /^Track \d+$/i.test(title.trim()))
     })
-    document.getElementById('ai-apply-tracks')?.addEventListener('click', () =>
-      applyRecTrackTitles(r.track_titles || [], rec, recordingId))
-    // Run again returns to the ASK BOX rather than firing straight off. Having
-    // just read a result is precisely when someone has a specific doubt worth
-    // typing, and a second blind pass is the thing that produced two different
-    // confident wrong dates in the first place.
-    document.getElementById('btn-ai-rerun')?.addEventListener('click', () => {
-      const pane = document.getElementById('ai-results')
-      if (!pane) return
-      pane.innerHTML = `<div class="ai-assist-cta">
-        ${aiAskBoxHtml('Run again. A question here tells it where to look.', researchBtnHtml('btn-ai-rerun-go', 'Research again'))}
-      </div>`
-      document.getElementById('ai-question')?.focus()
-      document.getElementById('btn-ai-rerun-go')?.addEventListener('click', () =>
-        startRecAiAssist(recordingId, rec, perf))
-    })
+  }
+
+  // ── Lomax: the Resolver tab (Add Recording and import review) ───────────────
+  // One compact table, Field | Trellis | Lomax | actions, for all ten fields,
+  // then the tracks on a lighter surface, then the Answer and Check by ear. The
+  // ask bar is pinned to the bottom of the panel (sticky, solid ground) and
+  // looks the same before and after a run. The Trellis column is read live from
+  // the form (o.value), so an edit shows without a new run.
+  // o: {resolved, value(field), tracks, leave}
+  function lomaxResolverHtml(c, o) {
+    const run = c.latest()
+    const fp = lxFieldProps(run), tp = lxTrackProps(run)
+    const plain = (o.resolved && o.resolved.sources_plain) || {}
+    const rows = LX_FIELDS.map(([k, label]) => {
+      const f = (o.resolved && o.resolved[k]) || {}
+      const tentative = f.confidence === 'tentative' ? ' <span class="lx-tent">Tentative</span>' : ''
+      const p = fp[k]
+      return `<tr><th scope="row">${label}</th>` +
+        `<td><span class="lx-tv" data-lx-tv="${k}">${esc(o.value(k) || '')}</span>\u2060${tentative}${lomaxSourcesPopover(plain[k], k)}</td>` +
+        `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`
+    }).join('')
+
+    const tracks = o.tracks || []
+    const openIds = []
+    for (const n of Object.keys(tp)) for (const p of lxTrackPieces(tp[n])) if (lxOpen(p)) openIds.push(p.id)
+    const trows = tracks.map(t => {
+      const n = t.track_number
+      const pieces = tp[n] ? lxTrackPieces(tp[n]) : []
+      const dim = !t.title || /^Track \d+$/i.test(String(t.title).trim())
+      return `<tr><td class="lx-n">${lxPad2(n)}</td><td data-lx-tt="${n}"${dim ? ' class="lx-dim"' : ''}>${esc(t.title || '')}</td>` +
+        `<td>${tp[n] ? lxTrackPiecesHtml(tp[n]) : ''}</td><td class="lx-act-td">${lomaxActions(pieces)}</td></tr>`
+    }).join('')
+    const acceptAll = openIds.length && canEditLibrary()
+      ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${openIds.join(',')}">Accept all</button>` : ''
+
+    const err = c.lastError()
+    const q = run && run.question ? `<div class="lx-h">You asked: ${esc(run.question)}</div>` : ''
+    const answer = lxAnswerHtml(run)
+    const state = c.pending ? lomaxRunState(c.pending, { leave: o.leave }) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')
+    return `<div class="lx-res-body">
+      ${state}
+      <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>Lomax</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      ${tracks.length ? `<table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Lomax</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${trows}</tbody></table>` : ''}
+      ${answer ? `<div class="lx-sec">${q}${answer}</div>` : ''}
+      ${lxEarHtml(run || {})}
+    </div>${lomaxAskBar({ pin: true, placeholder: 'Anything you want checked (optional)', last: run, busy: !!c.pending })}`
   }
 
   /** Recording detail — split panel: tracks + info file */
@@ -7381,14 +7541,11 @@ const App = (() => {
             </div>` : ''}
 
             ${canEdit ? `
-            <!-- AI Assist pane. The execute button lives in the tab strip with
-                 every other pane action; the pane itself holds results, and
-                 renderRecAiResults() replaces this block wholesale — which is
-                 the other reason the button had to move out of it. -->
+            <!-- Lomax pane: a chat. Messages scroll; the ask bar is its own
+                 flex row at the bottom (lomaxMountChat fills both). -->
             <div class="slide-pane" id="sp-ai">
-              <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))}
-              </div></div>
+              <div class="slide-pane-scroll lx-scroll"></div>
+              <div class="lx-bar-slot"></div>
             </div>` : ''}
 
           </div>
@@ -8219,13 +8376,24 @@ const App = (() => {
 
       renderRecMusicians()
 
-      // AI Assist (top-right) — research the web to verify/fill this recording.
-      // Scoped inside this block (like the header editors above) since applying
-      // a proposal needs perf.id. Non-editors never get the pane in the DOM.
-      document.getElementById('btn-ai-assist')?.addEventListener('click', () => startRecAiAssist(recordingId, rec, perf))
-      // Saved research from a prior run — render it immediately instead of the CTA.
-      if (rec.ai_research) {
-        renderRecAiResults(rec.ai_research, document.getElementById('ai-results'), recordingId, rec, perf)
+      // Lomax tab. Accepting a suggestion is applied by the server through the
+      // field's normal save path, so the page only has to redraw. Non-editors
+      // never get the pane in the DOM.
+      if (canEdit) {
+        lomaxMountChat(document.getElementById('sp-ai'), {
+          skill: 'recording', subjectType: 'recording', subjectId: recordingId,
+          afterAccept: () => renderRecordingView(recordingId),
+        }, {
+          leave: true,
+          addNotes: async text => {
+            const cur = String(rec.notes || '').trim()
+            const next = cur ? `${cur}\n${text}` : text
+            await API.recordings.update(recordingId, { notes: next, change_note: 'Lomax' })
+            rec.notes = next
+            const el = document.getElementById('rec-notes')
+            if (el) { el.textContent = next; el.classList.remove('pp-empty') }
+          },
+        })
       }
     }
 
@@ -9137,7 +9305,8 @@ const App = (() => {
     ingest.folderPath = null
     ingest.form       = {}
     ingest.tracks     = []
-    ingest.aiResult   = null
+    ingest.lxc        = null
+    ingest.lxSyncRes  = null
     ingest.aiApplied  = {}
     ingest.returnTo   = null
   }
@@ -9188,6 +9357,7 @@ const App = (() => {
   async function renderIngestSource() {
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
+    await getPrefs()   // the Lomax toggle needs has_api_key before the first paint
     // Only a fallback: getPrefs().import_dir wins whenever the backend has one.
     // After Reset Queue the picker reopens on the folder that was reset.
     const defaultDir = _biPickerPath
@@ -9640,7 +9810,7 @@ const App = (() => {
 
   function _iqRow(row, opts) {
     const open = !!(opts.isOpen && opts.isOpen(row))
-    const cls = opts.soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq'
+    const cls = (opts.soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq') + (opts.lomaxCell ? ' iq-brow--lx' : '')
     let metaLine
     if (row.status === 'pending') metaLine = 'Queued'
     else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Importing</span>`
@@ -9670,6 +9840,7 @@ const App = (() => {
         ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
         <span class="lq-brow-meta">${_iqBandPill(row.needs_review ? 'red' : (row.meta_band || 'red'), !!(row.concerns && row.concerns.length))}</span>
         <span class="iq-col-status">${_iqStatusCell(row)}</span>
+        ${opts.lomaxCell ? `<span class="iq-col-lx">${opts.lomaxCell(row)}</span>` : ''}
         <span class="lq-actions iq-actions">${actions}</span>
         ${canExpand
           ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
@@ -10201,8 +10372,8 @@ const App = (() => {
     return JSON.stringify(obj, null, 2)
   }
 
-  // ── AI Assist ─────────────────────────────────────────────────────────────
-  // Read the form's current metadata to send to the research pass.
+  // ── Lomax: the form, read and written ─────────────────────────────────────
+  // Read the form's current metadata to send to Lomax.
   function collectCurrentMeta() {
     const g = id => (document.getElementById(id)?.value || '').trim()
     const y = g('f-year'), m = g('f-month'), d = g('f-day')
@@ -10213,10 +10384,13 @@ const App = (() => {
       artist:  g('f-artist'), date, venue: g('f-venue-name'),
       city:    g('f-city'),   state: g('f-state'), country: g('f-country'),
       source:  g('f-source'), lineage: g('f-lineage'), event: g('f-event-name'),
+      stage:   g('f-stage'),
       tracks:  (ingest.tracks || []).map(t => ({
         number: t.track_number, title: t.title, duration: t.duration,
+        songwriter: t.songwriter || '', notes: t.notes || '',
       })),
       info_file_content: ingest.scan.info_file_content || '',
+      resolved: ingest.scan.resolved || null,
     }
   }
 
@@ -10231,6 +10405,8 @@ const App = (() => {
       case 'country': return g('f-country')
       case 'event':   return g('f-event-name')
       case 'source':  return g('f-source')
+      case 'stage':   return g('f-stage')
+      case 'lineage': return g('f-lineage')
       case 'date': {
         const y = g('f-year'), m = g('f-month'), d = g('f-day')
         return y ? `${y}${m ? '-' + String(m).padStart(2, '0') : ''}${(m && d) ? '-' + String(d).padStart(2, '0') : ''}` : ''
@@ -10257,6 +10433,8 @@ const App = (() => {
       // it no longer needs the old "only accept a value that's one of the
       // <select>'s options" guard.
       case 'source':  set('f-source', value);      ingest.form.source      = value; break
+      case 'stage':   set('f-stage', value);       ingest.form.stage       = value; break
+      case 'lineage': set('f-lineage', value);     ingest.form.lineage     = value; break
       case 'date': {
         const p = String(value).split('-')
         set('f-year', p[0] || '')
@@ -10267,20 +10445,6 @@ const App = (() => {
         ingest.form.start_day   = p[2] ? parseInt(p[2]) : ''
         break
       }
-    }
-  }
-
-  // Apply ⇆ revert a single proposal; tracks prior value per field for revert.
-  function toggleApplyProposal(p, btn) {
-    ingest.aiApplied = ingest.aiApplied || {}
-    if (p.field in ingest.aiApplied) {
-      setFormField(p.field, ingest.aiApplied[p.field])
-      delete ingest.aiApplied[p.field]
-      if (btn) { btn.textContent = 'Apply'; btn.classList.remove('applied') }
-    } else {
-      ingest.aiApplied[p.field] = getFormField(p.field)
-      setFormField(p.field, p.proposed)
-      if (btn) { btn.textContent = 'Revert'; btn.classList.add('applied') }
     }
   }
 
@@ -10306,32 +10470,9 @@ const App = (() => {
       if (t.set_number && t.set_number !== lastSet) { L.push(t.set_number); lastSet = t.set_number }
       L.push(`${String(t.track_number || i + 1).padStart(2, '0')}. ${t.title || ''}`.trimEnd())
     })
-    const prov = ingest.aiResult?.provenance_notes || []
+    const prov = ingest.lxc?.latest()?.result?.provenance_notes || []
     if (prov.length) { L.push('', 'Notes:'); prov.forEach(n => L.push(n)) }
     return L.join('\n')
-  }
-
-  // Tidy the model's reasoning: drop any leaked tool-call syntax, and break
-  // numbered findings ("1. … 2. …") onto their own lines for readability.
-  function formatAiThinking(text) {
-    if (!text) return ''
-    let t = String(text).split(/<\/?thinking>|<parameter\b/i)[0]
-    t = t.replace(/\s+/g, ' ').trim()
-    t = t.replace(/\s(\d{1,2}\.)\s/g, '\n$1 ')
-    return t
-  }
-
-  // Apply the AI's researched setlist onto the track rows (human-triggered).
-  function applyAiTrackTitles(titles) {
-    ;(titles || []).forEach(tt => {
-      const idx = (ingest.tracks || []).findIndex(t => String(t.track_number) === String(tt.number))
-      if (idx >= 0 && tt.title) {
-        ingest.tracks[idx].title = tt.title
-        const inp = mainContent.querySelector(`.t-title[data-idx="${idx}"]`)
-        if (inp) inp.value = tt.title
-      }
-    })
-    reScore()
   }
 
   // ── Reusable track context menu (right-click): flags + songwriter + note ──────
@@ -10489,40 +10630,6 @@ const App = (() => {
       document.addEventListener('mousedown', _trackMenuOutside)
       document.addEventListener('keydown', _trackMenuEsc)
     }, 0)
-  }
-
-  // Read-only render of a saved AI research blob (recording view AI Assist tab).
-  // Same look as the interactive version, minus the Apply controls.
-  // Clean, succinct AI results in the AI Assist tab — prose + simple lists, no
-  // tables or colour chips. Links are neutral + theme-aware (.ai-link).
-  function renderAiResults(r) {
-    // Scoped to the ingest panel, NOT a bare getElementById (2026-08-28).
-    // View Recording renders an #ai-results of its own, and this job polls for
-    // 30 to 90 seconds: "Add & View" mid-run put that page on screen, and the
-    // ingest proposals then painted into ITS AI pane, complete with Apply
-    // buttons targeting form fields (#f-artist, #f-year) that do not exist
-    // there — so they silently did nothing. If the review form has gone, the
-    // result has nowhere to land and is dropped.
-    const body = document.querySelector('#ingest-slide-panel #ai-results')
-    if (!body) return
-
-    body.innerHTML = buildAiResultsHtml(r, { showRerun: true })
-
-    body.querySelectorAll('.ai-apply-btn').forEach(b =>
-      b.addEventListener('click', () => { toggleApplyProposal(r.proposals[parseInt(b.dataset.idx)], b); reScore() }))
-    document.getElementById('ai-apply-tracks')?.addEventListener('click', () => applyAiTrackTitles(r.track_titles || []))
-    // Run again goes back to the ask box, as on View Recording.
-    document.getElementById('btn-ai-rerun')?.addEventListener('click', () => {
-      body.innerHTML = `<div class="ai-assist-cta">
-        ${aiAskBoxHtml('Run again. A question here tells it where to look.', researchBtnHtml('btn-ai-assist', 'Research again'))}
-      </div>`
-      document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
-      document.getElementById('ai-question')?.focus()
-    })
-    // No auto-apply, regardless of confidence — see renderRecAiResults above
-    // for why (2026-07-20, AI Assist Refinement spec). Every proposal needs
-    // an explicit click on its own Apply button.
-    reScore()
   }
 
   // Re-score the current form state and update the AI tab's score header.
@@ -10765,51 +10872,12 @@ const App = (() => {
     }
   }
 
-  // Poll a background AI job until it finishes. The synchronous call is too slow
-  // (30-90s) for the webview's fetch timeout, so we start a job and poll for it.
-  function pollAiJob(jobId, t0) {
-    const sleep = ms => new Promise(r => setTimeout(r, ms))
-    return (async function loop() {
-      while (true) {
-        await sleep(2000)
-        const el = document.getElementById('ai-elapsed')
-        if (el) el.textContent = `${Math.round((Date.now() - t0) / 1000)}s`
-        let s
-        try { s = await API.ingest.aiAssistStatus(jobId) }
-        catch (e) { if (/unknown job/.test(e.message)) throw new Error('Job was lost (did the app restart?)'); throw e }
-        if (s.status === 'done')  return s.result
-        if (s.status === 'error') throw new Error(s.error)
-        if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('AI research timed out after 5 minutes')
-      }
-    })()
-  }
-
-  // Same polling pattern as pollAiJob, for the Artist page's AI Assist
-  // research job (2026-07-22) — kept separate rather than parameterizing
-  // pollAiJob, since the endpoint shape (artistId + jobId) differs.
-  // The elapsed timer now lives with the caller (runDossier owns its own
-  // interval against #pp-dossier-msg), so this only polls.
-  function pollDossierJob(artistId, jobId, t0) {
-    const sleep = ms => new Promise(r => setTimeout(r, ms))
-    return (async function loop() {
-      while (true) {
-        await sleep(2000)
-        let s
-        try { s = await API.artists.dossierStatus(artistId, jobId) }
-        catch (e) { if (/unknown job/.test(e.message)) throw new Error('Job was lost (did the app restart?)'); throw e }
-        if (s.status === 'done')  return s.result
-        if (s.status === 'error') throw new Error(s.error)
-        if (Date.now() - t0 > 5 * 60 * 1000) throw new Error('Research timed out after 5 minutes')
-      }
-    })()
-  }
-
   // Switch which right-column pane is visible in the ingest review.
   /** Show one pane of the Add Recording details panel.
    *
    *  Also opens the panel if it was collapsed, syncs the shared action row,
    *  and kicks the lazy loads. `tabEl` is optional: callers that know only the
-   *  pane id (startAiAssist) can leave it out and the tab is found by
+   *  pane id can leave it out and the tab is found by
    *  data-ipane. */
   function switchIngestPane(paneId, tabEl) {
     const root = document.getElementById('ingest-slide-panel')
@@ -10927,44 +10995,6 @@ const App = (() => {
       body.innerHTML = `<div class="rq-empty">No sound-quality analysis for this folder yet.
         It is measured during Review &amp; Import, and again in full once the
         recording is filed.</div>`
-    }
-  }
-
-  /** The AI Assist results container.
-   *
-   *  Was `ensureAiPane`, which BUILT the pane and its tab the first time AI
-   *  Assist ran (2026-08-28: both are now rendered up front with the rest of
-   *  the panel). A tab that only appears once you have already found the
-   *  button is a tab that never advertises the feature, and it meant the pane
-   *  order differed depending on what you had clicked. */
-  function ensureAiPane() {
-    return document.getElementById('ai-results')
-  }
-
-  async function startAiAssist() {
-    const body = ensureAiPane()
-    if (!body) return
-    // The Research button lives in the ask box, which a run replaces, so every
-    // state that ends a run puts the box (and its button) back.
-    const askAgain = note => {
-      body.innerHTML = note + aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))
-      document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
-    }
-    switchIngestPane('isp-ai')
-    const question = takeAiQuestion()   // read before the spinner overwrites the pane
-    body.innerHTML = `<div class="ai-loading"><div class="loading-spinner"></div><div>Researching the web. This can take a minute or two… <span id="ai-elapsed">0s</span></div></div>`
-    const t0 = Date.now()
-    try {
-      const { job_id } = await API.ingest.aiAssist({ folder_path: ingest.folderPath, current: collectCurrentMeta(), question })
-      const result = await pollAiJob(job_id, t0)
-      ingest.aiResult = result
-      renderAiResults(result)
-    } catch (e) {
-      const secs = Math.round((Date.now() - t0) / 1000)
-      console.error('AI Assist error after', secs, 's:', e)
-      askAgain(/no_api_key/.test(e.message)
-        ? `<p class="ai-res-note">No Anthropic API key set. Add one in Settings.</p>`
-        : `<p class="ai-res-note" style="color:var(--red)">Research failed after ${secs}s: ${esc(e.message)}</p>`)
     }
   }
 
@@ -11186,7 +11216,7 @@ const App = (() => {
     // to protect and typing one in from scratch is the documented purpose of
     // the box, so it opens unlocked and the Edit button already says Cancel.
     const infoLocked = !!(ingest.scan.info_file_content || '').trim()
-    const resolverPaneHtml = buildResolverPaneHtml(ingest.scan.resolved)
+    const hasResolver = !!ingest.scan.resolved   // the Resolver tab is the Lomax table
     const infoText = `<textarea class="rev-info-text rev-info-edit${infoLocked ? ' rev-info-text--locked' : ''}" id="rev-info-edit"
       ${infoLocked ? 'readonly' : ''}
       placeholder="No info file found. Paste or type one in.">${esc(ingest.scan.info_file_content || '')}</textarea>`
@@ -11564,22 +11594,19 @@ const App = (() => {
               <div class="slide-pane" id="isp-checksums">
                 <div class="slide-pane-scroll">${buildChecksumsPreviewHtml(ingest.scan.fingerprints)}</div>
               </div>
-              ${resolverPaneHtml ? `<div class="slide-pane" id="isp-resolver">
-                <div class="slide-pane-scroll">${resolverPaneHtml}</div>
+              ${hasResolver ? `<div class="slide-pane" id="isp-resolver">
+                <div class="slide-pane-scroll lx-col"><div class="lx-res" id="lx-res-root"></div></div>
               </div>` : ''}
-              <!-- Permanent, not built on first use (it used to be created by
-                   ensureAiPane the moment AI Assist ran). A tab that appears
-                   only after you have already found the button is a tab that
-                   never advertises the feature. -->
+              <!-- Permanent, so the tab always advertises Lomax. The chat and
+                   the Resolver tab share one controller (see lomaxController). -->
               <div class="slide-pane" id="isp-ai">
-                <div class="slide-pane-scroll"><div class="ai-results" id="ai-results">
-                  ${aiAskBoxHtml(RESEARCH_HINT, researchBtnHtml('btn-ai-assist', 'Research'))}
-                </div></div>
+                <div class="slide-pane-scroll lx-scroll"></div>
+                <div class="lx-bar-slot"></div>
               </div>
             </div>
           </div>
           <nav class="slide-index" id="ingest-tab-rail" aria-label="Details">
-            ${detailsTabsHtml('data-ipane', 'isp-', { resolver: !!resolverPaneHtml, research: true, staged: false })}
+            ${detailsTabsHtml('data-ipane', 'isp-', { resolver: hasResolver, research: true, staged: false })}
           </nav>
         </div>
 
@@ -11594,7 +11621,10 @@ const App = (() => {
     // torn down by the next setMainHTML() call, so this doesn't accumulate.
     // `focusout` (unlike `blur`) bubbles, so one listener covers every field.
     mainContent.querySelector('.ingest-review-outer')?.addEventListener('focusout', e => {
-      if (e.target.matches('input, textarea, select')) reScore()
+      if (e.target.matches('input, textarea, select')) {
+        reScore()
+        if (ingest.lxSyncRes) ingest.lxSyncRes()
+      }
     })
     reScore()   // also recompute right away, against whatever track list just rendered
 
@@ -12104,7 +12134,8 @@ const App = (() => {
         // artist name the scan just re-derived.
         ingest.form = { members: [], guests: [] }
         ingest.tracks = []
-        ingest.aiResult = null
+        ingest.lxc = null
+        ingest.lxSyncRes = null
         ingest.aiApplied = {}
         // Through renderIngestStep, not renderIngestReview directly — the step
         // renderer is what reinstalls the in-page Back handler and repaints the
@@ -12516,7 +12547,61 @@ const App = (() => {
       ingestBackFromReview()
     })
 
-    document.getElementById('btn-ai-assist')?.addEventListener('click', startAiAssist)
+    // Lomax. One controller on this folder drives the Resolver tab and the
+    // chat. A run is filed against the folder, and moves to the recording when
+    // it is added. Accepting applies to the form here, because the database has
+    // nothing yet (the server only records the decision).
+    {
+      const resRoot = document.getElementById('lx-res-root')
+      const chatPane = document.getElementById('isp-ai')
+      const alive = () => !!document.getElementById('ingest-panes')
+      const resOpts = () => ({ resolved: ingest.scan.resolved, value: getFormField, tracks: ingest.tracks })
+      const applyLocal = props => {
+        ingest.aiApplied = ingest.aiApplied || {}
+        for (const p of props) {
+          const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(p.field)
+          if (m) {
+            const i = ingest.tracks.findIndex(t => String(t.track_number) === m[1])
+            if (i < 0) continue
+            const t = ingest.tracks[i]
+            if (m[2] === 'title') {
+              t.title = p.proposed
+              const inp = mainContent.querySelector(`.t-title[data-idx="${i}"]`)
+              if (inp) inp.value = p.proposed
+            } else t[m[2] === 'note' ? 'notes' : 'songwriter'] = p.proposed
+            refreshIngestTrackRow(i)
+          } else if (LX_FIELDS.some(([k]) => k === p.field)) {
+            if (!(p.field in ingest.aiApplied)) ingest.aiApplied[p.field] = getFormField(p.field)
+            setFormField(p.field, p.proposed)
+          }
+        }
+        reScore()
+      }
+      const c = lomaxController({
+        skill: 'recording', subjectType: 'folder', subjectKey: ingest.folderPath,
+        current: collectCurrentMeta, alive, afterAccept: applyLocal,
+      })
+      ingest.lxc = c
+      if (resRoot) {
+        resRoot.closest('.slide-pane').setAttribute('data-lx-ctl', c.id)
+        c.addView(ctl => {
+          if (!document.body.contains(resRoot)) return false
+          lxRepaint(resRoot, lomaxResolverHtml(ctl, resOpts()))
+          return true
+        })
+        ingest.lxSyncRes = () => lxSyncResolver(resRoot, resOpts())
+      }
+      lomaxMountChat(chatPane, null, {
+        addNotes: async text => {
+          const el = document.getElementById('f-notes')
+          if (!el) return
+          el.value = el.value.trim() ? `${el.value.trim()}\n${text}` : text
+          ingest.form.notes = el.value
+        },
+      }, c)
+      c.refresh()
+      c.load()
+    }
 
     // Details panel: horizontal tabs + the permanent rail, same gestures as
     // View Recording. Clicking the ACTIVE tab collapses the panel, which is the
@@ -12634,10 +12719,9 @@ const App = (() => {
         // Both are sent: an id links an existing genre, a name creates one.
         genre_id:   f.genre_id   || null,
         genre_name: f.genre_name || null,
-        // AI Assist may have already been run on this draft (pre-save) — carry
-        // the result along so it lands on the new recording instead of being
-        // lost the moment confirm creates the row (2026-07-14 bug: it wasn't).
-        ai_result: ingest.aiResult || null,
+        // Lomax may already have run on this draft (a run on the folder moves to
+        // the recording on confirm; the result rides along as the fallback).
+        ai_result: ingest.lxc?.latest()?.result || null,
         // Fields whose value the person applied from an AI proposal (they may learn aliases).
         ai_accepted: Object.keys(ingest.aiApplied || {}),
         resolver_result: ingest.scan?.resolved || null,
@@ -12931,6 +13015,12 @@ const App = (() => {
           html: recordingsPaneHtml(venueRows, { showArtist: true, mountId: 'rec-table-venue',
                                                 empty: 'No recordings from this venue yet' }) },
         { id: 'about', label: 'About', html: `
+            <div class="pp-sec-row">
+              <div class="pp-sec">History</div>
+              <span id="vn-lx-hist"></span>
+            </div>
+            <div class="pp-desc pp-editable ${v.history && v.history.trim() ? '' : 'pp-empty'}" id="vn-history" title="Click to edit">${v.history && v.history.trim() ? esc(v.history) : 'Add history\u2026'}</div>
+
             <div class="pp-sec">Location</div>
             <div class="vn-loc">
               <span class="vn-field"><label>City</label><span class="pp-editable vn-val ${v.city ? '' : 'pp-empty'}" id="vn-city">${v.city ? esc(v.city) : '\u2014'}</span></span>
@@ -12938,8 +13028,14 @@ const App = (() => {
               <span class="vn-field"><label>Country</label><span class="pp-editable vn-val ${v.country ? '' : 'pp-empty'}" id="vn-country">${v.country ? esc(v.country) : '\u2014'}</span></span>
             </div>
 
+            <div class="lx-slot" id="vn-lx-loc"></div>
+            <div class="lx-slot" id="vn-lx-names"></div>
+
             <div class="pp-sec">Notes</div>
-            <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="vn-bio" title="Click to edit">${descText ? esc(v.bio) : 'Add notes\u2026'}</div>` },
+            <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="vn-bio" title="Click to edit">${descText ? esc(v.bio) : 'Add notes\u2026'}</div>
+
+            <!-- Questions and the ask bar close the page (not pinned). -->
+            <div class="lx-page" id="vn-lx"></div>` },
         { id: 'photos', label: 'Photos', count: photoCount || null,
           html: '<div id="vn-photos"></div>' },
       ],
@@ -12997,6 +13093,94 @@ const App = (() => {
       multiline: true, placeholder: 'Add notes…',
       get: () => v.bio || '',
       onSave: async val => { val = val.trim(); v.bio = val; await saveField({ bio: val || null }) },
+    })
+
+    // ── Lomax: history, location, former names, questions ─────────────────────
+    // History is auto-applied by the server (Restore previous undoes it);
+    // location corrections and former names are suggestions to accept.
+    {
+      const lxHist = document.getElementById('vn-lx-hist')
+      const lxLoc = document.getElementById('vn-lx-loc')
+      const lxNames = document.getElementById('vn-lx-names')
+      const lxAsk = document.getElementById('vn-lx')
+      const alive = () => document.body.contains(lxAsk)
+      const LOC = [['city', 'City'], ['state', 'State / Region'], ['country', 'Country']]
+      const paintLoc = () => {
+        for (const [f] of LOC) {
+          const el = document.getElementById('vn-' + f)
+          if (!el || el.querySelector('input')) continue
+          el.textContent = v[f] || '—'
+          el.classList.toggle('pp-empty', !v[f])
+        }
+      }
+      const paintHist = () => {
+        const el = document.getElementById('vn-history')
+        if (!el || el.querySelector('textarea, input')) return
+        el.textContent = v.history || (canEditLibrary() ? 'Add history…' : '')
+        el.classList.toggle('pp-empty', !v.history)
+      }
+      const parsed = p => { try { return JSON.parse(p.proposed) || {} } catch (_) { return {} } }
+      const c = lomaxController({
+        skill: 'venue', subjectType: 'venue', subjectId: id, alive,
+        afterAccept: async props => {
+          if (props.some(p => LOC.some(([f]) => f === p.field))) {
+            const fresh = await API.venues.get(id)
+            for (const [f] of LOC) v[f] = fresh[f]
+            paintLoc()
+          }
+        },
+        afterRestore: run => { v.history = (run.result && run.result.replaced && run.result.replaced.text) || ''; paintHist() },
+        onDone: run => {
+          const rep = run.result && run.result.replaced
+          if (rep && rep.written) { v.history = rep.written; paintHist() }
+        },
+      })
+      c.addView(ctl => {
+        if (!alive()) return false
+        const rep = ctl.runs.slice().reverse().find(r => r.status === 'done' && r.result && r.result.replaced)
+        lxRepaint(lxHist, rep ? lomaxRestoreLink(ctl, rep, v.history) : '')
+
+        const run = ctl.latest()
+        const edit = canEditLibrary()
+        const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+        const locProps = edit ? lxProps(run).filter(p => LOC.some(([f]) => f === p.field) && !p.agrees && lxShown(p) &&
+          (p.decision === 'accepted' || !same(v[p.field], p.proposed))) : []
+        lxRepaint(lxLoc, locProps.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Field</th><th>Now</th><th>Lomax</th><th></th></tr></thead><tbody>${
+          locProps.map(p => `<tr><th scope="row">${esc(LOC.find(([f]) => f === p.field)[1])}</th><td><span class="lx-tv">${esc(v[p.field] || '')}</span></td>` +
+            `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`).join('')}</tbody></table>` : '')
+
+        const names = edit ? lxProps(run).filter(p => p.field === 'former_name' && lxShown(p)) : []
+        lxRepaint(lxNames, names.length ? `<div class="pp-sec">Former names</div><table class="lx-tbl lx-sugg"><tbody>${names.map(p => {
+          const n = parsed(p), quiet = p.decision === 'accepted'
+          const years = (n.from || n.to) ? `${n.from || '?'} – ${n.to || '?'}` : ''
+          return `<tr><td><span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(n.name || '')}</span></td>` +
+            `<td><span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(years)}</span></td>` +
+            `<td class="lx-act-td">${lomaxActions(p, { accept: 'Add as alias' })}</td></tr>`
+        }).join('')}</tbody></table>` : '')
+
+        const asked = ctl.runs.filter(r => r.question && r.status === 'done' && r.result && String(r.result.answer || '').trim())
+        const err = ctl.lastError()
+        const bar = lomaxAskBar({ placeholder: 'Anything else you want to learn? (optional)',
+          note: "Lomax researches this venue's history, former names and location. Add anything else below.",
+          last: run, busy: !!ctl.pending })
+        lxRepaint(lxAsk, !(asked.length || ctl.pending || err || bar) ? '' : `<div class="lx-ask-wrap">
+          ${asked.length ? `<div class="pp-sec">Questions</div><div class="lx-qs">${asked.map(r =>
+            `<div class="lx-qa"><div class="lx-qa-q">${esc(r.question)}</div><div class="lx-answer">${esc(stripCitations(r.result.answer))}</div>` +
+            `<div class="lx-qa-d">${esc(lxDay(r.created_at))}</div></div>`).join('')}</div>` : ''}
+          ${ctl.pending ? lomaxRunState(ctl.pending) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')}
+          ${bar}
+        </div>`)
+        return true
+      })
+      for (const el of [lxHist, lxLoc, lxNames, lxAsk]) if (el) el.setAttribute('data-lx-ctl', c.id)
+      c.refresh()
+      c.load()
+    }
+
+    makeInlineEditable(document.getElementById('vn-history'), {
+      multiline: true, placeholder: 'Add history…',
+      get: () => v.history || '',
+      onSave: async val => { val = val.trim(); v.history = val; await saveField({ history: val || null }) },
     })
 
     onAdminClick('vn-delete', async () => {
@@ -14058,9 +14242,21 @@ const App = (() => {
       : ['rescan', 'Rescan Folder', 'btn-ghost']
     const c = (run && run.counts) || {}
     const queued = (c.ready || 0) + (c.review || 0) + (c.pending || 0)
+    // The Lomax row sits under Mode. Without a key the toggle is locked to Off.
+    const hasKey = lxHasKey()
+    const lxDesc = hasKey ? 'Checks recordings that need review.'
+      : 'Checks recordings that need review. Lomax requires your Anthropic key to be set.'
     return `<div class="bi-scan-mode">
-        <div class="seg" role="group" aria-label="Import mode">${seg('auto', 'Import Automatically')}${seg('hold', 'Review First')}</div>
-        <span class="bi-scan-desc">${desc}</span>
+        <span class="bi-scan-lbl">Mode</span>
+        <div class="bi-scan-cell">
+          <div class="seg" role="group" aria-label="Import mode">${seg('auto', 'Import Automatically')}${seg('hold', 'Review First')}</div>
+          <span class="bi-scan-desc">${desc}</span>
+        </div>
+        ${canEditLibrary() ? `<span class="bi-scan-lbl">Lomax</span>
+        <div class="bi-scan-cell">
+          ${lomaxLevelToggle({ level: lxImportLevel(), off: true, key: 'import', disabled: !hasKey })}
+          <span class="bi-scan-desc">${lxDesc}</span>
+        </div>` : ''}
       </div>
       <div class="bi-scan-row">
         <button type="button" class="btn ${scan[2]}" data-scan="${scan[0]}">${scan[1]}</button>
@@ -14101,6 +14297,8 @@ const App = (() => {
     setNavCurrent('Add Recordings')
     _stopBulkIngestPoll()
     _biResetProgressState()
+    _lxQ = _lxQNew()
+    await getPrefs()   // the Lomax toggle needs has_api_key before the first paint
 
     let data
     try {
@@ -14428,17 +14626,210 @@ const App = (() => {
 
   // Review First runs score live folders before ingest, so only their Queue
   // shows the Sound Quality column.
+  // ── Lomax: the import queue ─────────────────────────────────────────────────
+  // With Study or Research on (Add Recordings), Lomax runs by itself, one
+  // recording at a time, on every row that needs review. A run is filed against
+  // the row's folder, so opening the row's Resolver finds it already there, and
+  // it moves to the recording when the row is imported. The Lomax column and
+  // the summary line read the state kept here.
+  function _lxQNew() {
+    return { cells: new Map(), items: new Map(), queue: [], running: false, paused: false,
+             touched: false, tokens: 0, searches: 0, listedAt: 0 }
+  }
+  let _lxQ = _lxQNew()
+
+  const _lxColShown = () => _biTab === 'queue' && canEditLibrary() && (lxImportLevel() !== 'off' || _lxQ.touched)
+
+  function _biAbsPath(it) {
+    const root = (_biRun && _biRun.root) || ''
+    return it.abs_path || (root.replace(/\/+$/, '') + '/' + it.rel_path)
+  }
+
+  // What the page would send for a folder it has scanned but not opened: the
+  // same fields the Add Recording form is prefilled with, read from the resolver.
+  function lomaxCurrentFromScan(scan) {
+    const r = (scan && scan.resolved) || {}
+    const val = k => { const v = r[k] && r[k].value; return v == null || typeof v === 'object' ? '' : String(v) }
+    const d = (r.date && r.date.value) || {}
+    const p2 = n => String(n).padStart(2, '0')
+    const date = d.year ? `${d.year}${d.month ? '-' + p2(d.month) : ''}${d.month && d.day ? '-' + p2(d.day) : ''}` : ''
+    return {
+      artist: val('artist'), date, venue: val('venue'), city: val('city'), state: val('state'),
+      country: val('country'), event: val('event'), stage: val('stage'), source: val('source'),
+      lineage: val('lineage'),
+      tracks: (r.tracks || []).map(t => ({
+        number: t.track_number, title: t.title, duration: t.duration,
+        songwriter: t.songwriter || '', notes: t.notes || '',
+      })),
+      info_file_content: (scan && scan.info_file_content) || '',
+      resolved: r,
+    }
+  }
+
+  function _lxQueueCell(row) {
+    const it = row._it
+    if (row.status === 'ready') return '<span class="lx-qc lx-qc--dim">Not needed</span>'
+    if (!row.needs_review || !it) return ''
+    const cell = _lxQ.cells.get(it.id)
+    let inner = ''
+    if (cell && cell.state === 'working') inner = '<span class="lq-spin"></span>Working'
+    else if (cell && cell.state === 'done') {
+      inner = cell.n
+        ? `<a href="#" class="lx-qc-link" data-lx-review="${esc(it.id)}">${lxPlural(cell.n, 'suggestion')}</a>`
+        : 'Nothing to add'
+    } else if (cell && cell.state === 'skipped') inner = 'Skipped: not reachable'
+    else if (cell || lxImportLevel() !== 'off') inner = 'Queued'
+    return `<span class="lx-qc" data-lx-qc="${esc(it.id)}">${inner}</span>`
+  }
+
+  function _lxQSetCell(id, cell) {
+    _lxQ.cells.set(id, cell)
+    _lxQ.touched = true
+    const el = document.querySelector(`#bi-rows [data-lx-qc="${id}"]`)
+    const it = _biRowsCache.get(id)
+    if (el && it) {
+      const tmp = document.createElement('div')
+      tmp.innerHTML = _lxQueueCell(_biBuildIqRow(it))
+      if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild)
+    }
+    _lxQPaintLine()
+  }
+
+  function _lxQPaintLine() {
+    const el = document.getElementById('bi-lomax-line')
+    if (!el) return
+    const q = _lxQ
+    if (!_biRun || !_lxColShown() || !q.items.size) { el.innerHTML = ''; return }
+    let checked = 0
+    for (const c of q.cells.values()) if (c.state === 'done' || c.state === 'skipped') checked++
+    el.innerHTML = `<span class="bi-lx-lbl">Lomax</span>` +
+      `<span class="bi-lx-sum">${checked} of ${q.items.size} checked · ${lxTokens(q.tokens)} tokens · ${lxPlural(q.searches, 'search', 'searches')}</span>` +
+      (checked >= q.items.size ? '' : `<button type="button" class="btn btn-ghost btn-xs" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`)
+  }
+
+  // Redraw the header and every loaded row (the column came or went).
+  function _lxQRepaintAll() {
+    const head = document.getElementById('bi-thead')
+    if (head) head.innerHTML = _biTheadHtml()
+    for (const id of Array.from(_biRowsCache.keys())) _biRepaintRow(id)
+    _lxQPaintLine()
+  }
+
+  // Every row that needs review, paged from the server, not just the ones the
+  // table has scrolled into view. Throttled: the page ticks every few seconds.
+  async function _lxQLoadItems(q) {
+    if (Date.now() - q.listedAt < 5000) return
+    q.listedAt = Date.now()
+    for (let page = 1; ; page++) {
+      let body
+      try { body = await API.bulkIngest.items(_biPageRunId, 'review', page) } catch (_) { return }
+      const items = (body && body.items) || []
+      for (const it of items) {
+        if (it.status !== 'review' || q.items.has(it.id)) continue
+        q.items.set(it.id, it)
+        q.queue.push(it.id)
+        _lxQSetCell(it.id, { state: 'queued' })
+      }
+      if (items.length < 100) break
+    }
+  }
+
+  async function _lxQProcess(q, id) {
+    const it = q.items.get(id)
+    const abs = _biAbsPath(it)
+    const level = lxImportLevel()
+    const alive = () => _lxQ === q
+    _lxQSetCell(id, { state: 'working' })
+    try {
+      const runs = ((await API.lomax.runs({ skill: 'recording', subject_type: 'folder', subject_key: abs })) || {}).runs || []
+      const last = runs[runs.length - 1]
+      let run = runs.slice().reverse().find(r => r.status === 'done')
+      let fresh = false
+      if (!run) {
+        if (last && last.status === 'error') throw new Error('earlier run failed')
+        if (last) run = await lomaxWaitRun(last.id, { alive })
+        else {
+          const scan = await API.recordings.scan(abs)
+          const started = await API.lomax.start({
+            skill: 'recording', subject_type: 'folder', subject_key: abs, level,
+            current: lomaxCurrentFromScan(scan),
+          })
+          fresh = true
+          run = await lomaxWaitRun(started.id, { alive })
+        }
+      }
+      if (!alive()) return
+      if (!run || run.status !== 'done') throw new Error((run && run.error) || 'no result')
+      if (fresh && run.usage) {
+        q.tokens += run.usage.total_tokens || 0
+        q.searches += run.usage.web_search_requests || 0
+      }
+      _lxQSetCell(id, { state: 'done', n: lxSuggestions(run).length })
+    } catch (e) {
+      if (!alive()) return
+      if (/no_api_key/.test(String(e && e.message))) {
+        // No key: nothing will run. Put the toggle back to Off and leave the row queued.
+        appPrefs = null
+        q.paused = true
+        _lxQSetCell(id, { state: 'queued' })
+        return
+      }
+      _lxQSetCell(id, { state: 'skipped' })
+    }
+  }
+
+  async function _lxQKick() {
+    const q = _lxQ
+    if (q.running || q.paused || !_biRun || !_lxColShown() || lxImportLevel() === 'off') return
+    q.running = true
+    try {
+      await _lxQLoadItems(q)
+      while (_lxQ === q && !q.paused && lxImportLevel() !== 'off' && document.getElementById('bi-rows')) {
+        const id = q.queue.shift()
+        if (id == null) break
+        await _lxQProcess(q, id)
+      }
+    } finally {
+      q.running = false
+      if (_lxQ === q) _lxQPaintLine()
+    }
+  }
+
+  // The Add Recordings toggle changed (the toggle itself updated in place).
+  function _lxImportLevelChanged(level) {
+    if (!document.getElementById('bi-rows')) return   // the picker: nothing running yet
+    _lxQ.paused = false
+    _lxQRepaintAll()
+    if (level !== 'off') _lxQKick()
+  }
+
+  document.addEventListener('click', e => {
+    const link = e.target.closest && e.target.closest('[data-lx-review]')
+    if (link) {
+      e.preventDefault()
+      const it = _biRowsCache.get(Number(link.dataset.lxReview))
+      if (it) _biOpenReviewFor(it)
+      return
+    }
+    if (e.target.closest && e.target.closest('[data-lx-pause]')) {
+      _lxQ.paused = !_lxQ.paused
+      _lxQPaintLine()
+      if (!_lxQ.paused) _lxQKick()
+    }
+  })
+
   function _biSoundCol() {
     return !!(_biRun && _biRun.mode === 'hold' && _biTab === 'queue')
   }
 
   function _biTheadHtml() {
     const sq = _biSoundCol()
-    return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}">
+    const lx = _lxColShown()
+    return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}${lx ? ' iq-brow--lx' : ''}">
       <span>Recording</span>
       <span>Format</span><span>Type</span>
       ${sq ? '<span>Sound Quality</span>' : ''}
-      <span>Metadata</span><span></span><span></span><span></span>
+      <span>Metadata</span><span></span>${lx ? '<span>Lomax</span>' : ''}<span></span><span></span>
     </div>`
   }
 
@@ -14492,6 +14883,7 @@ const App = (() => {
       canIngest: true,
       moveTargets: [],
       actionsHtml: _biActionsHtml,
+      lomaxCell: _lxColShown() ? _lxQueueCell : null,
       isOpen: r => _biOpenRows.has(r.id),
     })
   }
@@ -14730,6 +15122,7 @@ const App = (() => {
     const listEl = document.getElementById('bi-rows')
     if (listEl) listEl.innerHTML = ''
     await _biTableLoadMore()
+    _lxQKick()
   }
 
   // Toggle a done row's expand panel -- delegated on the table container so
@@ -15176,6 +15569,7 @@ const App = (() => {
         await _biTableInit(run.id)
         return
       }
+      _lxQKick()   // rows that arrived since the last tick, and a run that has just finished scanning
       if (!done) await _biTableTick(run)
       return
     }
@@ -15197,6 +15591,7 @@ const App = (() => {
         <div class="bi-tab-note-wrap" id="bi-tab-note">${_biTabNoteHtml(run)}</div>
         <div id="bi-applyall"></div>
         <div id="bi-ingest-all-wrap" class="bi-ingest-all-wrap">${_biIngestAllHtml(run)}</div>
+        <div id="bi-lomax-line" class="bi-lomax-line"></div>
         <div id="bi-notices">${_biNoticesHtml(run)}</div>
 
         <div class="lq-cards lq-cards--compact" id="bi-table">
@@ -16656,7 +17051,7 @@ const App = (() => {
         </section>
 
         <section class="set-sec">
-          <h2 class="set-sec-title">AI assistance</h2>
+          <h2 class="set-sec-title">Lomax</h2>
           <p class="set-sec-hint">Used to research artists and read info files.
             You bring your own key, so you pay Anthropic directly and Trellis
             never marks it up.</p>
@@ -16683,6 +17078,8 @@ const App = (() => {
             </select>
             <span class="set-flash" id="set-model-flash"></span>
           </div>
+
+          <div class="set-field" id="set-lx-usage"></div>
         </section>
 
         ${canEditLibrary() ? `
@@ -16981,14 +17378,59 @@ const App = (() => {
       if (!key) return _settingsSaved($('set-key-flash'), 'Paste a key first')
       try {
         await API.preferences.update({ api_key: key })
+        appPrefs = null   // the level toggles read has_api_key
         $('set-key').value = ''
         _settingsSaved($('set-key-flash'))
       } catch (e) { _settingsSaved($('set-key-flash'), e.message) }
     })
     $('set-key-clear')?.addEventListener('click', async () => {
-      try { await API.preferences.update({ clear_api_key: true }); renderSettingsPage() }
+      try { await API.preferences.update({ clear_api_key: true }); appPrefs = null; renderSettingsPage() }
       catch (e) { _settingsSaved($('set-key-flash'), e.message) }
     })
+
+    // ── Lomax usage: four totals and the run history (tokens and searches only) ──
+    ;(async function () {
+      const host = $('set-lx-usage')
+      if (!host) return
+      const p2 = n => String(n).padStart(2, '0')
+      const date = s => {
+        const t = lxTs(s)
+        if (isNaN(t)) return ''
+        const d = new Date(t)
+        return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+      }
+      const PATH = { recording: 'recording', artist: 'artist', venue: 'venue' }
+      const subject = r => {
+        const label = esc(r.subject_label || '')
+        return PATH[r.subject_type] && r.subject_id && label ? `<a href="#/${PATH[r.subject_type]}/${r.subject_id}">${label}</a>` : label
+      }
+      const row = r => `<tr><td>${esc(date(r.created_at))}</td><td>${esc(r.skill_label || '')}</td><td>${subject(r)}</td>` +
+        `<td>${esc(LX_LEVEL_LABEL[r.level] || '')}</td><td class="num">${r.proposals || 0}</td>` +
+        `<td class="num">${(r.total_tokens || 0).toLocaleString()}</td><td class="num">${r.web_searches || 0}</td></tr>`
+      let data
+      try { data = await API.lomax.usage(50, 0) } catch (_) { return }
+      const t = data.totals || {}
+      let loaded = (data.runs || []).length
+      const tot = (n, l) => `<div class="lx-tot"><div class="lx-tot-n">${n}</div><div class="lx-tot-l">${l}</div></div>`
+      host.innerHTML = `<div class="lx-tots">${tot((t.runs || 0).toLocaleString(), 'Runs')}${tot((t.total_tokens || 0).toLocaleString(), 'Tokens')}` +
+        `${tot((t.web_searches || 0).toLocaleString(), 'Web searches')}${tot(`${t.accepted || 0} of ${t.proposals || 0}`, 'Suggestions accepted')}</div>` +
+        ((data.runs || []).length ? `<table class="lx-tbl lx-hist"><thead><tr><th>Date</th><th>Job</th><th>Subject</th><th>Level</th>` +
+          `<th class="num">Suggestions</th><th class="num">Tokens</th><th class="num">Searches</th></tr></thead>` +
+          `<tbody id="set-lx-rows">${data.runs.map(row).join('')}</tbody></table>` +
+          `<button type="button" class="btn btn-ghost btn-sm" id="set-lx-more"${loaded >= (data.total || 0) ? ' hidden' : ''}>Show more</button>` : '')
+      $('set-lx-more')?.addEventListener('click', async e => {
+        const btn = e.currentTarget
+        btn.disabled = true
+        try {
+          const more = await API.lomax.usage(50, loaded)
+          const runs = more.runs || []
+          $('set-lx-rows').insertAdjacentHTML('beforeend', runs.map(row).join(''))
+          loaded += runs.length
+          if (!runs.length || loaded >= (more.total || 0)) btn.hidden = true
+        } catch (_) { /* leave the button for another try */ }
+        btn.disabled = false
+      })
+    })()
 
     $('set-peers')?.addEventListener('click', () => { window.location.hash = '#/peers' })
   }

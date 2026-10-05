@@ -3,7 +3,7 @@ app/utils/paula.py — "Paula": the free, non-AI completeness/confidence scorer.
 
 Named in the 2026-07-16 design conversation with Ryan as shorthand for the
 deterministic (regex/fuzzy-match) info parser, paired with "Jeff" for the
-paid AI Assist research pass (app/utils/ai_assist.py). Paula runs
+paid Lomax research pass (app/lomax/). Paula runs
 automatically, for free, as part of every folder scan — Jeff is an explicit,
 opt-in, paid action layered on top when a human wants deeper research.
 

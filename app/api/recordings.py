@@ -50,6 +50,8 @@ from app.utils.checksums import (
 from app.utils import musicbrainz
 from app.models.recording_image import RecordingImage
 from app.utils import entity_images as ei
+from app import lomax
+from app.utils.sources_plain import with_sources_plain as _sources_plain
 
 bp = Blueprint("recordings", __name__)
 
@@ -468,10 +470,10 @@ def get_recording(recording_id):
         "is_published":         bool(rec.is_published),
         "info_file_content":    rec.info_file_content,
         "notes":                rec.notes,
-        "ai_research":          _json.loads(rec.ai_research_json) if rec.ai_research_json else None,
+        "ai_research":          lomax.latest_result("recording", rec.id, ("recording", "resolution")),
         # Ingest provenance for the Resolver tab. Owner-only: app/api/share.py
         # has its own serializer and deliberately does not carry this.
-        "resolver_json":        _json.loads(rec.resolver_json) if rec.resolver_json else None,
+        "resolver_json":        _sources_plain(_json.loads(rec.resolver_json)) if rec.resolver_json else None,
         # Junction rows ONLY, deliberately (2026-08-24). System collections are
         # dynamic and Full Library covers every published recording, so
         # resolving them here would stamp the same chip on all 580 recording

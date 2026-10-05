@@ -302,20 +302,6 @@ const API = (() => {
       // an attribution requirement, and only fetched photos exist here.
       updateImage:     (imageId, data) => put(`/api/artists/images/${imageId}`, data),
 
-      // AI Assist — AI-drafted bio + suggested resource links, background job
-      // (same shape as API.ingest.aiAssist*). The ROUTES keep the older
-      // "dossier" name: renaming a working endpoint to match a UI label buys
-      // nothing and breaks anything already pointed at it. The user-facing
-      // wording is AI Assist everywhere (Ryan, 2026-08-07).
-      // Pre-flight TOKEN RANGE for one pass — see utils/ai_assist.py. Was a
-      // cost range in cents until 2026-09-07; no currency appears anywhere now.
-      aiEstimate:     ()           => get('/api/artists/ai-estimate'),
-      // body: { mode?: 'bio' | 'lineup', question?: string }. Lineup research
-      // is a SEPARATE pass on the same endpoint — it neither writes the
-      // description nor persists a dossier blob (see api/artists.py).
-      startDossier:   (id, body)   => post(`/api/artists/${id}/dossier`, body || {}),
-      dossierStatus:  (id, jobId)  => get(`/api/artists/${id}/dossier/${jobId}`),
-
       // MusicBrainz — structured facts, separate from AI Assist by design
       // (curated database, no hallucination surface; see utils/musicbrainz.py).
       // Looks up AND links if the match is unambiguous — see api/artists.py.
@@ -513,6 +499,20 @@ const API = (() => {
       ...entityImageApi('events'),
     },
 
+    // ── Lomax ────────────────────────────────────────────────────────────────
+    // The one wrapper for /api/lomax. A subject is {skill, subject_type, subject_id} or, for a
+    // folder not yet imported, {skill, subject_type: 'folder', subject_key}.
+    lomax: {
+      start:    (body)  => post('/api/lomax/runs', body),
+      run:      (id)    => get(`/api/lomax/runs/${id}`),
+      runs:     (q)     => get('/api/lomax/runs?' + new URLSearchParams(q).toString()),
+      latest:   (q)     => get('/api/lomax/latest?' + new URLSearchParams(q).toString()),
+      decide:   (id, decision) => post(`/api/lomax/proposals/${id}`, { decision }),
+      restore:  (id)    => post(`/api/lomax/runs/${id}/restore`),
+      usage:    (limit, offset) => get(`/api/lomax/usage?limit=${limit || 50}&offset=${offset || 0}`),
+      estimate: (q)     => get('/api/lomax/estimate?' + new URLSearchParams(q).toString()),
+    },
+
     // ── Preferences ──────────────────────────────────────────────────────────
     preferences: {
       get:    ()     => get('/api/preferences'),
@@ -523,9 +523,6 @@ const API = (() => {
     ingest: {
       confirm:       (data)  => post('/api/ingest/confirm', data),
       confirmStatus: (jobId) => get(`/api/ingest/confirm/${jobId}`),
-      aiAssist:          (payload) => post('/api/ingest/ai-assist', payload),
-      aiAssistRecording: (recId, body) => post(`/api/ingest/ai-assist-recording/${recId}`, body || {}),
-      aiAssistStatus:    (jobId)   => get(`/api/ingest/ai-assist/${jobId}`),
       saveInfoFile:   (payload) => post('/api/ingest/save-info-file', payload),
       checkExisting:  ({ artist_name, year, month, day }) => {
         const p = new URLSearchParams({ artist_name })
