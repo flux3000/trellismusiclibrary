@@ -74,8 +74,19 @@
    open on purpose. Tightening it is lightness-only — --t2: #94877c (4.53) and
    --t3: #837468 (3.51) — and is Ryan's call, not a defect to fix in passing.
 
+   The in-between six (2026-10-05) split by text colour, because a true
+   mid-grey ground holds readable text in neither direction: Chet, Townes and
+   Gram are dim grounds with light text (mode 'dark'); Joni, Gillian and Hazel
+   are overcast grounds with dark text (mode 'light'). `mode` is text polarity
+   and drives every light/dark rule below; the picker groups by `group`.
+
+   --accent-ink is the label colour on a solid --accent fill (.btn-primary),
+   chosen per scheme for contrast. White failed on every dark accent (2.0-2.7).
+
    Adding a scheme: add a block here AND an entry in PALETTES in app.js. The
-   ids must match. Hexes live ONLY here; app.js carries id, label and blurb so
+   ids must match. A dark-text scheme also needs its selector added to the
+   three rules that list those schemes by id (info-file focus, archive teal,
+   Lomax button ink). Hexes live ONLY here; app.js carries id, label and blurb so
    the two can never disagree about a colour. The `[data-pal-preview]` half of
    each selector is what lets the Settings picker paint a real swatch of the
    scheme without a single hex in the JS.
@@ -103,6 +114,7 @@
   --accent-lit:  #0f4a4e;
   --accent-dim:  rgba(21,94,99,0.12);
   --accent-dim2: rgba(21,94,99,0.2);
+  --accent-ink:  #ffffff;
 
   --green:   #1f6b45;
   --amber:   #7a5712;
@@ -139,6 +151,7 @@
   --accent-lit:  #3b5530;
   --accent-dim:  rgba(77,107,63,0.12);
   --accent-dim2: rgba(77,107,63,0.2);
+  --accent-ink:  #ffffff;
 
   --green:   #2f6a3f;
   --amber:   #7a5712;
@@ -175,6 +188,7 @@
   --accent-lit:  #12376f;
   --accent-dim:  rgba(26,74,153,0.12);
   --accent-dim2: rgba(26,74,153,0.2);
+  --accent-ink:  #ffffff;
 
   --green:   #1f6b45;
   --amber:   #7a5712;
@@ -211,6 +225,7 @@
   --accent-lit:  #d4aa82;
   --accent-dim:  rgba(196,149,106,0.14);
   --accent-dim2: rgba(196,149,106,0.24);
+  --accent-ink:  #141210;
 
   --green:   #6ab880;
   --amber:   #c89b50;
@@ -247,6 +262,7 @@
   --accent-lit:  #93cee6;
   --accent-dim:  rgba(116,184,212,0.14);
   --accent-dim2: rgba(116,184,212,0.24);
+  --accent-ink:  #0d1116;
 
   --green:   #63bd90;
   --amber:   #c9a35c;
@@ -283,6 +299,7 @@
   --accent-lit:  #e8c477;
   --accent-dim:  rgba(217,174,85,0.14);
   --accent-dim2: rgba(217,174,85,0.24);
+  --accent-ink:  #140f1a;
 
   --green:   #6dbb8c;
   --amber:   #cda45c;
@@ -319,6 +336,7 @@
   --accent-lit:  #aacbe4;
   --accent-dim:  rgba(143,180,209,0.14);
   --accent-dim2: rgba(143,180,209,0.24);
+  --accent-ink:  #111111;
 
   --green:   #69b98a;
   --amber:   #c6a05c;
@@ -331,6 +349,228 @@
   --mtx-bg:   rgba(127,168,207,0.15);  --mtx-fg:   #7fa8cf;
   --fm-bg:    rgba(164,142,212,0.15);  --fm-fg:    #a48ed4;
   --other-bg: rgba(151,151,151,0.15);  --other-fg: #979797;
+}
+
+/* Chet -- smoky slate, muted brass */
+:root[data-palette="chet"], [data-pal-preview="chet"] {
+  --bg-0: #2e343c;
+  --bg-1: #343b45;
+  --bg-2: #313841;
+  --bg-3: #3a424d;
+  --bg-4: #424c58;
+  --bg-5: #4d5866;
+
+  --bd-0: rgba(255,255,255,0.07);
+  --bd-1: rgba(255,255,255,0.11);
+  --bd-2: rgba(255,255,255,0.18);
+
+  --t0: #eaeaeb;
+  --t1: #c2c6cc;
+  --t2: #acb2b9;
+  --t3: #969da6;
+
+  --accent:      #d0a44e;
+  --accent-lit:  #ddbd7e;
+  --accent-dim:  rgba(208,164,78,0.16);
+  --accent-dim2: rgba(208,164,78,0.26);
+  --accent-ink:  #111111;
+
+  --green:   #92d3b0;
+  --amber:   #e1c07f;
+  --red:     #ecbab6;
+  --blue:    #afc8e4;
+  --purple:  #d0bfe3;
+
+  --sbd-bg:   rgba(146,211,176,0.15);  --sbd-fg:   #92d3b0;
+  --aud-bg:   rgba(225,192,127,0.15);  --aud-fg:   #e1c07f;
+  --mtx-bg:   rgba(175,200,228,0.15);  --mtx-fg:   #afc8e4;
+  --fm-bg:    rgba(208,191,227,0.15);  --fm-fg:    #d0bfe3;
+  --other-bg: rgba(172,178,185,0.15);  --other-fg: #acb2b9;
+}
+
+/* Townes -- olive drab, faded denim */
+:root[data-palette="townes"], [data-pal-preview="townes"] {
+  --bg-0: #35342c;
+  --bg-1: #3c3b32;
+  --bg-2: #393830;
+  --bg-3: #434238;
+  --bg-4: #4c4b40;
+  --bg-5: #59584a;
+
+  --bd-0: rgba(255,255,255,0.07);
+  --bd-1: rgba(255,255,255,0.11);
+  --bd-2: rgba(255,255,255,0.18);
+
+  --t0: #ebebea;
+  --t1: #c8c7c1;
+  --t2: #b4b4ac;
+  --t3: #9f9e93;
+
+  --accent:      #79b2d8;
+  --accent-lit:  #a0c9e3;
+  --accent-dim:  rgba(121,178,216,0.16);
+  --accent-dim2: rgba(121,178,216,0.26);
+  --accent-ink:  #111111;
+
+  --green:   #92d3b0;
+  --amber:   #e2c283;
+  --red:     #ecbab6;
+  --blue:    #afc8e4;
+  --purple:  #d0bfe3;
+
+  --sbd-bg:   rgba(146,211,176,0.15);  --sbd-fg:   #92d3b0;
+  --aud-bg:   rgba(226,194,131,0.15);  --aud-fg:   #e2c283;
+  --mtx-bg:   rgba(175,200,228,0.15);  --mtx-fg:   #afc8e4;
+  --fm-bg:    rgba(208,191,227,0.15);  --fm-fg:    #d0bfe3;
+  --other-bg: rgba(180,180,172,0.15);  --other-fg: #b4b4ac;
+}
+
+/* Gram -- spruce green, faded rose */
+:root[data-palette="gram"], [data-pal-preview="gram"] {
+  --bg-0: #2a3634;
+  --bg-1: #2f3d3b;
+  --bg-2: #2d3a39;
+  --bg-3: #354543;
+  --bg-4: #3c4f4c;
+  --bg-5: #465b59;
+
+  --bd-0: rgba(255,255,255,0.07);
+  --bd-1: rgba(255,255,255,0.11);
+  --bd-2: rgba(255,255,255,0.18);
+
+  --t0: #eaebeb;
+  --t1: #c0c9c8;
+  --t2: #aab6b4;
+  --t3: #91a19f;
+
+  --accent:      #dd9dad;
+  --accent-lit:  #e6b7c3;
+  --accent-dim:  rgba(221,157,173,0.16);
+  --accent-dim2: rgba(221,157,173,0.26);
+  --accent-ink:  #111111;
+
+  --green:   #92d3b0;
+  --amber:   #e1c07f;
+  --red:     #ecbab6;
+  --blue:    #b3cae6;
+  --purple:  #d0bfe3;
+
+  --sbd-bg:   rgba(146,211,176,0.15);  --sbd-fg:   #92d3b0;
+  --aud-bg:   rgba(225,192,127,0.15);  --aud-fg:   #e1c07f;
+  --mtx-bg:   rgba(179,202,230,0.15);  --mtx-fg:   #b3cae6;
+  --fm-bg:    rgba(208,191,227,0.15);  --fm-fg:    #d0bfe3;
+  --other-bg: rgba(170,182,180,0.15);  --other-fg: #aab6b4;
+}
+
+/* Joni -- powder blue-grey, deep indigo */
+:root[data-palette="joni"], [data-pal-preview="joni"] {
+  --bg-0: #abb8c4;
+  --bg-1: #a0afbc;
+  --bg-2: #b5c1cb;
+  --bg-3: #c6ced6;
+  --bg-4: #95a6b4;
+  --bg-5: #8497a8;
+
+  --bd-0: rgba(20,22,24,0.10);
+  --bd-1: rgba(20,22,24,0.15);
+  --bd-2: rgba(20,22,24,0.24);
+
+  --t0: #0f0f10;
+  --t1: #292e33;
+  --t2: #373e43;
+  --t3: #454d54;
+
+  --accent:      #2a3c84;
+  --accent-lit:  #202e65;
+  --accent-dim:  rgba(42,60,132,0.16);
+  --accent-dim2: rgba(42,60,132,0.26);
+  --accent-ink:  #ffffff;
+
+  --green:   #1f4c34;
+  --amber:   #574114;
+  --red:     #792620;
+  --blue:    #13444e;
+  --purple:  #543479;
+
+  --sbd-bg:   rgba(31,76,52,0.12);  --sbd-fg:   #1f4c34;
+  --aud-bg:   rgba(87,65,20,0.12);  --aud-fg:   #574114;
+  --mtx-bg:   rgba(19,68,78,0.12);  --mtx-fg:   #13444e;
+  --fm-bg:    rgba(84,52,121,0.12);  --fm-fg:    #543479;
+  --other-bg: rgba(55,62,67,0.12);  --other-fg: #373e43;
+}
+
+/* Gillian -- dust-bowl khaki, oxblood */
+:root[data-palette="gillian"], [data-pal-preview="gillian"] {
+  --bg-0: #c1b5a2;
+  --bg-1: #b9ac95;
+  --bg-2: #c8beac;
+  --bg-3: #d4ccbf;
+  --bg-4: #b0a289;
+  --bg-5: #a49376;
+
+  --bd-0: rgba(20,22,24,0.10);
+  --bd-1: rgba(20,22,24,0.15);
+  --bd-2: rgba(20,22,24,0.24);
+
+  --t0: #10100e;
+  --t1: #332f28;
+  --t2: #423d34;
+  --t3: #534c41;
+
+  --accent:      #752933;
+  --accent-lit:  #571e26;
+  --accent-dim:  rgba(117,41,51,0.16);
+  --accent-dim2: rgba(117,41,51,0.26);
+  --accent-ink:  #ffffff;
+
+  --green:   #1f4c34;
+  --amber:   #574114;
+  --red:     #7d2721;
+  --blue:    #214063;
+  --purple:  #543479;
+
+  --sbd-bg:   rgba(31,76,52,0.12);  --sbd-fg:   #1f4c34;
+  --aud-bg:   rgba(87,65,20,0.12);  --aud-fg:   #574114;
+  --mtx-bg:   rgba(33,64,99,0.12);  --mtx-fg:   #214063;
+  --fm-bg:    rgba(84,52,121,0.12);  --fm-fg:    #543479;
+  --other-bg: rgba(66,61,52,0.12);  --other-fg: #423d34;
+}
+
+/* Hazel -- grey-green, dark plum */
+:root[data-palette="hazel"], [data-pal-preview="hazel"] {
+  --bg-0: #b1b9ab;
+  --bg-1: #a7b0a0;
+  --bg-2: #bac1b5;
+  --bg-3: #c9cfc5;
+  --bg-4: #9da796;
+  --bg-5: #8d9985;
+
+  --bd-0: rgba(20,22,24,0.10);
+  --bd-1: rgba(20,22,24,0.15);
+  --bd-2: rgba(20,22,24,0.24);
+
+  --t0: #0f100f;
+  --t1: #2d302b;
+  --t2: #3a3e37;
+  --t3: #494e46;
+
+  --accent:      #5a3460;
+  --accent-lit:  #442749;
+  --accent-dim:  rgba(90,52,96,0.16);
+  --accent-dim2: rgba(90,52,96,0.26);
+  --accent-ink:  #ffffff;
+
+  --green:   #1f4c34;
+  --amber:   #574114;
+  --red:     #792620;
+  --blue:    #214063;
+  --purple:  #543479;
+
+  --sbd-bg:   rgba(31,76,52,0.12);  --sbd-fg:   #1f4c34;
+  --aud-bg:   rgba(87,65,20,0.12);  --aud-fg:   #574114;
+  --mtx-bg:   rgba(33,64,99,0.12);  --mtx-fg:   #214063;
+  --fm-bg:    rgba(84,52,121,0.12);  --fm-fg:    #543479;
+  --other-bg: rgba(58,62,55,0.12);  --other-fg: #3a3e37;
 }
 
 /* ── Not palette ─────────────────────────────────────────────────────────────
@@ -380,7 +620,10 @@
    scheme means adding its selector here too. */
 :root[data-palette="steely"] .info-file-textarea:focus,
 :root[data-palette="krauss"] .info-file-textarea:focus,
-:root[data-palette="monk"] .info-file-textarea:focus {
+:root[data-palette="monk"] .info-file-textarea:focus,
+:root[data-palette="joni"] .info-file-textarea:focus,
+:root[data-palette="gillian"] .info-file-textarea:focus,
+:root[data-palette="hazel"] .info-file-textarea:focus {
   background: rgba(0,0,0,0.02);
 }
 
@@ -1330,6 +1573,8 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
   font-variant-numeric: tabular-nums;
 }
 
+.pp-mb-cand--noscore { grid-template-columns: minmax(0, 1fr) auto; }
+
 /* ── Photos tab gallery ──────────────────────────────────────────────────── */
 .pp-gal {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
@@ -2056,7 +2301,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 /* ── Slide-in right panel ─────────────────────────────────────────────────── */
 
 /* The index column's width: the tab list at the panel's right edge. */
-:root { --idx-w: 92px; }
+:root { --idx-w: 122px; }
 .slide-panel {
   display: flex;
   flex-direction: row;
@@ -2174,7 +2419,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 0;
+  padding: 10px 8px 10px 0;
   border-left: 1px solid var(--bd-1);
   overflow-y: auto;
   scrollbar-width: none;
@@ -2187,7 +2432,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   white-space: nowrap;
   font-size: 10px;
   letter-spacing: 0.06em;
-  padding: 8px 8px 8px 12px;
+  padding: 8px 12px 8px 12px;
   border-left: 2px solid transparent;
   border-radius: 0 3px 3px 0;
 }
@@ -2258,7 +2503,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .pane-act--primary { color: var(--accent); border-color: var(--accent-dim2, var(--bd-2)); }
 /* Lomax colour (Ryan, 2026-10-05): the Research blue, a colour no other control
    uses (accent = primary, amber = staged, red = danger). Follows the palette's --blue. */
-:root { --research: var(--blue); }
+:root { --lomax: var(--blue); }   /* the Lomax colour: set it here and every Lomax surface follows */
 /* Unwritten metadata changes are waiting for this button — same signal the old
    .btn-staged carried, in this bar's vocabulary. */
 .pane-act--staged {
@@ -3157,7 +3402,7 @@ input[type="range"].progress-bar {
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
 }
 
 .btn-primary:hover { background: var(--accent-lit); }
@@ -4896,6 +5141,8 @@ a.member-chip-name:hover { color: var(--accent); }
   grid-template-columns: 72px 48px 48px minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
   gap: 10px;
 }
+/* Album: the title takes the row, the year sits beside it. */
+.ingest-row-ident.ingest-row-album { grid-template-columns: minmax(0, 1fr) 72px; }
 /* Quality, Source, Lineage — that order. Lineage is the long one and takes
    what is left. */
 .ingest-row-src {
@@ -8913,6 +9160,9 @@ select.set-input { max-width: 480px; }
    Teal contract, measured against every palette's bg-0..bg-3 (bg-4/5 are hover
    and pressed): dark palettes #5fb8a6, 6.0 to 8.0:1 across bg-0..bg-4; the three
    light palettes (steely, krauss, monk) #0b6a5a, 5.4 to 6.5:1 across bg-0..bg-3.
+   Mid-tone grounds need their own: the dim three (chet, townes, gram) #91cec2,
+   5.7:1 minimum; the overcast three (joni, gillian, hazel) #06473a, 4.6:1
+   minimum, the most a teal can clear on that ground and still read as teal.
    accent-lit text clears 7.0:1 on its own accent-dim wash in every palette.
    ══════════════════════════════════════════════════════════════════════════ */
 .archive-space, .dlq-tab, .dlq-panel, .arc-drawer, .dl-prog {
@@ -8935,6 +9185,36 @@ select.set-input { max-width: 480px; }
   --accent-lit:  #075245;
   --accent-dim:  rgba(11,106,90,0.12);
   --accent-dim2: rgba(11,106,90,0.2);
+  --accent-ink:  #ffffff;
+}
+:root[data-palette="chet"] .archive-space, :root[data-palette="chet"] .dlq-tab,
+:root[data-palette="chet"] .dlq-panel, :root[data-palette="chet"] .arc-drawer,
+:root[data-palette="chet"] .dl-prog,
+:root[data-palette="townes"] .archive-space, :root[data-palette="townes"] .dlq-tab,
+:root[data-palette="townes"] .dlq-panel, :root[data-palette="townes"] .arc-drawer,
+:root[data-palette="townes"] .dl-prog,
+:root[data-palette="gram"] .archive-space, :root[data-palette="gram"] .dlq-tab,
+:root[data-palette="gram"] .dlq-panel, :root[data-palette="gram"] .arc-drawer,
+:root[data-palette="gram"] .dl-prog {
+  --accent:      #91cec2;
+  --accent-lit:  #e2f4f0;
+  --accent-dim:  rgba(145,206,194,0.15);
+  --accent-dim2: rgba(145,206,194,0.25);
+  --accent-ink:  #141210;
+}
+:root[data-palette="joni"] .archive-space, :root[data-palette="joni"] .dlq-tab,
+:root[data-palette="joni"] .dlq-panel, :root[data-palette="joni"] .arc-drawer,
+:root[data-palette="joni"] .dl-prog,
+:root[data-palette="gillian"] .archive-space, :root[data-palette="gillian"] .dlq-tab,
+:root[data-palette="gillian"] .dlq-panel, :root[data-palette="gillian"] .arc-drawer,
+:root[data-palette="gillian"] .dl-prog,
+:root[data-palette="hazel"] .archive-space, :root[data-palette="hazel"] .dlq-tab,
+:root[data-palette="hazel"] .dlq-panel, :root[data-palette="hazel"] .arc-drawer,
+:root[data-palette="hazel"] .dl-prog {
+  --accent:      #06473a;
+  --accent-lit:  #03211b;
+  --accent-dim:  rgba(6,71,58,0.12);
+  --accent-dim2: rgba(6,71,58,0.2);
   --accent-ink:  #ffffff;
 }
 
@@ -9200,7 +9480,9 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 /* Import tab brightness (Ryan, 2026-10-01): the tabs read brighter than the
    default profile tabs, Live a step above Albums. */
 .bi-tabs .pp-tab.bi-tab--queue,
-.bi-tabs .pp-tab.bi-tab--live   { color: var(--t1); }
+.bi-tabs .pp-tab.bi-tab--live,
+.bi-tabs .pp-tab.bi-tab--apply  { color: var(--t1); }
+.bi-tabs .pp-tab.bi-tab--apply  { margin-left: auto; }
 .bi-tabs .pp-tab.bi-tab--album  { color: var(--t2); }
 .bi-tabs .pp-tab.active         { color: var(--accent); }
 .bi-note-ic { width: 13px; height: 13px; vertical-align: -2px; color: var(--amber); }
@@ -9233,6 +9515,12 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 /* The apply-values block sits in the page itself, above the action buttons:
    no frame, no fill. */
 #bi-applyall .lq-applyall { border: 0; padding: 4px 0 8px; margin-bottom: 4px; }
+/* Bulk Value Apply tab: the form replaces the table and everything that belongs to it. */
+#bi-shell.bi-applymode #bi-table, #bi-shell.bi-applymode #bi-ingest-all-wrap,
+#bi-shell.bi-applymode #bi-lomax-line, #bi-shell.bi-applymode #bi-notices,
+#bi-shell.bi-applymode #bi-tab-note { display: none; }
+.lq-applyall--tab .lq-applyall-head { order: 2; }
+.lq-applyall-intro { margin: 0; color: var(--t2); font-size: 13px; }
 #bi-applyall .lq-applyall.is-closed { padding: 4px 0; }
 
 /* ── Tags pane: Current / After ───────────────────────────────────────────── */
@@ -9259,12 +9547,29 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 /* ══ Lomax ════════════════════════════════════════════════════════════════════
    Every Lomax surface (Resolver tab, chat, Artist and Venue About, Settings,
    the import queue) is drawn from these classes; see the "Lomax" section of
-   app.js. The Lomax colour is --research. A value Lomax agrees with, or one
+   app.js. The Lomax colour is --lomax. A value Lomax agrees with, or one
    that has been accepted, uses a quieter blue and carries no buttons. Compact
    tables, 4 to 6px cell padding. The reel icon never sits on a button. */
-:root { --lx-quiet: color-mix(in srgb, var(--research) 58%, var(--t3)); }
+/* 88% blue: the quiet tier must still clear 4.5:1 on every surface of every palette (58% measured 3.55 on cale). */
+:root { --lx-quiet: color-mix(in srgb, var(--lomax) 88%, var(--t3)); }
 
-.lx-val  { color: var(--research); }
+/* The Lomax action button (Ask Lomax). One colour token, the blue family of Lomax values, used for
+   nothing else. --lx-btn-ink is the label: white on the six dark-text palettes, the page ground on the
+   seven light-text ones, so the label clears WCAG AA (4.5:1) on every palette, at rest and on hover (the
+   hover mix moves the fill away from the label colour, so it only gains contrast). tests/
+   test_lomax_button_contrast.py measures all seven. */
+:root {
+  --lx-btn: var(--lomax);
+  --lx-btn-ink: var(--bg-0);
+  --lx-btn-hover: color-mix(in srgb, var(--lx-btn) 86%, var(--t0));
+}
+:root[data-palette="steely"], :root[data-palette="krauss"], :root[data-palette="monk"],
+:root[data-palette="joni"], :root[data-palette="gillian"], :root[data-palette="hazel"] { --lx-btn-ink: #fff; }
+.lx-go { background: var(--lx-btn); color: var(--lx-btn-ink); }
+.lx-go:hover:not(:disabled) { background: var(--lx-btn-hover); }
+.lx-go:disabled { opacity: .5; cursor: default; }
+
+.lx-val  { color: var(--lomax); }
 .lx-same { color: var(--lx-quiet); }
 .lx-sub  { margin-top: 1px; font-size: 11.5px; }
 .lx-inst { font-size: 11.5px; opacity: .85; }
@@ -9275,7 +9580,7 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lx-roster { color: var(--t3); font-size: 11px; }
 .lx-link {
   background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 11.5px;
-  color: var(--research); text-transform: none; letter-spacing: normal; font-weight: 500;
+  color: var(--lomax); text-transform: none; letter-spacing: normal; font-weight: 500;
 }
 .lx-link:hover:not(:disabled) { text-decoration: underline; }
 .lx-link:disabled { opacity: .5; cursor: default; }
@@ -9295,8 +9600,23 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lx-tbl .lx-n { width: 1%; color: var(--t3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .lx-tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
 .lx-act-td { width: 1%; white-space: nowrap; text-align: right; }
-.lx-tracks { background: var(--bg-3); border-radius: 6px; }
-.lx-tracks thead th:first-child { border-top-left-radius: 6px; }
+/* Tracks: one step down in size, hairline cell borders, a group per track (Title, Songwriter and
+   Notes share the # cell), and a slightly heavier line between tracks. */
+.lx-tracks { background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: var(--r-sm); table-layout: fixed; font-size: 11.5px; }
+.lx-tracks th, .lx-tracks td { padding: 3px 6px; border: 1px solid var(--bd-0); }
+.lx-tracks thead th { font-size: 10px; border-bottom-color: var(--bd-1); }
+.lx-tracks tr > :first-child { border-left: 0; }
+.lx-tracks tr > :last-child { border-right: 0; }
+.lx-tracks thead th:nth-child(1) { width: 30px; }
+.lx-tracks thead th:nth-child(2) { width: 72px; }
+.lx-tracks thead th:nth-child(5) { width: 64px; }
+.lx-tracks td { overflow-wrap: anywhere; }
+.lx-tracks tbody .lx-trk > td, .lx-tracks tbody .lx-trk > th { border-top-color: var(--bd-1); }
+.lx-tracks tbody .lx-trk:first-child > td, .lx-tracks tbody .lx-trk:first-child > th { border-top: 0; }
+.lx-tracks tbody tr:last-child > td, .lx-tracks tbody tr:last-child > th { border-bottom: 0; }
+.lx-tracks .lx-n { vertical-align: top; }
+.lx-tracks .lx-pk { color: var(--t3); font-size: 10.5px; font-weight: 500; white-space: nowrap; width: auto; }
+.lx-mb { color: var(--t1); }
 .lx-sugg { margin: 6px 0 4px; }
 .lx-sugg td, .lx-sugg th { padding: 4px 6px; }
 .lx-slot:empty, .lx-page:empty { display: none; }
@@ -9323,7 +9643,7 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
   margin-left: 4px; background: transparent; border: 0; border-radius: 50%; color: var(--t3); cursor: pointer;
 }
 .lx-info .tic { width: 14px; height: 14px; }
-.lx-info:hover, .lx-info[aria-expanded="true"] { color: var(--research); }
+.lx-info:hover, .lx-info[aria-expanded="true"] { color: var(--lomax); }
 .lx-pop {
   position: fixed; z-index: 1200; width: 270px; max-width: calc(100vw - 16px); padding: 10px 12px;
   background: var(--bg-3); color: var(--t1); border: 1px solid var(--bd-1); border-radius: 6px;
@@ -9350,8 +9670,8 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
   font-family: var(--font-ui); font-size: 12.5px; line-height: 1.4;
 }
 .lx-q::placeholder { color: var(--t3); }
-.lx-q:focus { outline: none; border-color: var(--research); }
-.lx-ask-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; }
+.lx-q:focus { outline: none; border-color: var(--lomax); }
+.lx-ask-row { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .lx-ask .lx-pop { max-height: 70vh; overflow: auto; }
 
 /* The Resolver pane: tables scroll, the ask bar stays put. */
@@ -9382,7 +9702,7 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 /* Working */
 .lx-state { display: flex; align-items: flex-start; gap: 8px; }
 .lx-working { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
-.lx-working b { color: var(--research); font-weight: 600; }
+.lx-working b { color: var(--lomax); font-weight: 600; }
 .lx-elapsed { color: var(--t3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .lx-leave { margin-top: 3px; color: var(--t3); font-size: 11.5px; }
 
@@ -9392,12 +9712,12 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lx-me { display: flex; justify-content: flex-end; }
 .lx-me-b {
   max-width: 85%; padding: 7px 11px; font-size: 12.5px; color: var(--t0); white-space: pre-wrap; overflow-wrap: anywhere;
-  background: color-mix(in srgb, var(--research) 14%, transparent); border-radius: 12px 12px 3px 12px;
+  background: color-mix(in srgb, var(--lomax) 14%, transparent); border-radius: 12px 12px 3px 12px;
 }
 .lx-msg { display: flex; align-items: flex-start; gap: 8px; }
 .lx-av {
   flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px;
-  border-radius: 50%; color: var(--research); background: color-mix(in srgb, var(--research) 14%, transparent);
+  border-radius: 50%; color: var(--lomax); background: color-mix(in srgb, var(--lomax) 14%, transparent);
 }
 .lx-av .tic { width: 16px; height: 16px; }
 .lx-bub { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; color: var(--t1); padding-top: 2px; }
@@ -9427,11 +9747,12 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .iq-col-lx { font-size: 12px; color: var(--t2); text-align: center; }
 .lx-qc { display: inline-flex; align-items: center; gap: 5px; }
 .lx-qc--dim { color: var(--t3); }
-.lx-qc-link { color: var(--research); }
+.lx-qc-link { color: var(--lomax); }
 .bi-lomax-line { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 12.5px; color: var(--t2); }
 .bi-lomax-line:empty { display: none; }
-.bi-lx-lbl { color: var(--research); font-weight: 600; }
-.slide-tab--ai .tic { color: var(--research); }
+.bi-lx-lbl { color: var(--lomax); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.bi-scan-lbl--lx { color: var(--lomax); display: inline-flex; align-items: center; gap: 5px; }
+.slide-tab--ai .tic { color: var(--lomax); }
 .lx-fields { table-layout: fixed; }
 .lx-fields thead th:nth-child(1) { width: 66px; }
 .lx-fields thead th:nth-child(2) { width: 33%; }

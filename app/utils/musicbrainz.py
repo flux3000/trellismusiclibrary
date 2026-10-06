@@ -829,6 +829,52 @@ def _genre_key(name):
     return " ".join(_fold(name).replace("-", " ").split())
 
 
+_MINOR = {"and", "of", "the", "in", "on", "n"}
+
+
+def genre_case(name):
+    """Capitalise a lowercase MusicBrainz genre without damaging it: a word that already has a capital
+    keeps it, "r&b" becomes "R&B", "drum and bass" keeps its small words."""
+    out = []
+    for i, w in enumerate(str(name).strip().split()):
+        if any(c.isupper() for c in w):
+            out.append(w)
+        elif "&" in w:
+            out.append(w.upper())
+        elif i and w in _MINOR:
+            out.append(w)
+        else:
+            out.append(w[:1].upper() + w[1:])
+    return " ".join(out)
+
+
+def valid_new_genre(name):
+    """A name fit to become a NEW genre: at most 4 words, no digit, no sentence punctuation."""
+    n = " ".join(str(name or "").split())
+    return bool(n) and len(n.split()) <= 4 and not re.search(r"[0-9.!?:;]", n)
+
+
+def pick_genre(names):
+    """The genre MusicBrainz's names resolve to: (existing Genre or None, name to create or None).
+    Any name matching an existing Trellis genre wins (vote order); otherwise the top-voted one is
+    the name to create. Reads the genre table, writes nothing."""
+    names = [n for n in (names or []) if n and str(n).strip()]
+    if not names:
+        return None, None
+    from app.extensions import db
+    from app.models.genre import Genre
+    existing = {_genre_key(g.name): g for g in db.session.query(Genre).all()}
+    for n in names:
+        g = existing.get(_genre_key(n))
+        if g is not None:
+            return g, None
+    # MusicBrainz genres are lowercase ("hard bop"); Trellis names are not.
+    for n in names:
+        if valid_new_genre(n):
+            return None, genre_case(n)[:80]
+    return None, None
+
+
 def apply_genre_to_artist(artist, names):
     """Fill artist.genre_id from MusicBrainz genre names. Returns the Genre
     set, or None. Does not commit."""
@@ -836,18 +882,54 @@ def apply_genre_to_artist(artist, names):
         return None
     from app.extensions import db
     from app.models.genre import Genre
-    existing = {_genre_key(g.name): g for g in db.session.query(Genre).all()}
-    for n in names:
-        g = existing.get(_genre_key(n))
-        if g is not None:
-            artist.genre_id = g.id
-            return g
-    # MusicBrainz genres are lowercase ("hard bop"); Trellis names are not.
-    g = Genre(name=names[0].strip().title()[:80])
-    db.session.add(g)
-    db.session.flush()
+    g, new_name = pick_genre(names)
+    if g is None and new_name:
+        g = Genre(name=new_name)
+        db.session.add(g)
+        db.session.flush()
+    if g is None:
+        return None
     artist.genre_id = g.id
     return g
+
+
+# The genre a form can offer for an act before the act exists (Add Recording and import review).
+# An online lookup, outside the offline resolver: cached for the life of the process, skipped
+# quietly when lookups are off, the breaker has tripped, or the network fails. Writes nothing.
+_GENRE_CACHE = {}
+_GENRE_TTL_FOUND = 24 * 3600
+_GENRE_TTL_NONE = 15 * 60
+
+
+def suggest_genre(artist_name, mbid=None):
+    """{"genre_id": int | None, "name": str} for an act, or None. A confident artist match only (the
+    same gate as the automatic pass), then the artist's MusicBrainz genres through pick_genre()."""
+    key = _genre_key(artist_name)
+    if not key or not enabled() or tripped():
+        return None
+    now = time.time()
+    hit = _GENRE_CACHE.get(key)
+    if hit and now - hit[0] < (_GENRE_TTL_FOUND if hit[1] else _GENRE_TTL_NONE):
+        return hit[1]
+    failures_before = _failures[0]
+    result = None
+    try:
+        if not mbid:
+            status, best = classify(search_artist(artist_name))
+            mbid = best.get("mbid") if status == "matched" and best else None
+        if mbid:
+            g, new_name = pick_genre(release_genres(None, mbid))
+            if g is not None:
+                result = {"genre_id": g.id, "name": g.name}
+            elif new_name:
+                result = {"genre_id": None, "name": new_name}
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("genre suggestion failed for %r: %s", artist_name, e)
+        return None
+    if _failures[0] > failures_before or tripped():
+        return None                                          # the network failed: not a real "none", do not cache
+    _GENRE_CACHE[key] = (now, result)
+    return result
 
 
 def fetch_cover_art(release_mbid, release_group_id=None):

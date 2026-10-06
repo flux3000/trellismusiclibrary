@@ -309,3 +309,29 @@ def test_a_venues_history_can_be_edited_by_hand(api, seeded_ids):
     vid = db.session.get(Performance, seeded_ids["performance_id"]).venue_id
     assert api.put("/api/venues/%d" % vid, json={"history": "Opened 1921."}).status_code == 200
     assert api.get("/api/venues/%d" % vid).get_json()["history"] == "Opened 1921."
+
+
+# ── View Recording's Resolver table: what the payloads carry ─────────────────
+
+def test_the_recording_payload_carries_what_the_resolver_table_needs(api, seeded_ids):
+    rid = seeded_ids["recording_id"]
+    rec = db.session.get(Recording, rid)
+    rec.resolver_json = json.dumps({"artist": {"value": "X", "confidence": "tentative",
+                                               "candidates": {"info": "X"}, "evidence": []}})
+    db.session.commit()
+    d = api.get("/api/recordings/%d" % rid).get_json()
+    assert d["resolver_json"]["artist"]["confidence"] == "tentative"
+    assert "sources_plain" in d["resolver_json"]
+    assert d["tracks"] and {"track_number", "title", "songwriter", "notes"} <= set(d["tracks"][0])
+    assert "source" in d and "lineage" in d
+    p = api.get("/api/performances/%d" % d["performance_id"]).get_json()
+    assert {"artist", "venue_name", "city", "state", "country", "event_name", "stage",
+            "start_year", "artist_genre"} <= set(p)
+
+
+def test_a_recording_with_no_resolver_json_and_no_run_still_loads(api, seeded_ids):
+    rid = seeded_ids["recording_id"]
+    db.session.get(Recording, rid).resolver_json = None
+    db.session.commit()
+    assert api.get("/api/recordings/%d" % rid).get_json()["resolver_json"] is None
+    assert api.get("/api/lomax/runs?skill=recording&subject_type=recording&subject_id=%d" % rid).get_json()["runs"] == []

@@ -23,6 +23,7 @@ Covers two bugs Ryan reported 2026-07-16 from a real CSNY info file:
    "(Tuning)") is never mistaken for a composer credit.
 """
 
+import pytest
 import tempfile
 import os
 
@@ -219,3 +220,66 @@ Some Venue
     tracks = result["tracks"]
     assert [t["number"] for t in tracks] == [1, 2, 3]
     assert [t["title"] for t in tracks] == ["First Song", "Second Song", "Third Song"]
+
+
+# ── invisible characters in the info text (Ryan, 2026-10-05) ─────────────────
+
+_Z = "﻿"
+_SETLIST = (
+    "Setlist:\n01 Green Sugar (22:27)\n" + _Z * 3 + "02 Dancing Blue (8:21)\n"
+    "03 " + _Z * 3 + "Zo no Senaka (6:50)\n04 " + _Z * 3 + "Smoke and Mirrors (9:50)\n"
+    "05 " + _Z * 3 + "Entrance (3:39)\n06 " + _Z * 3 + "Dripping Sun (8:31)\n"
+    "07 " + _Z * 3 + "Orange Peel (6:45)\n08 " + _Z * 3 + "Yayoi, lyayoi (7:52)\n"
+    "09 " + _Z * 3 + "Kodama (5:20)\n" + _Z * 4 + "10 Streets of Calcutta - " + _Z * 3 + "Gatherings (17:30)\n"
+    "11 Monaka (9:37)\n")
+
+
+def test_a_setlist_wrapped_in_feff_reads_as_eleven_tracks():
+    from app.utils.ingest import parse_info_file
+    r = parse_info_file(None, text=_SETLIST)
+    assert [t["number"] for t in r["tracks"]] == list(range(1, 12))
+    assert [t["title"] for t in r["tracks"]] == [
+        "Green Sugar", "Dancing Blue", "Zo No Senaka", "Smoke and Mirrors", "Entrance", "Dripping Sun",
+        "Orange Peel", "Yayoi, Lyayoi", "Kodama", "Streets of Calcutta - Gatherings", "Monaka"]
+
+
+def test_clean_info_text_strips_every_invisible_character_everywhere():
+    from app.utils.ingest import clean_info_text
+    assert clean_info_text("﻿A​B‌C‍D⁠E﻿") == "ABCDE"
+    assert clean_info_text(None) == ""
+
+
+def test_the_same_setlist_without_the_invisible_characters_reads_the_same():
+    from app.utils.ingest import parse_info_file
+    assert parse_info_file(None, text=_SETLIST)["tracks"] == parse_info_file(None, text=_SETLIST.replace(_Z, ""))["tracks"]
+
+
+def test_a_setlist_heading_starts_the_tracks_but_a_bare_number_line_alone_does_not():
+    from app.utils.ingest import parse_info_file
+    assert len(parse_info_file(None, text="Setlist:\n01 One\n02 Two\n")["tracks"]) == 2
+    assert parse_info_file(None, text="1999 Tour\n")["tracks"] == []
+
+
+@pytest.mark.parametrize("head", ["Equipment:", "Lineage:", "Thanks:", "Notes:", "Source:"])
+def test_a_numbered_list_under_another_heading_is_not_read_as_tracks(head):
+    from app.utils.ingest import parse_info_file
+    assert parse_info_file(None, text=f"{head}\n1 Neumann KM140\n")["tracks"] == []
+
+
+def test_setlist_heading_then_other_heading_then_numbers_is_not_a_setlist_flag_leak():
+    from app.utils.ingest import parse_info_file
+    r = parse_info_file(None, text="Setlist:\n01 One\n02 Two\nEquipment:\n1 Neumann KM140\n")
+    assert [t["title"] for t in r["tracks"]][:2] == ["One", "Two"]
+
+
+# ── parsing is deterministic (the place peeler's cached result used to be edited in place) ──
+
+@pytest.mark.parametrize("text", [
+    'Hot Rize 4.3.90\r\nThe Wheeler Opry House -Aspen,CO\r\n"Farewell Colorado"\r\n\r\n-DISC 1-\r\n1. Sandy talks/Blue Night\r\n2. Keep Your Lamps Trimmed and Burning\r\n',
+    "Miles Davis Sextet\r\nDecember 17, 1970 \r\nCellar Door Club, Washington\r\n\r\n01. So What\r\n02. Freddie Freeloader\r\n",
+    "Manzanita Band\r\n\r\nGreat American Music Hall--San Francisco, CA\r\n10/03/1979\r\n\r\n01. One\r\n02. Two\r\n",
+])
+def test_parsing_the_same_text_three_times_gives_the_same_result(text):
+    from app.utils.ingest import parse_info_file
+    a, b, c = (parse_info_file(None, text=text) for _ in range(3))
+    assert a == b == c

@@ -677,10 +677,26 @@ def build_scan(item):
     }
 
 
+def _resolve_with_library(item, scan):
+    """resolve() as the app runs it: the library it consults (a known act, a known venue) is the
+    one the reader was given for this item, so a leave-one-out tier stays leave-one-out here too."""
+    from app.utils.resolve import resolve
+    lib = library_for(item)
+    if lib is None or getattr(lib, "is_empty", True):
+        return resolve(scan)
+    from app.utils.reader import library as L
+    saved = L.current_library
+    L.current_library = lambda: lib
+    try:
+        return resolve(scan)
+    finally:
+        L.current_library = saved
+
+
 def predict_resolve(item):
     """build_scan() -> resolve() -> verdict(). Fields resolve() lacks yet read as empty."""
-    from app.utils.resolve import resolve, verdict
-    res = resolve(build_scan(item))
+    from app.utils.resolve import verdict
+    res = _resolve_with_library(item, build_scan(item))
     status, reasons = verdict(res)
 
     def val(name):

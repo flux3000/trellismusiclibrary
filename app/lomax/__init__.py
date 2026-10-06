@@ -15,6 +15,7 @@ Lomax, the research assistant. Public API; nothing outside this package reaches 
 """
 import json
 import os
+import re
 from datetime import datetime, timezone
 
 from flask import current_app
@@ -51,15 +52,73 @@ def proposal_dict(p):
             "decided_at": _iso(p.decided_at)}
 
 
+from app.lomax import filters  # noqa: E402
+
+_NOTE_FIELD = re.compile(r"^track\.(\d+)\.note$")
+
+
+def _info_text(run):
+    """The info file text the run's subject carries: what a folder run was sent, or the recording's own."""
+    if run.subject_type == "folder":
+        return (_parsed(run.input_json) or {}).get("info_file_content") or ""
+    if run.subject_type == "recording" and run.subject_id:
+        from app.models import Recording
+        rec = db.session.get(Recording, run.subject_id)
+        return (rec.info_file_content or "") if rec else ""
+    return ""
+
+
+def clean_result(run, result):
+    """The result with every track note the info file does not support removed, and every lineage cut to its chain, on a copy of what was
+    stored (runs made before the filter, or by an older rule, are cleaned as they are served). The stored
+    row is never changed. Only recording-skill results carry track notes."""
+    if not isinstance(result, dict) or run.skill not in ("recording", "resolution"):
+        return result
+    tracks, props = result.get("tracks"), result.get("proposals")
+    if not (tracks or props):
+        return result
+    info = _info_text(run)
+    titles = {t.get("number"): t.get("title") for t in (tracks or []) if isinstance(t, dict)}
+    for t in (_parsed(run.input_json) or {}).get("tracks") or [] if run.subject_type == "folder" else []:
+        if isinstance(t, dict):
+            titles.setdefault(t.get("number"), t.get("title"))
+
+    def keep(number, note):
+        return filters.filter_track_note(note, titles.get(number) or "", info, None, number)
+
+    out = dict(result)
+    if tracks:
+        out["tracks"] = [dict(t, note=keep(t.get("number"), t.get("note"))) if isinstance(t, dict) and t.get("note") else t
+                         for t in tracks]
+    if props:
+        kept = []
+        for p in props:
+            m = _NOTE_FIELD.match(str(p.get("field") or "")) if isinstance(p, dict) else None
+            if m and not keep(int(m.group(1)), p.get("proposed")):
+                continue
+            if isinstance(p, dict) and p.get("field") == "lineage":
+                chain = filters.clean_lineage(p.get("proposed"))
+                if not chain:
+                    continue
+                p = dict(p, proposed=chain, agrees=filters.same_text(chain, p.get("current")))
+            kept.append(p)
+        out["proposals"] = kept
+    return out
+
+
 def run_dict(run):
     result = _parsed(run.result_json)
     skill = "recording" if run.skill == "resolution" else run.skill      # legacy rows still read
+    # A folder run keeps the identity of the show it was made for (audio files plus info file) inside
+    # the data the page sent, so a path reused for different content is not mistaken for the same show.
+    fingerprint = (_parsed(run.input_json) or {}).get("fingerprint") if run.subject_type == "folder" else None
     if result is not None and run.proposals:
         result["proposals"] = [proposal_dict(p) for p in run.proposals]
+    result = clean_result(run, result)
     return {"id": run.id, "skill": skill, "subject_type": run.subject_type, "subject_id": run.subject_id,
             "subject_key": run.subject_key, "level": core.LEVEL_ALIASES.get(run.level, run.level), "question": run.question,
             "status": run.status, "result": result, "usage": _parsed(run.usage_json), "model": run.model,
-            "error": run.error, "created_by": run.created_by,
+            "error": run.error, "created_by": run.created_by, "fingerprint": fingerprint,
             "created_at": _iso(run.created_at), "finished_at": _iso(run.finished_at)}
 
 
@@ -149,7 +208,7 @@ def latest_result(subject_type, subject_id, skills, *, not_mode=None):
     for run in runs:
         result = _parsed(run.result_json)
         if isinstance(result, dict) and (not_mode is None or result.get("mode") != not_mode):
-            return result
+            return clean_result(run, result)
     return None
 
 
@@ -191,9 +250,12 @@ def repoint_folder(folder_path, recording_id):
     return n
 
 
-def adopt_result(recording_id, result, user_id=None, skill="recording"):
+def adopt_result(recording_id, result, user_id=None, skill=None):
     """File a result the page already holds (Add Recording before the recording existed) as a done
     run on the recording. Not committed; the caller's save owns the transaction."""
+    skill = skill or (result or {}).get("skill") or "recording"      # an album result says so itself
+    if skill not in ("recording", "album"):
+        skill = "recording"
     run = LomaxRun(skill=skill, subject_type="recording", subject_id=recording_id, level="research",
                    status="done", model=(result or {}).get("model"), created_by=user_id,
                    result_json=json.dumps(result), usage_json=json.dumps((result or {}).get("usage")),
@@ -231,7 +293,7 @@ def restore(run_id):
 
 
 SKILL_LABELS = {"resolution": "Recording", "recording": "Recording",
-                "artist": "Artist History", "venue": "Venue History"}
+                "artist": "Artist History", "venue": "Venue History", "album": "Album"}
 
 
 def _subject_label(run):

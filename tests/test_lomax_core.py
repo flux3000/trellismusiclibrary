@@ -247,7 +247,9 @@ def test_an_enormous_info_file_is_capped_at_20000_and_says_so(fake, app, rec_id)
 # ── the shared prompt text ───────────────────────────────────────────────────
 
 def test_state_covers_us_canada_and_australia_only():
-    assert "State covers US states, Canadian provinces and Australian states only" in prompts.BASE
+    flat = prompts.BASE.replace("\\\n", " ").replace("\n", " ")
+    assert "State is always the 2-letter abbreviation" in flat
+    assert "Australian states and territories only" in flat
     assert "US only" not in prompts.BASE
 
 

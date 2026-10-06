@@ -532,6 +532,10 @@ const API = (() => {
         return get(`/api/ingest/check-existing?${p.toString()}`)
       },
       health:         (scan)    => post('/api/ingest/health', scan),
+      similarActs:    (artist_name) => get(`/api/ingest/similar-acts?artist_name=${encodeURIComponent(artist_name)}`),
+      genreSuggestion:(artist_name) => get(`/api/ingest/genre-suggestion?artist_name=${encodeURIComponent(artist_name)}`),
+      releaseDetail: (mbid) => get(`/api/ingest/release-detail?mbid=${encodeURIComponent(mbid)}`),
+      releaseCandidates: (artist, title, tracks) => get(`/api/ingest/release-candidates?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&tracks=${encodeURIComponent(tracks || 0)}`),
     },
 
     // ── Naming engine preview (app/utils/file_naming.py) ───────────────────────
@@ -562,6 +566,9 @@ const API = (() => {
       browse: (path) => get(`/api/quality/browse?path=${encodeURIComponent(path || '')}`),
       // Shorten / WAV → FLAC, in place (2026-09-02). Background job: start
       // returns a job_id; poll until the status is not 'running'.
+      // Analyze one folder (Add Recording's Quality pane). Background job: poll analyzeStatus.
+      analyze:       (source_dir) => post('/api/quality/analyze', { source_dir, reanalyze: true }),
+      analyzeStatus: (jobId) => get(`/api/quality/analyze/${jobId}`),
       convert:       (folder_path) => post('/api/quality/convert', { folder_path }),
       convertStatus: (jobId) => get(`/api/quality/convert/${jobId}`),
       convertCancel: (jobId) => post(`/api/quality/convert/${jobId}/cancel`, {}),

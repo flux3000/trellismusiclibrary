@@ -96,7 +96,7 @@ def test_resolution_keeps_confident_field_proposals_flagged_as_challenges(fake, 
     fake.canned["submit_recording_research"] = {"thinking": "t", "proposals": [
         {"field": "date", "proposed": "1980-03-01", "confidence": "medium", "source": "web"},
         {"field": "venue", "proposed": "Sprague Memorial Hall", "confidence": "medium", "source": "atlas"},
-        {"field": "lineage", "proposed": "x", "confidence": "low", "source": "web"}]}
+        {"field": "lineage", "proposed": "DAT > FLAC", "confidence": "low", "source": "web"}]}
     run = run_skill("recording", "recording", seeded_ids["recording_id"])
     got = {p["field"]: p for p in lomax.get_run(run.id)["result"]["proposals"]}
     assert set(got) == {"date", "venue", "lineage"}

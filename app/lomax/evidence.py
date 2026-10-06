@@ -82,6 +82,33 @@ def known_fields_section(current, fields=CURRENT_FIELDS):
     return EvidenceSection("known", ["The recording as filed:"] + lines) if lines else EvidenceSection("known")
 
 
+# ── genre ────────────────────────────────────────────────────────────────────
+
+def genre_names(cap=80):
+    from app.models.genre import Genre
+    return [n for (n,) in db.session.query(Genre.name).order_by(Genre.name).limit(cap)]
+
+
+def act_genre_name(current):
+    """The genre the act already has: the one on the page, else the library's own artist row."""
+    g = str(current.get("genre") or "").strip()
+    if g:
+        return g
+    artist = artist_row(current.get("artist"))
+    return artist.genre.name if artist is not None and artist.genre else ""
+
+
+def canonical_genre(name):
+    """An existing Trellis genre's own spelling for `name` (case and hyphen insensitive), else None."""
+    from app.models.genre import Genre
+    key = lambda t: " ".join(str(t or "").lower().replace("-", " ").split())   # noqa: E731
+    want = key(name)
+    for (n,) in db.session.query(Genre.name):
+        if key(n) == want:
+            return n
+    return None
+
+
 # ── the library ──────────────────────────────────────────────────────────────
 
 def roster_lines(artist, cap=40):

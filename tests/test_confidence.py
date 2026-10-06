@@ -406,3 +406,441 @@ def test_the_warning_is_logged_once(tmp_path, monkeypatch, broken_cal, caplog):
 def test_set_calibration_with_wrong_shape_is_failsafe(broken_cal):
     C.set_calibration([1, 2])
     assert C.assess("artist", {"x": 40.0}, "x").confidence == "tentative"
+
+
+# ── free-form folder name as a second artist source ─────────────────────────
+
+def _src_names(r):
+    return {e["source"] for e in r.artist.evidence}
+
+
+@pytest.mark.parametrize("folder", [
+    "Boxcars July 25, 2014 Bicentennial Park Pavilion Columbus, Ohio",     # prefix
+    "Keith Jarrett - 1976-02-17 Milwaukee; American Quartet",               # prefix, hyphen
+    "1976-02-17 Milwaukee The Boxcars live",                                # contained, leading The
+])
+def test_free_form_folder_naming_the_artist_is_a_folder_source(folder):
+    name = "Keith Jarrett" if "Jarrett" in folder else "Boxcars"
+    r = resolve(_artist_scan(info=name, folder_name=folder))
+    assert _src_names(r) == {"info", "folder"}
+
+
+def test_folder_match_is_on_word_boundaries():
+    r = resolve(_artist_scan(info="Phish", folder_name="Phishing Expedition 1997-11-22"))
+    bare = resolve(_artist_scan(info="Phish"))
+    assert r.artist.logit == bare.artist.logit                  # not corroborated: the lead is only shown
+    assert "agreed by" not in " ".join(e["notes"] for e in r.artist.evidence)
+
+
+@pytest.mark.parametrize("info", ["Tim", "Yes", "UB4", "X"])
+def test_short_names_never_count(info):
+    r = resolve(_artist_scan(info=info, folder_name=f"{info} 1997-11-22 Hampton Coliseum"))
+    assert _src_names(r) == {"info"}
+
+
+def test_a_mismatched_free_form_folder_is_neutral_and_does_not_agree():
+    r = resolve(_artist_scan(info="S U R V I V O R S' S U I T E Concerts",
+                             folder_name="Keith Jarrett - 1976-02-17 Milwaukee; American Quartet"))
+    bare = resolve(_artist_scan(info="S U R V I V O R S' S U I T E Concerts"))
+    assert r.artist.logit == bare.artist.logit                   # shown in the popover, scores nothing
+    assert "agreed by" not in " ".join(e["notes"] for e in r.artist.evidence)
+    assert not r.artist.conflict
+
+
+def test_a_date_only_folder_is_neutral():
+    r = resolve(_artist_scan(info="Phish", folder_name="1997-11-22"))
+    assert _src_names(r) == {"info"}
+    assert not r.artist.conflict
+
+
+def test_free_form_agreement_adds_the_bonus_not_a_score():
+    base = resolve(_artist_scan(info="Phish", folder_name="1997-11-22"))
+    agree = resolve(_artist_scan(info="Phish", folder_name="Phish 1997-11-22 Hampton"))
+    assert agree.artist.logit > base.artist.logit
+    assert agree.artist.margin > base.artist.margin
+
+
+# ── the folder lead: strong agreement and the billing extension ──────────────
+
+@pytest.mark.parametrize("name,lead", [
+    ("Ella Fitzgerald & Joe Pass - 1984-05-03 - Teatro Tenda Lampugnano - Milano, Italy", "Ella Fitzgerald & Joe Pass"),
+    ("Bela Fleck & Friends - 2004-04-30 - Merlefest Cabin Stage - Wilkesboro, NC (XM A)", "Bela Fleck & Friends"),
+    ("Bill Frisell, Jerry Douglas, Victor Krauss - 1997-10-25 - St. Ann's Church", "Bill Frisell, Jerry Douglas, Victor Krauss"),
+    ("Darol Anger's Fiddle Congress and Melee - 2001-04-01 - Freight & Salvage", "Darol Anger's Fiddle Congress and Melee"),
+    ("J.D. Crowe and the New South - 1999-02-27 - Wintergrass Festival", "J.D. Crowe and the New South"),
+    ("Mark O'Connor, Edgar Meyer, Yo Yo Ma - 1996-11-06 - Bottom Line", "Mark O'Connor, Edgar Meyer, Yo Yo Ma"),
+    ("Merlefest Midnight Jam - 1991-04-28 - Walker Center", "Merlefest Midnight Jam"),
+    ("Miles Davis & John Coltrane - 1960-04-09 - Green Dolphin Street", "Miles Davis & John Coltrane"),
+    ("Pat Metheny Secret Story; 1992-11-04; Landmark Theatre; Syracuse, NY rm", "Pat Metheny Secret Story"),
+    ("Trio! (Bela Fleck, Stanley Clarke, Jean-Luc Ponty) - 2005-06-21", "Trio!"),
+    ("Keith Jarrett Quartet - 1976-09-18 - Unknown Venue - Frankfurt, Germany (FM)", "Keith Jarrett Quartet"),
+    ("Fela Kuti - 1986-11-15 - Olympic Auditorium - Los Angeles, CA", "Fela Kuti"),
+    ("Boxcars July 25, 2014 Bicentennial Park Pavilion Columbus, Ohio", "Boxcars"),
+    ("GoGo Penguin - Jazz Middelheim - Antwerp 2025-06-09", "GoGo Penguin"),
+    ("Herbie Hancock 1984-09-10 Blossom Music Center", "Herbie Hancock"),
+    ("Keith Jarrett - 1976-02-17 Milwaukee; American Quartet", "Keith Jarrett"),
+    ("Miles Davis Hempstead NY 1975 March 22 remaster", "Miles Davis Hempstead NY"),
+    ("oscar peterson 1970-11-19 cologne", "oscar peterson"),
+    ("Shakti; 1976-06-28; Wollman Rink Central Park; New York, N.Y", "Shakti"),
+    ("1976-02-17", None),
+    ("", None),
+])
+def test_folder_lead(name, lead):
+    from app.utils.reader.folder import folder_lead
+    assert folder_lead(name) == lead
+
+
+def test_a_lead_equal_to_the_reading_is_a_full_source_a_contained_name_only_the_bonus():
+    strong = resolve(_artist_scan(info="Boxcars", folder_name="Boxcars July 25, 2014 Bicentennial Park Pavilion"))
+    weak = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25 Bicentennial Park Boxcars"))
+    base = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25"))
+    assert strong.artist.logit - base.artist.logit >= C.FOLDER_TEMPLATE_SCORE["artist"]
+    assert 0 < weak.artist.logit - base.artist.logit < C.FOLDER_TEMPLATE_SCORE["artist"]
+
+
+def test_a_longer_lead_is_not_a_strong_agreement(monkeypatch):
+    import app.utils.resolve as R
+    monkeypatch.setattr(R, "FOLDER_LEAD_EXTENDS", False)
+    r = resolve(_artist_scan(info="Pat Metheny", folder_name="Pat Metheny Group 1990-06-23 Mellon Hall"))
+    assert r.artist.value == "Pat Metheny"
+    assert r.artist.p is not None and r.artist.confidence != "confident"
+
+
+def test_the_lead_must_be_the_whole_reading_not_a_city():
+    r = resolve(_artist_scan(info="Los Angeles", folder_name="Fela Kuti - 1986-11-15 - Olympic Auditorium - Los Angeles, CA"))
+    assert "folder" not in {e["source"] for e in r.artist.evidence} or r.artist.confidence != "confident"
+
+
+@pytest.mark.parametrize("info,folder,expect", [
+    ("Ella Fitzgerald", "Ella Fitzgerald & Joe Pass - 1984-05-03 - Teatro Tenda", "Ella Fitzgerald & Joe Pass"),
+    ("Pat Metheny", "Pat Metheny, Herbie Hancock, Dave Holland - 1990-06-23 - Mellon Hall", "Pat Metheny, Herbie Hancock, Dave Holland"),
+    ("Keith Jarrett", "Keith Jarrett Quartet - 1976-09-18 - Frankfurt", "Keith Jarrett Quartet"),
+    ("J.D. Crowe", "J.D. Crowe and the New South - 1999-02-27 - Wintergrass", "J.D. Crowe And The New South"),
+])
+def test_a_well_formed_billing_in_the_folder_is_proposed_but_stays_tentative(info, folder, expect):
+    r = resolve(_artist_scan(info=info, folder_name=folder))
+    assert r.artist.value.lower() == expect.lower()
+    assert r.artist.confidence == "tentative"
+
+
+@pytest.mark.parametrize("info,folder", [
+    ("Pat Metheny", "Pat Metheny Secret Story - 1992-11-04 - Landmark Theatre"),
+    ("Keith Jarrett", "Keith Jarrett - 1976-02-17 Milwaukee; American Quartet"),
+    ("Phish", "Phish Hampton 1997-11-22"),
+])
+def test_a_lead_that_continues_as_something_else_is_not_proposed(info, folder):
+    assert resolve(_artist_scan(info=info, folder_name=folder)).artist.value == info
+
+
+def test_the_extension_switch_turns_the_proposal_off(monkeypatch):
+    import app.utils.resolve as R
+    monkeypatch.setattr(R, "FOLDER_LEAD_EXTENDS", False)
+    r = resolve(_artist_scan(info="Ella Fitzgerald", folder_name="Ella Fitzgerald & Joe Pass - 1984-05-03 - Teatro"))
+    assert r.artist.value == "Ella Fitzgerald"
+
+
+# ── reviewer fixes: which leads may agree, which extensions are proposed ─────
+
+def _bonus_only(info, folder):
+    base = resolve(_artist_scan(info=info, folder_name="1997-11-22"))
+    r = resolve(_artist_scan(info=info, folder_name=folder))
+    return r.artist.logit - base.artist.logit
+
+
+@pytest.mark.parametrize("info,folder", [
+    ("Various Artists", "Various Artists - 1997-11-22 - Hampton"),
+    ("Soundcheck", "Soundcheck 1997-11-22 Hampton Coliseum"),
+    ("Concert", "Concert - 1997-11-22"),
+    ("Master", "Master 1997-11-22"),
+    ("Bootleg", "Bootleg - 1997-11-22"),
+    ("SBD", "SBD 1997-11-22"),
+    ("Newport Jazz Festival", "Newport Jazz Festival - 1997-08-10 - Fort Adams"),
+])
+def test_a_generic_or_festival_lead_earns_nothing(info, folder):
+    assert _bonus_only(info, folder) == 0
+
+
+@pytest.mark.parametrize("info,folder", [
+    ("ronnie", "ronnie2015-05-01.picklemix"),
+    ("Alligators", "Alligators2023-03-17"),
+    ("cracker", "cracker2017-12-29"),
+])
+def test_a_shortcode_glued_to_digits_never_gets_the_full_score(info, folder):
+    assert _bonus_only(info, folder) < C.FOLDER_TEMPLATE_SCORE["artist"]
+
+
+def test_a_known_venue_lead_earns_nothing():
+    from app.utils.reader.library import LibraryIndex
+    from app.utils.resolve import _free_form_folder_source, _Groups
+    lib = LibraryIndex.from_dicts(venues=["Hampton Coliseum"])
+    g = _Groups("artist")
+    _free_form_folder_source(g, "Hampton Coliseum", "Hampton Coliseum", "Hampton Coliseum - 1997-11-22", library=lib, atlas=None)
+    assert g.d == {}
+
+
+def test_an_atlas_place_lead_earns_nothing():
+    from types import SimpleNamespace
+    from app.utils.resolve import _free_form_folder_source, _Groups
+
+    class A:
+        def venue(self, *a, **k): return []
+        def event(self, *a, **k): return []
+        def area(self, text, **k): return [SimpleNamespace()] if text == "Boston" else []
+    g = _Groups("artist")
+    _free_form_folder_source(g, "Boston", "Boston", "Boston - 1997-11-22", library=None, atlas=A())
+    assert g.d == {}
+
+
+@pytest.mark.parametrize("folder", [
+    "Miles Davis, Chicago 1975-02-01",
+    "Miles Davis and Chicago 1975-02-01",
+    "Miles Davis, 1975-02-01",
+    "Miles Davis & Newport Jazz Festival 1975-07-04",
+    "Miles Davis, Chicago Theatre - 1975-02-01",
+])
+def test_an_extension_that_is_not_a_person_or_act_is_not_proposed(folder):
+    assert resolve(_artist_scan(info="Miles Davis", folder_name=folder)).artist.value == "Miles Davis"
+
+
+def test_an_extension_naming_a_known_place_is_not_proposed():
+    from types import SimpleNamespace
+    from app.utils.resolve import _free_form_folder_source, _Groups
+
+    class A:
+        def venue(self, *a, **k): return []
+        def event(self, *a, **k): return []
+        def area(self, text, **k): return [SimpleNamespace()] if text == "New York" else []
+    out = _free_form_folder_source(_Groups("artist"), "Miles Davis", "Miles Davis",
+                                   "Miles Davis, New York - 1975-02-01", library=None, atlas=A())
+    assert out is None
+
+
+# ── The folder lead as a variant of the reading, and as display evidence ────────────
+
+@pytest.mark.parametrize("info,folder,shown", [
+    ("Miles Davis Septet", "Miles Davis - 1971-10-26 - Brussels, Belgium", "Miles Davis"),
+    ("Oscar Peterson Trio", "oscar peterson 1970-11-19 cologne", "Oscar Peterson"),
+    ("Count Basie Big Band", "Count Basie 1970-05-01 Paris", "Count Basie"),
+])
+def test_a_lead_that_is_the_reading_without_its_group_word_agrees(info, folder, shown):
+    from app.utils.sources_plain import with_sources_plain
+    plain = resolve(_artist_scan(info=info, folder_name=folder))
+    bare = resolve(_artist_scan(info=info))
+    assert plain.artist.value == info and plain.artist.source == "info"      # the reading still wins
+    assert plain.artist.logit > bare.artist.logit
+    assert plain.artist.conflict is False
+    assert with_sources_plain(plain.to_dict())["sources_plain"]["artist"]["folder"] == shown
+
+
+def test_a_variant_lead_still_obeys_the_guards():
+    # a generic word and a festival never agree, however the reading is spelled
+    for info, folder in [("Live Band", "Live - 1997-11-22 - Somewhere"),
+                         ("Newport Folk Festival Band", "Newport Folk Festival - 1965-07-25")]:
+        r = resolve(_artist_scan(info=info, folder_name=folder))
+        assert r.artist.logit == resolve(_artist_scan(info=info)).artist.logit
+    # a shortcode glued to the date gets no more than the agreement bonus
+    glued = resolve(_artist_scan(info="Ronnie Band", folder_name="ronnie2015-05-01"))
+    assert glued.artist.logit <= resolve(_artist_scan(info="Ronnie Band")).artist.logit + C.AGREE_BONUS["artist"] + 0.01
+
+
+def test_a_disagreeing_act_lead_is_shown_and_scores_nothing():
+    from app.utils.sources_plain import with_sources_plain
+    bare = resolve(_artist_scan(info="Phish"))
+    r = resolve(_artist_scan(info="Phish", folder_name="Grateful Dead - 1977-05-08 - Barton Hall"))
+    assert r.artist.value == "Phish"
+    assert r.artist.logit == bare.artist.logit and r.artist.margin == bare.artist.margin
+    assert r.artist.conflict is False and r.artist.confidence == bare.artist.confidence
+    assert with_sources_plain(r.to_dict())["sources_plain"]["artist"]["folder"] == "Grateful Dead"
+    row = [e for e in r.artist.evidence if e["source"] == "folder"]
+    assert row and row[0]["text"] == "Grateful Dead" and not row[0]["score"]
+
+
+@pytest.mark.parametrize("folder", [
+    "Live - 1997-11-22 - Hampton",
+    "Newport Folk Festival - 1965-07-25",
+    "ronnie2015-05-01",
+])
+def test_a_lead_that_is_not_an_act_shows_nothing(folder):
+    from app.utils.sources_plain import with_sources_plain
+    r = resolve(_artist_scan(info="Phish", folder_name=folder))
+    assert with_sources_plain(r.to_dict())["sources_plain"]["artist"]["folder"] is None
+    assert not [e for e in r.artist.evidence if e["source"] == "folder"]
+
+
+# ── Cross-checks between the sources (2026-10-06) ───────────────────────────────────
+
+class _ActAtlas:
+    """An Atlas that knows some acts (exactly) and, optionally, which shows an act played."""
+
+    def __init__(self, acts=(), shows=None, place_keys=None):
+        from types import SimpleNamespace
+        self._ns = SimpleNamespace
+        self.acts = {x.lower() for x in acts}
+        self.shows = shows or {}
+        self._pk = place_keys or {}
+
+    def artist(self, text, fuzzy=True, limit=5, **kw):
+        if str(text).lower() in self.acts:
+            return [self._ns(name=text, how="exact", extra={"popularity": 50})]
+        return []
+
+    def venue(self, *a, **k): return []
+    def event(self, *a, **k): return []
+    def area(self, *a, **k): return []
+    def musician(self, *a, **k): return []
+
+    def event_place(self, artist, date):
+        return list(self.shows.get((str(artist).lower(), tuple(date)), []))
+
+    def place_keys(self, pid):
+        return list(self._pk.get(pid, []))
+
+
+@pytest.fixture
+def acts(monkeypatch):
+    """Install an Atlas (and an empty library) for resolve()'s lookups; returns a setter."""
+    from app.utils.reader.library import LibraryIndex
+
+    def install(atlas):
+        monkeypatch.setattr("app.atlas.lookup.current_atlas", lambda: atlas)
+        monkeypatch.setattr("app.utils.reader.library.current_library", lambda: LibraryIndex.empty())
+        return atlas
+    install(_ActAtlas())
+    return install
+
+
+def _scan_with(info=None, folder_name="", tags=None, date=None, venue=None, city=None):
+    s = _artist_scan(info=info, tags=tags, folder_name=folder_name)
+    if tags:
+        s["suggestions"]["from_tags"]["tracks"] = [
+            {"index": i, "filename": f"{i:02d}.flac", "raw": {"artist": tags}} for i in (1, 2)]
+    fi = s["suggestions"]["from_info_file"]
+    if date:
+        fi.update({"year": date[0], "month": date[1], "day": date[2]})
+    if venue:
+        fi["venue"] = venue
+    if city:
+        fi["city"] = city
+    return s
+
+
+KJ_FOLDER = "Keith Jarrett - 1976-02-17 Milwaukee; American Quartet"
+KJ_INFO = "SURVIVORS' SUITE Concerts"
+
+
+def test_a_known_act_in_the_folder_beats_a_reading_that_matches_no_act(acts):
+    acts(_ActAtlas(acts=["Keith Jarrett"]))
+    r = resolve(_scan_with(info=KJ_INFO, folder_name=KJ_FOLDER))
+    assert r.artist.value == "Keith Jarrett" and r.artist.source == "folder"
+    assert r.artist.confidence == "tentative"
+    assert r.artist.candidates["info"] == KJ_INFO and r.artist.candidates["folder"] == "Keith Jarrett"
+    assert "the folder names a known act" in " ".join(e["notes"] for e in r.artist.evidence)
+
+
+def test_the_folder_does_not_win_when_both_readings_are_known_acts_or_neither_is(acts):
+    acts(_ActAtlas(acts=["Keith Jarrett", "Phish"]))
+    both = resolve(_scan_with(info="Phish", folder_name=KJ_FOLDER))
+    assert both.artist.value == "Phish" and both.artist.source == "info"
+    acts(_ActAtlas())
+    neither = resolve(_scan_with(info=KJ_INFO, folder_name=KJ_FOLDER))
+    assert neither.artist.value == KJ_INFO and neither.artist.source == "info"
+
+
+def test_a_lead_that_is_not_an_act_does_not_win_even_when_the_atlas_knows_the_name(acts):
+    acts(_ActAtlas(acts=["Live"]))                       # a generic word is never a lead
+    r = resolve(_scan_with(info=KJ_INFO, folder_name="Live - 1976-02-17 Milwaukee"))
+    assert r.artist.value == KJ_INFO
+
+
+def test_the_folder_act_does_not_override_tags(acts):
+    acts(_ActAtlas(acts=["Keith Jarrett"]))
+    r = resolve(_scan_with(info=KJ_INFO, tags="Dewey Redman", folder_name=KJ_FOLDER))
+    assert r.artist.value == "Dewey Redman" and r.artist.source == "tags"
+
+
+def test_a_billing_that_holds_the_lead_after_other_names_is_kept(acts):
+    acts(_ActAtlas(acts=["Warne Marsh"]))
+    r = resolve(_scan_with(info="Bill Evans Trio With Warne Marsh",
+                           folder_name="Warne Marsh - Bill Evans trio - San Francisco 1977"))
+    assert r.artist.value == "Bill Evans Trio With Warne Marsh"
+
+
+# the Atlas lists the act on this very day
+
+SHOW = {"place_id": 7, "place": "Allegany County Fairgrounds", "city": "Cumberland", "event": None,
+        "kind": None, "date": "2003-06-15", "act": "Del McCoury Band", "exact": True}
+
+
+def test_the_show_index_is_an_independent_artist_source(acts):
+    acts(_ActAtlas(shows={("del mccoury band", (2003, 6, 15)): [SHOW]}))
+    on = resolve(_scan_with(info="Del McCoury Band", date=(2003, 6, 15)))
+    off = resolve(_scan_with(info="Del McCoury Band", date=(2003, 6, 16)))
+    assert on.artist.logit == off.artist.logit + C.ATLAS_SHOW_SCORE["artist"] + C.AGREE_BONUS["artist"]
+    rows = [e for e in on.artist.evidence if e["extractor"] == "show index"]
+    assert rows and rows[0]["source"] == "atlas"
+    assert "agreed by atlas, info" in " ".join(e["notes"] for e in on.artist.evidence)
+    assert not [e for e in off.artist.evidence if e["extractor"] == "show index"]
+
+
+def test_the_show_index_needs_an_exact_day_and_the_act_on_it(acts):
+    acts(_ActAtlas(shows={("del mccoury band", (2003, 6, 15)): [SHOW]}))
+    for date, info in [((2003, 6, None), "Del McCoury Band"), ((2003, 6, 15), "Doc Watson")]:
+        r = resolve(_scan_with(info=info, date=date))
+        assert not [e for e in r.artist.evidence if e["extractor"] == "show index"]
+
+
+def test_the_show_index_corroborates_the_venue_and_city_where_the_place_matches(acts):
+    acts(_ActAtlas(shows={("del mccoury band", (2003, 6, 15)): [SHOW]},
+                   place_keys={7: ["allegany county fairgrounds"]}))
+    r = resolve(_scan_with(info="Del McCoury Band", date=(2003, 6, 15), venue="Allegany County Fairgrounds",
+                           city="Cumberland"))
+    assert [e for e in r.venue.evidence if e["extractor"] == "show index"]
+    assert [e for e in r.city.evidence if e["extractor"] == "show index"]
+    other = resolve(_scan_with(info="Del McCoury Band", date=(2003, 6, 15), venue="Some Other Hall", city="Elsewhere"))
+    assert not [e for e in other.venue.evidence if e["extractor"] == "show index"]
+    assert not [e for e in other.city.evidence if e["extractor"] == "show index"]
+
+
+def test_the_show_index_alone_can_make_an_artist_confident(acts):
+    acts(_ActAtlas(shows={("del mccoury band", (2003, 6, 15)): [SHOW]}))
+    from app.utils.reader import confidence as conf
+    scan = _scan_with(info="Del McCoury Band", date=(2003, 6, 15))
+    scan["suggestions"]["from_info_file"]["evidence"] = {
+        "fields": {"artist": {"text": "Del McCoury Band", "line": 0, "score": 9.0, "role": "ARTIST", "via": ""}}}
+    assert resolve(scan).artist.confidence == "confident"
+    assert conf.ATLAS_SHOW_SCORE["artist"] > 0
+
+
+# tags, folder lead and info text: two that agree win
+
+def test_the_info_text_and_the_folder_outvote_the_tags(acts):
+    r = resolve(_scan_with(info="Grateful Dead", tags="Phil Lesh", folder_name="Grateful Dead - 1977-05-08 - Barton Hall"))
+    assert r.artist.value == "Grateful Dead" and r.artist.source == "info"
+    assert r.artist.conflict is True                      # the tags still disagree: a person looks
+
+
+def test_the_folder_and_a_group_word_variant_of_the_info_outvote_the_tags(acts):
+    r = resolve(_scan_with(info="Miles Davis Septet", tags="Wayne Shorter", folder_name="Miles Davis - 1971-10-26"))
+    assert r.artist.value == "Miles Davis Septet"
+
+
+def test_three_different_readings_keep_the_tags(acts):
+    r = resolve(_scan_with(info="Grateful Dead", tags="Phil Lesh", folder_name="Jerry Garcia Band - 1977-05-08 - Barton Hall"))
+    assert r.artist.value == "Phil Lesh" and r.artist.source == "tags" and r.artist.conflict is True
+
+
+def test_tags_and_info_agreeing_beat_a_folder_that_differs(acts):
+    r = resolve(_scan_with(info="Grateful Dead", tags="Grateful Dead", folder_name="Jerry Garcia Band - 1977-05-08 - Barton Hall"))
+    assert r.artist.value == "Grateful Dead" and r.artist.conflict is False
+    assert r.artist.candidates["folder"] == "Jerry Garcia Band"
+
+
+# a known act on a personnel line is not the billing
+
+def test_a_known_act_on_a_personnel_line_does_not_take_the_artist(acts):
+    from app.utils.ingest import parse_info_file
+    atlas = _ActAtlas(acts=["Keith Jarrett"])
+    text = ("Scrambled Greg\nMitchell Auditorium\nMilwaukee, Wisconsin\nFebruary 17, 1976\n\n"
+            "Keith Jarrett - piano\nDewey Redman - tenor sax\nCharlie Haden - bass\nPaul Motian - drums\n")
+    r = parse_info_file(None, text=text, atlas=atlas)
+    assert r["artist"] == "Scrambled Greg"

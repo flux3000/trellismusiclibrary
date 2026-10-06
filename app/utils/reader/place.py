@@ -29,6 +29,7 @@ Output conventions (unchanged from ingest.py):
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from dataclasses import replace as _dc_replace
 from functools import lru_cache
 
 import geonamescache as _geonamescache
@@ -531,8 +532,10 @@ def _peel_clause(segs, work, city_only):
 
 
 def peel(text, city_only=True):
-    """Cached; the returned PlaceResult is shared, treat it as read-only."""
-    return _peel_cached(text or "", bool(city_only))
+    """Cached; the caller gets its own copy of the PlaceResult (features._trim_place_span edits
+    .city, and an edit on the cached object made the next parse of the same text read differently)."""
+    r = _peel_cached(text or "", bool(city_only))
+    return _dc_replace(r, others=list(r.others), evidence=list(r.evidence))
 
 
 @lru_cache(maxsize=4096)

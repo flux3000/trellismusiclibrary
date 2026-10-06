@@ -50,7 +50,7 @@ from app.models.recording import Recording, RecordingFingerprint
 from app.models.quality import QualityAnalysis
 from app.models.user import User
 from app.utils.ingest import resolve_shows_in_dir, is_show_root
-from app.utils.health import compute_health
+from app.utils.completeness import completeness_band
 from app.utils.checksums import parse_checksum_file
 from app.utils.format import format_partial_date
 from app.utils.resolve import DEDUP_FP_TYPES
@@ -585,21 +585,11 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
                 and not in_library):
             quality = _score_before_ingest(folder_abs, base)
 
-        # meta_band (2026-09-27 unified ingest queue table): the same
-        # High/Medium/Low read compute_health() gives triage, computed
-        # here at extraction time -- cheaper than a per-row recompute at
-        # serialization, and needs no schema change (it rides inside the
-        # existing `meta` JSON blob rather than a new column). A row
-        # that needs review is always "red" regardless of the computed
-        # band, same rule the shared table applies everywhere else.
-        meta_band = "red"
-        if resolved is not None and resolved.scan:
-            try:
-                meta_band = compute_health(resolved.scan)["band"]
-            except Exception:
-                meta_band = "red"
-        if status == "review":
-            meta_band = "red"
+        # meta_band (2026-09-27 unified ingest queue table, 2026-10-05 completeness): the
+        # High/Medium/Low band of how complete the resolver's reading is (app/utils/
+        # completeness.py), computed here at extraction time and carried inside the existing
+        # `meta` JSON blob (no schema change). It no longer turns Low for a row in review.
+        meta_band = completeness_band(resolved) if resolved is not None else None   # unread: no band
 
         date = (resolved.date.value if resolved else None) or {}
         track_count, track_titles = _scan_tracks(resolved.scan if resolved else None)
@@ -620,6 +610,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "lineage":   resolved.lineage.value if resolved else None,
             "title":     resolved.album.value if resolved else None,
             "meta_band": meta_band,
+            "meta_band_v": 2,        # completeness band (schema_upgrades.ensure_bulk_meta_band skips these)
             "listening_quality": quality,
             "track_count":  track_count,
             "tracks":       track_titles,

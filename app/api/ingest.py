@@ -146,6 +146,87 @@ def check_existing():
     return jsonify({"artist_found": True, "performances": performances})
 
 
+@bp.route("/similar-acts", methods=["GET"])
+@login_required
+def similar_acts():
+    """
+    GET /api/ingest/similar-acts?artist_name=...
+    Every act already in the library that plausibly IS the named act (exact, same words once
+    noise words go, or a close spelling): the same resolve_similar_artist_ids() the duplicate
+    check uses. The Add Recording form asks before it pre-fills Members for a brand-new act.
+    """
+    name = (request.args.get("artist_name") or "").strip()
+    ids = resolve_similar_artist_ids(name) if name else []
+    rows = db.session.query(Artist.id, Artist.name).filter(Artist.id.in_(ids)).all() if ids else []
+    return jsonify({"acts": [{"id": i, "name": n} for i, n in rows]})
+
+
+@bp.route("/release-candidates", methods=["GET"])
+@login_required
+def release_candidates():
+    """
+    GET /api/ingest/release-candidates?artist=...&title=...&tracks=N
+    MusicBrainz release candidates for an album that is not saved yet (Add Recording).
+    Searches only when asked and never picks: the person chooses one from the list.
+    Writes nothing.
+    """
+    from app.utils import musicbrainz as mb
+    artist = (request.args.get("artist") or "").strip()
+    title = (request.args.get("title") or "").strip()
+    if not artist or not title:
+        return jsonify({"candidates": []})
+    if not mb.enabled():
+        return jsonify({"error": "MusicBrainz lookups are disabled"}), 503
+    try:
+        tracks = int(request.args.get("tracks") or 0) or None
+    except ValueError:
+        tracks = None
+    mb.reset_breaker()
+    candidates = mb.search_release(artist, title)
+    _status, _best, ranked = mb.classify_release(candidates, tracks)
+    return jsonify({"candidates": ranked})
+
+
+@bp.route("/release-detail", methods=["GET"])
+@login_required
+def release_detail():
+    """
+    GET /api/ingest/release-detail?mbid=...
+    One MusicBrainz release in full (title, label, catalog number, country, date, track titles),
+    for the Add Recording form to fill its empty fields from the release the person picked.
+    Writes nothing.
+    """
+    from app.utils import musicbrainz as mb
+    mbid = (request.args.get("mbid") or "").strip()
+    if not mbid:
+        return jsonify({"error": "mbid is required"}), 400
+    if not mb.enabled():
+        return jsonify({"error": "MusicBrainz lookups are disabled"}), 503
+    mb.reset_breaker()
+    return jsonify({"release": mb.lookup_release(mbid)})
+
+
+@bp.route("/genre-suggestion", methods=["GET"])
+@login_required
+def genre_suggestion():
+    """
+    GET /api/ingest/genre-suggestion?artist_name=...
+    The genre MusicBrainz gives an act that is new, or has no genre, so the Resolver table can
+    offer it in the attended flows (Add Recording, import review). An online lookup outside the
+    offline resolver, cached, and quietly empty when offline. Writes nothing: the person accepts it
+    into the form, and Confirm applies it through the usual genre path (fill-if-empty is the form's
+    own rule: an act that already has a genre is never offered one).
+    """
+    from app.utils import musicbrainz as mb
+    name = (request.args.get("artist_name") or "").strip()
+    if not name:
+        return jsonify({"genre": None})
+    artist = db.session.query(Artist).filter(func.lower(Artist.name) == name.lower()).first()
+    if artist is not None and artist.genre_id is not None:
+        return jsonify({"genre": None, "has_genre": True})
+    return jsonify({"genre": mb.suggest_genre(name, getattr(artist, "mbid", None) if artist else None)})
+
+
 @bp.route("/save-info-file", methods=["POST"])
 @login_required
 def save_info_file():
@@ -834,6 +915,11 @@ def _apply_artist_genre(artist, data):
         Exactly the None-vs-[] trap the members/guests payload documents below,
         and the reason there is no `else: artist.genre_id = None` here.
     """
+    # Fill-if-empty, unless a person picked this genre by hand in the form
+    # (genre_source == "hand"). Suggestions (MusicBrainz, Lomax), unattended
+    # imports and a missing flag only ever fill an empty genre.
+    if artist.genre_id is not None and data.get("genre_source") != "hand":
+        return
     genre_id_in   = data.get("genre_id")
     genre_name_in = (data.get("genre_name") or "").strip()
 
@@ -1814,6 +1900,25 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     promote_to_recording(source_folder, rec.id, commit=False)
 
     db.session.commit()
+
+    # A release the person picked on the Add Recording form (never auto-picked):
+    # linked with status 'linked', fill-only-null, so the background MusicBrainz
+    # follow-up (which only takes status IS NULL) leaves it alone. A lookup that
+    # fails leaves the status untouched and never fails the save.
+    mb_release_id = (data.get("mb_release_id") or "").strip() if isinstance(data.get("mb_release_id"), str) else ""
+    if rec_kind == "studio" and mb_release_id:
+        try:
+            from app.utils import musicbrainz as _mbr
+            _mbr.reset_breaker()   # a human pick: background failures must not silently drop it
+            details = _mbr.lookup_release(mb_release_id)
+            if details:
+                _mbr.apply_to_recording(rec, details, status="linked")
+                _mbr.enrich_from_release(rec)
+                db.session.commit()
+        except Exception:  # noqa: BLE001 -- the recording is saved either way
+            db.session.rollback()
+            import traceback as _tb6
+            _tb6.print_exc()
 
     checksum_mismatches = sum(1 for t in created_tracks if t.checksum_status == "mismatch")
 

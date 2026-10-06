@@ -9,6 +9,7 @@ Handles:
   - Writing the canonical folder name
 """
 
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,8 @@ from mutagen import MutagenError
 from mutagen.mp3 import MP3
 from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX
 import geonamescache as _geonamescache
+
+log = logging.getLogger(__name__)
 
 from app.utils.format import format_partial_date
 from app.utils.reader.dates import best_show_date as _best_show_date, date_evidence as _date_evidence
@@ -2223,6 +2226,20 @@ def _is_track_noise(title):
     return False
 
 
+_TRACKLIST_HEAD_RE = re.compile(r"^(?:set\s*list|track\s*list|tracks|songs|playlist)\s*:?\s*$", re.I)
+_BARE_HEADING_RE = re.compile(r"^[A-Za-z][A-Za-z /&-]{0,28}:\s*$")
+_INVISIBLE = dict.fromkeys(map(ord, "\ufeff\u200b\u200c\u200d\u2060"))
+
+
+# "S U R V I V O R S' S U I T E": capital letters set one apart, four or more. A run is one
+# word, or several when a gap is two spaces or more, or an apostrophe ends a letter.
+def clean_info_text(raw):
+    """Info text without the invisible characters editors and web pages leave inside it:
+    U+FEFF (byte-order mark / zero-width no-break space), U+200B, U+200C, U+200D and U+2060,
+    anywhere in the text, not just at the start."""
+    return (raw or "").translate(_INVISIBLE)
+
+
 def _read_text_auto(file_path):
     """
     Read a text file and return a clean unicode string regardless of encoding.
@@ -2303,6 +2320,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
         except OSError:
             return {"raw_content": "", "tracks": []}
 
+    raw = clean_info_text(raw)
     library = library or LibraryIndex.empty()
     lines = raw.splitlines()
 
@@ -2315,6 +2333,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
     tracks_ended = False    # set once a trailing Notes/Comments/etc. heading is seen
     disc_offset  = 0        # running offset so multi-disc restarts (1, 2, 3... 1, 2, 3...)
     last_raw_num = None     # come out sequential instead of colliding by number
+    after_heading = False   # a "Setlist:" heading has been seen
 
     for line_idx, line in enumerate(lines):
         stripped = line.strip()
@@ -2348,7 +2367,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             # titles (Ryan, 2026-08-30).
             raw_title, songwriter = _extract_trailing_songwriter(raw_title)
             title = title_case(raw_title)
-            if not _is_track_noise(title) and (in_tracks or len(header_lines) >= 2):
+            if not _is_track_noise(title) and (in_tracks or len(header_lines) >= 2 or after_heading):
                 in_tracks = True
                 # Multi-disc listings restart numbering at 1 each disc — e.g.
                 # "*** Disc Two ***" followed by "1. Song". Detect the restart
@@ -2364,6 +2383,10 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
                 continue
 
         if not in_tracks:
+            if _TRACKLIST_HEAD_RE.match(stripped):
+                after_heading = True          # "Setlist:" -- numbered lines below it are tracks
+            elif _BARE_HEADING_RE.match(stripped):
+                after_heading = False         # "Equipment:", "Thanks:" ... a numbered list there is not tracks
             header_lines.append(stripped)
             header_idx.append(line_idx)
 
@@ -3166,6 +3189,7 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     # (source, destination) for every file actually transferred, so a cancel can
     # be undone precisely.
     moved = []
+    left_behind = []     # (rel path, error) for non-audio files the OS refused to move
 
     for p in files:
         # Poll BETWEEN files, never mid-file: a partially written file is the one
@@ -3176,18 +3200,49 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
 
         rel  = str(p.relative_to(src)).replace(os.sep, "/")
         size = p.stat().st_size
-        if p.suffix.lower() in AUDIO_EXTENSIONS:
+        is_audio = p.suffix.lower() in AUDIO_EXTENSIONS
+        if not is_audio and _is_junk_name(p.name):
+            # Folder cruft (desktop.ini, .DS_Store, a Windows folder icon) is not carried
+            # into the library; the source cleanup below removes it.
+            done += size
+            continue
+        if is_audio:
             new_rel = resolve_ingest_file_path(rel, audio_rename_map, flatten)
             target  = dest_folder / new_rel
         else:
             # Preserve relative structure for everything else (Art/, loose .txt, ...).
             target = dest_folder / p.relative_to(src)
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(p), str(target))
+        try:
+            shutil.move(str(p), str(target))
+        except OSError as e:
+            if is_audio:
+                # Put back everything already moved, as a cancel does, so a failed import
+                # never leaves the show split between the source and the library.
+                _undo_transfer(moved, dest_folder)
+                raise
+            # A non-audio file the OS will not let us move (permissions, a locked flag)
+            # must not fail the import: the audio, info text and checksums are already
+            # read into the database. Leave it where it is and say so in the log.
+            left_behind.append((rel, str(e)))
+            done += size
+            continue
         moved.append((p, target))
         done += size
         if progress_cb:
             progress_cb(done, total)
+
+    if left_behind:
+        # Never delete a file we could not move: keep the source folder, minus the
+        # directories the move emptied, and report what stayed.
+        for d in sorted((x for x in src.rglob("*") if x.is_dir()), key=lambda x: len(x.parts), reverse=True):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+        log.warning("move_to_library: left %d file(s) in %s: %s", len(left_behind), src,
+                    "; ".join("%s (%s)" % lb for lb in left_behind))
+        return str(dest_folder.relative_to(library_root))
 
     # Files are gone from source; clear out the now-empty (or
     # empty-of-anything-useful) directory tree that's left behind.
@@ -3218,7 +3273,10 @@ _JUNK_NAME_PREFIXES = (".smbdelete",)
 
 
 def _is_junk_name(name):
-    return name in _JUNK_FILENAMES or name.startswith(_JUNK_NAME_PREFIXES)
+    # .ico is a Windows folder icon (the file a desktop.ini points at), never library
+    # content. Ryan's 2026-10-05 import failed on one macOS would not let Trellis move.
+    return (name in _JUNK_FILENAMES or name.startswith(_JUNK_NAME_PREFIXES)
+            or name.lower().endswith(".ico"))
 
 # Standard macOS/user directories that must never be auto-deleted even if
 # they happen to be empty — this cleanup is meant for disposable Bulk Import

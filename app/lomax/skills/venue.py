@@ -3,6 +3,7 @@ import json
 
 from app.extensions import db
 from app.lomax import evidence as ev
+from app.lomax import filters
 from app.lomax.prompts import EvidenceSection
 from app.lomax.skills.base import Skill
 from app.lomax.sources import trusted_section
@@ -16,7 +17,8 @@ closed or changed hands, why collectors care. Say less rather than guess.
 gives them and a 'url'. Names under "Reference matches" with years are already known; add \
 only what the evidence supports beyond them.
 - Location: propose city, state or country only when the filed value looks wrong, as \
-proposals with a confidence and source. Zero proposals is a good result.
+proposals with a confidence and source. State is the 2-letter abbreviation (TN, not \
+Tennessee). Zero proposals is a good result.
 - resources: links to pages about the venue, with a label and a url."""
 
 SUBMIT = {
@@ -56,8 +58,15 @@ def gather(subject, ctx):
 
 
 def normalize(raw, subject):
-    props = [p for p in (raw.get("proposals") or [])
-             if isinstance(p, dict) and p.get("field") in ("city", "state", "country") and p.get("proposed")]
+    props = []
+    for p in raw.get("proposals") or []:
+        if not (isinstance(p, dict) and p.get("field") in ("city", "state", "country") and p.get("proposed")):
+            continue
+        if p["field"] == "state":      # always the 2-letter abbreviation; equal to the filed one is agreement
+            ctry = subject.obj.country
+            code = filters.state_code(p["proposed"], ctry)
+            p = dict(p, proposed=code, agrees=filters.same_text(code, filters.state_code(subject.obj.state, ctry)))
+        props.append(p)
     former = [n for n in (raw.get("former_names") or []) if isinstance(n, dict) and n.get("name")]
     result = {"thinking": raw.get("thinking", ""), "answer": raw.get("answer", ""),
               "history": raw.get("history", ""),

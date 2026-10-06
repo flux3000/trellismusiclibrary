@@ -132,6 +132,31 @@ def _natural_join(names):
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
+_AT_LEAD = re.compile(r"^(?:at\s+|@\s*)(?=\S)", re.I)
+_GENERIC_VENUE_WORD = {"gate", "door", "bar", "club", "pub", "hall", "room", "lounge", "house", "theatre",
+                       "theater", "center", "centre", "arena", "park", "stage", "venue", "place"}
+
+
+_AT_STOP = {"last", "home", "first", "once", "least", "all", "ease", "large", "night", "best", "play", "work"}
+
+
+def strip_venue_at(raw):
+    """A venue reading that opens with "At " or "@" loses it ("At Barley's Tap Room" ->
+    "Barley's Tap Room", "At The Door Bar" -> "The Door Bar"). Kept as it is when what would
+    be left is one generic venue word or a stopword ("At The Gate", "At Last", "At Home"); a bare
+    "At the" leaves nothing."""
+    m = _AT_LEAD.match(raw or "")
+    if not m:
+        return raw
+    rest = raw[m.end():].strip()
+    if re.fullmatch(r"(?:the|a|an)", rest, flags=re.I):
+        return ""
+    words = re.sub(r"^the\s+", "", rest, flags=re.I).split()
+    if not rest or (len(words) == 1 and words[0].lower().strip(".,") in (_GENERIC_VENUE_WORD | _AT_STOP)):
+        return raw
+    return rest
+
+
 def read_billing(doc, dec, library=None, title_case=None):
     """Assemble the fields from decoded units. `title_case` is ingest's title_case."""
     library = library or LibraryIndex.empty()
@@ -271,6 +296,7 @@ def read_billing(doc, dec, library=None, title_case=None):
     if vd is not None:
         raw = _clean(_VENUE_LEAD_RE.sub("", vd.unit.text.strip()))
         raw = re.sub(r"^ft\.?\s+", "Fort ", raw, flags=re.I)
+        raw = strip_venue_at(raw)
         _rem = re.sub(r"\s*\bstage\b\s*$", "", raw, flags=re.I).strip()
         if _rem and _rem != raw and {w.lower() for w in re.findall(r"[^\W\d_]+", _rem)} & VENUE_WORDS:
             raw = _rem              # "Town Park Stage": the generic stage word is dropped

@@ -79,6 +79,10 @@ INDEPENDENT_SOURCES = ("info", "tags", "folder", "parent", "archive")
 AGREE_BONUS = {"artist": 3.0, "date": 2.0, "venue": 3.0, "city": 2.0, "state": 2.0, "country": 2.0}
 AGREE_CAP = 2
 
+# The Atlas's show index lists the act on the resolved date (real outside evidence, an independent
+# source for the agreement bonus). Measured on G1, G2 and G3 (2026-10-06).
+ATLAS_SHOW_SCORE = {"artist": 6.0, "venue": 6.0, "city": 4.0}
+
 # A runner-up is kept on the field only when it is this close (log-score points).
 CLOSE_MARGIN = 4.0
 

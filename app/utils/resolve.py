@@ -51,6 +51,10 @@ def _tag_container_values(tracks, *keys):
         v = None
         for k in keys:
             v = raw.get(k)
+            if isinstance(v, list):
+                # A multi-valued tag (two ARTIST comments) keeps its first value, the same
+                # rule _first_tag() in ingest.py applies to the container fields.
+                v = next((str(x).strip() for x in v if str(x).strip()), None)
             if v:
                 break
         values.append(v)
@@ -151,6 +155,7 @@ class Resolved:
     duplicates: list = _dc_field(default_factory=list)
     status: str = None
     reasons: list = _dc_field(default_factory=list)
+    members: list = _dc_field(default_factory=list)   # the person names the billing lists (never saved unattended)
 
     def to_dict(self):
         return {
@@ -172,6 +177,7 @@ class Resolved:
             "duplicates":  [d.to_dict() for d in self.duplicates],
             "status":      self.status,
             "reasons":     list(self.reasons),
+            "members":     list(self.members),
         }
 
 
@@ -213,6 +219,8 @@ def _agree_src(row):
     src = row.get("source")
     if src == "library" and row.get("independent"):
         return "library"                     # an act a person confirmed, matched exactly
+    if src == "atlas" and row.get("independent"):
+        return "atlas"                       # the show index: an act listed on this very day
     if src == "folder" and row.get("extractor") == "folder tree":
         return "parent"                      # the artist folder it was filed under
     return src if src in _conf.INDEPENDENT_SOURCES else None
@@ -461,9 +469,327 @@ def _act_key_norm(name):
     return _act_key(name)
 
 
-def _resolve_artist_field(scan, *, library_root=None, placement=None):
+# A free-form folder name beside the info-text artist (reader/folder.py). Two switches, each
+# measured on G1 (2026-10-05):
+#   FOLDER_LEAD_AGREES   the folder's lead (the text before its first date or separator) IS the
+#                        info reading: a full second source, scored like a template folder.
+#                        A folder that only CONTAINS the reading earns the +3 agreement bonus.
+#   FOLDER_LEAD_EXTENDS  the lead begins with the reading and continues as a billing ("& Joe
+#                        Pass", ", Herbie Hancock", "Quartet"): propose the lead, tentative.
+FOLDER_LEAD_AGREES = True
+FOLDER_LEAD_EXTENDS = True
+# The lead is the reading without its trailing group word ("Miles Davis" for "Miles Davis
+# Septet"): a billing variant, so the folder still agrees. Score it like an exact lead
+# (FOLDER_TEMPLATE_SCORE) or, at 0.0, with only the agreement bonus.
+FOLDER_LEAD_VARIANT_SCORE = None            # None: the template score
+# Cross-checks between the sources (2026-10-06), each switchable and measured on G1/G2/G3:
+#   FOLDER_LEAD_COMPETES  the lead is a known act and the info reading matches no act at all:
+#                         the lead is the artist (tentative)
+#   SHOW_INDEX_ARTIST     the Atlas lists the chosen act on the resolved date: an independent source
+#   THREE_WAY_VOTE        tags, folder lead and info text: the two that agree win
+FOLDER_LEAD_COMPETES = True
+SHOW_INDEX_ARTIST = True
+THREE_WAY_VOTE = True
+
+_EXT_BILLING = _re.compile(r"^\s*(?:&|\+|,|and\b)\s*\S", _re.I)
+_PART_SPLIT = _re.compile(r"\s*(?:,|&|\+|\band\b)\s*", _re.I)
+# Words a folder lead can be without naming an act.
+_GENERIC_LEAD = {"various", "various artists", "va", "unknown", "unknown artist", "concert", "show", "live", "master",
+                 "taper", "bootleg", "rehearsal", "soundcheck", "sound check", "sbd", "aud", "mtx", "fm", "matrix",
+                 "audience", "soundboard", "radio", "tv", "broadcast", "demo", "interview", "jam", "set", "disc",
+                 "cd", "flac", "mp3", "shn", "wav", "unreleased", "bonus", "outtakes", "misc", "new folder"}
+
+
+def _known_place_or_event(text, library, atlas):
+    """True when `text` is a venue, event or place the library or the Atlas knows by exactly that
+    name, or reads like a festival."""
+    from app.utils.reader.features import is_festival_like
+    if is_festival_like(text):
+        return True
+    try:
+        if library is None:
+            from app.utils.reader.library import current_library
+            library = current_library()
+        if library.venue_match(text) or library.event_match(text):
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    try:
+        if atlas is None:
+            from app.atlas.lookup import current_atlas
+            atlas = current_atlas()
+        if atlas is not None and (atlas.venue(text, fuzzy=False, limit=1) or atlas.area(text, limit=1)
+                                  or atlas.event(text, fuzzy=False, limit=1)):
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    return False
+
+
+def _is_known_act(text, library, atlas):
+    """An exact library act name (or learned alias), or an exact Atlas act."""
+    try:
+        if library is None:
+            from app.utils.reader.library import current_library
+            library = current_library()
+        m = library.artist_match(text)
+        if m and m[1] == "exact":
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    try:
+        if atlas is None:
+            from app.atlas.lookup import current_atlas
+            atlas = current_atlas()
+        if atlas is not None and atlas.artist(text, fuzzy=False, limit=1):
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    return False
+
+
+def _lead_is_not_an_act(lead, library=None, atlas=None):
+    """A folder lead that cannot be an artist's name: a generic word, a festival, or a known
+    place or event -- unless it is also a known act ("Boston", "Chicago", "Rush", "Santana"),
+    which a place or event of the same name does not block. A venue the Atlas knows only by a
+    near name ("Red Rocks") is caught by a fuzzy venue lookup."""
+    from app.utils.reader.features import is_festival_like
+    k = _nkey(lead)
+    if not k or k in _GENERIC_LEAD or all(w in _GENERIC_LEAD for w in k.split()):
+        return True
+    if is_festival_like(lead):
+        return True
+    if _is_known_act(lead, library, atlas):
+        return False
+    if _known_place_or_event(lead, library, atlas):
+        return True
+    try:
+        if atlas is None:
+            from app.atlas.lookup import current_atlas
+            atlas = current_atlas()
+        if atlas is None:
+            return False
+        if atlas.venue(lead, limit=1):                                       # fuzzy / alias
+            return True
+        if len(lead.split()) >= 2:
+            # "Red Rocks": the start of a venue name that goes on with a building word
+            from app.utils.reader.features import VENUE_WORDS
+            nl = _nkey(lead) + " "
+            for c in atlas.venue(lead, limit=5, min_score=0.5):
+                nc = _nkey(c.name)
+                if nc.startswith(nl) and set(nc[len(nl):].split()) & set(VENUE_WORDS):
+                    return True
+        return False
+    except Exception:           # noqa: BLE001
+        return False
+
+
+def _glued_shortcode(folder_name, lead):
+    """"ronnie2015-05-01": the lead runs straight into digits. A shortcode a taper typed, not an
+    independent statement of the act."""
+    t = (folder_name or "").strip()
+    return bool(lead) and t.lower().startswith(lead.lower()) and t[len(lead):len(lead) + 1].isdigit()
+
+
+def _looks_like_act_part(part, library=None, atlas=None):
+    """One extra name in a folder billing ("Joe Pass", "the New South"): not a place, venue or
+    festival, no digits, and not a lone word unless it is a group word."""
+    words = part.split()
+    if not words or _re.search(r"\d", part):
+        return False
+    if len(words) == 1 and words[0].lower().strip(".") not in _GROUP_WORDS_ALL:
+        return False
+    from app.utils.reader.features import VENUE_WORDS
+    if {w.lower().strip(".,") for w in words} & set(VENUE_WORDS):
+        return False                          # "Chicago Theatre": a building word
+    return not _known_place_or_event(part, library, atlas)
+
+
+_BAND_PREFIX = {"big", "jazz", "swing"}
+
+
+def _without_group_tail(name):
+    """"Miles Davis Septet" -> "Miles Davis", "Count Basie Big Band" -> "Count Basie"; the
+    name itself when it does not end in a group word (or would be left empty)."""
+    words = name.split()
+    if len(words) >= 2 and words[-1].lower().strip(".") in _GROUP_WORDS_ALL:
+        words = words[:-1]
+        if len(words) >= 2 and words[-1].lower() in _BAND_PREFIX:
+            words = words[:-1]
+    return " ".join(words)
+
+
+def _lead_is_variant_of(lead, reading):
+    """The reading is the lead plus a trailing group word."""
+    base = _without_group_tail(reading)
+    return base != reading and bool(base) and _nkey(base) == _nkey(lead)
+
+
+def _cur_atlas():
+    try:
+        from app.atlas.lookup import current_atlas
+        return current_atlas()
+    except Exception:           # noqa: BLE001
+        return None
+
+
+def _cur_library():
+    try:
+        from app.utils.reader.library import current_library
+        return current_library()
+    except Exception:           # noqa: BLE001
+        return None
+
+
+def _matches_any_act(text, library=None, atlas=None):
+    """The text is, or reads as the core of, an act the library or the Atlas knows."""
+    try:
+        m = (library or _cur_library()).artist_match(text)
+        if m:
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    try:
+        atlas = atlas or _cur_atlas()
+        if atlas is not None and atlas.artist(text, fuzzy=False, limit=1):
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    return False
+
+
+def _is_known_act_strict(text, library=None, atlas=None):
+    """An exact library act, or an exact Atlas act (a one-word name needs some MusicBrainz history,
+    as in the decoder)."""
+    try:
+        m = (library or _cur_library()).artist_match(text)
+        if m and m[1] == "exact":
+            return True
+    except Exception:           # noqa: BLE001
+        pass
+    try:
+        atlas = atlas or _cur_atlas()
+        if atlas is None:
+            return False
+        for c in atlas.artist(text, fuzzy=False, limit=3):
+            if c.how in ("exact", "squashed") and (len(text.split()) > 1 or (c.extra.get("popularity") or 0) >= 3):
+                return True
+    except Exception:           # noqa: BLE001
+        pass
+    return False
+
+
+def _lead_agrees(lead, reading):
+    """The lead and the reading name the same act: equal, or one is the other plus a group word."""
+    return bool(lead and reading) and (_nkey(lead) == _nkey(reading) or _lead_is_variant_of(lead, reading)
+                                       or _lead_is_variant_of(reading, lead))
+
+
+def _folder_lead_act(scan, library=None, atlas=None):
+    """The folder's lead when it can be an act's name (passes the not-an-act guard, is not a shortcode
+    glued to digits), else None."""
+    from app.utils.reader.folder import MIN_NAME_KEY, folder_lead
+    name = scan.get("folder_name")
+    lead = folder_lead(name)
+    if (not lead or len(_nkey(lead)) < MIN_NAME_KEY or _glued_shortcode(name, lead)
+            or _lead_is_not_an_act(lead, library, atlas)):
+        return None
+    return lead
+
+
+def _full_date(date_f):
+    v = getattr(date_f, "value", None) or {}
+    if v.get("year") and v.get("month") and v.get("day"):
+        return (int(v["year"]), int(v["month"]), int(v["day"]))
+    return None
+
+
+def _shows_listed(atlas, act, full, memo):
+    """The Atlas's exact-day shows of `act` on `full` (y, m, d): the show index, real outside evidence."""
+    if atlas is None or not act or not full:
+        return []
+    k = (_nkey(act), full)
+    if k not in memo:
+        try:
+            memo[k] = [e for e in atlas.event_place(act, full) if e.get("exact")]
+        except Exception:           # noqa: BLE001
+            memo[k] = []
+    return memo[k]
+
+
+def _lead_remainder(lead, reading):
+    """What `lead` says after the artist `reading` (matched on norm_key), or None."""
+    nr = _nkey(reading)
+    for k in range(1, len(lead)):
+        if (lead[k] in " ,&+") and _nkey(lead[:k]) == nr:
+            return lead[k:]
+    return None
+
+
+def _free_form_folder_source(groups, reading, cased_reading, folder_name, templated=False,
+                             library=None, atlas=None, shown=None, swap=None):
+    """Add the folder-name evidence for the info artist `reading` to `groups`. Returns the
+    folder's billing when the extension proposes it in place of the reading, else None.
+    `shown` (a list) receives the lead when it names an act the reading does not agree with
+    or extend: display only, it adds no score. `swap` (a list; None switches the rule off) gets
+    True when the lead is a known act and the reading matches no act at all: the lead is returned
+    as the artist."""
+    from app.utils.reader.folder import MIN_NAME_KEY, folder_lead, names_artist
+    nk = _nkey(reading)
+    lead = folder_lead(folder_name)
+    if (lead and not templated and FOLDER_LEAD_AGREES and len(nk) >= MIN_NAME_KEY
+            and _nkey(lead) != nk and len(_nkey(lead)) >= MIN_NAME_KEY
+            and _lead_is_variant_of(lead, reading)
+            and not _lead_is_not_an_act(lead, library, atlas)):
+        sc = _conf.FOLDER_TEMPLATE_SCORE["artist"] if FOLDER_LEAD_VARIANT_SCORE is None else FOLDER_LEAD_VARIANT_SCORE
+        if _glued_shortcode(folder_name, lead):
+            sc = 0.0
+        groups.add(nk, sc, cased_reading,
+                   [_row("folder", title_case(lead), None, None, "folder name", sc, "lead, without the group word")])
+        if shown is not None:
+            shown.append(title_case(lead))
+        return None
+    if lead and not templated and FOLDER_LEAD_AGREES and len(nk) >= MIN_NAME_KEY and _nkey(lead) == nk:
+        if _lead_is_not_an_act(lead, library, atlas):
+            return None                       # the "artist" is a place, a festival or a generic word
+        if not _glued_shortcode(folder_name, lead):
+            sc = _conf.FOLDER_TEMPLATE_SCORE["artist"]
+            groups.add(nk, sc, cased_reading, [_row("folder", reading, None, None, "folder name", sc, "lead")])
+            return None
+        # glued shortcode: no more than the contains bonus below
+    if not templated and names_artist(folder_name, reading):
+        groups.add(nk, 0.0, cased_reading,
+                   [_row("folder", reading, None, None, "folder name", 0.0, "free-form")])
+    if lead and FOLDER_LEAD_EXTENDS and len(nk) >= MIN_NAME_KEY:
+        rest = _lead_remainder(lead, reading)
+        if rest and rest.strip():
+            words = rest.split()
+            if len(words) == 1 and words[0].lower().strip(".") in _GROUP_WORDS_ALL:
+                return title_case(lead)
+            if _EXT_BILLING.match(rest):
+                parts = [x for x in _PART_SPLIT.split(rest) if x.strip()]
+                if parts and all(_looks_like_act_part(x, library, atlas) for x in parts):
+                    return title_case(lead)
+    if (FOLDER_LEAD_COMPETES and swap is not None and lead and len(_nkey(lead)) >= MIN_NAME_KEY
+            and _nkey(lead) != nk and not _glued_shortcode(folder_name, lead)
+            and (f" {_nkey(lead)} " not in f" {nk} " or nk.startswith(_nkey(lead) + " "))   # "X with <lead>" is its own billing
+            and not _matches_any_act(reading, library, atlas)
+            and _is_known_act_strict(lead, library, atlas)
+            and not _lead_is_not_an_act(lead, library, atlas)):
+        swap.append(True)
+        return title_case(lead)
+    if (shown is not None and lead and not templated and len(_nkey(lead)) >= MIN_NAME_KEY
+            and not _nkey(lead) == nk and not names_artist(folder_name, reading)
+            and not _glued_shortcode(folder_name, lead)
+            and not _lead_is_not_an_act(lead, library, atlas)):
+        shown.append(title_case(lead))        # the folder names an act the reading differs from
+    return None
+
+
+def _resolve_artist_field(scan, *, library_root=None, placement=None, date_f=None, memo=None):
     from_tags = scan["suggestions"]["from_tags"]
     from_info = scan["suggestions"]["from_info_file"]
+    memo = {} if memo is None else memo
 
     cands = {}
     tag_artist = _consistent_tag(from_tags.get("tracks", []), "artist", "albumartist")
@@ -485,7 +811,15 @@ def _resolve_artist_field(scan, *, library_root=None, placement=None):
         if _act_key_norm(cands["tags"]) != _act_key_norm(cands["info"]):
             conflict = True
 
-    source = "tags" if "tags" in cands else ("info" if "info" in cands else "folder")
+    # Tags, folder lead and info text: when the info text and the folder lead agree and the tags
+    # say something else, the two that agree win. The tags still disagree, so the conflict stays.
+    vote_info = False
+    if THREE_WAY_VOTE and conflict and "folder" not in cands:
+        lead = _folder_lead_act(scan)
+        if lead and _lead_agrees(lead, cands["info"]) and not _lead_agrees(lead, cands["tags"]):
+            vote_info = True
+
+    source = "tags" if ("tags" in cands and not vote_info) else ("info" if "info" in cands else "folder")
     cased = {k: title_case(v) for k, v in cands.items()}
 
     # Pooled by the exact normalised name, not the act core: "Miles Davis Sextet" does not
@@ -504,17 +838,74 @@ def _resolve_artist_field(scan, *, library_root=None, placement=None):
     if "folder" in cands:
         groups.add(_nkey(cands["folder"]), _conf.FOLDER_ARTIST_SCORE, cased["folder"],
                    [_row("folder", cands["folder"], None, None, "folder tree", _conf.FOLDER_ARTIST_SCORE, "")])
-    _template_group(groups, "artist", scan, _template(scan).get("artist"))
-    chosen = _nkey(cased[source])
-    if chosen not in groups.d:
-        groups.add(chosen, _conf.INFO_NO_EVIDENCE_SCORE, cased[source], [])
-    return _assessed("artist", groups, chosen, value=cased[source], source=source,
-                     candidates=cased, conflict=conflict)
+    tpl_artist = _template(scan).get("artist")
+    _template_group(groups, "artist", scan, tpl_artist)
+    extended = None
+    shown, swap = [], []
+    if "info" in cands and "folder" not in cands:
+        extended = _free_form_folder_source(groups, cands["info"], cased["info"], scan.get("folder_name"),
+                                            templated=bool(tpl_artist), shown=shown,
+                                            swap=None if "tags" in cands else swap)
+        if extended:
+            chosen = _nkey(extended)
+            cased["folder"] = extended
+            if not (swap and tpl_artist and _nkey(tpl_artist) == chosen):     # the template row already counts
+                groups.add(chosen, _conf.FOLDER_TEMPLATE_SCORE["artist"], extended,
+                           [_row("folder", extended, None, None, "folder name",
+                                 _conf.FOLDER_TEMPLATE_SCORE["artist"],
+                                 "the folder names a known act" if swap else "billing in the folder name")])
+    if not extended:
+        chosen = _nkey(cased[source])
+        if chosen not in groups.d:
+            groups.add(chosen, _conf.INFO_NO_EVIDENCE_SCORE, cased[source], [])
+    value = extended or cased[source]
+    src = "folder" if extended else source
+
+    # The Atlas's show index: it lists this act on this day. Outside evidence, not read from the files.
+    corroborated = False
+    atlas = _cur_atlas() if (SHOW_INDEX_ARTIST and date_f is not None) else None
+    full = _full_date(date_f) if atlas is not None else None
+    if full and _shows_listed(atlas, value, full, memo):
+        corroborated = True
+        sc = _conf.ATLAS_SHOW_SCORE["artist"]
+        groups.add(chosen, sc, value,
+                   [dict(_row("atlas", value, None, None, "show index", sc,
+                              "lists this act on this date"), independent=True)])
+    fld = _assessed("artist", groups, chosen, value=value, source=src, candidates=cased, conflict=conflict)
+    if extended and fld.confidence == "confident" and not (swap and corroborated):
+        fld.confidence = "tentative"          # a billing read off a folder name is never confident alone
+    if shown and fld.confidence != "empty" and "folder" not in fld.candidates:
+        # Display only, after the score: the Sources popover quotes what the folder named.
+        fld.candidates["folder"] = shown[0]
+        if not any(e.get("source") == "folder" for e in fld.evidence):
+            fld.evidence = list(fld.evidence) + [
+                _row("folder", shown[0], None, None, "folder name", 0.0, "names a different billing")]
+    return fld
 
 
 # ── Venue + city/state/country ───────────────────────────────────────────
 
-def _resolve_venue_field(scan):
+def _show_place_row(groups, chosen, value, field, shows, atlas):
+    """The show index names this place for the act on this day: an independent source for the
+    venue (the Atlas place's names) or the city."""
+    if not shows or atlas is None or chosen not in groups.d:
+        return
+    hit = False
+    for e in shows:
+        if field == "city":
+            hit = hit or (bool(e.get("city")) and _nkey(e["city"]) == chosen)
+        elif e.get("place_id") is not None:
+            try:
+                hit = hit or chosen in {_nkey(k) for k in atlas.place_keys(e["place_id"])}
+            except Exception:           # noqa: BLE001
+                pass
+    if hit:
+        sc = _conf.ATLAS_SHOW_SCORE[field]
+        groups.add(chosen, sc, value, [dict(_row("atlas", value, None, None, "show index", sc,
+                                                 "lists this act here on this date"), independent=True)])
+
+
+def _resolve_venue_field(scan, shows=None, atlas=None):
     from_tags = scan["suggestions"]["from_tags"]
     from_info = scan["suggestions"]["from_info_file"]
 
@@ -538,11 +929,58 @@ def _resolve_venue_field(scan):
         _add_info_groups(groups, "venue", cands["info"], from_info)
     _template_group(groups, "venue", scan, _template(scan).get("venue"))
     chosen = _nkey(cands[source])
+    _show_place_row(groups, chosen, cands[source], "venue", shows, atlas)
     return _assessed("venue", groups, chosen, value=cands[source], source=source,
                      candidates=dict(cands), conflict=False)
 
 
-def _resolve_info_only_field(scan, key):
+_STAGE_TAIL = _re.compile(r"\s+(?:\S+\s+)?stage$|\s+(?:down|up)stairs$|\s+(?:main|big|small)\s+room$", _re.I)
+
+
+_NOT_FESTIVAL_NAME_WORDS = {"greatest", "hits", "best", "radio", "song", "songs", "album", "albums", "collection",
+                            "special", "tribute", "unplugged", "session", "sessions", "anthology", "essential",
+                            "classics", "remastered", "remaster", "reunion", "tour", "live"}
+
+
+def _festival_is_head(text):
+    """True when the festival word is the head noun of `text`: its last token, or the last one
+    before "of" ("Festival of the Sun"). "Festivals Greatest Hits" and "Radio Festival Special"
+    are not."""
+    from app.utils.reader.features import _EVENT_SUFFIX, _EVENT_TOKENS
+    toks = [t.lower().strip(".,;:()") for t in text.split()]
+    if "of" in toks[1:]:
+        toks = toks[:toks.index("of", 1)]
+    if set(toks[:-1]) & _NOT_FESTIVAL_NAME_WORDS:
+        return False                          # "Greatest Hits Festival": a record, not a festival name
+    return bool(toks) and (toks[-1] in _EVENT_TOKENS or bool(_EVENT_SUFFIX.match(toks[-1])))
+
+
+def _event_from_folder(scan, from_info):
+    """The info text gave no event: a free-form folder name that opens with the artist and goes
+    on to name a festival ("Go Kurosawa Big Ears Festival (Barley's Tap Room) 3-28-26") gives
+    one. Festivals and single events only (event_names rules), the festival word its head noun;
+    a leading "live at" / "at" and a trailing stage phrase are dropped. Always tentative."""
+    from app.utils.event_names import clean_event_name
+    from app.utils.reader.features import counts_as_event, is_festival_like
+    from app.utils.reader.folder import folder_lead
+    artist = (from_info or {}).get("artist")
+    lead = folder_lead(scan.get("folder_name"))
+    rest = _lead_remainder(lead, artist) if lead and artist else None
+    if rest and _EXT_BILLING.match(rest):
+        return Field()                        # "& Friends ...": a longer billing, not an event
+    rest = (rest or "").strip(" -,;")
+    rest = _re.sub(r"^(?:live\s+)?at\s+", "", rest, flags=_re.I)
+    rest = _STAGE_TAIL.sub("", rest).strip(" -,;")
+    if not rest or not is_festival_like(rest) or not counts_as_event(rest) or not _festival_is_head(rest):
+        return Field()
+    ev = clean_event_name(title_case(rest))
+    if not ev:
+        return Field()
+    return Field(value=ev, source="folder", candidates={"folder": ev}, confidence="tentative",
+                 evidence=[_row("folder", rest, None, None, "folder name", None, "after the artist")])
+
+
+def _resolve_info_only_field(scan, key, folder_event=True):
     """event / stage: what the info file's header states. Tags carry neither, and the
     folder name is not read for them, so there is one source and no conflict to track.
     The festival is an Event, "Harbor Stage" is the performance's Stage; neither is
@@ -553,6 +991,8 @@ def _resolve_info_only_field(scan, key):
     if key == "event":
         from app.utils.event_names import clean_event_name
         v = clean_event_name(v)
+    if not v and key == "event":
+        return _event_from_folder(scan, from_info) if folder_event else Field()
     if not v:
         return Field()
     groups = _Groups(key)
@@ -570,7 +1010,7 @@ def _location_score(key, pe):
     return table.get(how, _conf.INFO_NO_EVIDENCE_SCORE)
 
 
-def _resolve_location_fields(scan, venue_field):
+def _resolve_location_fields(scan, venue_field, shows=None, atlas=None):
     """city/state/country: taken from the SAME source as the venue where
     that source has them; filled from the other only when it has none."""
     from_tags = scan["suggestions"]["from_tags"]
@@ -604,6 +1044,8 @@ def _resolve_location_fields(scan, venue_field):
                              "atlas" if how == "atlas" else "place peeler", score, how or "")])
         if key in _conf.FOLDER_TEMPLATE_SCORE:
             _template_group(groups, key, scan, _template(scan).get(key))
+        if key == "city":
+            _show_place_row(groups, _nkey(cands[source]), cands[source], "city", shows, atlas)
         out[key] = _assessed(key, groups, _nkey(cands[source]), value=cands[source], source=source,
                              candidates=dict(cands), conflict=False)
     return out
@@ -756,6 +1198,65 @@ def resolve_tracks(scan):
     return tracks_out
 
 
+# ── Members from an "X and Y" billing ────────────────────────────────────
+
+_BILLING_SPLIT = _re.compile(r"\s*(?:,|&|\+|\band\b)\s*", _re.I)
+from app.utils.reader.folder import GROUP_WORDS as _GROUP_WORDS
+_GROUP_WORDS_ALL = _GROUP_WORDS
+
+
+def _is_known_band(name, library=None, atlas=None):
+    """True when `name` is an act the library or the Atlas knows as a group: a library act with
+    that exact name (or a learned alias) that is not also a Musician, or an Atlas act of a kind
+    other than Person. A solo act ("Doc Watson") is a person, not a band."""
+    try:
+        if library is None:
+            from app.utils.reader.library import current_library
+            library = current_library()
+        m = library.artist_match(name)
+        if m and m[1] == "exact" and not library.musician_match(name):
+            return True
+    except Exception:       # noqa: BLE001 -- no library: nothing to reject on
+        pass
+    try:
+        if atlas is None:
+            from app.atlas.lookup import current_atlas
+            atlas = current_atlas()
+        if atlas is not None:
+            for c in atlas.artist(name, fuzzy=False, limit=3):
+                if (c.extra.get("act_kind") or "person").lower() != "person":
+                    return True
+    except Exception:       # noqa: BLE001
+        pass
+    return False
+
+
+def billing_members(artist, library=None, atlas=None):
+    """The person names an artist reading of "X and Y" (or "X, Y, Z and W") states, for
+    pre-filling a brand-new act's Members row; [] when the reading is not such a billing.
+    Nothing is split when any part starts with "The", ends in a group word ("Band", "Trio",
+    "Orchestra"...) or is possessive ("Darol Anger's Fiddle Congress"). A "with ..." sideman
+    list is never read here: it is the artist reading itself that is split."""
+    if not artist or not isinstance(artist, str):
+        return []
+    parts = [p.strip() for p in _BILLING_SPLIT.split(artist) if p.strip()]
+    if len(parts) < 2:
+        return []
+    for p in parts:
+        words = p.lower().split()
+        if words[0] == "the" or words[-1].strip(".") in _GROUP_WORDS or "'s" in p.lower() or "\u2019s" in p.lower():
+            return []
+    if _re.search(r"\bwith\b|\bfeat", artist, _re.I):
+        return []
+    if any(_is_known_band(p, library, atlas) for p in parts):
+        return []                              # "Los Lobos and Los Lonely Boys": two acts, not people
+    out = []
+    for p in parts:
+        if p.lower() not in (x.lower() for x in out):
+            out.append(p)
+    return out if len(out) >= 2 else []
+
+
 # ── resolve() ─────────────────────────────────────────────────────────────
 
 def resolve(scan, *, library_root=None, placement=None):
@@ -766,9 +1267,15 @@ def resolve(scan, *, library_root=None, placement=None):
     touches the DB).
     """
     date_f = _resolve_date_field(scan)
-    artist_f = _resolve_artist_field(scan, library_root=library_root, placement=placement)
-    venue_f = _resolve_venue_field(scan)
-    loc = _resolve_location_fields(scan, venue_f)
+    memo = {}
+    artist_f = _resolve_artist_field(scan, library_root=library_root, placement=placement, date_f=date_f, memo=memo)
+    shows, atlas = None, None
+    if SHOW_INDEX_ARTIST and any(e.get("source") == "atlas" and e.get("extractor") == "show index"
+                                 for e in artist_f.evidence):
+        atlas = _cur_atlas()
+        shows = _shows_listed(atlas, artist_f.value, _full_date(date_f), memo)
+    venue_f = _resolve_venue_field(scan, shows=shows, atlas=atlas)
+    loc = _resolve_location_fields(scan, venue_f, shows=shows, atlas=atlas)
     album_f = _resolve_album_field(scan)
     kind = classify_kind(scan, album_f.value, venue_f.value)
     tracks = resolve_tracks(scan)
@@ -777,7 +1284,7 @@ def resolve(scan, *, library_root=None, placement=None):
         date=date_f,
         artist=artist_f,
         venue=venue_f,
-        event=_resolve_info_only_field(scan, "event"),
+        event=_resolve_info_only_field(scan, "event", folder_event=artist_f.source != "folder"),
         stage=_resolve_info_only_field(scan, "stage"),
         city=loc["city"],
         state=loc["state"],
@@ -791,6 +1298,7 @@ def resolve(scan, *, library_root=None, placement=None):
         tracks=tracks,
         folder_path=scan.get("folder_path"),
         scan=scan,
+        members=billing_members(artist_f.value),
     )
 
 

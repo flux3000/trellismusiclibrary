@@ -80,6 +80,8 @@ def get_performance(performance_id):
         # The venue's face, offered in the recording image picker (2026-10-04).
         "venue_image_id":    v.images[0].id if (v and v.images) else None,
         "artist_genre_color": _perf_genre.color if _perf_genre else None,
+        # The act's genre name: the Genre row of the Resolver table shows only while the act has none.
+        "artist_genre": _perf_genre.name if _perf_genre else None,
         # Back-compat shape (id/name pairs) for the existing recording-page
         # Musicians pill row — now the RESOLVED show lineup (act roster with
         # stint bounds applied, plus guests, or the explicit list), not the

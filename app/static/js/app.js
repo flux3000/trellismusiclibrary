@@ -245,14 +245,22 @@ const App = (() => {
   // toggle: it is per-machine, and it must apply before the first paint — see
   // the inline script in index.html, which stamps the saved id and knows
   // nothing else about palettes.
+  // `mode` is text polarity ('light' = light ground, dark text); main.css keys
+  // its light/dark rules on it. `group` is only where the picker shows it.
   const PALETTES = [
-    { id: 'steely', label: 'Steely', mode: 'light', note: 'Cool paper, petrol accent' },
-    { id: 'krauss', label: 'Krauss', mode: 'light', note: 'Warm ivory, sage accent' },
-    { id: 'monk',   label: 'Monk',   mode: 'light', note: 'Near-white, ink, bold blue' },
-    { id: 'cale',   label: 'Cale',   mode: 'dark',  note: 'Warm ash, amber-tan accent' },
-    { id: 'miles',  label: 'Miles',  mode: 'dark',  note: 'Midnight slate, icy blue' },
-    { id: 'alice',  label: 'Alice',  mode: 'dark',  note: 'Deep aubergine, gold accent' },
-    { id: 'eno',    label: 'Eno',    mode: 'dark',  note: 'Neutral graphite, chrome blue' },
+    { id: 'steely',  label: 'Steely',  mode: 'light', group: 'light', note: 'Cool paper, petrol accent' },
+    { id: 'krauss',  label: 'Krauss',  mode: 'light', group: 'light', note: 'Warm ivory, sage accent' },
+    { id: 'monk',    label: 'Monk',    mode: 'light', group: 'light', note: 'Near-white, ink, bold blue' },
+    { id: 'joni',    label: 'Joni',    mode: 'light', group: 'mid',   note: 'Powder blue-grey, deep indigo' },
+    { id: 'gillian', label: 'Gillian', mode: 'light', group: 'mid',   note: 'Dust-bowl khaki, oxblood' },
+    { id: 'hazel',   label: 'Hazel',   mode: 'light', group: 'mid',   note: 'Grey-green, dark plum' },
+    { id: 'chet',    label: 'Chet',    mode: 'dark',  group: 'mid',   note: 'Smoky slate, muted brass' },
+    { id: 'townes',  label: 'Townes',  mode: 'dark',  group: 'mid',   note: 'Olive drab, faded denim' },
+    { id: 'gram',    label: 'Gram',    mode: 'dark',  group: 'mid',   note: 'Spruce green, faded rose' },
+    { id: 'cale',    label: 'Cale',    mode: 'dark',  group: 'dark',  note: 'Warm ash, amber-tan accent' },
+    { id: 'miles',   label: 'Miles',   mode: 'dark',  group: 'dark',  note: 'Midnight slate, icy blue' },
+    { id: 'alice',   label: 'Alice',   mode: 'dark',  group: 'dark',  note: 'Deep aubergine, gold accent' },
+    { id: 'eno',     label: 'Eno',     mode: 'dark',  group: 'dark',  note: 'Neutral graphite, chrome blue' },
   ]
   // Cale is the app default because it is the palette every existing install is
   // already running — shipping a new set should not silently relight anyone's
@@ -648,11 +656,14 @@ const App = (() => {
   // where the user can run it.
   const DETAILS_TABS = [
     ['info', 'Info File'], ['quality', 'Quality'], ['resolver', 'Resolver'],
-    ['filetags', 'Tags'], ['checksums', 'Checksums'], ['ai', 'Lomax'],
+    ['filetags', 'Tags'], ['checksums', 'Checksums'], ['mb', 'MusicBrainz'], ['ai', 'Lomax'],
   ]
-  function detailsTabsHtml(attr, prefix, { resolver, research, staged }) {
+  // An album has no Info File tab (info: false) and no Resolver; Add Recording's album layout
+  // adds the MusicBrainz tab (mb: true).
+  function detailsTabsHtml(attr, prefix, { resolver, research, staged, info = true, mb = false }) {
     return DETAILS_TABS
-      .filter(([k]) => (k !== 'resolver' || resolver) && (k !== 'ai' || research))
+      .filter(([k]) => (k !== 'resolver' || resolver) && (k !== 'ai' || research) &&
+                       (k !== 'info' || info) && (k !== 'mb' || mb))
       .map(([k, label]) => `<button class="slide-tab${k === 'ai' ? ' slide-tab--ai' : ''}` +
         `${k === 'filetags' && staged ? ' slide-tab--staged' : ''}" ${attr}="${prefix}${k}">${k === 'ai' ? icon('lomax') + ' ' : ''}${label}</button>`)
       .join('')
@@ -1074,6 +1085,7 @@ const App = (() => {
       const idEl  = ids.genreIdInput ? document.getElementById(ids.genreIdInput) : null
       store.genre_id   = genre ? genre.id : null
       store.genre_name = genre ? genre.name : ''
+      store.genre_source = null          // the act's own genre, not a pick
       if (input) {
         input.value = store.genre_name
         input.classList.remove('is-new-genre')
@@ -1097,6 +1109,19 @@ const App = (() => {
   const _NAME_SPLIT_RE = /\s*(?:&|,|\/|\+|\bwith\b|\bfeat\.?\b|\bfeaturing\b|\band\b)\s*/i
   function splitArtistNameCandidates(raw) {
     return (raw || '').split(_NAME_SPLIT_RE).map(s => s.trim()).filter(Boolean)
+  }
+
+  // A field the person edited by hand on the Add Recording form (kept on the form, so a new form starts clean).
+  function _ingestMarkDirty(field) {
+    ingest.form._dirty = ingest.form._dirty || {}
+    ingest.form._dirty[field] = true
+  }
+
+  // An act billing compared the way the library compares names: case, accents, "&" vs "and",
+  // punctuation and a leading "The" do not make a different act.
+  function _normBilling(text) {
+    return String(text || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/&/g, ' and ').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^the /, '')
   }
 
   // Add flow: preload Members if the scanned Artist (act) already exists
@@ -1134,6 +1159,29 @@ const App = (() => {
             const hit = results.find(r => r.name.toLowerCase() === cand.toLowerCase())
             if (hit) found.push({ id: hit.id, name: hit.name })
           } catch (_) { /* best-effort — a failed lookup just leaves that name unmatched */ }
+        }
+        // The people an "X and Y" billing names (the resolver splits only that, never a
+        // "with" list or a group name): a brand-new act's Members row starts with them
+        // (saved with the recording, which seeds the new act's roster; an existing act never
+        // gets here). An existing Musician of that exact name is linked, others are new; a
+        // single-word name is kept only when it matches an existing Musician exactly.
+        //
+        // Only while the billing the resolver read is still the act name in the form (an artist
+        // the person changed, or accepted from Lomax, is not that billing), and only when no act
+        // of a similar name is already in the library: "Bela Fleck and Edgar Meyer" must not seed
+        // a new roster when "Bela Fleck & Edgar Meyer" exists.
+        const billing = ingest.scan?.resolved?.artist?.value
+        const sameBilling = _normBilling(billing) === _normBilling(name)
+        let similar = true                       // unknown counts as similar: no pre-fill is the safe side
+        if (sameBilling) {
+          try { similar = ((await API.ingest.similarActs(name)).acts || []).length > 0 } catch (_) { /* stays true */ }
+        }
+        for (const nm of (sameBilling && !similar ? (ingest.scan?.resolved?.members || []) : [])) {
+          if (found.some(m => m.name.toLowerCase() === String(nm).toLowerCase())) continue
+          let hit = null
+          try { hit = (await API.musicians.search(nm)).find(r => r.name.toLowerCase() === String(nm).toLowerCase()) } catch (_) { /* best-effort */ }
+          if (hit) found.push({ id: hit.id, name: hit.name })
+          else if (/\s/.test(String(nm).trim())) found.push({ name: nm })
         }
         f.members = found
       }
@@ -6258,80 +6306,6 @@ const App = (() => {
       <div class="cksum-rows">${rows}</div>`
   }
 
-  // ── Resolver pane — what each field was read from ───────────────────────────
-  // One builder for View Recording (rec.resolver_json) and Add Recording
-  // (ingest.scan.resolved); both are the resolver's to_dict() shape. A recording
-  // saved after Resolver v2 carries evidence on every field and lists them all: the
-  // chosen value, the lines it was read from, the runner-up when one was close, and
-  // a mark on a field the resolver is not sure of. An older one has no evidence and
-  // shows only the fields whose sources disagreed. Returns '' when there is nothing
-  // to show, and the caller then renders no tab at all.
-  const _RESOLVER_SOURCE_LABEL = {
-    tags: 'Tags', info: 'Info File', folder: 'Folder', archive: 'Archive',
-    library: 'Your Library', atlas: 'Atlas',
-  }
-  const _RESOLVER_PANE_FIELDS = ['date', 'artist', 'venue', 'event', 'stage', 'city', 'state',
-    'country', 'source', 'lineage', 'source_tag', 'shnid', 'album']
-
-  function _resolverValueText(v) {
-    if (v && typeof v === 'object') {
-      const p2 = n => String(n).padStart(2, '0')
-      return [v.year, v.month ? p2(v.month) : null, v.day ? p2(v.day) : null]
-        .filter(x => x != null).join('-')
-    }
-    return String(v)
-  }
-
-  function _resolverFieldTitle(k) {
-    const label = _INGEST_FIELD_LABEL[k] || k
-    return label.charAt(0).toUpperCase() + label.slice(1)
-  }
-
-  function _resolverRow(source, lineNo, text, strong, dim) {
-    const src = esc(_RESOLVER_SOURCE_LABEL[source] || source || '')
-    const num = lineNo != null ? esc(lineNo + 1) : ''
-    const body = esc(text == null ? '' : text)
-    return `<div class="cksum-row"><span class="cksum-status resolver-src${dim ? ' cksum-status--unverified' : ''}">${strong ? `<strong>${src}</strong>` : src}</span><span class="cksum-num">${num}</span><span class="cksum-title">${strong ? `<strong>${body}</strong>` : body}</span></div>`
-  }
-
-  // Rows for fields whose sources disagreed -- all an older recording can show.
-  function _resolverPaneConflicts(resolved) {
-    return Object.keys(_INGEST_FIELD_LABEL).filter(k => resolved[k]?.conflict).map(k => {
-      const f = resolved[k]
-      const rows = Object.keys(_RESOLVER_SOURCE_LABEL)
-        .filter(s => f.candidates && f.candidates[s] != null)
-        .map(s => _resolverRow(s, null, _resolverValueText(f.candidates[s]), s === f.source, false))
-        .join('')
-      return `<div class="cksum-summary">${esc(_resolverFieldTitle(k))}</div><div class="cksum-rows">${rows}</div>`
-    }).join('')
-  }
-
-  // Every field with a value: the value, then where it was read from.
-  function _resolverPaneFields(resolved) {
-    return _RESOLVER_PANE_FIELDS.filter(k => resolved[k] && (resolved[k].value != null || resolved[k].conflict)).map(k => {
-      const f = resolved[k]
-      const mark = f.confidence === 'tentative' ? ' <span class="cksum-status cksum-status--unverified">Tentative</span>' : ''
-      const evidence = (f.evidence || []).map(e => _resolverRow(e.source, e.line, e.text, false, false)).join('')
-      let others = ''
-      if (f.conflict) {
-        others = Object.keys(_RESOLVER_SOURCE_LABEL)
-          .filter(s => s !== f.source && f.candidates && f.candidates[s] != null)
-          .map(s => _resolverRow(s, null, _resolverValueText(f.candidates[s]), false, true)).join('')
-      } else if (f.runner_up) {
-        const r = f.runner_up
-        others = _resolverRow(r.source, r.line, _resolverValueText(r.value), false, true)
-      }
-      const chosen = `<div class="cksum-row"><span class="cksum-title"><strong>${esc(_resolverValueText(f.value))}</strong></span></div>`
-      return `<div class="cksum-summary">${esc(_resolverFieldTitle(k))}${mark}</div><div class="cksum-rows">${chosen}${evidence}${others}</div>`
-    }).join('')
-  }
-
-  function buildResolverPaneHtml(resolved) {
-    if (!resolved) return ''
-    const hasEvidence = _RESOLVER_PANE_FIELDS.some(k => Array.isArray(resolved[k]?.evidence))
-    return hasEvidence ? _resolverPaneFields(resolved) : _resolverPaneConflicts(resolved)
-  }
-
   // ── Lomax ─────────────────────────────────────────────────────────────────
   // Every Lomax surface is built from the helpers in this section, so a new
   // screen mounts Lomax with one controller and a few calls:
@@ -6347,31 +6321,30 @@ const App = (() => {
   // is edit-only: canEditLibrary() false renders none of them, and Playback
   // mode also hides .lx-edit in CSS.
   const LX_LEVEL_LABEL = { off: 'Off', study: 'Study', research: 'Research' }
-  const LX_LEVEL_TIP = {
-    off: ['Off', ' means no Lomax AI assistance; Trellis will still resolve recording info with a high degree of accuracy.'],
-    study: ['Study', ' asks Lomax AI to peruse the recording files and your Trellis database for details that may help validate or fill out missing information.'],
-    research: ['Research', ' instructs Lomax to also search web resources for show information, setlists, and other context around the recording.'],
-  }
-  const LX_ASK_KEY = 'trellisLomaxAskLevel'      // Study / Research on the ask bars
-  const LX_IMPORT_KEY = 'trellisLomaxLevel'      // Off / Study / Research on Add Recordings
+  // Study was removed (Ryan, 2026-10-05): every run is Research. Add Recordings is Off / On, the ask
+  // bars have no level control. LX_LEVEL_LABEL keeps 'study' so older runs still label correctly.
+  const LX_IMPORT_KEY = 'trellisLomaxLevel'      // Off / On on Add Recordings ('research' means On)
+  const LX_PAUSED_KEY = 'trellisLomaxPausedRun'  // the import run whose Lomax queue the person paused
+  const LX_IMPORT_TIP = 'Lomax, your AI research assistant, will peruse recording files, query your Trellis database, and search web resources to find missing info for recordings.'
   const LX_FIELDS = [
     ['artist', 'Artist'], ['date', 'Date'], ['venue', 'Venue'], ['city', 'City'], ['state', 'State'],
     ['country', 'Country'], ['event', 'Event'], ['stage', 'Stage'], ['source', 'Source'], ['lineage', 'Lineage'],
   ]
+  // An album run proposes these (skill 'album'); they show as field cards in the Lomax pane.
+  const LX_ALBUM_FIELDS = [['title', 'Title'], ['year', 'Year'], ['notes', 'Notes']]
   const _lxCtls = new Map()
   let _lxSeq = 0
   let _lxTickTimer = null
 
   function lxGet(k) { try { return localStorage.getItem(k) } catch (_) { return null } }
   function lxSet(k, v) { try { localStorage.setItem(k, v) } catch (_) { /* storage blocked: the level just is not remembered */ } }
-  function lxAskLevel() { return lxGet(LX_ASK_KEY) === 'research' ? 'research' : 'study' }
   // Off when there is no key, whatever was remembered. appPrefs is null until
   // first read, which is treated as "has a key" so a cold page is not wrongly locked.
   function lxHasKey() { return appPrefs ? !!appPrefs.has_api_key : true }
   function lxImportLevel() {
     if (!lxHasKey()) return 'off'
     const v = lxGet(LX_IMPORT_KEY)
-    return v === 'study' || v === 'research' ? v : 'off'
+    return v === 'study' || v === 'research' ? 'research' : 'off'   // an old Study pick reads as On
   }
   function lxPlural(n, one, many) { return `${n} ${n === 1 ? one : (many || one + 's')}` }
   function lxTokens(n) { n = Number(n) || 0; return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n) }
@@ -6419,17 +6392,37 @@ const App = (() => {
   // is not Lomax agreeing with Trellis, and nobody has decided it.
   const lxOpen = p => !!(p && p.id && !p.agrees && !p.decision)
   const lxSuggestions = run => lxProps(run).filter(p => !p.agrees)
+  // The stored decision is the truth. Every accepted proposal (oldest run first, the newest one per
+  // field winning) whose value differs from what the form holds now; the caller writes them back
+  // into the form as human-set. read(field) is the form's current value for a field.
+  // The identity of a scanned show: audio file count, a hash of the file names, a hash of the info
+  // file. Stored on a folder run when it is made; a run for another show at the same path differs.
+  function lxFingerprint(scan) {
+    if (!scan) return ''
+    const h = t => { let x = 5381; const q = String(t || ''); for (let i = 0; i < q.length; i++) x = ((x * 33) ^ q.charCodeAt(i)) >>> 0; return x.toString(36) }
+    return [scan.audio_file_count || 0, h((scan.audio_files || []).map(f => f.rel_path || f.filename).join('\n')), h(scan.info_file_content)].join('.')
+  }
+  // fingerprint: the current show's. A run made for a different show, or one that carries no identity,
+  // is left alone. skip(p) vetoes one proposal (already applied here, or its field typed in by hand).
+  function lxAcceptedToReapply(runs, read, skip, fingerprint) {
+    const byField = new Map()
+    for (const run of runs || []) {
+      if (!run || run.status !== 'done') continue
+      if (fingerprint && run.fingerprint !== fingerprint) continue
+      for (const p of lxProps(run)) if (p && p.decision === 'accepted' && !p.agrees && p.id) byField.set(p.field, p)
+    }
+    const same = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim()
+    return Array.from(byField.values()).filter(p => !(skip && skip(p)) && !same(read(p.field), p.proposed))
+  }
 
   // ── Pieces ──────────────────────────────────────────────────────────────────
-  function lomaxLevelToggle({ level, off, key, disabled }) {
-    const opts = (off ? ['off'] : []).concat(['study', 'research'])
-    const tip = opts.map(o => `<div><b>${LX_LEVEL_TIP[o][0]}</b>${esc(LX_LEVEL_TIP[o][1])}</div>`).join('')
-    return `<span class="lx-level">` +
-      `<span class="seg lx-seg" role="group" aria-label="Lomax level">${opts.map(o =>
-        `<button type="button" class="${o === level ? 'on' : ''}" data-lx-level="${o}" data-lx-key="${key}"${disabled ? ' disabled' : ''}>${LX_LEVEL_LABEL[o]}</button>`).join('')}</span>` +
-      `<span class="lx-tipwrap"><button type="button" class="lx-info" data-lx-tip aria-expanded="false" ` +
-      `aria-label="${off ? 'What Off, Study and Research do' : 'What Study and Research do'}">${icon('info')}</button>` +
-      `<span class="lx-pop lx-pop--tip" role="tooltip" hidden>${tip}</span></span></span>`
+  // Add Recordings: Lomax Off / On. On stores 'research', the only level runs use.
+  function lomaxImportSwitch({ on, disabled }) {
+    const b = (v, label) => `<button type="button" class="${on === v ? 'on' : ''}" data-lx-level="${v ? 'research' : 'off'}" ` +
+      `data-lx-key="import"${disabled ? ' disabled' : ''}>${label}</button>`
+    return `<span class="lx-level"><span class="seg lx-seg" role="group" aria-label="Lomax">${b(false, 'Off')}${b(true, 'On')}</span>` +
+      `<span class="lx-tipwrap"><button type="button" class="lx-info" data-lx-tip aria-expanded="false" aria-label="What Lomax does">${icon('info')}</button>` +
+      `<span class="lx-pop lx-pop--tip" role="tooltip" hidden>${esc(LX_IMPORT_TIP)}</span></span></span>`
   }
 
   // o: {level, placeholder, note, last (run), rows, pin}. The controller is found
@@ -6443,8 +6436,7 @@ const App = (() => {
       ${last}
       <textarea class="lx-q" rows="${o.rows || 2}" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.placeholder || 'Question')}"></textarea>
       <div class="lx-ask-row">
-        ${lomaxLevelToggle({ level: lxAskLevel(), off: false, key: 'ask' })}
-        <button type="button" class="btn btn-sm btn-primary lx-go" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
+        <button type="button" class="btn btn-sm lx-go" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
       </div>
     </div>`
   }
@@ -6574,7 +6566,7 @@ const App = (() => {
 
   // cfg: {skill, subjectType, subjectId | subjectKey, current() (folder only),
   //   alive() (is the screen still mounted), onChange(c), afterAccept(props, c),
-  //   afterRestore(run, c), onDone(run, c)}
+  //   afterRestore(run, c), onDone(run, c), onLoaded(c) (the stored runs have just been read)}
   function lomaxController(cfg) {
     const c = { id: ++_lxSeq, cfg, runs: [], pending: null, error: null, loaded: false, blocked: {}, notesAdded: {}, views: new Set() }
     _lxCtls.set(c.id, c)
@@ -6619,6 +6611,7 @@ const App = (() => {
     c.load = async () => {
       try { c.runs = ((await API.lomax.runs(query())) || {}).runs || [] } catch (_) { c.runs = [] }
       c.loaded = true
+      if (cfg.onLoaded) { try { await cfg.onLoaded(c) } catch (e) { console.error(e) } }
       const p = c.runs.slice().reverse().find(r => r.status === 'queued' || r.status === 'running')
       if (p) { c.pending = p; c.wait(p.id) }
       changed()
@@ -6626,7 +6619,7 @@ const App = (() => {
     c.ask = async ({ question, level }) => {
       if (c.pending) return
       c.error = null
-      const body = { skill: cfg.skill, subject_type: cfg.subjectType, level: level || 'study' }
+      const body = { skill: cfg.skill, subject_type: cfg.subjectType, level: level || 'research' }
       if (question) body.question = question
       if (cfg.subjectKey) { body.subject_key = cfg.subjectKey; body.current = cfg.current ? cfg.current() : {} }
       else body.subject_id = cfg.subjectId
@@ -6725,9 +6718,10 @@ const App = (() => {
       if (lv.disabled) return
       const level = lv.dataset.lxLevel
       const key = lv.dataset.lxKey
-      lxSet(key === 'import' ? LX_IMPORT_KEY : LX_ASK_KEY, level)
+      if (key !== 'import') return
+      lxSet(LX_IMPORT_KEY, level)
       document.querySelectorAll(`[data-lx-key="${key}"]`).forEach(b => b.classList.toggle('on', b.dataset.lxLevel === level))
-      if (key === 'import') _lxImportLevelChanged(level)
+      _lxImportLevelChanged(level)
       return
     }
     const btn = t.closest('[data-lx-act]')
@@ -6753,7 +6747,7 @@ const App = (() => {
       const q = bar && bar.querySelector('.lx-q')
       const question = q ? q.value.trim() : ''
       if (q) q.value = ''
-      c.ask({ question, level: lxAskLevel() })
+      c.ask({ question, level: 'research' })
     } else if (act === 'accept' || act === 'dismiss' || act === 'accept-all') {
       btn.disabled = true
       c.decide(String(btn.dataset.lxIds || '').split(',').filter(Boolean), act === 'dismiss' ? 'rejected' : 'accepted')
@@ -6803,7 +6797,7 @@ const App = (() => {
 
   function lxFieldCardHtml(run, o) {
     const fp = lxFieldProps(run)
-    const rows = LX_FIELDS.filter(([k]) => fp[k] && !fp[k].agrees && lxShown(fp[k]))
+    const rows = LX_FIELDS.concat(LX_ALBUM_FIELDS, [['genre', 'Genre']]).filter(([k]) => fp[k] && !fp[k].agrees && lxShown(fp[k]))
     if (!rows.length) return ''
     return `<div class="lx-card"><table class="lx-tbl"><tbody>${rows.map(([k, label]) => {
       const p = fp[k]
@@ -6933,12 +6927,16 @@ const App = (() => {
   function lxSyncResolver(root, o) {
     if (!root) return
     root.querySelectorAll('[data-lx-tv]').forEach(el => { el.textContent = o.value(el.dataset.lxTv) || '' })
-    root.querySelectorAll('[data-lx-tt]').forEach(el => {
-      const t = (o.tracks || []).find(x => String(x.track_number) === el.dataset.lxTt)
-      const title = t ? (t.title || '') : ''
-      el.textContent = title
-      el.classList.toggle('lx-dim', !title || /^Track \d+$/i.test(title.trim()))
+    root.querySelectorAll('[data-lx-tp]').forEach(el => {
+      const [n, f] = el.dataset.lxTp.split(':')
+      const t = (o.tracks || []).find(x => String(x.track_number) === n)
+      const v = t ? (t[f] || '') : ''
+      el.textContent = v
+      if (f === 'title') el.classList.toggle('lx-dim', !v || /^Track \d+$/i.test(v.trim()))
     })
+    // A genre in the form is never replaced: its accept and dismiss go once the field is filled.
+    const filled = !!(o.value('genre') || '')
+    root.querySelectorAll('[data-lx-genre-acts] .lx-acts').forEach(el => { el.style.display = filled ? 'none' : '' })
   }
 
   // ── Lomax: the Resolver tab (Add Recording and import review) ───────────────
@@ -6947,12 +6945,52 @@ const App = (() => {
   // ask bar is pinned to the bottom of the panel (sticky, solid ground) and
   // looks the same before and after a run. The Trellis column is read live from
   // the form (o.value), so an edit shows without a new run.
-  // o: {resolved, value(field), tracks, leave}
+  // o: {resolved, value(field), tracks, leave, genreRow, mbGenre}
+  // Tracks: each of Title, Songwriter and Notes is its own row with its own Trellis cell, Lomax cell
+  // and accept / dismiss, so Title and Songwriter can be accepted and Notes dismissed. Accept all
+  // takes titles and songwriters only; a note is always decided by itself.
+  const LX_TRACK_ROWS = [['title', 'Title', 'title'], ['songwriter', 'Songwriter', 'songwriter'], ['note', 'Notes', 'notes']]
+  const lxIconBtn = (act, label, ico, cls) =>
+    `<button type="button" class="lx-ic ${cls}" data-lx-act="${act}" aria-label="${label}" title="${label}">${icon(ico)}</button>`
+
+  // Genre: Lomax's proposal, else what MusicBrainz offers for the act (neutral ink, it is not Lomax's).
+  function lxGenreRowHtml(fp, o) {
+    const p = fp.genre, mb = o.mbGenre
+    let cell = '', acts = ''
+    if (lxShown(p)) { cell = lomaxSuggestionCell(p); acts = lomaxActions(p) }
+    else if (mb && mb.name && mb.state !== 'dismissed') {
+      const done = mb.state === 'accepted'
+      cell = `<span class="${done ? 'lx-same' : 'lx-mb'}">${esc(mb.name)}</span>`
+      acts = done ? '<span class="lx-done">Accepted</span>'
+        : (canEditLibrary() ? `<span class="lx-acts lx-edit">${lxIconBtn('mb-genre-accept', 'Accept', 'check', 'lx-ok')}${lxIconBtn('mb-genre-dismiss', 'Dismiss', 'x', 'lx-no')}</span>` : '')
+    }
+    return `<tr><th scope="row">Genre</th><td><span class="lx-tv" data-lx-tv="genre">${esc(o.value('genre') || '')}</span></td>` +
+      `<td>${cell}</td><td class="lx-act-td" data-lx-genre-acts>${acts}</td></tr>`
+  }
+
+  function lxTrackRowsHtml(tracks, tp) {
+    return tracks.map(t => {
+      const n = t.track_number, props = tp[n] || {}
+      const out = []
+      for (const [k, label, tk] of LX_TRACK_ROWS) {
+        const p = props[k], now = t[tk] || ''
+        if (k !== 'title' && !now && !lxShown(p)) continue      // nothing to show on either side
+        const first = out.length === 0
+        const dim = k === 'title' && (!now || /^Track \d+$/i.test(String(now).trim()))
+        out.push(`<tr${first ? ' class="lx-trk"' : ''}>${first ? `<td class="lx-n" rowspan="@@">${lxPad2(n)}</td>` : ''}` +
+          `<th scope="row" class="lx-pk">${label}</th>` +
+          `<td data-lx-tp="${n}:${tk}"${dim ? ' class="lx-dim"' : ''}>${esc(now)}</td>` +
+          `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`)
+      }
+      return out.join('').replace('rowspan="@@"', `rowspan="${out.length}"`)
+    }).join('')
+  }
+
   function lomaxResolverHtml(c, o) {
     const run = c.latest()
     const fp = lxFieldProps(run), tp = lxTrackProps(run)
     const plain = (o.resolved && o.resolved.sources_plain) || {}
-    const rows = LX_FIELDS.map(([k, label]) => {
+    let rows = LX_FIELDS.map(([k, label]) => {
       const f = (o.resolved && o.resolved[k]) || {}
       const tentative = f.confidence === 'tentative' ? ' <span class="lx-tent">Tentative</span>' : ''
       const p = fp[k]
@@ -6960,19 +6998,13 @@ const App = (() => {
         `<td><span class="lx-tv" data-lx-tv="${k}">${esc(o.value(k) || '')}</span>\u2060${tentative}${lomaxSourcesPopover(plain[k], k)}</td>` +
         `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`
     }).join('')
+    if (o.genreRow || lxShown(fp.genre)) rows += lxGenreRowHtml(fp, o)
 
     const tracks = o.tracks || []
-    const openIds = []
-    for (const n of Object.keys(tp)) for (const p of lxTrackPieces(tp[n])) if (lxOpen(p)) openIds.push(p.id)
-    const trows = tracks.map(t => {
-      const n = t.track_number
-      const pieces = tp[n] ? lxTrackPieces(tp[n]) : []
-      const dim = !t.title || /^Track \d+$/i.test(String(t.title).trim())
-      return `<tr><td class="lx-n">${lxPad2(n)}</td><td data-lx-tt="${n}"${dim ? ' class="lx-dim"' : ''}>${esc(t.title || '')}</td>` +
-        `<td>${tp[n] ? lxTrackPiecesHtml(tp[n]) : ''}</td><td class="lx-act-td">${lomaxActions(pieces)}</td></tr>`
-    }).join('')
-    const acceptAll = openIds.length && canEditLibrary()
-      ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${openIds.join(',')}">Accept all</button>` : ''
+    const bulk = []
+    for (const n of Object.keys(tp)) for (const k of ['title', 'songwriter']) if (lxOpen(tp[n][k])) bulk.push(tp[n][k].id)
+    const acceptAll = bulk.length && canEditLibrary()
+      ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${bulk.join(',')}">Accept all</button>` : ''
 
     const err = c.lastError()
     const q = run && run.question ? `<div class="lx-h">You asked: ${esc(run.question)}</div>` : ''
@@ -6981,10 +7013,29 @@ const App = (() => {
     return `<div class="lx-res-body">
       ${state}
       <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>Lomax</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-      ${tracks.length ? `<table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Lomax</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${trows}</tbody></table>` : ''}
+      ${tracks.length ? `<div class="lx-sec"><div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Trellis</th><th>Lomax</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${lxTrackRowsHtml(tracks, tp)}</tbody></table></div>` : ''}
       ${answer ? `<div class="lx-sec">${q}${answer}</div>` : ''}
       ${lxEarHtml(run || {})}
     </div>${lomaxAskBar({ pin: true, placeholder: 'Anything you want checked (optional)', last: run, busy: !!c.pending })}`
+  }
+
+  // The same Resolver table for a saved recording (View Recording). The Trellis column is what is
+  // saved now; the stored resolver_json gives the Sources popovers and the Tentative marks. Genre
+  // shows when the act has none (or Lomax proposed one).
+  function lxRecordingResolverOpts(rec, perf) {
+    const p = perf || {}
+    const pad = n => String(n).padStart(2, '0')
+    const date = p.start_year
+      ? `${p.start_year}${p.start_month ? '-' + pad(p.start_month) : ''}${(p.start_month && p.start_day) ? '-' + pad(p.start_day) : ''}` : ''
+    const vals = { artist: p.artist, date, venue: p.venue_name, city: p.city, state: p.state, country: p.country,
+      event: p.event_name, stage: p.stage, source: rec.source, lineage: rec.lineage, genre: p.artist_genre }
+    return {
+      resolved: rec.resolver_json || {},
+      value: k => (vals[k] == null ? '' : String(vals[k])),
+      tracks: rec.tracks || [],
+      genreRow: !p.artist_genre,
+      leave: true,
+    }
   }
 
   /** Recording detail — split panel: tracks + info file */
@@ -7082,7 +7133,9 @@ const App = (() => {
     // Grouping is markup only: it never touches Player or playback order,
     // which follows the continuous track_number as it always has.
     const canEdit  = canEditLibrary()
-    const resolverPaneHtml = buildResolverPaneHtml(rec.resolver_json)
+    // The Resolver tab is the Lomax table. Lomax calls are not proxied to a peer, so a joined
+    // library (which also sends no resolver_json) has none.
+    const showResolver = libraryState.activeId == null
     const editHint = canEdit ? ' title="Click title to rename · right-click for flags"' : ''
     // Set no longer has a cell: it is edited from the track's right-click menu.
     // The set group headers in the list still show it.
@@ -7534,10 +7587,10 @@ const App = (() => {
               <div class="slide-pane-scroll" id="sp-checksums-body">${buildChecksumsPaneHtml(rec.tracks)}</div>
             </div>
 
-            ${resolverPaneHtml ? `
-            <!-- Resolver pane — ingest provenance; content, not an editing control -->
+            ${showResolver && !isStudioKind ? `
+            <!-- Resolver pane: the same Lomax table as Add Recording -->
             <div class="slide-pane" id="sp-resolver">
-              <div class="slide-pane-scroll">${resolverPaneHtml}</div>
+              <div class="slide-pane-scroll lx-col"><div class="lx-res" id="lx-res-root"></div></div>
             </div>` : ''}
 
             ${canEdit ? `
@@ -7551,7 +7604,7 @@ const App = (() => {
           </div>
           </div>
           <nav class="slide-index" aria-label="Details">
-            ${detailsTabsHtml('data-pane', '', { resolver: !!resolverPaneHtml, research: canEdit, staged: stagedCount > 0 })}
+            ${detailsTabsHtml('data-pane', '', { resolver: showResolver && !isStudioKind, research: canEdit, staged: stagedCount > 0, info: !isStudioKind })}
           </nav>
         </div>
         ` : ''}
@@ -8376,24 +8429,41 @@ const App = (() => {
 
       renderRecMusicians()
 
-      // Lomax tab. Accepting a suggestion is applied by the server through the
-      // field's normal save path, so the page only has to redraw. Non-editors
-      // never get the pane in the DOM.
-      if (canEdit) {
-        lomaxMountChat(document.getElementById('sp-ai'), {
-          skill: 'recording', subjectType: 'recording', subjectId: recordingId,
-          afterAccept: () => renderRecordingView(recordingId),
-        }, {
-          leave: true,
-          addNotes: async text => {
-            const cur = String(rec.notes || '').trim()
-            const next = cur ? `${cur}\n${text}` : text
-            await API.recordings.update(recordingId, { notes: next, change_note: 'Lomax' })
-            rec.notes = next
-            const el = document.getElementById('rec-notes')
-            if (el) { el.textContent = next; el.classList.remove('pp-empty') }
-          },
-        })
+      // Lomax: Resolver tab and chat. Accepting a suggestion is applied by the server through the
+      // field's normal save path, so the page only has to redraw. Non-editors get the table
+      // without actions and never get the chat pane. One controller drives the Resolver tab and the chat. Without a Resolver tab (a joined
+      // library) there is no controller and no Lomax call at all.
+      const resRoot = (showResolver && !isStudioKind) ? document.getElementById('lx-res-root') : null
+      // An album has no Resolver table: its Lomax pane (skill 'album') is the chat alone.
+      const albumLx = isStudioKind && canEdit && showResolver
+      const lxc = (resRoot || albumLx) ? lomaxController({
+        skill: isStudioKind ? 'album' : 'recording', subjectType: 'recording', subjectId: recordingId,
+        alive: () => document.body.contains(resRoot || document.getElementById('sp-ai')),
+        afterAccept: () => renderRecordingView(recordingId),
+      }) : null
+      if (lxc) {
+        if (resRoot) {
+          resRoot.closest('.slide-pane').setAttribute('data-lx-ctl', lxc.id)
+          lxc.addView(ctl => {
+            if (!document.body.contains(resRoot)) return false
+            lxRepaint(resRoot, lomaxResolverHtml(ctl, lxRecordingResolverOpts(rec, perf)))
+            return true
+          })
+        }
+        if (canEdit) {
+          lomaxMountChat(document.getElementById('sp-ai'), null, {
+            leave: true,
+            addNotes: async text => {
+              const cur = String(rec.notes || '').trim()
+              const next = cur ? `${cur}\n${text}` : text
+              await API.recordings.update(recordingId, { notes: next, change_note: 'Lomax' })
+              rec.notes = next
+              const el = document.getElementById('rec-notes')
+              if (el) { el.textContent = next; el.classList.remove('pp-empty') }
+            },
+          }, lxc)
+        } else lxc.refresh()
+        lxc.load()
       }
     }
 
@@ -8857,6 +8927,13 @@ const App = (() => {
 
       const rail = document.getElementById('slide-rail')
 
+      // A remembered pane whose tab is gone (an album has no Info File tab) falls back to the
+      // first tab that remains.
+      function pickPane(p) {
+        if (p && p !== 'spectrogram' && panel.querySelector(`.slide-tab[data-pane="${p}"]`)) return p
+        return panel.querySelector('.slide-tab')?.dataset.pane || 'info'
+      }
+
       function openPane(pane) {
         state.recPanelOpen = true
         panel.classList.add('open')
@@ -8895,7 +8972,7 @@ const App = (() => {
       // the track list back to full width.
       rail?.addEventListener('click', () => {
         if (panel.classList.contains('open')) closePanel()
-        else openPane(state.recLastPane || 'info')
+        else openPane(pickPane(state.recLastPane))
       })
 
       document.querySelectorAll('.slide-tab').forEach(tab => {
@@ -8915,9 +8992,7 @@ const App = (() => {
       // recPanelOpen persists a deliberate collapse across recordings: someone
       // who put Details away is listening, not auditing, and should not have to
       // dismiss it again on every show. Undefined (first visit) means open.
-      const startPane = (state.recLastPane && state.recLastPane !== 'spectrogram'
-                         && document.getElementById(`sp-${state.recLastPane}`))
-        ? state.recLastPane : 'info'
+      const startPane = pickPane(state.recLastPane)
       if (state.recPanelOpen === false) closePanel()
       else openPane(startPane)
     })()
@@ -9309,6 +9384,7 @@ const App = (() => {
     ingest.lxSyncRes  = null
     ingest.aiApplied  = {}
     ingest.returnTo   = null
+    ingest.kindFolder = null
   }
 
   /** Header Back, while standing inside the Add Recordings wizard.
@@ -9665,8 +9741,7 @@ const App = (() => {
   // `status` other than the five named terminal/in-flight ones (i.e.
   // 'review') is the default "awaiting a decision" row -- it gets the full
   // Ingest / Review / Move action group whether or not `needs_review` is
-  // set; `needs_review` only changes the meta line and forces the metadata
-  // pill to Low.
+  // set; `needs_review` only changes the meta line.
   // ════════════════════════════════════════════════════════════════════════
 
   // ── Resolver reason codes -> short review labels ───────────────────────────
@@ -9815,7 +9890,7 @@ const App = (() => {
     if (row.status === 'pending') metaLine = 'Queued'
     else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Importing</span>`
     else if (row.status === 'failed') metaLine = esc(row.status_text || 'Could not be read')
-    else metaLine = row.meta || '—'
+    else metaLine = row.meta === '' ? '' : (row.meta || '—')
 
     const actions = opts.actionsHtml ? opts.actionsHtml(row) : _iqDefaultActions(row, opts)
     const canExpand = row.status !== 'pending' && row.status !== 'ingesting'
@@ -9832,13 +9907,13 @@ const App = (() => {
             <div class="iq-name-row">
               <div class="lq-brow-name" title="${esc((row.detail && row.detail.path) || row.name)}">${esc(row.name)}</div>
             </div>
-            <div class="lq-brow-sub">${metaLine}</div>
+            ${metaLine ? `<div class="lq-brow-sub">${metaLine}</div>` : ''}
           </div>
         </div>
         <span class="iq-col-format">${row.format ? `<span class="iq-pill">${esc(row.format)}</span>` : ''}</span>
         <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Album' : 'Live'}</span>` : ''}</span>
         ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
-        <span class="lq-brow-meta">${_iqBandPill(row.needs_review ? 'red' : (row.meta_band || 'red'), !!(row.concerns && row.concerns.length))}</span>
+        <span class="lq-brow-meta">${_iqBandPill(row.meta_band, !!(row.concerns && row.concerns.length))}</span>
         <span class="iq-col-status">${_iqStatusCell(row)}</span>
         ${opts.lomaxCell ? `<span class="iq-col-lx">${opts.lomaxCell(row)}</span>` : ''}
         <span class="lq-actions iq-actions">${actions}</span>
@@ -10088,14 +10163,18 @@ const App = (() => {
     const aaTyped = cx.typed
     const aaCount = _aaCount(aaTyped)
     const aaState = cx.state
-    const aaOpen = cx.open
-    return `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}">
+    // cx.tabbed (import page, 2026-10-05): the form is its own tab, so it is always open, has no
+    // +/- or title, opens with one line, and its Apply / Clear row sits under the fields (CSS order).
+    const tabbed = !!cx.tabbed
+    const aaOpen = tabbed || cx.open
+    return `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}${tabbed ? ' lq-applyall--tab' : ''}">
+           ${tabbed ? '<p class="lq-applyall-intro">Enter information here to apply the values to all recordings in the Queue.</p>' : ''}
            <div class="lq-applyall-head">
-             <button type="button" class="lq-applyall-tog" id="lq-applyall-toggle"
+             ${tabbed ? '' : `<button type="button" class="lq-applyall-tog" id="lq-applyall-toggle"
                      aria-expanded="${aaOpen}"
                      title="${aaOpen ? 'Collapse' : 'Expand'}"
                      >${icon(aaOpen ? 'minus' : 'plus', 'lq-applyall-ic')}</button>
-             <span class="lq-applyall-h">Apply values to every recording below</span>
+             <span class="lq-applyall-h">Apply values to every recording below</span>`}
              ${!aaOpen && aaCount ? `<span class="lq-applyall-n">${aaCount} value${
                  aaCount === 1 ? '' : 's'} set</span>` : ''}
              <!-- Apply Values (Ryan, 2026-09-03). The blanket values do
@@ -10384,7 +10463,7 @@ const App = (() => {
       artist:  g('f-artist'), date, venue: g('f-venue-name'),
       city:    g('f-city'),   state: g('f-state'), country: g('f-country'),
       source:  g('f-source'), lineage: g('f-lineage'), event: g('f-event-name'),
-      stage:   g('f-stage'),
+      stage:   g('f-stage'),   genre: g('f-genre'),   fingerprint: lxFingerprint(ingest.scan),
       tracks:  (ingest.tracks || []).map(t => ({
         number: t.track_number, title: t.title, duration: t.duration,
         songwriter: t.songwriter || '', notes: t.notes || '',
@@ -10392,6 +10471,29 @@ const App = (() => {
       info_file_content: ingest.scan.info_file_content || '',
       resolved: ingest.scan.resolved || null,
     }
+  }
+
+  // The album form as the Lomax album skill reads it.
+  function collectAlbumMeta() {
+    const g = id => (document.getElementById(id)?.value || '').trim()
+    return {
+      artist: g('f-artist'), title: g('f-album-title'), year: g('f-year'),
+      tracks: (ingest.tracks || []).map(t => ({
+        number: t.track_number, title: t.title, duration: t.duration, songwriter: t.songwriter || '',
+      })),
+      info_file_content: ingest.scan.info_file_content || '',
+      notes: g('f-notes'),
+      fingerprint: lxFingerprint(ingest.scan),
+    }
+  }
+
+  // Release facts of the MusicBrainz release picked on the Add Recording album form, under the
+  // album title (label, catalog number, country; the same line View Recording shows).
+  function ingestMbFactsHtml() {
+    const p = ingest.mb && ingest.mb.picked
+    if (!p) return ''
+    const facts = [p.label, p.catalog_number, p.country].filter(Boolean).join(' · ') || p.title || 'Release'
+    return `<a class="pp-mb-name" href="${esc(mbReleaseUrl(p.mbid))}" target="_blank" rel="noopener">${esc(facts)} ↗</a>`
   }
 
   // Read the current value of a proposal's target field (for revert).
@@ -10407,6 +10509,7 @@ const App = (() => {
       case 'source':  return g('f-source')
       case 'stage':   return g('f-stage')
       case 'lineage': return g('f-lineage')
+      case 'genre':   return g('f-genre')
       case 'date': {
         const y = g('f-year'), m = g('f-month'), d = g('f-day')
         return y ? `${y}${m ? '-' + String(m).padStart(2, '0') : ''}${(m && d) ? '-' + String(d).padStart(2, '0') : ''}` : ''
@@ -10814,6 +10917,16 @@ const App = (() => {
   async function reScore() {
     if (!ingest.scan) return
     const g = id => (document.getElementById(id)?.value || '').trim()
+    if (ingest.kind === 'studio') {
+      const titles = [...document.querySelectorAll('.t-title')].map(el => ({ title: el.value }))
+      const h = _studioCompleteness(g('f-artist'), g('f-year'), titles.length ? titles : (ingest.tracks || []))
+      const valEl = document.querySelector('#iq-score .meta-readout-value')
+      if (valEl) {
+        valEl.textContent = h.rating
+        valEl.className = 'meta-readout-value meta-readout-value--' + h.band
+      }
+      return
+    }
     const y = g('f-year'), m = g('f-month'), d = g('f-day')
     const date = y ? `${y}${m ? '-' + String(m).padStart(2, '0') : ''}${(m && d) ? '-' + String(d).padStart(2, '0') : ''}` : ''
     const clone = JSON.parse(JSON.stringify(ingest.scan))
@@ -10992,9 +11105,37 @@ const App = (() => {
       })
     } catch (_) {
       if (ingest.folderPath !== forFolder) return
-      body.innerHTML = `<div class="rq-empty">No sound-quality analysis for this folder yet.
-        It is measured during Review &amp; Import, and again in full once the
-        recording is filed.</div>`
+      // Same empty state and button as View Recording's Quality pane. The old line here promised a
+      // measurement during import that does not happen for review rows, albums or in-library runs.
+      body.innerHTML = `<div class="rq-empty">Run Analyze Audio</div>
+        ${canEditLibrary() ? '<button class="pane-act" id="btn-ingest-analyze">Analyze Audio</button>' : ''}`
+      document.getElementById('btn-ingest-analyze')?.addEventListener('click', e => _ingestAnalyze(e.currentTarget, forFolder))
+    }
+  }
+
+  // Score this folder now: the staging row the analyzer writes is the one import promotes, so the
+  // score carries into the library. Polls the job, then repaints the pane from the fresh row.
+  async function _ingestAnalyze(btn, forFolder) {
+    btn.disabled = true
+    btn.textContent = 'Analyzing…'
+    try {
+      const { job_id } = await API.quality.analyze(forFolder)
+      for (;;) {
+        await new Promise(r => setTimeout(r, 1500))
+        if (ingest.folderPath !== forFolder) return
+        const st = await API.quality.analyzeStatus(job_id)
+        if (st.status !== 'running') {
+          if (st.status === 'error') throw new Error(st.error || 'Analysis failed')
+          break
+        }
+      }
+      _ingestQualityLoaded = false
+      await loadIngestQualityPane()
+    } catch (e) {
+      if (ingest.folderPath !== forFolder) return
+      btn.disabled = false
+      btn.textContent = 'Analyze Audio'
+      alert('Analysis failed: ' + e.message)
     }
   }
 
@@ -11026,7 +11167,77 @@ const App = (() => {
     paintNavButtons()
   }
 
+  // Album (studio) form: Metadata Completeness counts only artist, year and tracks, the same
+  // rule as the queue's band (app/utils/completeness.py).
+  const _PLACEHOLDER_TITLE_RE = /^(?:(?:cd|disc|disk|side)\s*\w*\s*)?(?:track|trk|t|d\d+\s*t)\s*[-_. ]?\s*\d+$|^\d+$/i
+  const _PLACEHOLDER_TITLES = ['untitled', 'unknown', 'unknown title', 'audio track', 'track']
+  function _isRealTrackTitle(title) {
+    const t = String(title || '').trim().toLowerCase().split(/\s+/).join(' ')
+    return !!t && !_PLACEHOLDER_TITLES.includes(t) && !_PLACEHOLDER_TITLE_RE.test(t)
+  }
+  function _studioCompleteness(artist, year, tracks) {
+    const miss = []
+    if (!String(artist || '').trim()) miss.push('artist')
+    if (!String(year || '').trim()) miss.push('date')
+    if (!tracks.length || !tracks.every(t => _isRealTrackTitle(t.title))) miss.push('tracks')
+    const band = (miss.length >= 2 || miss.includes('artist') || miss.includes('date')) ? 'red'
+               : miss.length ? 'yellow' : 'green'
+    return { band, rating: { green: 'High', yellow: 'Medium', red: 'Low' }[band] }
+  }
+
+  // Write the live inputs of the Add Recording form back onto ingest.form (and the track titles
+  // onto ingest.tracks). Used by both exits and by the Album / Live Recording switch, so a
+  // re-render keeps everything typed. The live-only inputs stay in the page, hidden, on an album.
+  function _syncIngestFormFromDom() {
+    const f = ingest.form
+      f.artist_name     = document.getElementById('f-artist').value.trim()
+      f.start_year      = parseInt(document.getElementById('f-year').value)      || null
+      f.start_month     = parseInt(document.getElementById('f-month').value)     || null
+      f.start_day       = parseInt(document.getElementById('f-day').value)       || null
+      f.end_year        = parseInt(document.getElementById('f-end-year').value)  || null
+      f.end_month       = parseInt(document.getElementById('f-end-month').value) || null
+      f.end_day         = parseInt(document.getElementById('f-end-day').value)   || null
+      f.venue_name      = document.getElementById('f-venue-name').value.trim()
+      f.venue_id        = parseInt(document.getElementById('f-venue-id').value) || null
+      f.city            = document.getElementById('f-city').value.trim()
+      f.state           = document.getElementById('f-state').value.trim()
+      f.country         = document.getElementById('f-country').value.trim()
+      f.event_name      = document.getElementById('f-event-name').value.trim()
+      f.event_id        = parseInt(document.getElementById('f-event-id').value) || null
+      f.stage           = document.getElementById('f-stage').value.trim()
+      // Genre: an id for an existing genre, or a name for one the user
+      // explicitly chose to create. A NAME WITH NO ID that was merely typed and
+      // never confirmed through the create row is discarded here rather than
+      // minting a vocabulary entry from a half-finished keystroke — see the
+      // picker's wiring for the full argument.
+      f.genre_id        = parseInt(document.getElementById('f-genre-id').value) || null
+      f.genre_name      = document.getElementById('f-genre').classList.contains('is-new-genre')
+                          ? document.getElementById('f-genre').value.trim()
+                          : ''
+      f.is_official     = document.getElementById('f-is-official').checked
+      f.source          = document.getElementById('f-source').value
+      f.quality         = document.getElementById('f-quality').value.trim()
+      f.lineage         = document.getElementById('f-lineage').value.trim()
+      f.source_tag      = document.getElementById('f-source-tag').value.trim()
+      f.etree_shnid     = document.getElementById('f-shnid').value.trim()
+      f.notes           = document.getElementById('f-notes').value.trim()
+    f.album_title     = (document.getElementById('f-album-title')?.value ?? f.album_title ?? '').trim()
+    f._genreText      = document.getElementById('f-genre')?.value || ''
+    mainContent.querySelectorAll('.t-title').forEach(el => {
+      const t = ingest.tracks[parseInt(el.dataset.idx)]; if (t) t.title = el.value.trim()
+    })
+  }
+
   function renderIngestReview() {
+    // The form's kind: from the resolver's reading of this folder, then the reviewer's switch.
+    // Held on ingest (not ingest.form) so Rescan, which rebuilds the form, keeps it.
+    if (ingest.kindFolder !== ingest.folderPath) {
+      ingest.mb = null   // a MusicBrainz pick belongs to one folder
+      ingest.kind = ingest.scan.resolved?.kind === 'studio' ? 'studio' : 'live'   // the scan carries kind on resolved, not at top level
+      ingest.kindFolder = ingest.folderPath
+    }
+    const studio = ingest.kind === 'studio'
+    const hid = studio ? ' style="display:none"' : ''
     const tags = ingest.scan.suggestions.from_tags
     const info = ingest.scan.suggestions.from_info_file
 
@@ -11081,7 +11292,9 @@ const App = (() => {
       // existing row (filled in by initAddArtistMembers) or a human pick.
       f.genre_id        = null
       f.genre_name      = ''
+      f.genre_source    = null
       f.is_official     = false
+      f.album_title     = ingest.scan.resolved?.album?.value || ''
       f._filled         = true
       // Queue-level values land BEFORE the snapshot below, deliberately.
       // They are not something the reviewer typed on this form, so a Rescan
@@ -11097,6 +11310,8 @@ const App = (() => {
       // and should not cost a dialog.
       f._inferred = _ingestFormSnapshot(f)
     }
+
+    const studioHealth = studio ? _studioCompleteness(f.artist_name, f.start_year, ingest.tracks) : null
 
     // Right panel: FLAC Tags — container fields + per-track sub-section
     const tagKeys = ['artist', 'concert_date', 'venue', 'location', 'source', 'lineage']
@@ -11302,8 +11517,8 @@ const App = (() => {
           <div class="meta-readout" id="iq-score"
                title="How much of the metadata this form has filled in">
             <span class="meta-readout-label">Metadata Completeness</span>
-            <span class="meta-readout-value meta-readout-value--${ingest.scan.health?.band || 'yellow'}"
-                  >${esc(_metaRating(ingest.scan.health))}</span>
+            <span class="meta-readout-value meta-readout-value--${studioHealth ? studioHealth.band : (ingest.scan.health?.band || 'yellow')}"
+                  >${esc(studioHealth ? studioHealth.rating : _metaRating(ingest.scan.health))}</span>
           </div>
           <!-- Rescan (Ryan, 2026-09-01). The Details panel lets a reviewer fix
                the info file in place; until now nothing re-read it, so a
@@ -11312,6 +11527,8 @@ const App = (() => {
           <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-rescan"
                   title="Re-run the inference over the info file, including any edits you have made to it">
             ${icon('rotate-cw', 'lq-browse-ic')} Rescan</button>
+          <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-classify-kind">${
+            studio ? 'Classify as Live Recording' : 'Classify as Album'}</button>
           <!-- Re-apply the queue's applied values (2026-09-02, precedence
                reversed 2026-09-03). They are already written over the
                inference when this form opens, so in the ordinary case this has
@@ -11353,7 +11570,7 @@ const App = (() => {
               <div class="ingest-field">
                 <label for="f-genre">Genre</label>
                 <div class="genre-picker-wrap">
-                  <input type="text" id="f-genre" value="${esc(f.genre_name || '')}" autocomplete="off" placeholder="Search or add a genre…" />
+                  <input type="text" id="f-genre" value="${esc(f.genre_name || f._genreText || '')}" autocomplete="off" placeholder="Search or add a genre…" />
                   <input type="hidden" id="f-genre-id" value="${esc(String(f.genre_id || ''))}" />
                   <div class="artist-dropdown" id="f-genre-dropdown" style="display:none"></div>
                 </div>
@@ -11372,11 +11589,12 @@ const App = (() => {
                  boxes rather than a record. End date keeps its own disclosure:
                  a multi-day show is the rare case and should not cost three
                  permanent inputs. -->
-            <div class="ingest-field-grid ingest-row-ident" style="margin-top:6px">
+            <div class="ingest-field-grid ingest-row-ident${studio ? ' ingest-row-album' : ''}" style="margin-top:6px">
+              ${studio ? `<div class="ingest-field"><label for="f-album-title">Album Title</label><input type="text" id="f-album-title" value="${esc(f.album_title || '')}" autocomplete="off" /></div>` : ''}
               <div class="ingest-field"><label>Year</label><input type="number" id="f-year" class="${paulaCls('date')}" value="${esc(f.start_year)}" min="1900" max="2099" /></div>
-              <div class="ingest-field"><label>Month</label><input type="number" id="f-month" class="${paulaCls('date')}" value="${esc(f.start_month)}" min="1" max="12" /></div>
-              <div class="ingest-field"><label>Day</label><input type="number" id="f-day" class="${paulaCls('date')}" value="${esc(f.start_day)}" min="1" max="31" /></div>
-              <div class="ingest-field">
+              <div class="ingest-field"${hid}><label>Month</label><input type="number" id="f-month" class="${paulaCls('date')}" value="${esc(f.start_month)}" min="1" max="12" /></div>
+              <div class="ingest-field"${hid}><label>Day</label><input type="number" id="f-day" class="${paulaCls('date')}" value="${esc(f.start_day)}" min="1" max="31" /></div>
+              <div class="ingest-field"${hid}>
                 <label>Venue</label>
                 <div class="venue-picker-wrap">
                   <input type="text" id="f-venue-name" class="${paulaCls('venue_name')}" value="${esc(f.venue_name)}" autocomplete="off" placeholder="Search or type venue name…" />
@@ -11384,7 +11602,7 @@ const App = (() => {
                   <div class="venue-dropdown" id="f-venue-dropdown" style="display:none"></div>
                 </div>
               </div>
-              <div class="ingest-field">
+              <div class="ingest-field"${hid}>
                 <label>Festival / Event</label>
                 <div class="event-picker-wrap">
                   <input type="text" id="f-event-name" value="${esc(f.event_name || '')}" autocomplete="off" />
@@ -11392,12 +11610,12 @@ const App = (() => {
                   <div class="event-dropdown" id="f-event-dropdown" style="display:none"></div>
                 </div>
               </div>
-              <div class="ingest-field">
+              <div class="ingest-field"${hid}>
                 <label>Stage</label>
                 <input type="text" id="f-stage" value="${esc(f.stage || '')}" autocomplete="off" />
               </div>
             </div>
-            <div id="end-date-toggle-row" style="margin-top:3px">
+            <div id="end-date-toggle-row" style="margin-top:3px${studio ? '; display:none' : ''}">
               <a class="field-toggle-link" id="btn-toggle-end-date" href="#">+ End Date</a>
             </div>
             <div class="ingest-field-grid date-grid" id="end-date-row" style="margin-top:5px; display:none">
@@ -11415,7 +11633,7 @@ const App = (() => {
             </div>
 
             <!-- City / State / Country — state is narrow -->
-            <div class="ingest-field-grid" style="grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr); gap:10px; margin-top:6px" id="f-location-row">
+            <div class="ingest-field-grid" style="grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr); gap:10px; margin-top:6px${studio ? '; display:none' : ''}" id="f-location-row">
               <div class="ingest-field"><label>City</label><input type="text" id="f-city" class="${paulaCls('city')}" value="${esc(f.city)}" /></div>
               <div class="ingest-field"><label>State</label><input type="text" id="f-state" class="${paulaCls('state')}" value="${esc(f.state)}" maxlength="6" /></div>
               <div class="ingest-field"><label>Country</label><input type="text" id="f-country" class="${paulaCls('country')}" value="${esc(f.country)}" /></div>
@@ -11425,7 +11643,7 @@ const App = (() => {
                  Source carries no placeholder: "SBD, AUD, MTX…" read as a
                  value at a glance in a form whose other boxes are pre-filled,
                  and the field is not free text anyway. -->
-            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px">
+            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px${studio ? '; display:none' : ''}">
               <div class="ingest-field">
                 <label>Quality</label>
                 <input type="text" id="f-quality" value="${esc(f.quality)}" />
@@ -11443,7 +11661,7 @@ const App = (() => {
             <!-- Source tag, shnid -- spec section 5: folder-name detection
                  only, never written without this form. Same labels as the
                  View Recording Source block. -->
-            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px">
+            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px${studio ? '; display:none' : ''}">
               <div class="ingest-field">
                 <label>Source Tag</label>
                 <input type="text" id="f-source-tag" value="${esc(f.source_tag)}" />
@@ -11487,6 +11705,7 @@ const App = (() => {
                 <audio id="ingest-preview-audio" preload="metadata"></audio>
               </div>
             </div>
+            ${studio ? `<div class="pp-mb-linked" id="ingest-mb-facts">${ingestMbFactsHtml()}</div>` : ''}
             <div style="overflow:auto; margin-bottom:4px">
               <table class="track-review-table">
                 <thead>
@@ -11594,8 +11813,11 @@ const App = (() => {
               <div class="slide-pane" id="isp-checksums">
                 <div class="slide-pane-scroll">${buildChecksumsPreviewHtml(ingest.scan.fingerprints)}</div>
               </div>
-              ${hasResolver ? `<div class="slide-pane" id="isp-resolver">
+              ${hasResolver && !studio ? `<div class="slide-pane" id="isp-resolver">
                 <div class="slide-pane-scroll lx-col"><div class="lx-res" id="lx-res-root"></div></div>
+              </div>` : ''}
+              ${studio ? `<div class="slide-pane" id="isp-mb">
+                <div class="slide-pane-scroll"><div class="rev-raw-section" id="ingest-mb-root"></div></div>
               </div>` : ''}
               <!-- Permanent, so the tab always advertises Lomax. The chat and
                    the Resolver tab share one controller (see lomaxController). -->
@@ -11606,7 +11828,7 @@ const App = (() => {
             </div>
           </div>
           <nav class="slide-index" id="ingest-tab-rail" aria-label="Details">
-            ${detailsTabsHtml('data-ipane', 'isp-', { resolver: hasResolver, research: true, staged: false })}
+            ${detailsTabsHtml('data-ipane', 'isp-', { resolver: hasResolver && !studio, research: true, staged: false, info: !studio, mb: studio })}
           </nav>
         </div>
 
@@ -11899,6 +12121,7 @@ const App = (() => {
         onSave: v => {
           v = v.trim() || null
           ingest.tracks[i].notes = v
+          _ingestMarkDirty(`track.${ingest.tracks[i].track_number}.note`)
           if (noteEl) noteEl.title = v || 'Click to add a note'
         },
       })
@@ -11909,6 +12132,7 @@ const App = (() => {
         onSave: v => {
           v = v.trim() || null
           ingest.tracks[i].songwriter = v
+          _ingestMarkDirty(`track.${ingest.tracks[i].track_number}.songwriter`)
           if (swEl) swEl.title = v || 'Click to add a songwriter'
         },
       })
@@ -12105,6 +12329,15 @@ const App = (() => {
     // snapshot taken at prefill; if the form still matches it, nothing typed
     // is at risk and a confirm dialog would just be a speed bump on the
     // common case (fix the tracklist, rescan, carry on).
+    // Album <-> Live Recording. Keeps everything typed: the inputs are written back to the form
+    // first, then the page is drawn again in the other layout.
+    document.getElementById('btn-classify-kind')?.addEventListener('click', () => {
+      _syncIngestFormFromDom()
+      ingest.kind = ingest.kind === 'studio' ? 'live' : 'studio'
+      ingest._keepPane = state.ingestLastPane
+      renderIngestStep()
+    })
+
     document.getElementById('btn-rescan')?.addEventListener('click', async () => {
       const btn = document.getElementById('btn-rescan')
       if (!btn || btn.classList.contains('is-busy')) return
@@ -12187,7 +12420,7 @@ const App = (() => {
       genreInput: 'f-genre', genreIdInput: 'f-genre-id',
     })
     addMembersWidget.mount()
-    initAddArtistMembers(addMembersWidget)
+    const membersReady = initAddArtistMembers(addMembersWidget)
 
     // ── Genre (Ryan, 2026-09-01) ────────────────────────────────────────────
     //
@@ -12216,7 +12449,12 @@ const App = (() => {
       const dd    = document.getElementById('f-genre-dropdown')
       if (!input || !dd) return
 
-      const setGenre = ({ id, name }) => {
+      // `source` says who set the genre: 'hand' (the default: a person's pick or edit), 'suggestion'
+      // (MusicBrainz or Lomax accepted into the field), or null (carried over from the act itself).
+      // Confirm sends it so only a hand pick may replace an act's existing genre.
+      const setGenre = ({ id, name }, source) => {
+        ingest.setFormGenre = setGenre         // the Resolver table fills the field through this
+        ingest.form.genre_source = source === undefined ? 'hand' : source
         ingest.form.genre_id   = id || null
         ingest.form.genre_name = name || ''
         input.value = name || ''
@@ -12254,12 +12492,13 @@ const App = (() => {
         const typed = input.value.trim()
         if (!typed) { setGenre({ id: null, name: '' }); return }
         if (typed.toLowerCase() !== (ingest.form.genre_name || '').toLowerCase()) {
-          setGenre({ id: ingest.form.genre_id || null, name: ingest.form.genre_name || '' })
+          setGenre({ id: ingest.form.genre_id || null, name: ingest.form.genre_name || '' }, ingest.form.genre_source || null)
         }
       }, 220))   // after wirePickerDropdown's own 200ms close, or a click on a
                  // dropdown row is undone before it lands
 
-      if (ingest.form.genre_name) setGenre({ id: ingest.form.genre_id, name: ingest.form.genre_name })
+      ingest.setFormGenre = setGenre
+      if (ingest.form.genre_name) setGenre({ id: ingest.form.genre_id, name: ingest.form.genre_name }, ingest.form.genre_source || null)
     })()
 
     // End date toggle — show/hide the row; pre-fill from start date on first reveal
@@ -12555,9 +12794,23 @@ const App = (() => {
       const resRoot = document.getElementById('lx-res-root')
       const chatPane = document.getElementById('isp-ai')
       const alive = () => !!document.getElementById('ingest-panes')
-      const resOpts = () => ({ resolved: ingest.scan.resolved, value: getFormField, tracks: ingest.tracks })
-      const applyLocal = props => {
+      const resOpts = () => ({ resolved: ingest.scan.resolved, value: getFormField, tracks: ingest.tracks,
+                               genreRow: !!ingest.form._genreRow, mbGenre: ingest.form._mbGenre })
+      // Fill the Genre field from a proposal or the MusicBrainz suggestion. An act has one genre and
+      // a genre already in the form (one a person set) is never replaced.
+      const applyGenre = async (name, id) => {
+        const f = ingest.form
+        if (f.genre_id || f.genre_name || !ingest.setFormGenre || !name) return false
+        let g = null
+        try {
+          g = (await API.genres.list()).find(x => (id && x.id === id) || x.name.toLowerCase() === String(name).toLowerCase())
+        } catch (_) { /* the vocabulary could not be read: the name is offered as a new genre */ }
+        ingest.setFormGenre(g ? { id: g.id, name: g.name } : { id: null, name }, 'suggestion')
+        return true
+      }
+      const applyLocal = async props => {
         ingest.aiApplied = ingest.aiApplied || {}
+        const done = ingest.form._lxApplied = ingest.form._lxApplied || {}
         for (const p of props) {
           const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(p.field)
           if (m) {
@@ -12570,17 +12823,106 @@ const App = (() => {
               if (inp) inp.value = p.proposed
             } else t[m[2] === 'note' ? 'notes' : 'songwriter'] = p.proposed
             refreshIngestTrackRow(i)
+          } else if (p.field === 'genre') {
+            await applyGenre(p.proposed)
+          } else if (ingest.kind === 'studio' && LX_ALBUM_FIELDS.some(([k]) => k === p.field)) {
+            // An album's own fields: title -> the album title input, year -> Year, notes -> Notes.
+            const id = { title: 'f-album-title', year: 'f-year', notes: 'f-notes' }[p.field]
+            const key = { title: 'album_title', year: 'start_year', notes: 'notes' }[p.field]
+            if (!(p.field in ingest.aiApplied)) ingest.aiApplied[p.field] = document.getElementById(id)?.value || ''
+            const el = document.getElementById(id)
+            if (el) { el.value = p.proposed; el.classList.add('ai-applied') }
+            ingest.form[key] = p.proposed
           } else if (LX_FIELDS.some(([k]) => k === p.field)) {
             if (!(p.field in ingest.aiApplied)) ingest.aiApplied[p.field] = getFormField(p.field)
             setFormField(p.field, p.proposed)
           }
+          if (p.id) done[p.id] = true
         }
         reScore()
       }
+      // The stored decision is the truth. A show reopened gets a fresh form from the scan, but its
+      // accepted proposals are still accepted: put each back, as a human-set value, unless this
+      // form already took it. A value that cannot be written (a genre over one already chosen) stays
+      // as it is.
+      const formValue = field => {
+        const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(field)
+        if (ingest.kind === 'studio' && field === 'title') return document.getElementById('f-album-title')?.value || ''
+        if (ingest.kind === 'studio' && field === 'year') return document.getElementById('f-year')?.value || ''
+        if (ingest.kind === 'studio' && field === 'notes') return document.getElementById('f-notes')?.value || ''
+        if (!m) return getFormField(field)
+        const t = ingest.tracks.find(x => String(x.track_number) === m[1])
+        return t ? (t[m[2] === 'note' ? 'notes' : m[2]] || '') : ''
+      }
+      const reapplyAccepted = async ctl => {
+        const done = ingest.form._lxApplied || {}, dirty = ingest.form._dirty || {}
+        const todo = lxAcceptedToReapply(ctl.runs, formValue, p => done[p.id] || dirty[p.field], lxFingerprint(ingest.scan))
+        if (todo.length) await applyLocal(todo)
+      }
+      // A field the person types into is theirs: it is never re-applied from a stored decision.
+      const FIELD_OF = { 'f-artist': 'artist', 'f-venue-name': 'venue', 'f-city': 'city', 'f-state': 'state',
+        'f-country': 'country', 'f-event-name': 'event', 'f-source': 'source', 'f-stage': 'stage',
+        'f-lineage': 'lineage', 'f-year': 'date', 'f-month': 'date', 'f-day': 'date', 'f-genre': 'genre',
+        'f-album-title': 'title', 'f-notes': 'notes' }
+      mainContent.oninput = ev => {        // one handler, replaced on each render
+        const t = ev.target
+        if (!t || !alive()) return
+        let field = FIELD_OF[t.id]
+        if (!field && t.classList && t.classList.contains('t-title')) {
+          const tr = ingest.tracks[parseInt(t.dataset.idx)]
+          if (tr) field = `track.${tr.track_number}.title`
+        }
+        if (field) _ingestMarkDirty(field)
+        if (t.id === 'f-year') _ingestMarkDirty('year')   // an album's Year is the proposal field 'year'
+      }
       const c = lomaxController({
-        skill: 'recording', subjectType: 'folder', subjectKey: ingest.folderPath,
-        current: collectCurrentMeta, alive, afterAccept: applyLocal,
+        skill: ingest.kind === 'studio' ? 'album' : 'recording', subjectType: 'folder', subjectKey: ingest.folderPath,
+        current: ingest.kind === 'studio' ? collectAlbumMeta : collectCurrentMeta, alive, onLoaded: reapplyAccepted,
+        afterAccept: async props => { await applyLocal(props); scheduleGenre() },
+        onAct: async (act, btn, ctl) => {
+          const mb = ingest.form._mbGenre
+          if (!mb) return
+          if (act === 'mb-genre-accept') { if (await applyGenre(mb.name, mb.genre_id)) mb.state = 'accepted' }
+          else if (act === 'mb-genre-dismiss') mb.state = 'dismissed'
+          ctl.refresh()
+        },
       })
+      // The Genre row: shown when the act is new or has no genre, with what MusicBrainz offers for it
+      // (an online lookup outside the resolver; nothing is shown when it cannot be reached).
+      // The lookup is for the act the form will save: the Artist field as it stands now (typed or
+      // accepted from Lomax), not the reading the scan made. Answers are cached per name on the form.
+      const offerGenre = async () => {
+        const f = ingest.form, name = (getFormField('artist') || f.artist_name || '').trim()
+        if (!alive()) return
+        const key = name.toLowerCase()
+        if (f.genre_id || f.genre_name || !name) {
+          if (f._mbGenre && f._mbGenre.key !== key) { f._mbGenre = null; c.refresh() }
+          return
+        }
+        f._genreRow = true
+        f._mbCache = f._mbCache || {}
+        if (!f._mbGenre || f._mbGenre.key !== key) {
+          const hit = f._mbCache[key]
+          f._mbGenre = hit ? { ...hit } : { key, name: '' }
+          if (!hit) {
+            try {
+              const g = ((await API.ingest.genreSuggestion(name)) || {}).genre
+              const got = g && g.name ? { key, name: g.name, genre_id: g.genre_id || null } : { key, name: '' }
+              f._mbCache[key] = got
+              if (ingest.form === f && (getFormField('artist') || '').trim().toLowerCase() === key) f._mbGenre = { ...got }
+            } catch (_) { /* offline or unreachable: no suggestion, and nothing cached */ }
+          }
+        }
+        if (alive()) c.refresh()
+      }
+      let genreTimer = null
+      const scheduleGenre = () => {
+        clearTimeout(genreTimer)
+        genreTimer = setTimeout(offerGenre, 600)
+      }
+      membersReady.then(offerGenre)
+      document.getElementById('f-artist')?.addEventListener('input', scheduleGenre)
+      document.getElementById('f-artist')?.addEventListener('change', scheduleGenre)
       ingest.lxc = c
       if (resRoot) {
         resRoot.closest('.slide-pane').setAttribute('data-lx-ctl', c.id)
@@ -12603,6 +12945,110 @@ const App = (() => {
       c.load()
     }
 
+    // MusicBrainz tab (albums only). Searches by the form's Artist and album title when asked,
+    // never on its own, and never picks: a click on a candidate does. A pick fills only what is
+    // empty (album title, Year, track titles that are empty or "Track N"); the release's label,
+    // catalog number and country show under the album title. The id rides along on save.
+    ;(function () {
+      const root = document.getElementById('ingest-mb-root')
+      if (!root) return
+      const m = () => (ingest.mb = ingest.mb || { state: 'idle', cands: [], picked: null, error: '' })
+      const val = id => (document.getElementById(id)?.value || '').trim()
+      const paintFacts = () => {
+        const box = document.getElementById('ingest-mb-facts')
+        if (box) box.innerHTML = ingestMbFactsHtml()
+      }
+      const findBtn = label => `<button type="button" class="btn ${label === 'Find release' ? 'btn-primary' : 'btn-ghost'} btn-xs" id="ingest-mb-find">${label}</button>`
+      function paint() {
+        if (!document.body.contains(root)) return
+        const st = m()
+        if (st.picked) {
+          root.innerHTML = `
+            <div class="pp-mb-linked">${ingestMbFactsHtml()}</div>
+            <div class="pp-mb-foot">
+              <span class="pp-mb-dot"></span>Linked by you
+              <button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-unlink">Unlink</button>
+            </div>`
+        } else if (st.state === 'loading') {
+          root.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
+        } else if (st.state === 'fetching') {
+          root.innerHTML = `<div class="pp-mb-empty">Fetching…</div>`
+        } else if (st.state === 'error') {
+          root.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(st.error)} ${findBtn('Try again')}</div>`
+        } else if (st.state === 'list' && !st.cands.length) {
+          root.innerHTML = `<div class="pp-mb-empty">Nothing found for “${esc(st.title || '')}”.</div>${findBtn('Try again')}`
+        } else if (st.state === 'list') {
+          root.innerHTML = `
+            <div class="pp-mb-prompt">Click the right release to link it${st.cands.length === 1 ? '' : ' (more than one matches)'}.</div>
+            <div class="pp-mb-cands">
+              ${st.cands.map(c => `
+                <div class="pp-mb-cand pp-mb-cand--noscore" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
+                  <span class="pp-mb-cand-name">${esc(c.title || '')}</span>
+                  <span class="pp-mb-cand-meta">${[c.label, c.catalog_number, c.country, c.date].filter(Boolean).map(esc).join(' · ')}</span>
+                  <a class="pp-mb-cand-view" href="${esc(mbReleaseUrl(c.mbid))}" target="_blank" rel="noopener" title="Open on musicbrainz.org">View ↗</a>
+                </div>`).join('')}
+            </div>
+            <div class="pp-mb-foot"><button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-cancel">Cancel</button></div>`
+        } else {
+          root.innerHTML = findBtn('Find release')
+        }
+        document.getElementById('ingest-mb-find')?.addEventListener('click', search)
+        document.getElementById('ingest-mb-cancel')?.addEventListener('click', () => { m().state = 'idle'; paint() })
+        document.getElementById('ingest-mb-unlink')?.addEventListener('click', () => {
+          const st2 = m(); st2.picked = null; st2.state = 'idle'; st2.cands = []
+          paintFacts(); paint()
+        })
+        root.querySelectorAll('.pp-mb-cand').forEach(el => {
+          el.addEventListener('click', e => { if (!e.target.closest('.pp-mb-cand-view')) pick(el.dataset.mbid) })
+          el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } })
+        })
+      }
+      async function search() {
+        const st = m()
+        if (!val('f-album-title')) { document.getElementById('f-album-title')?.focus(); return }
+        st.state = 'loading'; st.title = val('f-album-title'); paint()
+        try {
+          const res = await API.ingest.releaseCandidates(val('f-artist'), st.title, (ingest.tracks || []).length)
+          st.cands = (res && res.candidates) || []
+          st.state = 'list'
+        } catch (e) { st.state = 'error'; st.error = e.message || String(e) }
+        paint()
+      }
+      async function pick(mbid) {
+        const st = m()
+        st.state = 'fetching'; paint()
+        let d
+        try { d = ((await API.ingest.releaseDetail(mbid)) || {}).release } catch (e) { d = null }
+        const cand = st.cands.find(c => c.mbid === mbid) || { mbid }
+        if (!d) { st.state = 'error'; st.error = 'release not found'; paint(); return }
+        d = Object.assign({}, cand, d, { mbid })
+        // Fill only what is empty.
+        const titleEl = document.getElementById('f-album-title')
+        if (titleEl && !titleEl.value.trim() && d.title) { titleEl.value = d.title; ingest.form.album_title = d.title }
+        const yearEl = document.getElementById('f-year')
+        const yr = /^(\d{4})/.exec(d.date || '')
+        if (yearEl && !yearEl.value.trim() && yr) { yearEl.value = yr[1]; ingest.form.start_year = yr[1] }
+        const rt = d.tracks || []
+        if (rt.length && rt.length === (ingest.tracks || []).length) {
+          const order = ingest.tracks.map((t, i) => [t, i]).sort((a, b) => (a[0].track_number || 0) - (b[0].track_number || 0))
+          order.forEach(([t, i], k) => {
+            const inp = mainContent.querySelector(`.t-title[data-idx="${i}"]`)
+            const cur = (inp ? inp.value : t.title || '').trim()
+            const next = rt[k] && rt[k].title
+            if (next && (!cur || /^track\s*\d+$/i.test(cur))) {
+              t.title = next
+              if (inp) inp.value = next
+              refreshIngestTrackRow(i)
+            }
+          })
+        }
+        st.picked = { mbid, title: d.title, label: d.label, catalog_number: d.catalog_number, country: d.country, date: d.date }
+        st.state = 'idle'
+        paintFacts(); paint(); reScore()
+      }
+      paint()
+    })()
+
     // Details panel: horizontal tabs + the permanent rail, same gestures as
     // View Recording. Clicking the ACTIVE tab collapses the panel, which is the
     // gesture existing muscle memory expects; the rail toggles it both ways and
@@ -12622,16 +13068,20 @@ const App = (() => {
       })
       document.getElementById('ingest-slide-rail')?.addEventListener('click', () => {
         if (panel.classList.contains('open')) _ingestPanelOpen(false)
-        else switchIngestPane(document.getElementById(state.ingestLastPane) ? state.ingestLastPane : 'isp-info')
+        else switchIngestPane(panel.querySelector(`.slide-tab[data-ipane="${state.ingestLastPane}"]`) ? state.ingestLastPane
+          : (panel.querySelector('.slide-tab')?.dataset.ipane || 'isp-info'))
       })
       // Default open on the Resolver when adding a recording (Ryan, 2026-10-03:
       // it is the first tab here), else Info File. A deliberate collapse
       // survives moving between recordings, same rule as recPanelOpen on
       // View Recording. switchIngestPane sets the active tab and pane.
       _ingestQualityLoaded = false
-      const _firstPane = ingest._keepPane && document.getElementById(ingest._keepPane)
+      // An album has no Info File or Resolver tab, so a remembered pane that has no tab falls back.
+      const _hasTab = id => !!panel.querySelector(`.slide-tab[data-ipane="${id}"]`)
+      const _firstPane = ingest._keepPane && _hasTab(ingest._keepPane)
         ? ingest._keepPane
-        : document.getElementById('isp-resolver') ? 'isp-resolver' : 'isp-info'
+        : _hasTab('isp-resolver') ? 'isp-resolver'
+        : _hasTab('isp-info') ? 'isp-info' : (panel.querySelector('.slide-tab')?.dataset.ipane || 'isp-info')
       delete ingest._keepPane
       if (state.ingestPanelOpen === false) _ingestPanelOpen(false)
       else switchIngestPane(_firstPane)
@@ -12643,46 +13093,13 @@ const App = (() => {
       const after = ev.currentTarget.dataset.after || 'view'
       // Collect metadata
       const f = ingest.form
-      f.artist_name     = document.getElementById('f-artist').value.trim()
-      f.start_year      = parseInt(document.getElementById('f-year').value)      || null
-      f.start_month     = parseInt(document.getElementById('f-month').value)     || null
-      f.start_day       = parseInt(document.getElementById('f-day').value)       || null
-      f.end_year        = parseInt(document.getElementById('f-end-year').value)  || null
-      f.end_month       = parseInt(document.getElementById('f-end-month').value) || null
-      f.end_day         = parseInt(document.getElementById('f-end-day').value)   || null
-      f.venue_name      = document.getElementById('f-venue-name').value.trim()
-      f.venue_id        = parseInt(document.getElementById('f-venue-id').value) || null
-      f.city            = document.getElementById('f-city').value.trim()
-      f.state           = document.getElementById('f-state').value.trim()
-      f.country         = document.getElementById('f-country').value.trim()
-      f.event_name      = document.getElementById('f-event-name').value.trim()
-      f.event_id        = parseInt(document.getElementById('f-event-id').value) || null
-      f.stage           = document.getElementById('f-stage').value.trim()
-      // Genre: an id for an existing genre, or a name for one the user
-      // explicitly chose to create. A NAME WITH NO ID that was merely typed and
-      // never confirmed through the create row is discarded here rather than
-      // minting a vocabulary entry from a half-finished keystroke — see the
-      // picker's wiring for the full argument.
-      f.genre_id        = parseInt(document.getElementById('f-genre-id').value) || null
-      f.genre_name      = document.getElementById('f-genre').classList.contains('is-new-genre')
-                          ? document.getElementById('f-genre').value.trim()
-                          : ''
-      f.is_official     = document.getElementById('f-is-official').checked
-      f.source          = document.getElementById('f-source').value
-      f.quality         = document.getElementById('f-quality').value.trim()
-      f.lineage         = document.getElementById('f-lineage').value.trim()
-      f.source_tag      = document.getElementById('f-source-tag').value.trim()
-      f.etree_shnid     = document.getElementById('f-shnid').value.trim()
-      f.notes           = document.getElementById('f-notes').value.trim()
+      _syncIngestFormFromDom()
 
       if (!f.artist_name) { alert('Artist name is required.'); return }
 
-      // Title is still a live input — collect its current value. Notes,
+      // Track titles were collected by _syncIngestFormFromDom. Notes,
       // songwriter, flags, and official are already staged directly on
       // ingest.tracks by openTrackMenu's onChange (right-click popup).
-      mainContent.querySelectorAll('.t-title').forEach(el => {
-        const t = ingest.tracks[parseInt(el.dataset.idx)]; if (t) t.title = el.value.trim()
-      })
 
       // Submit directly — the old "Confirm & Add to Library" review screen
       // is gone (Ryan, 2026-07-15: "never very useful, nothing is ever
@@ -12719,12 +13136,28 @@ const App = (() => {
         // Both are sent: an id links an existing genre, a name creates one.
         genre_id:   f.genre_id   || null,
         genre_name: f.genre_name || null,
+        // 'hand' when a person picked the genre (may replace the act's genre); anything else fills only an empty one.
+        genre_source: f.genre_source || null,
         // Lomax may already have run on this draft (a run on the folder moves to
         // the recording on confirm; the result rides along as the fallback).
         ai_result: ingest.lxc?.latest()?.result || null,
         // Fields whose value the person applied from an AI proposal (they may learn aliases).
         ai_accepted: Object.keys(ingest.aiApplied || {}),
         resolver_result: ingest.scan?.resolved || null,
+        kind: ingest.kind === 'studio' ? 'studio' : 'live',
+      }
+      // An album sends its title and none of the live-only fields; a live recording sends no title.
+      delete payload.album_title
+      payload.mb_release_id = (payload.kind === 'studio' && ingest.mb && ingest.mb.picked) ? ingest.mb.picked.mbid : null
+      delete payload._genreText
+      if (payload.kind === 'studio') {
+        payload.title = f.album_title || null
+        Object.assign(payload, {
+          start_month: null, start_day: null, end_year: null, end_month: null, end_day: null,
+          venue_name: '', venue_id: null, event_name: '', event_id: null, stage: '',
+          city: '', state: '', country: '', quality: '', source: '', lineage: '',
+          source_tag: '', etree_shnid: '',
+        })
       }
       // ⚠ NO blanket-value fallback here any more (2026-09-03).
       //
@@ -14244,17 +14677,17 @@ const App = (() => {
     const queued = (c.ready || 0) + (c.review || 0) + (c.pending || 0)
     // The Lomax row sits under Mode. Without a key the toggle is locked to Off.
     const hasKey = lxHasKey()
-    const lxDesc = hasKey ? 'Checks recordings that need review.'
-      : 'Checks recordings that need review. Lomax requires your Anthropic key to be set.'
+    const lxLine = 'Lomax checks recordings that need review and helps to fill out info.'
+    const lxDesc = hasKey ? lxLine : lxLine + ' Lomax requires your Anthropic key to be set.'
     return `<div class="bi-scan-mode">
         <span class="bi-scan-lbl">Mode</span>
         <div class="bi-scan-cell">
           <div class="seg" role="group" aria-label="Import mode">${seg('auto', 'Import Automatically')}${seg('hold', 'Review First')}</div>
           <span class="bi-scan-desc">${desc}</span>
         </div>
-        ${canEditLibrary() ? `<span class="bi-scan-lbl">Lomax</span>
+        ${canEditLibrary() ? `<span class="bi-scan-lbl bi-scan-lbl--lx">${icon('lomax')}Lomax</span>
         <div class="bi-scan-cell">
-          ${lomaxLevelToggle({ level: lxImportLevel(), off: true, key: 'import', disabled: !hasKey })}
+          ${lomaxImportSwitch({ on: lxImportLevel() !== 'off', disabled: !hasKey })}
           <span class="bi-scan-desc">${lxDesc}</span>
         </div>` : ''}
       </div>
@@ -14323,7 +14756,7 @@ const App = (() => {
     // The blanket values live on the server; the block starts from them.
     _biAa = _biAaFromApplied(run.applied)
     _biApplied = run.applied || null
-    _biAaOpen = false
+    _biApplyOpen = false
 
     await _paintBulkIngestPage(run)
     _biStartPoll()
@@ -14573,7 +15006,9 @@ const App = (() => {
         ? `${it.venue}, ${it.location}` : (it.venue || it.location)
       const parts = it.kind === 'studio' ? [it.artist, it.title] : [it.artist, it.date_text, place]
       const joined = parts.filter(Boolean).join(' - ')
-      if (joined) { title = joined; sub = esc(basename) }
+      // No grey line on the Imported tabs (Ryan, 2026-10-05): the folder name
+      // was redundant there. Hover on the title still shows the path.
+      if (joined) { title = joined; sub = '' }
     }
     return {
       id: it.id,
@@ -14627,14 +15062,26 @@ const App = (() => {
   // Review First runs score live folders before ingest, so only their Queue
   // shows the Sound Quality column.
   // ── Lomax: the import queue ─────────────────────────────────────────────────
-  // With Study or Research on (Add Recordings), Lomax runs by itself, one
+  // With Lomax on (Add Recordings), Lomax runs by itself, one
   // recording at a time, on every row that needs review. A run is filed against
   // the row's folder, so opening the row's Resolver finds it already there, and
   // it moves to the recording when the row is imported. The Lomax column and
   // the summary line read the state kept here.
   function _lxQNew() {
-    return { cells: new Map(), items: new Map(), queue: [], running: false, paused: false,
+    return { cells: new Map(), items: new Map(), queue: [], running: false, paused: false, pauseRead: false,
              touched: false, tokens: 0, searches: 0, listedAt: 0 }
+  }
+  // Pause lives in storage against the run id: the queue object is rebuilt on every visit to the
+  // page, and a pause held only there was lost the moment the person navigated away.
+  function _lxQReadPause(q) {
+    if (q.pauseRead || !_biPageRunId) return
+    q.pauseRead = true
+    q.paused = String(lxGet(LX_PAUSED_KEY) || '') === String(_biPageRunId)
+  }
+  function _lxQSetPaused(paused) {
+    _lxQ.paused = paused
+    _lxQ.pauseRead = true
+    lxSet(LX_PAUSED_KEY, paused && _biPageRunId ? String(_biPageRunId) : '')
   }
   let _lxQ = _lxQNew()
 
@@ -14663,6 +15110,23 @@ const App = (() => {
       })),
       info_file_content: (scan && scan.info_file_content) || '',
       resolved: r,
+      fingerprint: lxFingerprint(scan),
+    }
+  }
+
+  // The album shape of the same thing: what the Add Recording album form would send.
+  function lomaxAlbumCurrentFromScan(scan) {
+    const r = (scan && scan.resolved) || {}
+    const val = k => { const v = r[k] && r[k].value; return v == null || typeof v === 'object' ? '' : String(v) }
+    const d = (r.date && r.date.value) || {}
+    return {
+      artist: val('artist'), title: val('album'), year: d.year ? String(d.year) : '',
+      tracks: (r.tracks || []).map(t => ({
+        number: t.track_number, title: t.title, duration: t.duration, songwriter: t.songwriter || '',
+      })),
+      info_file_content: (scan && scan.info_file_content) || '',
+      notes: '',
+      fingerprint: lxFingerprint(scan),
     }
   }
 
@@ -14699,12 +15163,13 @@ const App = (() => {
     const el = document.getElementById('bi-lomax-line')
     if (!el) return
     const q = _lxQ
+    _lxQReadPause(q)
     if (!_biRun || !_lxColShown() || !q.items.size) { el.innerHTML = ''; return }
     let checked = 0
     for (const c of q.cells.values()) if (c.state === 'done' || c.state === 'skipped') checked++
-    el.innerHTML = `<span class="bi-lx-lbl">Lomax</span>` +
+    el.innerHTML = `<span class="bi-lx-lbl">${icon('lomax')}Lomax</span>` +
       `<span class="bi-lx-sum">${checked} of ${q.items.size} checked · ${lxTokens(q.tokens)} tokens · ${lxPlural(q.searches, 'search', 'searches')}</span>` +
-      (checked >= q.items.size ? '' : `<button type="button" class="btn btn-ghost btn-xs" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`)
+      (checked >= q.items.size ? '' : `<button type="button" class="btn btn-sm lx-go" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`)
   }
 
   // Redraw the header and every loaded row (the column came or went).
@@ -14741,7 +15206,8 @@ const App = (() => {
     const alive = () => _lxQ === q
     _lxQSetCell(id, { state: 'working' })
     try {
-      const runs = ((await API.lomax.runs({ skill: 'recording', subject_type: 'folder', subject_key: abs })) || {}).runs || []
+      const skill = it.kind === 'studio' ? 'album' : 'recording'
+      const runs = ((await API.lomax.runs({ skill, subject_type: 'folder', subject_key: abs })) || {}).runs || []
       const last = runs[runs.length - 1]
       let run = runs.slice().reverse().find(r => r.status === 'done')
       let fresh = false
@@ -14751,8 +15217,8 @@ const App = (() => {
         else {
           const scan = await API.recordings.scan(abs)
           const started = await API.lomax.start({
-            skill: 'recording', subject_type: 'folder', subject_key: abs, level,
-            current: lomaxCurrentFromScan(scan),
+            skill, subject_type: 'folder', subject_key: abs, level,
+            current: skill === 'album' ? lomaxAlbumCurrentFromScan(scan) : lomaxCurrentFromScan(scan),
           })
           fresh = true
           run = await lomaxWaitRun(started.id, { alive })
@@ -14780,7 +15246,8 @@ const App = (() => {
 
   async function _lxQKick() {
     const q = _lxQ
-    if (q.running || q.paused || !_biRun || !_lxColShown() || lxImportLevel() === 'off') return
+    _lxQReadPause(q)
+    if (q.running || !_biRun || !_lxColShown() || lxImportLevel() === 'off') return
     q.running = true
     try {
       await _lxQLoadItems(q)
@@ -14798,7 +15265,7 @@ const App = (() => {
   // The Add Recordings toggle changed (the toggle itself updated in place).
   function _lxImportLevelChanged(level) {
     if (!document.getElementById('bi-rows')) return   // the picker: nothing running yet
-    _lxQ.paused = false
+    _lxQSetPaused(false)
     _lxQRepaintAll()
     if (level !== 'off') _lxQKick()
   }
@@ -14812,7 +15279,7 @@ const App = (() => {
       return
     }
     if (e.target.closest && e.target.closest('[data-lx-pause]')) {
-      _lxQ.paused = !_lxQ.paused
+      _lxQSetPaused(!_lxQ.paused)
       _lxQPaintLine()
       if (!_lxQ.paused) _lxQKick()
     }
@@ -15059,16 +15526,24 @@ const App = (() => {
     const n = _biTabCounts(run)
     const tabs = [['queue', 'Queue'], ['live', 'Imported - Live Recordings'], ['album', 'Imported - Albums']]
     // Imported tabs appear only once they hold rows (Ryan, 2026-10-02).
-    return tabs.filter(([id]) => id === 'queue' || n[id] > 0).map(([id, label]) => `
-      <button type="button" class="pp-tab bi-tab--${id}${_biTab === id ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
+    const left = tabs.filter(([id]) => id === 'queue' || n[id] > 0).map(([id, label]) => `
+      <button type="button" class="pp-tab bi-tab--${id}${_biTab === id && !_biApplyOpen ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
+    // Bulk Value Apply sits at the right end and replaces the table while open; it is not a
+    // filter of rows, so it is page state (_biApplyOpen), never a _biTab value the table reads.
+    return left + (_biApplyAvailable(run) ? `
+      <button type="button" class="pp-tab bi-tab--apply${_biApplyOpen ? ' active' : ''}" data-bitab="apply">Bulk Value Apply</button>` : '')
+  }
+  function _biApplyAvailable(run) { return canEditLibrary() && !!run && _biTabCounts(run).queue > 0 }
+  function _biApplyMode() {
+    document.getElementById('bi-shell')?.classList.toggle('bi-applymode', _biApplyOpen)
   }
 
   // Line above the rows: the review note on Queue only. The completed tabs'
   // View buttons were removed (Ryan, 2026-10-01).
   function _biTabNoteHtml(run) {
     if (_biTab === 'queue') {
-      const review = (run.counts && run.counts.review) || 0
-      return review ? `<p class="bi-tab-note">Check the ${icon('alert', 'bi-note-ic')} for issues, then manually "Review", or "Import" to import it anyway</p>` : ''
+      // The Queue's instruction line was removed (Ryan, 2026-10-05).
+      return ''
     }
     return ''
   }
@@ -15076,6 +15551,7 @@ const App = (() => {
   function _biPaintTabs(run) {
     // A selected tab that has emptied is hidden, so fall back to Queue.
     if (_biTab !== 'queue' && !_biTabCounts(run)[_biTab]) _biTab = 'queue'
+    if (_biApplyOpen && !_biApplyAvailable(run)) { _biApplyOpen = false; _biApplyMode(); _biPaintApplyAll() }
     const tabsEl = document.getElementById('bi-tabs')
     if (tabsEl) tabsEl.innerHTML = _biTabsHtml(run)
     const noteEl = document.getElementById('bi-tab-note')
@@ -15309,7 +15785,7 @@ const App = (() => {
     city: '', state: '', country: '', source: '', source_tag: '', lineage: '', notes: '',
   })
   let _biAa = _biEmptyAa()
-  let _biAaOpen = false
+  let _biApplyOpen = false   // the Bulk Value Apply tab is showing in place of the table (2026-10-05)
   let _biApplied = null
   let _biAaTimer = null
 
@@ -15330,18 +15806,13 @@ const App = (() => {
   function _biPaintApplyAll() {
     const el = document.getElementById('bi-applyall')
     if (!el) return
-    if (!(canEditLibrary() && _biTab === 'queue' && _biRun && _biTabCounts(_biRun).queue > 0)) {
+    if (!(_biApplyOpen && _biApplyAvailable(_biRun))) {
       el.innerHTML = ''
       return
     }
     el.innerHTML = _applyAllHtml({
-      aa: _biAa, open: _biAaOpen, busy: false, applied: _biApplied,
+      aa: _biAa, tabbed: true, busy: false, applied: _biApplied,
       typed: _aaTyped(_biAa), state: _biAaState(),
-    })
-    document.getElementById('lq-applyall-toggle')?.addEventListener('click', () => {
-      _biAaOpen = !_biAaOpen
-      _biPaintApplyAll()
-      if (_biAaOpen) document.getElementById('lq-apply-artist')?.focus()
     })
     document.getElementById('lq-applyall-apply')?.addEventListener('click', async () => {
       const typed = _aaTyped(_biAa)
@@ -15577,7 +16048,7 @@ const App = (() => {
     // Full (re)build: first paint of this view, or a status bucket change
     // (running/paused -> done).
     setMainHTML(`
-      <div class="batch-shell lq-shell">
+      <div class="batch-shell lq-shell" id="bi-shell">
         <div class="lq-header">
           <div style="min-width:0">
             ${_biSrcHeaderHtml(run.root)}
@@ -15600,6 +16071,7 @@ const App = (() => {
           <div id="bi-sentinel"></div>
         </div>
       </div>`)
+    _biApplyMode()
     _biPaintApplyAll()
     document.addEventListener('click', _closeMoveMenus)
     document.getElementById('bi-ingest-all-wrap')?.addEventListener('click', e => {
@@ -15618,7 +16090,23 @@ const App = (() => {
     document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
     document.getElementById('bi-tabs')?.addEventListener('click', async e => {
       const t = e.target.closest('[data-bitab]')
-      if (!t || t.dataset.bitab === _biTab) return
+      if (!t) return
+      if (t.dataset.bitab === 'apply') {
+        if (_biApplyOpen) return
+        _biApplyOpen = true
+        _biPaintTabs(_biRun || run)
+        _biApplyMode()
+        _biPaintApplyAll()
+        document.getElementById('lq-apply-artist')?.focus()
+        return
+      }
+      const wasApply = _biApplyOpen
+      _biApplyOpen = false
+      _biApplyMode()
+      if (t.dataset.bitab === _biTab) {
+        if (wasApply) { _biPaintTabs(_biRun || run); _biPaintApplyAll() }
+        return
+      }
       _biTab = t.dataset.bitab
       if (_biTab !== 'queue') _biReviewFilter = false
       _biPaintTabs(_biRun || run)
@@ -16870,11 +17358,11 @@ const App = (() => {
    *  rather than in the one the card is advertising. */
   function _palettePickerHtml() {
     const active = currentPalette().id
-    const group = (title, mode) => `
+    const group = (title, grp) => `
       <div class="pal-group">
         <div class="pal-group-title">${title}</div>
         <div class="pal-grid">
-          ${PALETTES.filter(p => p.mode === mode).map(p => `
+          ${PALETTES.filter(p => p.group === grp).map(p => `
             <button type="button" class="pal-card${p.id === active ? ' active' : ''}"
                     data-palette="${esc(p.id)}" aria-pressed="${p.id === active}">
               <span class="pal-mini" data-pal-preview="${esc(p.id)}">
@@ -16895,7 +17383,7 @@ const App = (() => {
         </div>
       </div>`
     return `<div class="pal-picker" id="set-palette" role="group" aria-label="Palette">
-        ${group('Light', 'light')}${group('Dark', 'dark')}
+        ${group('Light', 'light')}${group('In between', 'mid')}${group('Dark', 'dark')}
       </div>`
   }
 

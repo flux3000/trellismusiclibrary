@@ -17,7 +17,7 @@ import traceback
 from datetime import datetime, timezone
 
 from app.extensions import db
-from app.lomax import prompts
+from app.lomax import filters, prompts
 from app.lomax.skills import SKILLS
 from app.lomax.skills.base import Ctx, NothingToDo, Subject
 from app.models.lomax import LomaxProposal, LomaxRun
@@ -281,6 +281,9 @@ def execute(run_id, api_key):
         except NothingToDo as e:
             raw = {"thinking": str(e), "proposals": []}
         result, proposals = skill.normalize(raw, subject)
+        if not ctx.question:   # an answer exists only for a question that was asked
+            result["answer"] = ""
+            result["thinking"] = filters.drop_absent_question_sentences(result.get("thinking"))
         result["model"], result["usage"], result["level"] = run.model, usage, run.level
         _store_proposals(run, proposals)
         run.result_json = json.dumps(result)

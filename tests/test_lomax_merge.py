@@ -94,7 +94,7 @@ def test_tracks_become_proposals_against_the_current_track_values(fake, seeded_i
     got = {p["field"]: p for p in lomax.get_run(run.id)["result"]["proposals"]}
     assert got["track.1.title"]["agrees"] is True
     assert got["track.1.songwriter"]["agrees"] is False and not got["track.1.songwriter"]["current"]
-    assert got["track.1.note"]["proposed"] == "Segue"
+    assert "track.1.note" not in got                    # no info file footnote supports it: dropped
     assert got["track.2.title"]["proposed"] == "Nardis" and got["track.2.title"]["agrees"] is False
     assert "track.2.songwriter" not in got and "track.2.note" not in got
     result = lomax.get_run(run.id)["result"]
@@ -104,13 +104,16 @@ def test_tracks_become_proposals_against_the_current_track_values(fake, seeded_i
 
 def test_accepting_track_proposals_writes_the_track_and_logs_it(api, fake, seeded_ids):
     rid = seeded_ids["recording_id"]
-    run = _run(fake, rid, tracks=[{"number": 2, "title": "Nardis", "songwriter": "Miles Davis", "note": "Long intro"}])
+    db.session.get(Recording, rid).info_file_content = "2. Nardis *\n* Long intro with Miles Davis on trumpet"
+    db.session.commit()
+    run = _run(fake, rid, tracks=[{"number": 2, "title": "Nardis", "songwriter": "Miles Davis",
+                                   "note": "Long intro with Miles Davis on trumpet"}])
     props = {p.field: p for p in db.session.get(LomaxRun, run.id).proposals}
     for f in ("track.2.title", "track.2.songwriter", "track.2.note"):
         r = api.post("/api/lomax/proposals/%d" % props[f].id, json={"decision": "accepted"})
         assert r.status_code == 200, r.get_json()
     t = db.session.query(Track).filter_by(recording_id=rid, track_number=2).one()
-    assert (t.title, t.songwriter, t.notes) == ("Nardis", "Miles Davis", "Long intro")
+    assert (t.title, t.songwriter, t.notes) == ("Nardis", "Miles Davis", "Long intro with Miles Davis on trumpet")
     notes = [e.note for e in db.session.query(RecordingEvent).filter_by(recording_id=rid)]
     assert any("Lomax proposal accepted: track.2.songwriter" in (n or "") for n in notes)
 
@@ -127,7 +130,7 @@ def test_the_instructions_ask_for_every_field_and_every_track():
     from app.lomax.skills import SKILLS
     ins = SKILLS["recording"].instructions
     assert "agrees=true" in ins and "EVERY track" in ins and "Segue notation" in ins
-    assert sorted(SKILLS) == ["artist", "recording", "venue"]
+    assert sorted(SKILLS) == ["album", "artist", "recording", "venue"]
     assert "—" not in ins
 
 

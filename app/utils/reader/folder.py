@@ -45,3 +45,51 @@ def parse_template(name):
         else:
             out["city"] = place
     return out
+
+
+MIN_NAME_KEY = 4
+
+
+def names_artist(folder_name, reading):
+    """True when the free-form folder name contains the artist `reading` whole, on word
+    boundaries, after the library's normalisation (accents, case, "&"/"and", punctuation,
+    leading "The"). A reading shorter than MIN_NAME_KEY characters never counts. A name that
+    does not contain the reading says nothing: folder names are often just dates."""
+    from app.utils.reader.library import norm_key
+    r = norm_key(reading)
+    if len(r) < MIN_NAME_KEY or not any(c.isalpha() for c in r):
+        return False
+    f = norm_key(folder_name)
+    return f" {r} " in f" {f} "
+
+
+_MONTH = (r"jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+          r"sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?")
+_LEAD_STOP = re.compile(
+    rf"\s+-\s+|\s+[\u2013\u2014]\s+|\s*;\s*|\s*\(|"
+    rf"(?<![\w])(?:{_MONTH})\.?(?=\s+\d|\s*$|\s*,)|"       # a month name beside a day or year
+    rf"(?<!\d)(?:19|20)\d{{2}}(?!\d)|"                          # a year
+    rf"(?<!\d)\d{{1,2}}[/.\-]\d{{1,2}}[/.\-]\d{{2,4}}(?!\d)|"  # 05-08-77, 5/8/1977
+    rf"(?<!\d)\d{{2}}-\d{{2}}-\d{{2}}(?!\d)", re.I)
+
+
+def folder_lead(name):
+    """The text a free-form folder name opens with, before the first date token or separator
+    (" - ", ";", an en/em dash, a parenthesis) -- the artist, when the name starts with one:
+
+        "Ella Fitzgerald & Joe Pass - 1984-05-03 - Teatro Tenda"  -> "Ella Fitzgerald & Joe Pass"
+        "Boxcars July 25, 2014 Bicentennial Park Pavilion"        -> "Boxcars"
+        "Herbie Hancock 1984-09-10 Blossom Music Center"          -> "Herbie Hancock"
+
+    A trailing location with no date or separator before it stays in the lead
+    ("Miles Davis Hempstead NY 1975 ..." -> "Miles Davis Hempstead NY"). None when nothing
+    is left before the first stop."""
+    t = (name or "").strip()
+    m = _LEAD_STOP.search(t)
+    lead = (t[:m.start()] if m else t).strip(" \t-,.")
+    return lead or None
+
+
+GROUP_WORDS = {"band", "trio", "quartet", "quintet", "sextet", "septet", "octet", "orchestra",
+               "ensemble", "group", "unit", "project", "collective", "jazztet", "friends",
+               "family", "brothers", "sisters", "boys", "players", "revue", "express", "allstars"}

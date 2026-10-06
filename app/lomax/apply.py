@@ -9,6 +9,7 @@ import json
 from sqlalchemy import func
 
 from app.extensions import db
+from app.lomax import filters
 from app.lomax.evidence import split_iso
 from app.models.lomax import LomaxProposal, LomaxRun
 from app.models.track import Track
@@ -24,6 +25,9 @@ class ApplyError(Exception):
 def apply_proposal(prop: LomaxProposal, run: LomaxRun, user_id=None):
     """Apply one accepted proposal. Folder subjects have nothing saved yet, so the page applies
     those; the decision is still recorded by the caller."""
+    if run.skill == "album" and run.subject_type == "recording":
+        _apply_album(prop, run, user_id)
+        return
     handler = {"recording": _apply_recording, "artist": _apply_artist, "venue": _apply_venue}.get(run.subject_type)
     if handler is None:
         return
@@ -51,6 +55,9 @@ def _apply_recording(prop, run, user_id):
         raise ApplyError("The recording no longer exists.")
     if prop.field.startswith("track."):
         _apply_track(prop, rec, run, user_id)
+        return
+    if prop.field == "genre":
+        _apply_genre(prop, rec, run, user_id)
         return
     perf = rec.performance
     f, v = prop.field, (prop.proposed or "").strip()
@@ -104,6 +111,9 @@ def _apply_recording(prop, run, user_id):
     elif f == "stage":
         perf.stage = v or None
     elif f in ("city", "state", "country"):
+        if f == "state":
+            ven = perf.venue if perf.venue and not is_placeholder_venue_name(perf.venue.name) else None
+            v = filters.state_code(v, (ven.country if ven else perf.country))
         # Location lands on a real linked venue, else on the performance's own fallback fields
         # (a placeholder-named venue is shared across unrelated shows and never gets one).
         if perf.venue and not is_placeholder_venue_name(perf.venue.name):
@@ -125,6 +135,71 @@ def _apply_recording(prop, run, user_id):
                 path.unlink()
         except OSError:
             pass
+
+
+def _apply_album(prop, run, user_id):
+    """An album run's proposals: title, year, notes and the track title/songwriter. An accepted
+    notes text replaces the recording's notes (it is a human decision)."""
+    from app.models.recording import Recording
+    from app.models.recording_event import RecordingEvent
+    from app.lomax.skills.album import NOTES_MAX_CHARS, _year
+    from app.utils.folder_naming import rename_recording_folder
+    from flask import current_app
+
+    rec = db.session.get(Recording, run.subject_id)
+    if rec is None:
+        raise ApplyError("The recording no longer exists.")
+    f, v = prop.field, (prop.proposed or "").strip()
+    if f.startswith("track."):
+        if f.split(".")[-1] not in ("title", "songwriter"):
+            raise ApplyError("Lomax cannot apply a %r proposal to an album track." % f)
+        _apply_track(prop, rec, run, user_id)
+        return
+    if f == "title":
+        if not v:
+            raise ApplyError("Empty title.")
+        rec.title = v
+    elif f == "year":
+        if rec.kind != "studio":
+            raise ApplyError("A year is applied only to a studio record.")
+        year = _year(v)
+        if not year or rec.performance is None:
+            raise ApplyError("%r is not a year." % v)
+        rec.performance.start_year = int(year)
+    elif f == "notes":
+        if not v:
+            raise ApplyError("Empty notes.")
+        rec.notes = v[:NOTES_MAX_CHARS]
+    else:
+        raise ApplyError("Lomax cannot apply a %r proposal to an album." % f)
+    db.session.add(RecordingEvent(recording_id=rec.id, user_id=user_id or run.created_by,
+                                  event_type="metadata_updated", note="Lomax proposal accepted: %s" % f))
+    if f in ("title", "year"):
+        rename_recording_folder(rec, current_app.config.get("LIBRARY_ROOT", ""))   # gated inside
+    db.session.commit()
+
+
+def _apply_genre(prop, rec, run, user_id):
+    """The act's genre, through the one genre-apply path (musicbrainz.apply_genre_to_artist): fill
+    when EMPTY, matching an existing Trellis genre or else creating the named one. A genre a person
+    already set is never replaced, and an act has one genre."""
+    from app.models.recording_event import RecordingEvent
+    from app.utils import musicbrainz as mb
+    from app.utils.artists import mark_artist_confirmed
+    perf = rec.performance
+    artist = perf.artist if perf else None
+    if artist is None:
+        raise ApplyError("This recording has no act.")
+    name = (prop.proposed or "").strip()
+    if not name:
+        raise ApplyError("Empty genre.")
+    if artist.genre_id is not None:
+        raise ApplyError("This act already has a genre.")
+    mb.apply_genre_to_artist(artist, [name])
+    mark_artist_confirmed(artist)
+    db.session.add(RecordingEvent(recording_id=rec.id, user_id=user_id or run.created_by,
+                                  event_type="metadata_updated", note="Lomax proposal accepted: genre"))
+    db.session.commit()
 
 
 def _apply_track(prop, rec, run, user_id):
@@ -210,7 +285,8 @@ def _apply_venue(prop, run, user_id):
         return
     if prop.field not in ("city", "state", "country"):
         raise ApplyError("Lomax cannot apply a %r proposal to a venue." % prop.field)
-    setattr(venue, prop.field, (prop.proposed or "").strip() or None)
+    v = (prop.proposed or "").strip()
+    setattr(venue, prop.field, (filters.state_code(v, venue.country) if prop.field == "state" else v) or None)
     db.session.commit()
 
 

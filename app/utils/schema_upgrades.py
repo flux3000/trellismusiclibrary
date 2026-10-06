@@ -180,3 +180,59 @@ def ensure_venue_history(engine):
         msg = f"Could not add the venue.history column to the database at {path}: {e}"
         log.error("schema: %s", msg)
         raise RuntimeError(msg) from e
+
+
+_BUSY_TIMEOUT = 60       # seconds a locked database is waited for (tests lower it)
+
+
+def ensure_bulk_meta_band(engine):
+    """Recompute `meta_band` (the import queue's Metadata badge) as a completeness band for queue
+    rows extracted before it was one (their `meta` blob has no meta_band_v). Idempotent: a row
+    is stamped meta_band_v = 2 and never touched again. Returns the rows updated, or None when
+    there was nothing to do. A stale pill is harmless, so this never raises: a missing table or
+    column, a locked database or a row of an odd shape is logged or skipped and the app starts."""
+    import json
+    from app.utils.completeness import band_from_meta
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=rw", uri=True, timeout=_BUSY_TIMEOUT, isolation_level=None)
+    except sqlite3.Error as e:
+        log.error("schema: could not open %s to recompute queue Metadata bands: %s", path, e)
+        return None
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(bulk_ingest_item)")}
+        if not {"id", "meta", "kind"} <= cols:
+            return None
+        con.execute("BEGIN IMMEDIATE")
+        n = 0
+        try:
+            for rid, raw, kind in con.execute(
+                    "SELECT id, meta, kind FROM bulk_ingest_item WHERE meta IS NOT NULL").fetchall():
+                try:
+                    meta = json.loads(raw)
+                    if not isinstance(meta, dict) or meta.get("meta_band_v") == 2:
+                        continue
+                    meta["meta_band"] = band_from_meta(meta, kind)
+                    meta["meta_band_v"] = 2
+                    con.execute("UPDATE bulk_ingest_item SET meta = ? WHERE id = ?", (json.dumps(meta), rid))
+                    n += 1
+                except Exception:       # noqa: BLE001 -- one odd row never stops the rest
+                    log.warning("schema: skipped queue row %s (unreadable meta)", rid)
+            con.execute("COMMIT")
+        except BaseException:
+            try:
+                con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        return n or None
+    except Exception as e:      # noqa: BLE001 -- includes "database is locked": never block the start
+        log.error("schema: could not recompute queue Metadata bands in %s: %s", path, e)
+        return None
+    finally:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
