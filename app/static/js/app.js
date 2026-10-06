@@ -344,7 +344,7 @@ const App = (() => {
     const modeLabel = fh.file_handling_mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
     return `<span class="fh-strip">
       <b>${esc(modeLabel)}</b><span class="sep">·</span>
-      <a href="#/settings" class="change">Change</a></span>`
+      <a href="#/settings/files" class="change">Change</a></span>`
   }
 
   // ── Resizable sidebar ──────────────────────────────────────────────────────
@@ -15168,7 +15168,7 @@ const App = (() => {
     let checked = 0
     for (const c of q.cells.values()) if (c.state === 'done' || c.state === 'skipped') checked++
     el.innerHTML = `<span class="bi-lx-lbl">${icon('lomax')}Lomax</span>` +
-      `<span class="bi-lx-sum">${checked} of ${q.items.size} checked · ${lxTokens(q.tokens)} tokens · ${lxPlural(q.searches, 'search', 'searches')}</span>` +
+      `<span class="bi-lx-sum">${checked} of ${q.items.size} checked</span>` +
       (checked >= q.items.size ? '' : `<button type="button" class="btn btn-sm lx-go" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`)
   }
 
@@ -15912,7 +15912,7 @@ const App = (() => {
       ? 'File Handling set to move/organize into Trellis folders'
       : 'File Handling set to keep files as-is (do not move or copy)')
       + (fh && fh.write_tags_on_ingest ? ' and write tags on import' : '')
-    return `${esc(text)} <a href="#/settings">Change in Settings</a>`
+    return `${esc(text)} <a href="#/settings/files">Change in Settings</a>`
   }
 
   // The page title and Source Folder block shared by the import page and the
@@ -17231,8 +17231,8 @@ const App = (() => {
       if (id) renderPersonView(id)
       else    renderLibraryView()
 
-    } else if (hash === '#/settings') {
-      renderSettingsPage()
+    } else if (hash === '#/settings' || hash.startsWith('#/settings/')) {
+      renderSettingsPage(hash.split('/')[2] || 'profile')
     } else if (hash === '#/peers') {
       renderPeersPage()
     } else if (hash === '#/collections') {
@@ -17387,73 +17387,98 @@ const App = (() => {
       </div>`
   }
 
-  /** Settings › File handling (mockup panels 2/2b). The template field is
-   *  read-only for a preset (shows that preset's own template, purely for
-   *  display) and editable only for Custom. */
+  /** Settings › Files (2026-10-05 tabbed redesign). The naming controls are
+   *  rendered only while Rename Files is on, and the template field only for
+   *  Custom: a preset's template is not something the user can act on, and a
+   *  dimmed block of controls that do nothing is noise. Placement moved to the
+   *  Folders tab. */
   function _fileHandlingSectionHtml(fh) {
-    const renaming  = !!fh.rename_files
-    const isCustom  = fh.naming_scheme === 'custom'
-    const template  = isCustom ? (fh.naming_template || '') : (NAMING_PRESET_TEMPLATES[fh.naming_scheme] || '')
+    const renaming = !!fh.rename_files
+    const isCustom = fh.naming_scheme === 'custom'
+    const naming = !renaming ? '' : `
+      <div class="set-dep">
+        <div class="set-field">
+          <label class="set-label" for="fh-scheme">Naming Scheme</label>
+          <div class="set-actions">
+            <select class="set-input" id="fh-scheme">
+              ${NAMING_SCHEME_LABELS.map(([v, label]) =>
+                `<option value="${v}"${v === fh.naming_scheme ? ' selected' : ''}>${esc(label)}</option>`).join('')}
+            </select>
+            <span class="set-flash" id="fh-scheme-flash"></span>
+          </div>
+        </div>
+        ${isCustom ? `
+        <div class="set-field">
+          <label class="set-label" for="fh-template">Template</label>
+          <input type="text" class="set-input mono" id="fh-template" value="${esc(fh.naming_template || '')}">
+          <div class="tokens">${NAMING_TOKENS.map(t => `<span>{${t}}</span>`).join('')}</div>
+          <p class="set-hint">Modifiers: <span class="mono">:lower</span> <span class="mono">:upper</span>
+            <span class="mono">:nospace</span> <span class="mono">:underscore</span>. Text in square brackets
+            is dropped when a token inside it is empty.</p>
+          <span class="set-flash" id="fh-template-flash"></span>
+        </div>` : ''}
+        <div class="set-field">
+          <span class="set-label">Preview</span>
+          <table class="fh-prev set-prev" id="fh-preview"></table>
+        </div>
+      </div>`
     return `
       <div class="set-field">
-        <div class="seg" id="fh-mode" role="group" aria-label="File handling mode">
-          <button type="button" class="${fh.file_handling_mode !== 'organize' ? 'on' : ''}" data-mode="keep">Keep my files as-is</button>
-          <button type="button" class="${fh.file_handling_mode === 'organize' ? 'on' : ''}" data-mode="organize">Organize my files</button>
+        <span class="set-label">Mode</span>
+        <div class="set-actions">
+          <div class="seg" id="fh-mode" role="group" aria-label="File handling mode">
+            <button type="button" class="${fh.file_handling_mode !== 'organize' ? 'on' : ''}" data-mode="keep">Keep my files as-is</button>
+            <button type="button" class="${fh.file_handling_mode === 'organize' ? 'on' : ''}" data-mode="organize">Organize my files</button>
+          </div>
+          <span class="set-flash" id="fh-mode-flash"></span>
         </div>
-        <span class="set-flash" id="fh-mode-flash"></span>
       </div>
 
       <div class="set-field">
-        <label class="check"><input type="checkbox" id="fh-rename-folders" ${fh.rename_folders ? 'checked' : ''}>
-          <div>Rename folders<div class="hint">Folder names follow each recording's details.</div></div></label>
-        <label class="check"><input type="checkbox" id="fh-rename-files" ${fh.rename_files ? 'checked' : ''}>
-          <div>Rename files<div class="hint">File names follow the naming scheme.</div></div></label>
+        <span class="set-label">Rename</span>
+        <label class="check"><input type="checkbox" id="fh-rename-folders" ${fh.rename_folders ? 'checked' : ''}><div>Folders</div></label>
+        <label class="check"><input type="checkbox" id="fh-rename-files" ${renaming ? 'checked' : ''}><div>Files</div></label>
         <span class="set-flash" id="fh-switches-flash"></span>
       </div>
-
-      <div class="set-field${renaming ? '' : ' dim'}">
-        <label class="set-label" for="fh-scheme">Naming scheme</label>
-        <select class="set-input" id="fh-scheme" ${renaming ? '' : 'disabled'}>
-          ${NAMING_SCHEME_LABELS.map(([v, label]) =>
-            `<option value="${v}"${v === fh.naming_scheme ? ' selected' : ''}>${esc(label)}</option>`).join('')}
-        </select>
-      </div>
-
-      <div class="set-field${renaming ? '' : ' dim'}">
-        <label class="set-label" for="fh-template">Template</label>
-        <input type="text" class="set-input mono" id="fh-template" value="${esc(template)}"
-               ${renaming && isCustom ? '' : 'readonly'}>
-        <div class="tokens">${NAMING_TOKENS.map(t => `<span>{${t}}</span>`).join('')}</div>
-        <p class="set-hint">Modifiers: <span class="mono">:lower</span> <span class="mono">:upper</span>
-          <span class="mono">:nospace</span> <span class="mono">:underscore</span>. Text in square brackets
-          is dropped when a token inside it is empty.</p>
-        <span class="set-flash" id="fh-template-flash"></span>
-      </div>
-
-      <div class="set-field${renaming ? '' : ' dim'}">
-        <label class="set-label" id="fh-preview-label">Preview</label>
-        <table class="fh-prev" id="fh-preview"><tr><th>Now</th><th></th><th>After</th></tr></table>
-      </div>
+      ${naming}
 
       <div class="set-field">
+        <span class="set-label">Tags</span>
         <label class="check"><input type="checkbox" id="fh-write-tags-ingest" ${fh.write_tags_on_ingest ? 'checked' : ''}>
           <div>Write tags when a recording is added<div class="hint">FFP and ST5 checksums still verify. MD5 will not.</div></div></label>
         <label class="check"><input type="checkbox" id="fh-write-tags-default" ${fh.write_tags_default ? 'checked' : ''}>
           <div>Write tags to files without asking each time</div></label>
         <span class="set-flash" id="fh-tags-flash"></span>
-      </div>
-
-      <div class="set-field" style="margin-bottom:0">
-        <label class="set-label">Placement</label>
-        <label class="check"><input type="radio" name="fh-place" value="artist" ${fh.placement === 'artist' ? 'checked' : ''}><div>Under the artist folder</div></label>
-        <label class="check"><input type="radio" name="fh-place" value="root" ${fh.placement === 'root' ? 'checked' : ''}><div>Library root</div></label>
-        <span class="set-flash" id="fh-place-flash"></span>
       </div>`
   }
 
-  async function renderSettingsPage() {
+  /** Settings › Folders: where the library is, where new recordings land in
+   *  it, and the three working folders (filled in by _wireSettings, desktop
+   *  only, since the folder dialog is PyWebView's). */
+  function _foldersSectionHtml(fh, about) {
+    return `
+      <div class="set-field">
+        <span class="set-label">Library</span>
+        <div class="set-path">${esc(about.library_root || '')}</div>
+      </div>
+      <div class="set-field">
+        <span class="set-label">Placement</span>
+        <label class="check"><input type="radio" name="fh-place" value="artist" ${fh.placement === 'artist' ? 'checked' : ''}><div>Under the artist folder</div></label>
+        <label class="check"><input type="radio" name="fh-place" value="root" ${fh.placement === 'root' ? 'checked' : ''}><div>Library root</div></label>
+        <span class="set-flash" id="fh-place-flash"></span>
+      </div>
+      <div id="set-folders"></div>`
+  }
+
+  // The Settings tab in force. Kept across the in-page repaints that follow a
+  // change (renderSettingsPage() with no argument), so flipping a switch never
+  // throws you back to the first tab.
+  let _settingsTab = 'profile'
+
+  async function renderSettingsPage(tab) {
     setActiveNav('settings')
     setNavCurrent('Settings')
+    if (tab) _settingsTab = tab
     setLoading()
 
     let prefs = {}, me = {}, about = {}, fh = {}
@@ -17472,123 +17497,126 @@ const App = (() => {
     const keySet     = prefs.has_api_key
     const noKeychain = prefs.keychain_available === false
     const model      = prefs.ai_model || 'claude-sonnet-5'
+    const editable   = canEditLibrary()
 
-    setMainHTML(`
-      <div class="set-wrap">
-        <header class="set-head">
-          <h1 class="set-h1">Settings</h1>
-          <p class="set-lede">Changes save as you make them.</p>
-        </header>
+    // Files and Folders are install-level and admin-only, so in Playback mode
+    // they are absent rather than shown and refused.
+    const tabs = [
+      ['profile', 'Profile'], ['appearance', 'Appearance'],
+      ...(editable ? [['files', 'Files'], ['folders', 'Folders']] : []),
+      ['lomax', 'Lomax'], ['about', 'About'],
+    ]
+    if (!tabs.some(([id]) => id === _settingsTab)) {
+      _settingsTab = 'profile'
+      if (location.hash.startsWith('#/settings/')) history.replaceState(null, '', '#/settings/profile')
+    }
 
-        <section class="set-sec">
-          <h2 class="set-sec-title">You</h2>
-          <p class="set-sec-hint">Your name and picture appear on any library you
-            share. They are how a peer knows whose shelf they are looking at.</p>
-
+    const panes = {
+      profile: `
+        <div class="set-field">
+          <label class="set-label" for="set-name">Display Name</label>
+          <div class="set-actions">
+            <input class="set-input" id="set-name" maxlength="120"
+                   value="${esc(me.display_name || '')}"
+                   placeholder="${esc(me.username)}" autocomplete="off">
+            <span class="set-flash" id="set-name-flash"></span>
+          </div>
+        </div>
+        <div class="set-field">
+          <label class="set-label" for="set-username">Sign-in Name</label>
+          <div class="set-actions">
+            <input class="set-input" id="set-username" maxlength="64"
+                   value="${esc(me.username)}" autocomplete="off"
+                   autocorrect="off" autocapitalize="off" spellcheck="false">
+            <span class="set-flash" id="set-username-flash"></span>
+          </div>
+        </div>
+        <div class="set-field">
+          <span class="set-label">Picture</span>
           <div class="set-person">
             <div class="set-avatar" id="set-avatar">${_settingsAvatarHtml(me)}</div>
-            <div class="set-person-fields">
-              <div class="set-field">
-                <label class="set-label" for="set-name">Display name</label>
-                <input class="set-input" id="set-name" maxlength="120"
-                       value="${esc(me.display_name || '')}"
-                       placeholder="${esc(me.username)}" autocomplete="off">
-                <span class="set-flash" id="set-name-flash"></span>
-                <p class="set-hint">Leave it empty to go by your sign-in name.</p>
-              </div>
-              <div class="set-field">
-                <label class="set-label" for="set-username">Sign-in name</label>
-                <input class="set-input" id="set-username" maxlength="64"
-                       value="${esc(me.username)}" autocomplete="off"
-                       autocorrect="off" autocapitalize="off" spellcheck="false">
-                <span class="set-flash" id="set-username-flash"></span>
-                <p class="set-hint">The name you sign in with. Peers see your
-                  display name instead, unless you have left that empty.</p>
-              </div>
-              <div class="set-field">
-                <span class="set-label">Picture</span>
-                <div class="set-actions">
-                  <input type="file" id="set-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
-                  <button class="btn btn-ghost btn-sm" id="set-avatar-pick">
-                    ${me.has_avatar ? 'Replace' : 'Choose a picture'}</button>
-                  ${me.has_avatar
-                    ? '<button class="btn btn-ghost btn-sm" id="set-avatar-clear">Remove</button>' : ''}
-                  <span class="set-flash" id="set-avatar-flash"></span>
-                </div>
-                <p class="set-hint">A square image works best. 4 MB maximum.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="set-sec">
-          <h2 class="set-sec-title">Appearance</h2>
-          <div class="set-field">
-            <span class="set-label">Palette</span>
-            ${_palettePickerHtml()}
-            <p class="set-hint">Applies immediately, and only on this machine.
-              A waveform already on screen keeps the colours it was drawn with
-              until you open that recording again.</p>
-          </div>
-        </section>
-
-        <section class="set-sec">
-          <h2 class="set-sec-title">File handling</h2>
-          ${canEditLibrary() ? _fileHandlingSectionHtml(fh) : ''}
-          <div id="set-folders"></div>
-        </section>
-
-        <section class="set-sec">
-          <h2 class="set-sec-title">Lomax</h2>
-          <p class="set-sec-hint">Used to research artists and read info files.
-            You bring your own key, so you pay Anthropic directly and Trellis
-            never marks it up.</p>
-
-          <div class="set-field">
-            <label class="set-label" for="set-key">Anthropic API key</label>
             <div class="set-actions">
-              <input class="set-input" type="password" id="set-key" autocomplete="off"
-                     placeholder="${keySet ? '•••••••••••••  (a key is saved)' : 'sk-ant-…'}">
-              <button class="btn btn-primary btn-sm" id="set-key-save">Save key</button>
-              ${keySet ? '<button class="btn btn-ghost btn-sm" id="set-key-clear">Clear</button>' : ''}
-              <span class="set-flash" id="set-key-flash"></span>
+              <input type="file" id="set-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" hidden>
+              <button class="btn btn-ghost btn-sm" id="set-avatar-pick">
+                ${me.has_avatar ? 'Replace' : 'Choose Picture'}</button>
+              ${me.has_avatar
+                ? '<button class="btn btn-ghost btn-sm" id="set-avatar-clear">Remove</button>' : ''}
+              <span class="set-flash" id="set-avatar-flash"></span>
             </div>
-            <p class="set-hint">${noKeychain
-              ? 'This machine has no usable keychain, so a key cannot be stored.'
-              : 'Stored in your OS keychain, never in the database.'}</p>
           </div>
+        </div>
+        ${editable ? `
+        <div class="set-field">
+          <span class="set-label">Sharing</span>
+          <button class="btn btn-ghost btn-sm" id="set-peers">Manage Sharing</button>
+        </div>` : ''}`,
 
-          <div class="set-field">
-            <label class="set-label" for="set-model">Model</label>
+      appearance: _palettePickerHtml(),
+
+      files:   editable ? _fileHandlingSectionHtml(fh) : '',
+      folders: editable ? _foldersSectionHtml(fh, about) : '',
+
+      lomax: `
+        <div class="set-field">
+          <label class="set-label" for="set-key">Anthropic API Key</label>
+          <div class="set-actions">
+            <input class="set-input" type="password" id="set-key" autocomplete="off"
+                   placeholder="${keySet ? '•••••••••••••  (a key is saved)' : 'sk-ant-…'}">
+            <button class="btn btn-primary btn-sm" id="set-key-save">Save Key</button>
+            ${keySet ? '<button class="btn btn-ghost btn-sm" id="set-key-clear">Clear</button>' : ''}
+            <span class="set-flash" id="set-key-flash"></span>
+          </div>
+          ${noKeychain ? '<p class="set-hint">This machine has no usable keychain, so a key cannot be stored.</p>' : ''}
+        </div>
+        <div class="set-field">
+          <label class="set-label" for="set-model">Model</label>
+          <div class="set-actions">
             <select class="set-input" id="set-model">
               <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet: stronger research</option>
               <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku: faster and cheaper</option>
             </select>
             <span class="set-flash" id="set-model-flash"></span>
           </div>
+        </div>
+        <div class="set-field" id="set-lx-usage"></div>`,
 
-          <div class="set-field" id="set-lx-usage"></div>
-        </section>
+      about: `
+        <dl class="set-about">
+          <dt>Version</dt><dd>${esc(about.app_name || 'Trellis')} ${esc(about.version || '')}${
+            about.installed ? '' : ' <span class="set-about-tag">running from source</span>'}</dd>
+          <dt>Library Data</dt><dd class="set-path">${esc(about.database || '')}</dd>
+        </dl>
+        <p class="set-about-credit">Place data from GeoNames (geonames.org), CC BY 4.0.</p>`,
+    }
 
-        ${canEditLibrary() ? `
-        <section class="set-sec">
-          <h2 class="set-sec-title">Sharing</h2>
-          <p class="set-sec-hint">Who can reach your library, and what they see.
-            Enrolling someone has its own steps and its own page.</p>
-          <button class="btn btn-ghost btn-sm" id="set-peers">Manage sharing →</button>
-        </section>` : ''}
-
-        <section class="set-sec set-sec--about">
-          <h2 class="set-sec-title">About</h2>
-          <dl class="set-about">
-            <dt>Version</dt><dd>${esc(about.app_name || 'Trellis')} ${esc(about.version || '')}${
-              about.installed ? '' : ' <span class="set-about-tag">running from source</span>'}</dd>
-            <dt>Library data</dt><dd class="set-path">${esc(about.database || '')}</dd>
-            <dt>Audio files</dt><dd class="set-path">${esc(about.library_root || '')}</dd>
-          </dl>
-          <p class="set-about-credit">Place data from GeoNames (geonames.org), CC BY 4.0.</p>
-        </section>
+    setMainHTML(`
+      <div class="set-wrap">
+        <h1 class="set-h1">Settings</h1>
+        <div class="pp-tabs set-tabs" role="tablist">
+          ${tabs.map(([id, label]) => `
+            <button class="pp-tab${id === _settingsTab ? ' active' : ''}" data-set-tab="${id}"
+                    role="tab" aria-selected="${id === _settingsTab}">${label}</button>`).join('')}
+        </div>
+        ${tabs.map(([id]) => `
+          <section class="set-pane${id === _settingsTab ? ' active' : ''}" data-set-pane="${id}" role="tabpanel">
+            ${panes[id]}
+          </section>`).join('')}
       </div>`)
+
+    // Switching tabs is in-page: every pane is already rendered and wired, so
+    // the hash is replaced (not pushed, and no hashchange) to keep a reload or
+    // a deep link on the same tab without a refetch.
+    document.querySelectorAll('[data-set-tab]').forEach(btn => btn.addEventListener('click', () => {
+      _settingsTab = btn.dataset.setTab
+      document.querySelectorAll('[data-set-tab]').forEach(b => {
+        const on = b === btn
+        b.classList.toggle('active', on)
+        b.setAttribute('aria-selected', String(on))
+      })
+      document.querySelectorAll('[data-set-pane]').forEach(p =>
+        p.classList.toggle('active', p.dataset.setPane === _settingsTab))
+      history.replaceState(null, '', '#/settings/' + _settingsTab)
+    }))
 
     _wireSettings(me)
   }
@@ -17768,18 +17796,17 @@ const App = (() => {
       const el = e.target
       const ok = await _fhSaveField('rename_files', el.checked, 'fh-switches-flash')
       if (!ok) { el.checked = !el.checked; return }
-      renderSettingsPage()   // scheme/template/preview enable or dim
+      renderSettingsPage()   // naming controls appear or go
     })
     $('fh-scheme')?.addEventListener('change', async e => {
       const el = e.target
       const prev = Array.from(el.options).find(o => o.defaultSelected)?.value
-      const ok = await _fhSaveField('naming_scheme', el.value, 'fh-template-flash')
+      const ok = await _fhSaveField('naming_scheme', el.value, 'fh-scheme-flash')
       if (!ok) { if (prev) el.value = prev; return }
-      renderSettingsPage()   // template field's readonly-ness and content follow
+      renderSettingsPage()   // template field appears for Custom only
     })
     $('fh-template')?.addEventListener('blur', async e => {
       const el = e.target
-      if (el.readOnly) return
       await _fhSaveField('naming_template', el.value, 'fh-template-flash')
       _fhRefreshPreview()
     })
@@ -17814,7 +17841,7 @@ const App = (() => {
         <div class="set-field">
           <span class="set-label">${label}</span>
           <div class="set-actions">
-            <span class="set-hint" id="wf-${key}">${esc(wf[key] || (key === 'import_dir' && wf.effective_import_dir) || 'not set')}</span>
+            <span class="set-path" id="wf-${key}">${esc(wf[key] || (key === 'import_dir' && wf.effective_import_dir) || 'not set')}</span>
             <button class="btn btn-ghost btn-sm" data-wf="${key}">Choose…</button>
             <span class="set-flash" id="wf-${key}-flash"></span>
           </div>
@@ -17845,17 +17872,26 @@ const App = (() => {
       const tbl = $('fh-preview')
       if (!tbl) return
       const scheme = $('fh-scheme')?.value
-      const template = $('fh-template') && !$('fh-template').readOnly ? $('fh-template').value : undefined
+      const template = $('fh-template') ? $('fh-template').value : undefined
+      // Custom with nothing typed yet: nothing to preview, and no error to show.
+      if (template !== undefined && !template.trim()) {
+        tbl.innerHTML = ''
+        tbl.closest('.set-field').hidden = true
+        return
+      }
       try {
         const result = await API.naming.preview({ scheme, template })
-        const rows = (result.plan || []).map(p => `
+        const rows = (result.plan || []).slice(0, 3).map(p => `
           <tr><td class="fh-prev-old">${esc(p.current)}</td><td class="fh-prev-arrow">→</td><td>${esc(p.proposed)}</td></tr>`).join('')
-        tbl.innerHTML = `<tr><th>Now</th><th></th><th>After</th></tr>` + rows
+        tbl.innerHTML = rows
+        // An empty library has nothing to preview; the label alone would be a
+        // heading over nothing.
+        tbl.closest('.set-field').hidden = !rows
       } catch (err) {
         tbl.innerHTML = `<tr><td colspan="3">${esc(err.message)}</td></tr>`
+        tbl.closest('.set-field').hidden = false
       }
     }
-    $('fh-scheme')?.addEventListener('change', _fhRefreshPreview)
     if ($('fh-preview')) _fhRefreshPreview()
 
     menu('set-model',    'ai_model')
@@ -17893,7 +17929,7 @@ const App = (() => {
         return PATH[r.subject_type] && r.subject_id && label ? `<a href="#/${PATH[r.subject_type]}/${r.subject_id}">${label}</a>` : label
       }
       const row = r => `<tr><td>${esc(date(r.created_at))}</td><td>${esc(r.skill_label || '')}</td><td>${subject(r)}</td>` +
-        `<td>${esc(LX_LEVEL_LABEL[r.level] || '')}</td><td class="num">${r.proposals || 0}</td>` +
+        `<td class="num">${r.proposals || 0}</td>` +
         `<td class="num">${(r.total_tokens || 0).toLocaleString()}</td><td class="num">${r.web_searches || 0}</td></tr>`
       let data
       try { data = await API.lomax.usage(50, 0) } catch (_) { return }
@@ -17902,7 +17938,7 @@ const App = (() => {
       const tot = (n, l) => `<div class="lx-tot"><div class="lx-tot-n">${n}</div><div class="lx-tot-l">${l}</div></div>`
       host.innerHTML = `<div class="lx-tots">${tot((t.runs || 0).toLocaleString(), 'Runs')}${tot((t.total_tokens || 0).toLocaleString(), 'Tokens')}` +
         `${tot((t.web_searches || 0).toLocaleString(), 'Web searches')}${tot(`${t.accepted || 0} of ${t.proposals || 0}`, 'Suggestions accepted')}</div>` +
-        ((data.runs || []).length ? `<table class="lx-tbl lx-hist"><thead><tr><th>Date</th><th>Job</th><th>Subject</th><th>Level</th>` +
+        ((data.runs || []).length ? `<table class="lx-tbl lx-hist"><thead><tr><th>Date</th><th>Job</th><th>Subject</th>` +
           `<th class="num">Suggestions</th><th class="num">Tokens</th><th class="num">Searches</th></tr></thead>` +
           `<tbody id="set-lx-rows">${data.runs.map(row).join('')}</tbody></table>` +
           `<button type="button" class="btn btn-ghost btn-sm" id="set-lx-more"${loaded >= (data.total || 0) ? ' hidden' : ''}>Show more</button>` : '')

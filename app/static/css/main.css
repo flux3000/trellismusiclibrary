@@ -8792,25 +8792,22 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
    read top to bottom once in a while, not navigated between. Nothing here is
    decorated — the hierarchy is type and spacing, per the no-ornament rule. */
 
-.set-wrap { max-width: 720px; margin: 0 auto; padding: 4px 0 64px; }
+/* width: 100% so the column stays put between tabs instead of shrinking to
+   whichever pane is open. */
+.set-wrap { width: 100%; max-width: 720px; margin: 0 auto; padding: 4px 0 64px; }
 
-.set-head { padding-bottom: 18px; }
 .set-h1 {
   font-family: var(--font-display); font-size: 26px; font-weight: 600;
-  color: var(--t0); margin: 0 0 4px;
-}
-.set-lede { font-size: var(--fs-body); color: var(--t3); margin: 0; }
-
-.set-sec { padding: 20px 0; border-top: 1px solid var(--bd-0); }
-.set-sec-title {
-  font-size: 12px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .07em; color: var(--t2); margin: 0 0 4px;
-}
-.set-sec-hint {
-  font-size: var(--fs-body); color: var(--t3); margin: 0 0 16px; max-width: 60ch;
+  color: var(--t0); margin: 0 0 18px;
 }
 
-.set-field { margin-bottom: 18px; }
+/* Tabbed since 2026-10-05: the strip is the page-level .pp-tabs, and every
+   pane is rendered up front so a switch is a class flip, not a refetch. */
+.set-tabs { margin-bottom: 24px; }
+.set-pane { display: none; }
+.set-pane.active { display: block; }
+
+.set-field { margin-bottom: 22px; }
 .set-field:last-child { margin-bottom: 0; }
 .set-label {
   display: block; font-size: 12px; font-weight: 600; color: var(--t1);
@@ -8864,7 +8861,14 @@ select.set-input { max-width: 480px; }
 
 /* A field whose control is disabled because a switch above it turned its
    effect off (e.g. the naming scheme when Rename files is unchecked). */
-.set-field.dim { opacity: .5; }
+.set-dep { padding-left: 26px; margin: -10px 0 22px; }
+.set-dep .set-field { margin-bottom: 14px; }
+.set-dep .set-field:last-child { margin-bottom: 0; }
+
+/* Three rows of a sample recording, sized to its content rather than
+   stretched across the pane. */
+.set-prev { width: auto; }
+.set-prev td { max-width: none; }
 
 /* Token chips under the naming template field. */
 .tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; max-width: 560px; }
@@ -8895,18 +8899,17 @@ select.set-input { max-width: 480px; }
 .set-flash.is-on { opacity: 1; }
 
 /* ── You ─────────────────────────────────────────────────────────────────── */
-.set-person { display: flex; gap: 20px; align-items: flex-start; }
-.set-person-fields { flex: 1 1 auto; min-width: 0; }
+.set-person { display: flex; gap: 16px; align-items: center; }
 
 .set-avatar {
-  flex: 0 0 auto; width: 84px; height: 84px; border-radius: 50%;
+  flex: 0 0 auto; width: 64px; height: 64px; border-radius: 50%;
   overflow: hidden; background: var(--bg-3);
   border: 1px solid var(--bd-1);
   display: flex; align-items: center; justify-content: center;
 }
 .set-avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .set-avatar-initial {
-  font-family: var(--font-display); font-size: 34px; font-weight: 600;
+  font-family: var(--font-display); font-size: 26px; font-weight: 600;
   color: var(--t3); line-height: 1;
 }
 
@@ -8916,15 +8919,12 @@ select.set-input { max-width: 480px; }
 .set-about dd { font-size: 11.5px; color: var(--t1); margin: 0; min-width: 0; }
 .set-about-credit { font-size: 11.5px; color: var(--t3); margin: 10px 0 0; }
 /* Paths are raw technical strings — one of the few places mono still belongs. */
-.set-path { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+.set-path { font-family: var(--font-mono); font-size: 11.5px; color: var(--t1); word-break: break-all; }
 .set-about-tag {
   font-size: 10.5px; color: var(--t3); border: 1px solid var(--bd-1);
   border-radius: 3px; padding: 1px 5px; margin-left: 6px;
 }
 
-@media (max-width: 640px) {
-  .set-person { flex-direction: column; }
-}
 
 /* Section header inside a debug pane — the Ingest pane shows two different
    tables (confirm jobs, analysis queue) and they are not the same list. */
