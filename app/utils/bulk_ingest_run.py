@@ -247,6 +247,63 @@ def listed_runs():
     return sorted(out, key=lambda r: r.id)
 
 
+# ── The one Queue (Ryan, 2026-10-06: "There should only be one queue. Ever.") ──
+# A run is a scan of one source folder, kept as the record of where its items
+# came from. It is never something a person sees: the Queue is every item of
+# every listed run, and every Queue action applies to all of them.
+
+_QUEUED = ("pending", "in_progress", "ready", "review", "failed")
+
+
+def queue_runs():
+    """The runs whose items make up the Queue (the listed runs), oldest first."""
+    return listed_runs()
+
+
+def queued_paths(exclude_run_id=None):
+    """Absolute path of every folder already in the Queue, so a second source
+    that overlaps an earlier one (a Downloads folder, then all of Downloads)
+    never puts the same folder in the Queue twice."""
+    ids = [r.id for r in listed_runs() if r.id != exclude_run_id]
+    if not ids:
+        return set()
+    rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestRun.root)
+            .join(BulkIngestRun, BulkIngestRun.id == BulkIngestItem.run_id)
+            .filter(BulkIngestItem.run_id.in_(ids), BulkIngestItem.status.in_(_QUEUED))
+            .all())
+    return {_abs_key(item_base(root), _norm_rel(rel)) for rel, root in rows}
+
+
+def pause_queue():
+    for run in listed_runs():
+        if run.status == "running":
+            run.status = "paused"
+    db.session.commit()
+
+
+def resume_queue():
+    started = False
+    for run in listed_runs():
+        if run.status == "paused":
+            run.status = "running"
+            started = True
+    db.session.commit()
+    if started:
+        _start_worker()
+
+
+def reset_whole_queue():
+    """Reset Queue: every listed run's Queue emptied and the run closed, and
+    every run marked cleared so its Imported rows leave the page too (Ryan,
+    2026-10-06). Imported recordings stay in the library, of course."""
+    removed = sum(reset_queue(run) for run in listed_runs())
+    now = datetime.now(timezone.utc)
+    for run in db.session.query(BulkIngestRun).filter(BulkIngestRun.cleared_at.is_(None)).all():
+        run.cleared_at = now
+    db.session.commit()
+    return removed
+
+
 def applied_values(run):
     """The run's staged blanket values as a dict ({} when none or unreadable)."""
     if not run.applied_json:
@@ -313,6 +370,7 @@ def discover(run):
     _reconcile_review_items(run=None)
 
     already_ingested = _ingested_paths_all_runs()
+    in_queue = queued_paths(exclude_run_id=run.id)
     # Only an in-library source can already BE a Recording by location; an
     # outside source is judged by content (find_duplicates) at process time.
     existing_folder_paths = set() if not in_library else {
@@ -352,6 +410,8 @@ def discover(run):
             # Ingested by an earlier run -- never re-offered, even on a fresh
             # run over the same root (spec 5b "Re-run").
             continue
+        if _abs_key(base, rel) in in_queue:
+            continue                        # already in the one Queue from another source
         if rel in existing_folder_paths:
             db.session.add(BulkIngestItem(run_id=run.id, rel_path=rel,
                                         status="skipped", reason="already_in_library"))
@@ -573,16 +633,17 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         resolved = outcome["resolved"]
         item.format = outcome.get("format")
 
-        # Review First: live folders are scored now, before anything enters
-        # the library, so the person sees the number while deciding. Ingest
-        # promotes this staging row (promote_to_recording), and the audio
-        # pass then skips scoring. Albums are never scored.
+        # Live folders that wait for a person (Ready, and Needs Review: Ryan,
+        # 2026-10-06) are scored now, before anything enters the library, so
+        # the person sees the number while deciding. Ingest promotes this
+        # staging row (promote_to_recording), and the audio pass then skips
+        # scoring. Albums are never scored, nor audio Trellis cannot import.
         # An in-place (library) run never scores here: scanning a whole
         # library's audio before anything is catalogued would take hours, and
         # the background audio pass scores it after ingest anyway.
         quality = None
-        if (status == "ready" and resolved is not None and resolved.kind != "studio"
-                and not in_library):
+        if (status in ("ready", "review") and resolved is not None and resolved.kind != "studio"
+                and not in_library and "unsupported_format" not in (reasons or [])):
             quality = _score_before_ingest(folder_abs, base)
 
         # meta_band (2026-09-27 unified ingest queue table, 2026-10-05 completeness): the
@@ -592,7 +653,8 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         meta_band = completeness_band(resolved) if resolved is not None else None   # unread: no band
 
         date = (resolved.date.value if resolved else None) or {}
-        track_count, track_titles = _scan_tracks(resolved.scan if resolved else None)
+        track_count, track_titles, duration_sec = _scan_tracks_and_length(
+            resolved.scan if resolved else None)
         # 2026-09-27 progress/log redesign: the log's expand panel needs
         # these fields without a per-item re-scan -- stash whatever the
         # resolver found, win or lose (a review/failed item still has
@@ -614,6 +676,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "listening_quality": quality,
             "track_count":  track_count,
             "tracks":       track_titles,
+            "duration_sec": duration_sec,
         })
 
         # BulkIngestItem.reason is a single String(32) column -- there is
@@ -689,19 +752,24 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         traceback.print_exc()
 
 
-def _scan_tracks(scan):
-    """(count, [{n, title}]) for the log's expand panel. Titles come from the
-    info file when it lists tracks, else from the files' own tags; both are
-    what the review page would show. Capped so the meta blob stays small."""
+def _scan_seconds(scan):
+    """Total running time in seconds from the files' own durations, or None."""
+    tags = ((scan or {}).get("suggestions") or {}).get("from_tags") or {}
+    durs = [t.get("duration") for t in tags.get("tracks") or []]
+    return sum(durs) if durs and all(isinstance(d, (int, float)) for d in durs) else None
+
+
+def _scan_tracks_and_length(scan):
+    """(count, [{n, title}], seconds) for the Queue's expand panel. Capped so
+    the meta blob stays small. Seconds is the files' total running time, or None."""
     if not scan:
-        return None, []
-    sug = scan.get("suggestions") or {}
-    info = (sug.get("from_info_file") or {}).get("tracks") or []
-    tags = (sug.get("from_tags") or {}).get("tracks") or []
-    rows = ([{"n": t.get("number"), "title": t.get("title")} for t in info]
-            or [{"n": t.get("track_number"), "title": t.get("title")} for t in tags])
-    rows = [r for r in rows if r["title"]][:200]
-    return scan.get("audio_file_count"), rows
+        return None, [], None
+    # One row per audio file, titled exactly as the review form will title it
+    # (resolve_tracks), so a track with no known title still shows (Ryan,
+    # 2026-10-06).
+    from app.utils.resolve import resolve_tracks
+    rows = [{"n": t["track_number"], "title": t["title"]} for t in resolve_tracks(scan)][:200]
+    return scan.get("audio_file_count"), rows, _scan_seconds(scan)
 
 
 def _score_before_ingest(folder_abs, base):
@@ -1113,15 +1181,38 @@ def default_mode(root):
     return "auto" if is_in_library(root) else "hold"
 
 
-def start_run(root, mode=None):
+def start_run(root, mode=None, paused=False):
     """
     Return the unfinished run already pointed at `root` (keeping ITS mode),
     else create a new one (status running) and make sure the worker is going.
     A run for a different root while another is active simply queues behind
     the worker's small-runs-first picking; nothing is refused or replaced.
     `mode` is 'auto' or 'hold'; None picks default_mode(root).
+    `paused` (Add to Library from a working folder, Ryan 2026-10-06): the run is
+    created paused with its folders already listed in the Queue, and waits for
+    the person's Start; an unfinished run for `root` is returned as it is.
     """
+    listed = listed_runs()
+    queue_running = any(r.status == "running" for r in listed)
+    if mode is None and listed:
+        mode = listed[-1].mode               # one mode for the whole Queue
+    # Joining a Queue that is already running means running with it.
+    paused = paused and not queue_running
+    if not paused:
+        resume_queue()                       # Start/Rescan applies to the whole Queue
+    if mode:
+        for r in listed:
+            if r.status in ("running", "paused"):
+                r.mode = mode
+        db.session.commit()
     run = _active_run_for_root(root)
+    if run and paused:
+        if run.status == "done":
+            run.status = "paused"
+            run.finished_at = None
+            db.session.commit()
+            discover(run)
+        return run
     if run:
         if run.status == "done":
             # A Review First queue being picked up again: look for new
@@ -1132,10 +1223,16 @@ def start_run(root, mode=None):
             _REDISCOVER.add(run.id)
             _start_worker()
         return run
-    run = BulkIngestRun(root=root, status="running", mode=mode or default_mode(root))
+    run = BulkIngestRun(root=root, status="paused" if paused else "running",
+                        mode=mode or default_mode(root),
+                        # Bulk Value Apply belongs to the Queue, so a new source carries it.
+                        applied_json=listed[-1].applied_json if listed else None)
     db.session.add(run)
     db.session.commit()
-    _start_worker()
+    if paused:
+        discover(run)
+    else:
+        _start_worker()
     return run
 
 

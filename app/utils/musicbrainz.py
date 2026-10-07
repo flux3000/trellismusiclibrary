@@ -591,6 +591,18 @@ def lookup_release(mbid):
         return None
 
     summary = _summarise_release(data)
+    # What the Add Recording MusicBrainz tab shows about the release (2026-10-06).
+    media = data.get("media") or []
+    formats = [m.get("format") for m in media if m.get("format")]
+    if formats:
+        f0 = formats[0]
+        summary["format"] = f0 if len(formats) == 1 else (
+            f"{len(formats)} × {f0}" if all(f == f0 for f in formats) else ", ".join(formats))
+    summary["status"] = data.get("status")
+    summary["barcode"] = data.get("barcode") or None
+    summary["artist_credit"] = "".join(
+        (ac.get("name") or (ac.get("artist") or {}).get("name") or "") + (ac.get("joinphrase") or "")
+        for ac in (data.get("artist-credit") or []) if isinstance(ac, dict)) or None
     tracks = []
     position = 0
     for medium in data.get("media") or []:

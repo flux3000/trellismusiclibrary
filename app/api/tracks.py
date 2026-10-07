@@ -185,50 +185,78 @@ def track_spectrogram(track_id):
         return jsonify({"error": f"File not found: {abs_path}"}), 404
 
     try:
-        import numpy as np
-        import librosa
-
-        y, sr = librosa.load(abs_path, sr=None, mono=True, duration=90)
-
-        n_fft = 4096
-        hop   = 512
-        D     = librosa.amplitude_to_db(
-                    np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop)),
-                    ref=np.max)
-        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-        times = librosa.frames_to_time(np.arange(D.shape[1]), sr=sr, hop_length=hop)
-
-        fig, ax = plt.subplots(figsize=(6, 2.5), dpi=120)
-        fig.patch.set_facecolor('#0c0f14')
-        ax.set_facecolor('#0c0f14')
-
-        ax.pcolormesh(times, freqs / 1000, D,
-                      shading='auto', cmap='magma', vmin=-80, vmax=0)
-
-        ax.set_xlabel('Time (s)', color='#8a7a68', fontsize=8)
-        # kHz labels on the right so the left edge of the plot aligns with the waveform
-        ax.set_ylabel('kHz', color='#8a7a68', fontsize=8, labelpad=4)
-        ax.yaxis.set_label_position('right')
-        ax.yaxis.tick_right()
-        ax.tick_params(colors='#8a7a68', labelsize=7)
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#2a2520')
-
-        ax.set_ylim(0, sr / 2000)   # 0 → Nyquist in kHz
-        ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.0f'))
-        plt.tight_layout(pad=0.4)
-        # Eliminate residual left margin so the plot edge aligns with the waveform canvas
-        fig.subplots_adjust(left=0.0)
-
-        buf = io.BytesIO()
-        fig.savefig(buf, format='png', facecolor='#0c0f14')
-        plt.close(fig)
-        buf.seek(0)
-        return send_file(buf, mimetype='image/png')
-
+        return _spectrogram_response(abs_path)
     except Exception:
         log.exception("Spectrogram generation failed for track %s", track_id)
         return jsonify({"error": traceback.format_exc()}), 500
+
+
+@bp.route("/spectrogram-file")
+@login_required
+def file_spectrogram():
+    """
+    GET /api/tracks/spectrogram-file?path=<abs path>
+    The same spectrogram for an audio file not yet imported (Add Recording's
+    Quality tab, Ryan 2026-10-06). Admin only, and only inside the import roots.
+    """
+    from app.utils.paths import within_import_roots
+    if getattr(current_user, "role", None) != "admin":
+        return jsonify({"error": "forbidden"}), 403
+    if not _MPL_OK:
+        return jsonify({"error": "matplotlib unavailable"}), 500
+    path = request.args.get("path") or ""
+    if not path or not os.path.isfile(path) or not within_import_roots(path):
+        return jsonify({"error": "Not found"}), 404
+    try:
+        return _spectrogram_response(path)
+    except Exception:
+        log.exception("Spectrogram generation failed for %s", path)
+        return jsonify({"error": traceback.format_exc()}), 500
+
+
+def _spectrogram_response(abs_path):
+    """Linear-frequency spectrogram PNG of the first 90 s of `abs_path`."""
+    import numpy as np
+    import librosa
+
+    y, sr = librosa.load(abs_path, sr=None, mono=True, duration=90)
+
+    n_fft = 4096
+    hop   = 512
+    D     = librosa.amplitude_to_db(
+                np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop)),
+                ref=np.max)
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    times = librosa.frames_to_time(np.arange(D.shape[1]), sr=sr, hop_length=hop)
+
+    fig, ax = plt.subplots(figsize=(6, 2.5), dpi=120)
+    fig.patch.set_facecolor('#0c0f14')
+    ax.set_facecolor('#0c0f14')
+
+    ax.pcolormesh(times, freqs / 1000, D,
+                  shading='auto', cmap='magma', vmin=-80, vmax=0)
+
+    ax.set_xlabel('Time (s)', color='#8a7a68', fontsize=8)
+    # kHz labels on the right so the left edge of the plot aligns with the waveform
+    ax.set_ylabel('kHz', color='#8a7a68', fontsize=8, labelpad=4)
+    ax.yaxis.set_label_position('right')
+    ax.yaxis.tick_right()
+    ax.tick_params(colors='#8a7a68', labelsize=7)
+    for spine in ax.spines.values():
+        spine.set_edgecolor('#2a2520')
+
+    ax.set_ylim(0, sr / 2000)   # 0 → Nyquist in kHz
+    ax.yaxis.set_major_formatter(ticker.FormatStrFormatter('%.0f'))
+    plt.tight_layout(pad=0.4)
+    # Eliminate residual left margin so the plot edge aligns with the waveform canvas
+    fig.subplots_adjust(left=0.0)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', facecolor='#0c0f14')
+    plt.close(fig)
+    buf.seek(0)
+    return send_file(buf, mimetype='image/png')
+
 
 
 @bp.route("/<int:track_id>/play", methods=["POST"])

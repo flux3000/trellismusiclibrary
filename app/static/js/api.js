@@ -553,6 +553,8 @@ const API = (() => {
     // Stage 1+2 of the unified ingestion flow (2026-07-30). See
     // app/api/quality.py for the endpoint contracts.
     quality: {
+      // FFP check of a folder not yet imported (Add Recording's Checksums tab).
+      fingerprints: (path) => get(`/api/quality/fingerprints?path=${encodeURIComponent(path)}`),
       stagingFeatures: (folderPath) => get(`/api/quality/staging/features?folder_path=${encodeURIComponent(folderPath)}`),
       // features=1 also returns the plain-English `interpretation` block (group
       // verdicts + advanced metric rows), which is what the View Recording
@@ -576,27 +578,30 @@ const API = (() => {
 
     // ── Bulk Ingest (spec 1.9/4) ──────────────────────────────────────────
     bulkIngest: {
-      start:   (path, mode) => post('/api/bulk-ingest/start', { path, mode }),
+      start:   (path, mode, paused) => post('/api/bulk-ingest/start', { path, mode, paused: !!paused }),
       runs:    () => get('/api/bulk-ingest/runs'),
-      current: (runId) => get(`/api/bulk-ingest/current${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`),
+      // The one Queue (2026-10-06). The run id arguments are kept for the
+      // callers' signatures and ignored: every action is Queue-wide.
+      current: () => get('/api/bulk-ingest/current'),
       // Review First / queue actions. The three item routes answer 202 and
-      // work happens on the server's worker, so callers poll the run.
+      // work happens on the server's worker, so callers poll the Queue.
       ingestItem:    (itemId) => post(`/api/bulk-ingest/items/${itemId}/ingest`, {}),
-      ingestReady:   (runId) => post(`/api/bulk-ingest/runs/${runId}/ingest-ready`, {}),
-      convertUnsupported: (runId) => post(`/api/bulk-ingest/runs/${runId}/convert-unsupported`, {}),
+      ingestReady:   () => post('/api/bulk-ingest/queue/ingest-ready', {}),
+      ingestAll:     () => post('/api/bulk-ingest/queue/ingest-all', {}),
+      convertUnsupported: () => post('/api/bulk-ingest/queue/convert-unsupported', {}),
       reanalyzeItem: (itemId) => post(`/api/bulk-ingest/items/${itemId}/reanalyze`, {}),
       moveItem:      (itemId, dest) => post(`/api/bulk-ingest/items/${itemId}/move`, { dest }),
-      setApplied:    (runId, values) => put(`/api/bulk-ingest/runs/${runId}/applied`, values || {}),
-      pause:   (runId) => post(`/api/bulk-ingest/${runId}/pause`, {}),
-      resume:  (runId) => post(`/api/bulk-ingest/${runId}/resume`, {}),
-      resetQueue: (runId) => post(`/api/bulk-ingest/runs/${runId}/reset`, {}),
+      setApplied:    (_runId, values) => put('/api/bulk-ingest/queue/applied', values || {}),
+      pause:   () => post('/api/bulk-ingest/queue/pause', {}),
+      resume:  () => post('/api/bulk-ingest/queue/resume', {}),
+      resetQueue: () => post('/api/bulk-ingest/queue/reset', {}),
       // Just these rows (the poll's cheap path).
-      itemsByIds: (runId, ids) => get(`/api/bulk-ingest/${runId}/items?ids=${ids.join(',')}`),
-      items:   (runId, status, page) => {
+      itemsByIds: (_runId, ids) => get(`/api/bulk-ingest/queue/items?ids=${ids.join(',')}`),
+      items:   (_runId, status, page) => {
         const params = []
         if (status) params.push(`status=${encodeURIComponent(status)}`)
         if (page)   params.push(`page=${encodeURIComponent(page)}`)
-        return get(`/api/bulk-ingest/${runId}/items${params.length ? `?${params.join('&')}` : ''}`)
+        return get(`/api/bulk-ingest/queue/items${params.length ? `?${params.join('&')}` : ''}`)
       },
     },
 
@@ -632,6 +637,7 @@ const API = (() => {
       pause:      ()            => post('/api/downloads/queue/pause', {}),
       resume:     ()            => post('/api/downloads/queue/resume', {}),
       folder:     (which)       => get('/api/downloads/folder' + (which ? `?which=${encodeURIComponent(which)}` : '')),
+      trash:      (which, name) => post('/api/downloads/trash', { which, name }),
     },
   }
 })()

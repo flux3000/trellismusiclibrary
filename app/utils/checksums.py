@@ -79,6 +79,19 @@ def file_md5(abs_path, chunk_size=1024 * 1024):
     return h.hexdigest()
 
 
+def read_checksum_text(path):
+    """A checksum file's text. UTF-8 when it decodes cleanly, else Windows-1252:
+    md5summer and older Windows tools write accented names in the ANSI code page,
+    and decoding those as UTF-8 turned 'Natiembé' into 'Natiemb\ufffd', which
+    matched no file (Ryan, 2026-10-06, the Tony Allen download)."""
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
 def parse_checksum_file(content):
     """
     Tolerant line parser for .ffp / .md5 / .st5 text. Community tools don't
@@ -335,8 +348,7 @@ def audit_folder_fingerprints(folder_path, audio_files, deep=False):
         rel_path = fp["rel_path"]
         abs_path = os.path.join(folder_path, rel_path)
         try:
-            with open(abs_path, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
+            content = read_checksum_text(abs_path)
         except OSError as e:
             files.append({"filename": fp["filename"], "rel_path": rel_path,
                           "type": fp_type, "error": str(e), "tracks": []})
@@ -373,16 +385,25 @@ def audit_folder_fingerprints(folder_path, audio_files, deep=False):
                     fp_type, expected)
             tracks.append({
                 "filename": os.path.basename(proxy.file_path),
+                "rel_path": proxy.file_path,
                 "expected": expected,
                 "status":   status,
             })
             key = {"unmatched": "unmatched", "pending": "pending_deep"}.get(status, status)
             summary[key] = summary.get(key, 0) + 1
 
-        # Entries in the file that matched no audio file at all — a checksum
-        # list longer than the folder means tracks are missing, which is worth
-        # saying out loud rather than quietly ignoring.
-        orphan_entries = max(0, len(entries) - len(matched))
+        # Audio entries that matched no audio file: tracks the folder is
+        # missing. Lines for artwork, the info file or another checksum file
+        # (an .md5 routinely lists them all) are not audio and never count;
+        # counting them read every complete md5summer folder as incomplete
+        # (Ryan, 2026-10-06). A file with no filenames at all is positional,
+        # so there the plain count difference still applies.
+        named = [e for e in entries if e.get("filename")]
+        if named:
+            hit = set(matched.values())
+            orphan_entries = sum(1 for e in named if e["checksum"] not in hit)
+        else:
+            orphan_entries = max(0, len(entries) - len(matched))
 
         files.append({
             "filename":       fp["filename"],
@@ -410,6 +431,62 @@ def audit_folder_fingerprints(folder_path, audio_files, deep=False):
         verdict = "unverified"
 
     return {"files": files, "summary": summary, "verdict": verdict, "deep": bool(deep)}
+
+
+_fp_state_cache = {}
+
+
+def folder_fingerprint_state(folder):
+    """
+    One verdict for a working-folder row (Downloads, Workshop, Backlog):
+    'valid', 'invalid', 'unchecked' or 'absent', with the file names behind an
+    invalid verdict. Only a failed FFP/ST5 is a problem (Ryan, 2026-10-06): a
+    checksum list naming files the folder lacks is not one. FFP and ST5 are
+    checked (header reads, as at triage); MD5 is never run automatically, so an
+    MD5-only folder is 'unchecked'. Cached on the folder's newest mtime, total
+    size and file count, so the Downloads poll does not re-read headers.
+    """
+    from app.utils.ingest import AUDIO_EXTENSIONS
+
+    audio, newest, total = [], 0.0, 0
+    for root, dirs, names in os.walk(folder):
+        for n in names:
+            full = os.path.join(root, n)
+            try:
+                st = os.stat(full)
+            except OSError:
+                continue
+            newest = max(newest, st.st_mtime)
+            total += st.st_size
+            if os.path.splitext(n.lower())[1] in AUDIO_EXTENSIONS:
+                audio.append(os.path.relpath(full, folder))
+    real = os.path.realpath(folder)
+    key = (newest, total, len(audio))
+    hit = _fp_state_cache.get(real)
+    if hit and hit[0] == key:
+        return hit[1]
+
+    audio.sort(key=str.lower)
+    files = [{"filename": os.path.basename(r), "rel_path": r,
+              "path": os.path.join(folder, r), "index": i + 1}
+             for i, r in enumerate(audio)]
+    audit = audit_folder_fingerprints(folder, files)
+    if not audit["files"]:
+        out = {"state": "absent", "detail": []}
+    elif audit["summary"].get("mismatch"):
+        bad = sorted({t["filename"] for f in audit["files"] for t in f.get("tracks", [])
+                      if t.get("status") == "mismatch"})
+        out = {"state": "invalid", "detail": bad[:5]}
+    elif audit["verdict"] == "verified" or {
+            t.get("rel_path") for f in audit["files"] for t in f.get("tracks", [])
+            if t.get("status") == "match"} >= set(audio):
+        # Valid when every audio file verified against some FFP or ST5, even if
+        # an MD5 list beside it is still waiting on its (never automatic) pass.
+        out = {"state": "valid", "detail": []}
+    else:
+        out = {"state": "unchecked", "detail": []}
+    _fp_state_cache[real] = (key, out)
+    return out
 
 
 def verify_track_checksum(abs_path, fp_type, expected_checksum):

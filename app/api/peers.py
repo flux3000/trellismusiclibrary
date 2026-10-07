@@ -97,6 +97,15 @@ def _peer_detail(peer):
     #   used     — someone enrolled with it. History; the device it produced is
     #              the real record, and revoking that is a different action.
     #   expired  — dead of old age. Harmless, but clutter.
+    # The invite to hand out: the newest live one that still has its code.
+    base_url = get_share_base_url()
+    current = next((i for i in sorted(peer.invites, key=lambda x: x.created_at or _utcnow(), reverse=True)
+                    if i.code and i.is_valid()), None)
+    d["current_invite"] = None if current is None else {
+        "id":     current.id,
+        "invite": f"{base_url.rstrip('/')}#{current.code}" if base_url else current.code,
+        "base_url_set": bool(base_url),
+    }
     d["invites"] = [
         {"id": i.id,
          "created_at": _iso(i.created_at), "expires_at": _iso(i.expires_at),
@@ -108,6 +117,20 @@ def _peer_detail(peer):
                         reverse=True)
     ]
     return d
+
+
+# ── Sharing is implied (Ryan, 2026-10-06) ────────────────────────────────────
+# A peer always holds the Full Library grant: there is no per-peer share switch
+# any more. Grants stay the one sharing primitive underneath, so this only
+# guarantees the row exists; revoking the peer still kills it via is_active.
+
+def _ensure_full_library_grant(peer):
+    from app.models.collection import SYSTEM_FULL_LIBRARY
+    full = db.session.query(Collection).filter_by(system_key=SYSTEM_FULL_LIBRARY).first()
+    if full is None:
+        return
+    if not any(g.collection_id == full.id and g.revoked_at is None for g in peer.grants):
+        db.session.add(CollectionGrant(peer_id=peer.id, collection_id=full.id))
 
 
 # ── Peer CRUD ─────────────────────────────────────────────────────────────────
@@ -128,6 +151,8 @@ def create_peer():
         return jsonify({"error": "name is required"}), 400
     peer = Peer(name=name, contact_note=(data.get("contact_note") or "").strip() or None)
     db.session.add(peer)
+    db.session.flush()
+    _ensure_full_library_grant(peer)
     db.session.commit()
     return jsonify(_peer_detail(peer)), 201
 
@@ -281,16 +306,24 @@ def mint_invite(peer_id):
         days = DEFAULT_INVITE_DAYS
     days = max(1, min(days, DEFAULT_INVITE_DAYS))
 
+    _ensure_full_library_grant(peer)
+    # A new invite replaces the old one: each peer has one live invite, so
+    # nothing stays valid out of sight. Devices that already joined hold their
+    # own tokens and are unaffected.
+    now = _utcnow()
+    for old in peer.invites:
+        if old.is_valid(now):
+            old.expires_at = now
     raw_code = generate_invite_code()
-    expires_at = _utcnow() + timedelta(days=days)
+    expires_at = now + timedelta(days=days)
     db.session.add(PeerInvite(
-        peer_id=peer.id, code_hash=hash_secret(raw_code), expires_at=expires_at))
+        peer_id=peer.id, code_hash=hash_secret(raw_code), code=raw_code, expires_at=expires_at))
     db.session.commit()
 
     base_url = get_share_base_url()
     invite_string = f"{base_url.rstrip('/')}#{raw_code}" if base_url else None
     return jsonify({
-        "code":         raw_code,          # shown ONCE
+        "code":         raw_code,
         "invite":       invite_string,     # the single string to send the peer (or null)
         "base_url_set": bool(base_url),
         "expires_at":   _iso(expires_at),

@@ -182,6 +182,50 @@ def ensure_venue_history(engine):
         raise RuntimeError(msg) from e
 
 
+def ensure_bulk_run_cleared_at(engine):
+    """Add bulk_ingest_run.cleared_at (Reset Queue, 2026-10-06) when missing. Returns True when
+    added, None when nothing was needed (no file, no table, or already there)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(bulk_ingest_run)"))}
+            if not cols or "cleared_at" in cols:
+                return None
+            con.execute(text("ALTER TABLE bulk_ingest_run ADD COLUMN cleared_at DATETIME"))
+        log.warning("schema: added bulk_ingest_run.cleared_at in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not add the bulk_ingest_run.cleared_at column to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
+def ensure_invite_code(engine):
+    """Add peer_invite.code (the copyable raw invite, Ryan 2026-10-06) when the column is missing.
+    Returns True when added, None when nothing was needed."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(peer_invite)"))}
+            if not cols or "code" in cols:
+                return None
+            con.execute(text("ALTER TABLE peer_invite ADD COLUMN code VARCHAR(128)"))
+        log.warning("schema: added peer_invite.code in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not add the peer_invite.code column to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
 _BUSY_TIMEOUT = 60       # seconds a locked database is waited for (tests lower it)
 
 
@@ -230,6 +274,57 @@ def ensure_bulk_meta_band(engine):
         return n or None
     except Exception as e:      # noqa: BLE001 -- includes "database is locked": never block the start
         log.error("schema: could not recompute queue Metadata bands in %s: %s", path, e)
+        return None
+    finally:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def ensure_full_library_grants(engine):
+    """Give every unrevoked peer an active grant to the Full Library collection (Ryan,
+    2026-10-06: sharing is implied, so the per-peer share switch is gone and a peer created
+    before then without the grant would otherwise see nothing with no way to fix it). Idempotent.
+    Returns the grants added, or None when there was nothing to do. Never raises: a missing
+    table or a locked database is logged and the app starts."""
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=rw", uri=True, timeout=_BUSY_TIMEOUT, isolation_level=None)
+    except sqlite3.Error as e:
+        log.error("schema: could not open %s to add Full Library grants: %s", path, e)
+        return None
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"peer", "collection", "collection_grant"} <= tables:
+            return None
+        row = con.execute("SELECT id FROM collection WHERE system_key = 'full_library'").fetchone()
+        if row is None:
+            return None
+        full_id = row[0]
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            missing = [pid for (pid,) in con.execute(
+                "SELECT p.id FROM peer p WHERE p.revoked_at IS NULL AND NOT EXISTS ("
+                " SELECT 1 FROM collection_grant g WHERE g.peer_id = p.id"
+                " AND g.collection_id = ? AND g.revoked_at IS NULL)", (full_id,)).fetchall()]
+            for pid in missing:
+                con.execute("INSERT INTO collection_grant (peer_id, collection_id, created_at) VALUES (?, ?, ?)",
+                            (pid, full_id, _stamp()))
+            con.execute("COMMIT")
+        except BaseException:
+            try:
+                con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        if missing:
+            log.warning("schema: added the Full Library grant for %d peer(s) in %s", len(missing), path)
+        return len(missing) or None
+    except sqlite3.Error as e:
+        log.error("schema: could not add Full Library grants in %s: %s", path, e)
         return None
     finally:
         try:

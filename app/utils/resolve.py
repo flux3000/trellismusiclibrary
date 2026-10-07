@@ -758,8 +758,12 @@ def _free_form_folder_source(groups, reading, cased_reading, folder_name, templa
             return None
         # glued shortcode: no more than the contains bonus below
     if not templated and names_artist(folder_name, reading):
-        groups.add(nk, 0.0, cased_reading,
-                   [_row("folder", reading, None, None, "folder name", 0.0, "free-form")])
+        # Any folder that names the artist is a second source, in whatever naming
+        # scheme (Ryan, 2026-10-06): most start with the artist, not only Trellis's.
+        # A shortcode glued to digits ("gd77-05-08") stays at the bonus only.
+        sc = 0.0 if _glued_shortcode(folder_name, lead) else _conf.FOLDER_TEMPLATE_SCORE["artist"]
+        groups.add(nk, sc, cased_reading,
+                   [_row("folder", reading, None, None, "folder name", sc, "free-form")])
     if lead and FOLDER_LEAD_EXTENDS and len(nk) >= MIN_NAME_KEY:
         rest = _lead_remainder(lead, reading)
         if rest and rest.strip():

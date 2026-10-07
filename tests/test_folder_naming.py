@@ -179,3 +179,13 @@ def test_explicit_rename_folders_false_is_a_no_op(tmp_path):
     assert err is None
     assert rec.folder_path == "Various Artists/Old Name"
     assert stale.exists()
+
+
+def test_an_album_is_named_artist_dash_title():
+    # Ryan, 2026-10-06: albums were named like shows ("Ahmad Jamal - 1973 -
+    # Unknown Venue - Unknown Location").
+    from app.utils.folder_naming import build_folder_name
+    assert build_folder_name("Ahmad Jamal", start_year=1973, kind="studio",
+                             title="Ahmad Jamal '73") == "Ahmad Jamal - Ahmad Jamal '73"
+    assert build_folder_name("Ahmad Jamal", kind="studio", title="A/B: C") == "Ahmad Jamal - A-B- C"
+    assert build_folder_name("Ahmad Jamal", start_year=1973, kind="live").startswith("Ahmad Jamal - 1973 - ")

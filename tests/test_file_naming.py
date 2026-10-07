@@ -89,6 +89,13 @@ def test_etree_preset_multi_disc():
     assert proposed == "gd1988-05-01.sbd.118671.d2t01.flac"
 
 
+def test_etree_tracks_preset_drops_disc_and_counts_continuously():
+    t = track(13, "Eyes", "13.flac", disc=2, disc_track=1)
+    rec = recording([t], performance(1977, 5, 8, GD), source="SBD")
+    _, _, proposed = rename_plan(rec, "etree_tracks")[0]
+    assert proposed == "gd1977-05-08.sbd.t13.flac"
+
+
 def test_etree_sets_preset():
     t = track(1, "X", "01.flac", set_number="Set 1")
     rec = recording([t], performance(1988, 5, 1, GD), source="SBD", etree_shnid=118671)
@@ -121,6 +128,7 @@ def test_number_title_multi_disc_is_continuous_and_flat():
 @pytest.mark.parametrize("scheme, expected", [
     ("original", False),
     ("number_title", True),
+    ("etree_tracks", True),
     ("etree", True),
     ("etree_sets", True),
 ])
@@ -293,7 +301,7 @@ def test_render_rejects_a_template_with_empty_output():
 # ── Presets registry ────────────────────────────────────────────────────────────
 
 def test_presets_cover_the_four_keys():
-    assert set(PRESETS) == {"original", "number_title", "etree", "etree_sets"}
+    assert set(PRESETS) == {"original", "number_title", "etree_tracks", "etree", "etree_sets"}
 
 
 # ── Custom templates (spec sections 4 and 12): grammar, modifiers, groups and

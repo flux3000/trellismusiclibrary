@@ -1,14 +1,13 @@
-"""The Ask Lomax button label must clear WCAG AA on every palette (six with dark text, seven with light text), at rest
-and on hover. Reads the palette tokens straight out of main.css."""
+"""Every palette sets its own --lomax and --lomax-ink. The Ask Lomax label must clear WCAG AA at rest
+and on hover, and Lomax text must clear it on every surface. Reads the palette tokens straight out of main.css."""
 import re
 from pathlib import Path
 
 import pytest
 
 CSS = (Path(__file__).resolve().parent.parent / "app" / "static" / "css" / "main.css").read_text(encoding="utf-8")
-PALETTES = ("steely", "krauss", "monk", "joni", "gillian", "hazel",
-            "chet", "townes", "gram", "cale", "miles", "alice", "eno")
-LIGHT = ("steely", "krauss", "monk", "joni", "gillian", "hazel")
+PALETTES = ("steely", "krauss", "monk", "joni", "hazel",
+            "townes", "chet", "gram", "cale", "miles", "alice", "eno")
 
 
 def _lum(h):
@@ -48,25 +47,28 @@ def test_the_button_uses_one_dedicated_token_and_nothing_else_does():
 @pytest.mark.parametrize("name", PALETTES)
 def test_the_label_clears_aa_on_every_palette_at_rest_and_on_hover(name):
     t = _tokens(name)
-    ink = "#ffffff" if name in LIGHT else t["bg-0"]
-    assert _ratio(ink, t["blue"]) >= 4.5, name
-    hover = _mix(t["blue"], t["t0"], 0.86)
+    ink = t["lomax-ink"]
+    assert _ratio(ink, t["lomax"]) >= 4.5, name
+    hover = _mix(t["lomax"], t["t0"], 0.86)
     assert _ratio(ink, hover) >= 4.5, name
 
 
-def test_the_light_palettes_declare_the_white_label():
-    assert re.search(r':root\[data-palette="steely"\], :root\[data-palette="krauss"\], :root\[data-palette="monk"\],\s*:root\[data-palette="joni"\], :root\[data-palette="gillian"\], :root\[data-palette="hazel"\]\s*\{\s*--lx-btn-ink: #fff', CSS)
+def test_every_palette_sets_its_own_lomax_colour_and_the_button_reads_it():
+    assert "--lx-btn-ink: var(--lomax-ink)" in CSS
+    for name in PALETTES:
+        t = _tokens(name)
+        assert "lomax" in t and "lomax-ink" in t, name
 
 
 @pytest.mark.parametrize("name", PALETTES)
 def test_lomax_values_clear_aa_on_every_surface_they_sit_on(name):
-    """.lx-val is --lomax (the palette blue); .lx-same is --lx-quiet, 88% blue mixed toward --t3.
+    """.lx-val is --lomax; .lx-same is --lx-quiet, 88% --lomax mixed toward --t3.
     Both are measured against bg-0 to bg-3, the surfaces Lomax values appear on."""
     assert re.search(r"\.lx-val\s*\{\s*color:\s*var\(--lomax\)", CSS)
     m = re.search(r"--lx-quiet:\s*color-mix\(in srgb, var\(--lomax\) (\d+)%, var\(--t3\)\)", CSS)
     share = int(m.group(1)) / 100
     t = _tokens(name)
-    quiet = _mix(t["blue"], t["t3"], share)
+    quiet = _mix(t["lomax"], t["t3"], share)
     for bg in ("bg-0", "bg-1", "bg-2", "bg-3"):
-        assert _ratio(t["blue"], t[bg]) >= 4.5, (name, bg, "lx-val")
+        assert _ratio(t["lomax"], t[bg]) >= 4.5, (name, bg, "lx-val")
         assert _ratio(quiet, t[bg]) >= 4.5, (name, bg, "lx-quiet")

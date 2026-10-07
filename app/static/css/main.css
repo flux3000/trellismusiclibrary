@@ -76,7 +76,7 @@
 
    The in-between six (2026-10-05) split by text colour, because a true
    mid-grey ground holds readable text in neither direction: Chet, Townes and
-   Gram are dim grounds with light text (mode 'dark'); Joni, Gillian and Hazel
+   Gram are dim grounds with light text (mode 'dark'); Joni and Hazel
    are overcast grounds with dark text (mode 'light'). `mode` is text polarity
    and drives every light/dark rule below; the picker groups by `group`.
 
@@ -85,8 +85,7 @@
 
    Adding a scheme: add a block here AND an entry in PALETTES in app.js. The
    ids must match. A dark-text scheme also needs its selector added to the
-   three rules that list those schemes by id (info-file focus, archive teal,
-   Lomax button ink). Hexes live ONLY here; app.js carries id, label and blurb so
+   two rules that list those schemes by id (info-file focus, archive teal). Hexes live ONLY here; app.js carries id, label and blurb so
    the two can never disagree about a colour. The `[data-pal-preview]` half of
    each selector is what lets the Settings picker paint a real swatch of the
    scheme without a single hex in the JS.
@@ -115,6 +114,8 @@
   --accent-dim:  rgba(21,94,99,0.12);
   --accent-dim2: rgba(21,94,99,0.2);
   --accent-ink:  #ffffff;
+  --lomax:       #b63c16;
+  --lomax-ink:   #ffffff;
 
   --green:   #1f6b45;
   --amber:   #7a5712;
@@ -152,6 +153,8 @@
   --accent-dim:  rgba(77,107,63,0.12);
   --accent-dim2: rgba(77,107,63,0.2);
   --accent-ink:  #ffffff;
+  --lomax:       #b5307c;
+  --lomax-ink:   #ffffff;
 
   --green:   #2f6a3f;
   --amber:   #7a5712;
@@ -189,6 +192,8 @@
   --accent-dim:  rgba(26,74,153,0.12);
   --accent-dim2: rgba(26,74,153,0.2);
   --accent-ink:  #ffffff;
+  --lomax:       #c13215;
+  --lomax-ink:   #ffffff;
 
   --green:   #1f6b45;
   --amber:   #7a5712;
@@ -226,6 +231,8 @@
   --accent-dim:  rgba(196,149,106,0.14);
   --accent-dim2: rgba(196,149,106,0.24);
   --accent-ink:  #141210;
+  --lomax:       #748ef6;
+  --lomax-ink:   #111111;
 
   --green:   #6ab880;
   --amber:   #c89b50;
@@ -263,6 +270,8 @@
   --accent-dim:  rgba(116,184,212,0.14);
   --accent-dim2: rgba(116,184,212,0.24);
   --accent-ink:  #0d1116;
+  --lomax:       #c47f08;
+  --lomax-ink:   #0d1116;
 
   --green:   #63bd90;
   --amber:   #c9a35c;
@@ -300,6 +309,8 @@
   --accent-dim:  rgba(217,174,85,0.14);
   --accent-dim2: rgba(217,174,85,0.24);
   --accent-ink:  #140f1a;
+  --lomax:       #ea57b4;
+  --lomax-ink:   #111111;
 
   --green:   #6dbb8c;
   --amber:   #cda45c;
@@ -337,6 +348,8 @@
   --accent-dim:  rgba(143,180,209,0.14);
   --accent-dim2: rgba(143,180,209,0.24);
   --accent-ink:  #111111;
+  --lomax:       #eb640a;
+  --lomax-ink:   #111111;
 
   --green:   #69b98a;
   --amber:   #c6a05c;
@@ -374,6 +387,8 @@
   --accent-dim:  rgba(208,164,78,0.16);
   --accent-dim2: rgba(208,164,78,0.26);
   --accent-ink:  #111111;
+  --lomax:       #c4a5f8;
+  --lomax-ink:   #111111;
 
   --green:   #92d3b0;
   --amber:   #e1c07f;
@@ -411,6 +426,8 @@
   --accent-dim:  rgba(121,178,216,0.16);
   --accent-dim2: rgba(121,178,216,0.26);
   --accent-ink:  #111111;
+  --lomax:       #f7a14a;
+  --lomax-ink:   #111111;
 
   --green:   #92d3b0;
   --amber:   #e2c283;
@@ -448,6 +465,8 @@
   --accent-dim:  rgba(221,157,173,0.16);
   --accent-dim2: rgba(221,157,173,0.26);
   --accent-ink:  #111111;
+  --lomax:       #e1b00e;
+  --lomax-ink:   #111111;
 
   --green:   #92d3b0;
   --amber:   #e1c07f;
@@ -485,6 +504,8 @@
   --accent-dim:  rgba(42,60,132,0.16);
   --accent-dim2: rgba(42,60,132,0.26);
   --accent-ink:  #ffffff;
+  --lomax:       #7b1422;
+  --lomax-ink:   #ffffff;
 
   --green:   #1f4c34;
   --amber:   #574114;
@@ -497,43 +518,6 @@
   --mtx-bg:   rgba(19,68,78,0.12);  --mtx-fg:   #13444e;
   --fm-bg:    rgba(84,52,121,0.12);  --fm-fg:    #543479;
   --other-bg: rgba(55,62,67,0.12);  --other-fg: #373e43;
-}
-
-/* Gillian -- dust-bowl khaki, oxblood */
-:root[data-palette="gillian"], [data-pal-preview="gillian"] {
-  --bg-0: #c1b5a2;
-  --bg-1: #b9ac95;
-  --bg-2: #c8beac;
-  --bg-3: #d4ccbf;
-  --bg-4: #b0a289;
-  --bg-5: #a49376;
-
-  --bd-0: rgba(20,22,24,0.10);
-  --bd-1: rgba(20,22,24,0.15);
-  --bd-2: rgba(20,22,24,0.24);
-
-  --t0: #10100e;
-  --t1: #332f28;
-  --t2: #423d34;
-  --t3: #534c41;
-
-  --accent:      #752933;
-  --accent-lit:  #571e26;
-  --accent-dim:  rgba(117,41,51,0.16);
-  --accent-dim2: rgba(117,41,51,0.26);
-  --accent-ink:  #ffffff;
-
-  --green:   #1f4c34;
-  --amber:   #574114;
-  --red:     #7d2721;
-  --blue:    #214063;
-  --purple:  #543479;
-
-  --sbd-bg:   rgba(31,76,52,0.12);  --sbd-fg:   #1f4c34;
-  --aud-bg:   rgba(87,65,20,0.12);  --aud-fg:   #574114;
-  --mtx-bg:   rgba(33,64,99,0.12);  --mtx-fg:   #214063;
-  --fm-bg:    rgba(84,52,121,0.12);  --fm-fg:    #543479;
-  --other-bg: rgba(66,61,52,0.12);  --other-fg: #423d34;
 }
 
 /* Hazel -- grey-green, dark plum */
@@ -559,6 +543,8 @@
   --accent-dim:  rgba(90,52,96,0.16);
   --accent-dim2: rgba(90,52,96,0.26);
   --accent-ink:  #ffffff;
+  --lomax:       #0e3c71;
+  --lomax-ink:   #ffffff;
 
   --green:   #1f4c34;
   --amber:   #574114;
@@ -622,7 +608,6 @@
 :root[data-palette="krauss"] .info-file-textarea:focus,
 :root[data-palette="monk"] .info-file-textarea:focus,
 :root[data-palette="joni"] .info-file-textarea:focus,
-:root[data-palette="gillian"] .info-file-textarea:focus,
 :root[data-palette="hazel"] .info-file-textarea:focus {
   background: rgba(0,0,0,0.02);
 }
@@ -634,40 +619,54 @@
    no hexes of its own and cannot drift. The card frame sits OUTSIDE the
    preview, so the selected ring is drawn in the scheme currently in force. */
 
-.pal-picker { display: grid; gap: 20px; max-width: 720px; }
-.pal-group-title {
-  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--t3); margin-bottom: 9px;
-}
-.pal-grid {
-  display: grid; gap: 10px;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+.pal-picker {
+  display: grid; gap: 12px; max-width: 720px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .pal-card {
   display: block; padding: 0; font: inherit; text-align: left; cursor: pointer;
-  color: inherit; background: var(--bg-3);
-  border: 1px solid var(--bd-1); border-radius: var(--r-md); overflow: hidden;
+  background: none; border: 1px solid var(--bd-1); border-radius: var(--r-lg); overflow: hidden;
 }
 .pal-card:hover { border-color: var(--bd-2); }
 .pal-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .pal-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.pal-mini { display: flex; height: 58px; background: var(--bg-0); }
-.pal-mini-nav { width: 27%; background: var(--bg-1); border-right: 1px solid var(--bd-0); }
-.pal-mini-body { flex: 1; padding: 8px; display: flex; align-items: center; }
-.pal-mini-card {
-  flex: 1; background: var(--bg-3); border: 1px solid var(--bd-1);
-  border-radius: 3px; padding: 6px 7px;
-  display: flex; flex-direction: column; gap: 4px;
+/* The scene: a sidebar, then a handbill card with a record and two lines of type, and a row
+   of source chips. The name sits on a scrim of the scheme's own ground at the bottom. */
+.pal-mini { position: relative; display: block; height: 124px; background: var(--bg-0); }
+.pal-mini-nav {
+  position: absolute; inset: 0 auto 0 0; width: 24%; padding: 13px 9px;
+  display: flex; flex-direction: column; gap: 7px;
+  background: var(--bg-1); border-right: 1px solid var(--bd-0);
 }
-.pal-mini-line { height: 3px; border-radius: 2px; }
-.pal-mini-line.a { width: 70%; background: var(--t0); }
-.pal-mini-line.b { width: 45%; background: var(--t2); }
-.pal-mini-line.c { width: 22%; background: var(--accent); }
-
-.pal-meta { padding: 8px 10px 9px; border-top: 1px solid var(--bd-0); }
-.pal-name { display: block; font-size: 12.5px; font-weight: 600; color: var(--t0); }
-.pal-note { display: block; font-size: 10.5px; color: var(--t2); margin-top: 2px; }
+.pal-mini-nav i { display: block; height: 4px; width: 68%; border-radius: 2px; background: var(--t3); opacity: .6; }
+.pal-mini-nav i:first-child { width: 82%; background: var(--accent); opacity: 1; }
+.pal-mini-bill {
+  position: absolute; top: 12px; left: calc(24% + 11px); right: 11px;
+  display: flex; align-items: center; gap: 9px; padding: 8px 9px;
+  background: var(--bg-3); border: 1px solid var(--bd-1); border-radius: 7px;
+  box-shadow: 0 2px 7px rgba(0,0,0,.14);
+}
+.pal-mini-disc {
+  flex: none; width: 28px; height: 28px; border-radius: 50%;
+  background: radial-gradient(circle, var(--bg-3) 0 2px, var(--accent) 2.5px 8px,
+              color-mix(in srgb, var(--accent) 55%, var(--bg-0)) 8.5px);
+}
+.pal-mini-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.pal-mini-lines > i { display: block; height: 4px; border-radius: 2px; width: 80%; background: var(--t0); }
+.pal-mini-lines > i + i { width: 54%; background: var(--t2); }
+.pal-mini-chips { display: flex; gap: 4px; margin-top: 2px; }
+.pal-mini-chips i { display: block; width: 16px; height: 6px; border-radius: 3px; background: var(--green); }
+.pal-mini-chips i + i { background: var(--amber); }
+.pal-mini-chips i + i + i { background: var(--lomax); }
+.pal-meta {
+  position: absolute; inset: auto 0 0 0; padding: 24px 14px 11px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--bg-0) 94%, transparent) 45%, transparent);
+}
+.pal-name {
+  display: block; font-family: var(--font-display); font-size: 17px; font-weight: 600;
+  line-height: 1.15; color: var(--t0);
+}
 
 /* ── Peer mode (browsing someone else's library) ─────────────────────────────
    Ryan, 2026-08-08 — Cool Slate retint, REMOVED 2026-08-24 ("let's just get
@@ -1239,26 +1238,47 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
    column -- narrower than .lq-brow's own 7-column grid, so it is overridden
    with an extra class the same way .bi-brow used to. */
 .lq-brow-head.iq-brow, .lq-brow.iq-brow {
-  grid-template-columns: minmax(0, 1fr) 56px 52px 92px 62px 150px 214px 30px;
-  /* Wider than .lq-brow's 10px: air between Metadata and the row buttons. */
-  gap: 18px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 56px 62px 112px 196px;
+  gap: 12px;
 }
 /* The Lomax column (140px, after Status) while Lomax is on for the queue. */
 .lq-brow-head.iq-brow.iq-brow--lx, .lq-brow.iq-brow.iq-brow--lx {
-  grid-template-columns: minmax(0, 1fr) 56px 52px 92px 62px 150px 140px 214px 30px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 56px 62px 112px 80px 196px;
 }
 /* No Sound Quality column (everything but a Review First Queue). */
 .lq-brow-head.iq-brow.iq-brow--nosq, .lq-brow.iq-brow.iq-brow--nosq {
-  grid-template-columns: minmax(0, 1fr) 56px 52px 62px 150px 214px 30px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 62px 112px 196px;
 }
 .lq-brow-head.iq-brow.iq-brow--nosq.iq-brow--lx, .lq-brow.iq-brow.iq-brow--nosq.iq-brow--lx {
-  grid-template-columns: minmax(0, 1fr) 56px 52px 62px 150px 140px 214px 30px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 62px 112px 80px 196px;
 }
 
 .lq-brow.iq-brow { min-height: 46px; }
-.lq-brow-head.iq-brow > * { text-align: center; }
-.lq-brow-head.iq-brow > :first-child { text-align: left; }
-.iq-col-format, .iq-col-type { text-align: center; }
+/* Headers and cells centre the same way (justify-self), so a header wider than
+   its column still sits over the middle of its values (Ryan, 2026-10-06). */
+.lq-brow-head.iq-brow > * { justify-self: center; white-space: nowrap; }
+.lq-brow-head.iq-brow > :nth-child(2) { justify-self: start; }
+.iq-col-format, .iq-col-type, .iq-col-lx { justify-self: center; white-space: nowrap; }
+.iq-col-format, .iq-col-type { font-size: 11.5px; color: var(--t2); }
+/* Queue rows (Ryan, 2026-10-06): plain coloured text instead of pills; the
+   inferred line (artist, date, venue) reads above the folder name in weight. */
+.iq-band { font-size: 11.5px; font-weight: 500; }
+.iq-band--green  { color: var(--green); }
+.iq-band--yellow { color: var(--amber); }
+.iq-band--red    { color: var(--red); }
+.lq-brow-head.iq-brow > .iq-head-status { justify-self: start; }
+#bi-lx-desc { display: inline-flex; align-items: center; gap: 10px; }
+.iq-brow .lq-brow-name { font-weight: 400; color: var(--t2); }
+.iq-brow .lq-brow-sub { font-size: 12px; color: var(--t0); }
+.iq-brow--skipped .lq-brow-name, .iq-brow--skipped .lq-brow-sub { color: var(--t3); }
+.iq-status.lq-tip { cursor: default; }
+/* Import All Ready: the one coloured button in the scan row. */
+.btn-import-ready {
+  background: color-mix(in srgb, var(--green) 22%, var(--bg-2));
+  border: 1px solid color-mix(in srgb, var(--green) 60%, transparent);
+  color: var(--t0);
+}
+.btn-import-ready:hover:not(:disabled) { background: color-mix(in srgb, var(--green) 34%, var(--bg-2)); }
 .iq-pill {
   display: inline-block; font-size: 10.5px; font-weight: 600;
   letter-spacing: .03em; color: var(--t2); background: var(--bg-4);
@@ -2501,9 +2521,9 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .pane-act:hover:not(:disabled) { color: var(--t0); border-color: var(--bd-2); background: var(--bg-3); }
 .pane-act:disabled { opacity: 0.45; cursor: default; }
 .pane-act--primary { color: var(--accent); border-color: var(--accent-dim2, var(--bd-2)); }
-/* Lomax colour (Ryan, 2026-10-05): the Research blue, a colour no other control
-   uses (accent = primary, amber = staged, red = danger). Follows the palette's --blue. */
-:root { --lomax: var(--blue); }   /* the Lomax colour: set it here and every Lomax surface follows */
+/* Lomax colour: --lomax and --lomax-ink are set in every palette block (2026-10-06).
+   Each is a saturated hue chosen away from that scheme's accent, so Lomax reads as
+   highlighted in every scheme. Measured by tests/test_lomax_button_contrast.py. */
 /* Unwritten metadata changes are waiting for this button — same signal the old
    .btn-staged carried, in this bar's vocabulary. */
 .pane-act--staged {
@@ -3916,60 +3936,20 @@ a.member-chip-name:hover { color: var(--accent); }
    Master-detail: the list is a scan of who has access, the pane is one peer.
    Same idiom as the Venues and Genres admin screens, so the third list-and-
    detail page in the app doesn't invent a fourth layout.                    */
-.peer-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 24px; }
-.peer-list { display: flex; flex-direction: column; gap: 2px; }
-.peer-row {
-  padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer;
-  border: 1px solid transparent;
-}
-.peer-row:hover { background: var(--bg-1); }
-.peer-row.active { background: var(--accent-dim); border-color: var(--accent); }
-.peer-row-name { font-size: 12.5px; color: var(--t0); }
-.peer-row-meta { font-size: 10.5px; color: var(--t3); margin-top: 2px; }
 /* A revoked peer stays visible rather than disappearing — you need to see that
    access WAS removed, not just that someone is absent. */
-.peer-row.is-revoked .peer-row-name { color: var(--t3); text-decoration: line-through; }
-.peer-empty { font-size: 11.5px; color: var(--t3); font-style: italic; padding: 10px 0; }
-.peer-badge--revoked {
-  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 2px 6px;
-}
 
-.peer-grants { display: flex; flex-direction: column; gap: 2px; max-width: 520px; }
-.peer-grant {
-  display: flex; align-items: center; gap: 10px;
-  padding: 6px 8px; margin: 0 -8px; border-radius: var(--r-sm);
-  font-size: 12px; color: var(--t1); cursor: pointer;
-}
-.peer-grant:hover { background: var(--bg-1); }
-.peer-grant.is-on { color: var(--t0); }
-.peer-grant-name { flex: 1; min-width: 0; }
-.peer-grant-count { font-size: 10.5px; color: var(--t3); font-variant-numeric: tabular-nums; }
 
 /* System collections (Full Library) sit above the curated ones and are set
    apart by a rule, because ticking one is a categorically different act:
    it shares the whole shelf, and keeps sharing it as the shelf grows. The
    caption carries that meaning — no badge, no icon. */
-.peer-grant--system {
-  flex-wrap: wrap;
-  padding-bottom: 9px; margin-bottom: 7px;
-  border-bottom: 1px solid var(--bd-0);
-}
-.peer-grant--system .peer-grant-name { font-weight: 500; }
-.peer-grant-note {
-  flex-basis: 100%; padding-left: 24px;   /* clears the checkbox + gap */
-  font-size: 10.5px; color: var(--t3); line-height: 1.45;
-}
 
 /* The invite is shown ONCE — the server keeps only a hash. Loud on purpose,
    because navigating away really does lose it. */
 .peer-invite-box {
   margin-top: 12px; padding: 12px 14px;
   background: var(--bg-1); border: 1px solid var(--accent); border-radius: var(--r-sm);
-}
-.peer-invite-label {
-  font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--t3); margin-bottom: 6px;
 }
 .peer-invite-code {
   display: block; font-family: var(--font-mono); font-size: 12.5px;
@@ -3986,24 +3966,8 @@ a.member-chip-name:hover { color: var(--accent); }
 .peer-act:last-child { border-bottom: none; }
 
 /* Previous invites. Same row idiom as .peer-act — this is a log, not a form. */
-.peer-inv-list { margin-top: 10px; }
-.peer-inv-head {
-  font-size: 10.5px; color: var(--t3); text-transform: uppercase;
-  letter-spacing: .06em; padding-bottom: 2px;
-}
-.peer-inv {
-  display: flex; align-items: center; gap: 10px;
-  padding: 5px 0; border-bottom: 1px solid var(--bd-0);
-  font-size: 11.5px; color: var(--t2);
-}
-.peer-inv:last-child { border-bottom: none; }
-.peer-inv-state { flex: 0 0 auto; min-width: 52px; color: var(--t3); }
 /* An unused invite is a live key to the library — the only row that is not
    merely history, so it is the only one that carries weight. */
-.peer-inv-state--live { color: var(--t1); font-weight: 600; }
-.peer-inv-state--used { color: var(--t3); }
-.peer-inv-when { flex: 1 1 auto; min-width: 0; color: var(--t3); }
-.peer-inv-del { flex: 0 0 auto; margin-left: auto; }
 .peer-act-when { color: var(--t3); white-space: nowrap; }
 
 @media (max-width: 860px) {
@@ -5260,9 +5224,8 @@ a.member-chip-name:hover { color: var(--accent); }
    freshly-created tab stands out"; the tab is permanent on both surfaces now
    (2026-08-28), and the brightness is simply what marks the one tab that does
    something rather than showing something. */
-.slide-tab--ai { color: var(--t0); }
+.slide-tab--ai, .slide-tab--ai:hover, .slide-tab--ai.active { color: var(--lomax); }
 .slide-tab--ai .tic { margin-right: 3px; vertical-align: -2px; }
-.slide-tab--ai.active { color: var(--accent); }
 
 .rev-section-title {
   font-size: 10px;
@@ -7132,8 +7095,8 @@ a.member-chip-name:hover { color: var(--accent); }
    stroke is thick relative to its 8px box; Lucide's is the thin 2-on-24
    stroke the rest of the icon set uses, sized down to sit quietly next to
    12px button text rather than reading as its own shape. */
-.lq-act--ingest { color: var(--green); border-color: rgba(106,184,128,.35); }
-.lq-act--ingest:hover { border-color: var(--green); color: var(--green); background: rgba(106,184,128,.08); }
+/* Import and Review are equal choices (Ryan, 2026-10-06): one neutral style. */
+.lq-act--ingest { color: var(--t0); border-color: var(--bd-2); }
 .lq-act--view { color: var(--accent-lit); border-color: var(--accent); }
 .lq-act-done     { font-size: 12px; color: var(--green); padding: 4px 0; white-space: nowrap; }
 /* Ingest queue rows (Ryan, 2026-09-27): the Metadata / Sound Quality chip sits
@@ -7141,7 +7104,7 @@ a.member-chip-name:hover { color: var(--accent); }
    width so Ingest -> Ingested and Review -> View change words, not shape.
    A finished row keeps the Ingested pill in place, greyed and inert. */
 .iq-brow .lq-verdict { font-size: 10.5px; padding: 2px 7px; letter-spacing: .03em; }
-.lq-act--ingest, .lq-act--review, .lq-act--view { min-width: 76px; }
+.lq-act--ingest, .lq-act--review, .lq-act--view { min-width: 58px; }
 .lq-act--ingest:disabled {
   opacity: 1; color: var(--t3); border-color: var(--bd-1); background: transparent;
 }
@@ -7157,9 +7120,8 @@ a.member-chip-name:hover { color: var(--accent); }
 /* Rows that need a look sit on a faint amber wash over the row fill. */
 /* Ingest All Ready: the row Ingest button one size up. */
 .lq-act--lg { padding: 7px 18px; font-size: 13px; min-width: 0; }
-.bi-ingest-all-wrap { margin: 0 0 12px; }
+.bi-ingest-all-wrap { display: inline-flex; align-items: center; gap: 8px; }
 .bi-ingest-all-wrap:empty { display: none; }
-.bi-ingest-all-wrap .btn + .btn { margin-left: 8px; }
 /* .lq-act-failed removed 2026-08-28 — the message is a hover now, not a
    paragraph wedged into the actions column. See .lq-errchip. */
 .lq-errchip {
@@ -7211,12 +7173,7 @@ a.member-chip-name:hover { color: var(--accent); }
    automatic path cannot do the job. Brought up to full text colour with a
    visible border; Ingest keeps the accent, so the order of prominence is
    still Ingest, then Review, then Move. */
-.lq-act--review {
-  color: var(--t0); border-color: var(--bd-2); background: var(--bg-4);
-}
-.lq-act--review:hover {
-  color: var(--accent-lit); border-color: var(--accent); background: var(--bg-5);
-}
+.lq-act--review { color: var(--t0); border-color: var(--bd-2); }
 /* Convert / Compress to FLAC (2026-09-02). Amber rather than the green of
    Ingest: this is not the action that files the recording, it is the one that
    has to happen first — a colour that says "attend to this" rather than
@@ -8794,7 +8751,7 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
 
 /* width: 100% so the column stays put between tabs instead of shrinking to
    whichever pane is open. */
-.set-wrap { width: 100%; max-width: 720px; margin: 0 auto; padding: 4px 0 64px; }
+.set-wrap { width: 100%; max-width: 720px; margin: 0 auto; padding: 28px 0 64px; }
 
 .set-h1 {
   font-family: var(--font-display); font-size: 26px; font-weight: 600;
@@ -8814,6 +8771,8 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   margin-bottom: 5px;
 }
 .set-hint { font-size: 11.5px; color: var(--t3); margin: 5px 0 0; max-width: 62ch; }
+/* A pane's opening line: what this section is for. */
+.set-intro { font-size: var(--fs-body); color: var(--t1); margin: 0 0 18px; max-width: 62ch; }
 
 .set-input {
   width: 100%; max-width: 420px; padding: 7px 10px;
@@ -8868,6 +8827,34 @@ select.set-input { max-width: 480px; }
 /* Three rows of a sample recording, sized to its content rather than
    stretched across the pane. */
 .set-prev { width: auto; }
+
+/* Lomax usage totals: one quiet line above the run history. */
+.set-usage { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0 0 12px;
+  font-size: var(--fs-body); color: var(--t2); }
+.set-usage b { color: var(--t0); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Settings > Sharing: peers and joined libraries as one-line rows; a peer
+   opens in place, one at a time. */
+.sh-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.sh-head .set-label { margin: 0; }
+.sh-add { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.sh-add[hidden] { display: none; }
+.sh-list { border-top: 1px solid var(--bd-0); }
+.sh-row { border-bottom: 1px solid var(--bd-0); }
+.sh-row-head { display: flex; align-items: baseline; gap: 14px; width: 100%; background: none; border: 0;
+  padding: 11px 2px; text-align: left; font-family: var(--font-ui); cursor: pointer; }
+.sh-row-head--static { cursor: default; align-items: center; }
+button.sh-row-head:hover .sh-name { color: var(--accent); }
+.sh-name { font-size: 13.5px; font-weight: 600; color: var(--t0); min-width: 0; }
+.sh-meta { font-size: 11.5px; color: var(--t3); white-space: nowrap; }
+.sh-leave { margin-left: auto; }
+.sh-row.is-revoked .sh-name { color: var(--t3); }
+.sh-body { display: none; padding: 4px 2px 18px; }
+.sh-row.open .sh-body { display: block; }
+.sh-body .set-field { margin-bottom: 18px; }
+.sh-actions { display: flex; align-items: center; gap: 8px; }
+.sh-revoke { color: var(--red); }
+.sh-empty { font-size: 12px; color: var(--t3); padding: 10px 2px; }
 .set-prev td { max-width: none; }
 
 /* Token chips under the naming template field. */
@@ -8885,8 +8872,7 @@ select.set-input { max-width: 480px; }
 .fh-strip { display: inline-flex; align-items: center; gap: 10px; color: var(--t1); font-size: 12.5px; }
 .fh-strip b { color: var(--t0); font-weight: 600; }
 .fh-strip .sep { color: var(--t3); }
-.fh-strip .change { color: var(--accent); text-decoration: none; }
-.fh-strip .change:hover { text-decoration: underline; }
+.fh-strip a { color: var(--accent); }
 
 .set-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
@@ -8918,6 +8904,7 @@ select.set-input { max-width: 480px; }
 .set-about dt { font-size: 11.5px; color: var(--t3); }
 .set-about dd { font-size: 11.5px; color: var(--t1); margin: 0; min-width: 0; }
 .set-about-credit { font-size: 11.5px; color: var(--t3); margin: 10px 0 0; }
+.set-about-contact { font-size: var(--fs-body); color: var(--t1); margin: 24px 0 0; user-select: text; }
 /* Paths are raw technical strings — one of the few places mono still belongs. */
 .set-path { font-family: var(--font-mono); font-size: 11.5px; color: var(--t1); word-break: break-all; }
 .set-about-tag {
@@ -9161,7 +9148,7 @@ select.set-input { max-width: 480px; }
    and pressed): dark palettes #5fb8a6, 6.0 to 8.0:1 across bg-0..bg-4; the three
    light palettes (steely, krauss, monk) #0b6a5a, 5.4 to 6.5:1 across bg-0..bg-3.
    Mid-tone grounds need their own: the dim three (chet, townes, gram) #91cec2,
-   5.7:1 minimum; the overcast three (joni, gillian, hazel) #06473a, 4.6:1
+   5.7:1 minimum; the overcast two (joni, hazel) #06473a, 4.6:1
    minimum, the most a teal can clear on that ground and still read as teal.
    accent-lit text clears 7.0:1 on its own accent-dim wash in every palette.
    ══════════════════════════════════════════════════════════════════════════ */
@@ -9205,9 +9192,6 @@ select.set-input { max-width: 480px; }
 :root[data-palette="joni"] .archive-space, :root[data-palette="joni"] .dlq-tab,
 :root[data-palette="joni"] .dlq-panel, :root[data-palette="joni"] .arc-drawer,
 :root[data-palette="joni"] .dl-prog,
-:root[data-palette="gillian"] .archive-space, :root[data-palette="gillian"] .dlq-tab,
-:root[data-palette="gillian"] .dlq-panel, :root[data-palette="gillian"] .arc-drawer,
-:root[data-palette="gillian"] .dl-prog,
 :root[data-palette="hazel"] .archive-space, :root[data-palette="hazel"] .dlq-tab,
 :root[data-palette="hazel"] .dlq-panel, :root[data-palette="hazel"] .arc-drawer,
 :root[data-palette="hazel"] .dl-prog {
@@ -9467,8 +9451,20 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 }
 .brow-added { text-align: right; color: var(--t2); }
 
-.dl-fp--ok  { color: var(--green); }
-.dl-fp--bad { color: var(--red); }
+.dl-fp--ok   { color: var(--green); }
+.dl-fp--bad  { color: var(--red); }
+.dl-fp--warn { color: var(--amber); }
+.dl-fp--dim  { color: var(--t3); }
+/* Sortable column headers on the working-folder pages (Name, Modified). */
+.arc-hd--sort { background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
+  display: inline-flex; align-items: center; gap: 3px; }
+.arc-hd--sort.arc-hd--r { justify-content: flex-end; }
+.arc-hd--sort:hover, .arc-hd--sort.is-on { color: var(--t1); }
+/* A folder with no audio: one line across the fingerprint, files, size and
+   format columns. */
+.dl-noaudio { grid-column: span 4; font-size: 12px; color: var(--t3); }
+.dl-row .lq-act:disabled { opacity: .45; cursor: default; }
+.arc-refresh { margin-left: auto; }
 
 /* An expanded dimension (Venues, Artists ...) grows the pinned foot upward over
    the main nav; give it an edge and a lift so the two read as separate layers. */
@@ -9517,7 +9513,7 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 #bi-applyall .lq-applyall { border: 0; padding: 4px 0 8px; margin-bottom: 4px; }
 /* Bulk Value Apply tab: the form replaces the table and everything that belongs to it. */
 #bi-shell.bi-applymode #bi-table, #bi-shell.bi-applymode #bi-ingest-all-wrap,
-#bi-shell.bi-applymode #bi-lomax-line, #bi-shell.bi-applymode #bi-notices,
+#bi-shell.bi-applymode #bi-notices,
 #bi-shell.bi-applymode #bi-tab-note { display: none; }
 .lq-applyall--tab .lq-applyall-head { order: 2; }
 .lq-applyall-intro { margin: 0; color: var(--t2); font-size: 13px; }
@@ -9553,18 +9549,14 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 /* 88% blue: the quiet tier must still clear 4.5:1 on every surface of every palette (58% measured 3.55 on cale). */
 :root { --lx-quiet: color-mix(in srgb, var(--lomax) 88%, var(--t3)); }
 
-/* The Lomax action button (Ask Lomax). One colour token, the blue family of Lomax values, used for
-   nothing else. --lx-btn-ink is the label: white on the six dark-text palettes, the page ground on the
-   seven light-text ones, so the label clears WCAG AA (4.5:1) on every palette, at rest and on hover (the
-   hover mix moves the fill away from the label colour, so it only gains contrast). tests/
-   test_lomax_button_contrast.py measures all seven. */
+/* The Lomax action button (Ask Lomax). Filled with the scheme's --lomax, labelled in its --lomax-ink,
+   so the label clears WCAG AA (4.5:1) on every palette, at rest and on hover.
+   tests/test_lomax_button_contrast.py measures every scheme. */
 :root {
   --lx-btn: var(--lomax);
-  --lx-btn-ink: var(--bg-0);
+  --lx-btn-ink: var(--lomax-ink);
   --lx-btn-hover: color-mix(in srgb, var(--lx-btn) 86%, var(--t0));
 }
-:root[data-palette="steely"], :root[data-palette="krauss"], :root[data-palette="monk"],
-:root[data-palette="joni"], :root[data-palette="gillian"], :root[data-palette="hazel"] { --lx-btn-ink: #fff; }
 .lx-go { background: var(--lx-btn); color: var(--lx-btn-ink); }
 .lx-go:hover:not(:disabled) { background: var(--lx-btn-hover); }
 .lx-go:disabled { opacity: .5; cursor: default; }
@@ -9738,24 +9730,56 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lx-empty .lx-av .tic { width: 22px; height: 22px; }
 
 /* Settings: totals and history */
-.lx-tots { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
-.lx-tot { min-width: 118px; padding: 9px 14px; background: var(--bg-2); border: 1px solid var(--bd-0); border-radius: 8px; }
-.lx-tot-n { color: var(--t0); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.lx-tot-l { color: var(--t3); font-size: 11.5px; }
 
 /* Import queue */
 .iq-col-lx { font-size: 12px; color: var(--t2); text-align: center; }
 .lx-qc { display: inline-flex; align-items: center; gap: 5px; }
 .lx-qc--dim { color: var(--t3); }
 .lx-qc-link { color: var(--lomax); }
-.bi-lomax-line { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; font-size: 12.5px; color: var(--t2); }
-.bi-lomax-line:empty { display: none; }
-.bi-lx-lbl { color: var(--lomax); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
-.bi-scan-lbl--lx { color: var(--lomax); display: inline-flex; align-items: center; gap: 5px; }
-.slide-tab--ai .tic { color: var(--lomax); }
+/* Lomax named as a menu item or a label (lomaxMark() in app.js). In a sentence it is plain text. */
+.lx-mark { color: var(--lomax); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .lx-fields { table-layout: fixed; }
 .lx-fields thead th:nth-child(1) { width: 66px; }
 .lx-fields thead th:nth-child(2) { width: 33%; }
 .lx-fields thead th:nth-child(4) { width: 58px; }
 .lx-fields tbody th { width: auto; }
 .lx-fields td { overflow-wrap: anywhere; }
+
+/* Lomax chat (Ryan, 2026-10-06), on View Recording and Add Recording alike:
+   a faintly Lomax-tinted ground so the chat reads as its own space, the
+   greeting as a bubble, a full-size Ask Lomax button, and the pane title
+   carrying the Lomax icon in the Lomax colour. */
+#sp-ai .lx-scroll, #isp-ai .lx-scroll {
+  background: color-mix(in srgb, var(--lomax) 6%, var(--bg-1));
+}
+#sp-ai .lx-ask, #isp-ai .lx-ask { background: color-mix(in srgb, var(--lomax) 4%, var(--bg-2)); }
+.lx-intro {
+  flex: 0 1 auto; align-self: flex-start; color: var(--t0);
+  padding: 8px 12px; background: var(--bg-3); border: 1px solid var(--bd-0);
+  border-radius: 12px 12px 12px 3px;
+}
+.lx-go--ask { padding: 8px 18px; font-size: 13px; font-weight: 600; }
+.pane-title:has(svg) { display: inline-flex; align-items: center; gap: 5px; color: var(--lomax); }
+
+/* Quality pane (2026-10-06, both panels): the verdict as larger coloured text,
+   and the empty state centred with room around it. */
+.rq-band { font-size: 15px; font-weight: 700; }
+.rq-empty-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 40px 20px; text-align: center; }
+.rq-empty-wrap .rq-empty { padding: 0; font-style: normal; color: var(--t2); }
+.lx-suggest { display: flex; justify-content: flex-end; }
+.lx-chip {
+  cursor: pointer; font: inherit; font-size: 12.5px; color: var(--t0);
+  padding: 7px 12px; border-radius: 12px 12px 3px 12px;
+  background: color-mix(in srgb, var(--lomax) 10%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--lomax) 55%, transparent);
+}
+.lx-chip:hover { background: color-mix(in srgb, var(--lomax) 20%, transparent); border-style: solid; }
+/* MusicBrainz release facts on Add Recording's MusicBrainz tab (2026-10-06). */
+.mb-rel { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; font-size: 12px; }
+.mb-rel .iq-expand-label { min-width: 104px; }
+.mb-rel-tracks { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.rq-err { color: var(--red); font-size: 12px; }
+.rq-err:empty { display: none; }
+.slide-pane-scroll > .rq-err { padding: 12px 16px 0; }
+.mb-intro { margin: 0 0 14px; font-size: 12.5px; line-height: 1.5; color: var(--t1); max-width: 520px; }
+.mb-find-row { display: flex; margin-top: 4px; }

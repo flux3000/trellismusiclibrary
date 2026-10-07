@@ -1607,6 +1607,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             state           = state,
             country         = country,
             source          = data.get("source"),
+            kind            = rec_kind,
+            title           = data.get("title"),
         )
     else:
         folder_name = os.path.basename(source_folder.rstrip("/\\")) or "Untitled"
@@ -1804,8 +1806,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         fp_abs_path = os.path.join(library_root, new_folder_path, rel_path)
         content = None
         try:
-            with open(fp_abs_path, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
+            from app.utils.checksums import read_checksum_text
+            content = read_checksum_text(fp_abs_path)
         except OSError:
             content = fp.get("content")
         db.session.add(RecordingFingerprint(

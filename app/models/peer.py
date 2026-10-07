@@ -107,6 +107,10 @@ class PeerInvite(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
     peer_id     = db.Column(db.Integer, db.ForeignKey("peer.id"), nullable=False, index=True)
     code_hash   = db.Column(db.String(64), unique=True, nullable=False, index=True)  # sha256 hex
+    # The raw code, kept so the sharer can copy the invite at any time (Ryan,
+    # 2026-10-06: not sensitive enough to justify a show-once code). NULL on
+    # invites minted before then. Enrollment still matches on code_hash.
+    code        = db.Column(db.String(128), nullable=True)
     created_at  = db.Column(db.DateTime, default=_utcnow)
     expires_at  = db.Column(db.DateTime, nullable=False)
     consumed_at = db.Column(db.DateTime, nullable=True)    # first-use timestamp, display only

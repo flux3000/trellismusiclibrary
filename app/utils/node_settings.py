@@ -104,7 +104,7 @@ WRITE_TAGS_ON_INGEST_KEY = "write_tags_on_ingest"
 WRITE_TAGS_DEFAULT_KEY   = "write_tags_default"
 
 VALID_MODES   = ("keep", "organize")
-VALID_SCHEMES = ("original", "number_title", "etree", "etree_sets", "custom")
+VALID_SCHEMES = ("original", "number_title", "etree_tracks", "etree", "etree_sets", "custom")
 
 # The six switches a mode change rewrites. Bool-valued keys are stored as the
 # literal strings "true"/"false"; naming_scheme is stored as-is.

@@ -203,6 +203,21 @@ def _checksum_state(job):
     return ("verified" if info.get("verified") else None), []
 
 
+def _fingerprints(full, job_result):
+    """The row's fingerprint verdict. A Trellis download that MD5-checked every
+    file as it landed already knows the answer; anything else is audited."""
+    status, bad = job_result or (None, [])
+    if status == "failed":
+        return {"state": "invalid", "detail": bad[:5]}
+    if status == "verified":
+        return {"state": "valid", "detail": []}
+    from app.utils.checksums import folder_fingerprint_state
+    try:
+        return folder_fingerprint_state(full)
+    except OSError:
+        return {"state": None, "detail": []}
+
+
 @bp.route("/folder", methods=["GET"])
 @admin_required
 def get_folder():
@@ -225,9 +240,11 @@ def get_folder():
                     files, size, fmt, mtime = _describe(full)
                 except OSError:
                     continue
+                fp = _fingerprints(full, None)
                 folders.append({
                     "checksums": None, "checksum_errors": [],
-                    "name": name, "files": files, "size_bytes": size, "format": fmt,
+                    "fingerprints": fp["state"], "fingerprint_detail": fp["detail"],
+                    "name": name, "files": files, "size_bytes": size, "format": fmt, "has_audio": fmt is not None,
                     "modified": datetime.fromtimestamp(mtime, timezone.utc).isoformat(),
                     "downloading": False, "job_id": None})
         return jsonify({"path": path, "folders": folders,
@@ -258,11 +275,54 @@ def get_folder():
             except OSError:
                 continue
             status, bad = _checksum_state(latest_done.get(name))
+            busy = name in open_jobs
+            fp = {"state": None, "detail": []} if busy else _fingerprints(full, (status, bad))
             folders.append({
                 "checksums": status, "checksum_errors": bad,
-                "name": name, "files": files, "size_bytes": size, "format": fmt,
+                "fingerprints": fp["state"], "fingerprint_detail": fp["detail"],
+                "name": name, "files": files, "size_bytes": size, "format": fmt, "has_audio": fmt is not None,
                 "modified": datetime.fromtimestamp(mtime, timezone.utc).isoformat(),
                 "downloading": name in open_jobs,
                 "job_id": open_jobs.get(name)})
     return jsonify({"path": path, "folders": folders,
                     "destinations": [k for k in ("backlog", "workshop") if triage.get(k)]})
+
+
+@bp.route("/trash", methods=["POST"])
+@admin_required
+def trash_folder():
+    """Move one working-folder row to the system Trash (Ryan, 2026-10-06).
+    The client names the folder and the row; the path is resolved here and
+    must be a direct child of that working folder. A folder still downloading
+    is refused."""
+    from app.utils.trash import move_to_trash, TrashUnavailable
+    data = request.get_json(silent=True) or {}
+    which = data.get("which") or "downloads"
+    name = data.get("name") or ""
+    if which == "downloads":
+        base = downloads_dir()
+    elif which in ("backlog", "workshop"):
+        base = (current_app.config.get("TRIAGE_DIRS") or {}).get(which)
+    else:
+        base = None
+    if not base:
+        return jsonify({"error": "Unknown folder"}), 400
+    if not name or name in (".", "..") or "/" in name or os.sep in name:
+        return jsonify({"error": "Not found"}), 404
+    full = os.path.join(base, name)
+    if (os.path.islink(full) or not os.path.isdir(full)
+            or os.path.dirname(os.path.realpath(full)) != os.path.realpath(base)):
+        return jsonify({"error": "Not found"}), 404
+    if which == "downloads":
+        busy = {os.path.basename(j.dest_path.rstrip(os.sep))
+                for j in db.session.query(DownloadJob)
+                .filter(DownloadJob.status.in_(("queued", "active"))).all()}
+        if name in busy:
+            return jsonify({"error": "This folder is still downloading."}), 409
+    try:
+        move_to_trash(full)
+    except TrashUnavailable as e:
+        return jsonify({"error": str(e)}), 501
+    except OSError as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True})

@@ -656,13 +656,16 @@ class FluxAPI:
     Called from JavaScript as async functions — always return JSON-safe values.
     """
 
-    def pick_folder(self):
+    def pick_folder(self, start=None):
         """
-        Open a native macOS folder picker dialog.
+        Open a native macOS folder picker dialog, opened on `start` when it is
+        an existing folder (Add Recordings opens on its Source Folder).
         Returns the selected folder path as a string, or None if cancelled.
-        Called from JS: const path = await window.pywebview.api.pick_folder()
+        Called from JS: const path = await window.pywebview.api.pick_folder(start)
         """
-        result = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER)
+        directory = start if isinstance(start, str) and os.path.isdir(start) else ""
+        result = webview.windows[0].create_file_dialog(webview.FileDialog.FOLDER,
+                                                       directory=directory)
         if result:
             return result[0]
         return None

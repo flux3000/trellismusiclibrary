@@ -490,12 +490,18 @@ def test_folder_lead(name, lead):
     assert folder_lead(name) == lead
 
 
-def test_a_lead_equal_to_the_reading_is_a_full_source_a_contained_name_only_the_bonus():
-    strong = resolve(_artist_scan(info="Boxcars", folder_name="Boxcars July 25, 2014 Bicentennial Park Pavilion"))
-    weak = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25 Bicentennial Park Boxcars"))
+def test_any_folder_name_naming_the_artist_is_a_full_source():
+    # Ryan, 2026-10-06: any naming scheme, not only Trellis's or artist-first.
+    lead = resolve(_artist_scan(info="Boxcars", folder_name="Boxcars July 25, 2014 Bicentennial Park Pavilion"))
+    inside = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25 Bicentennial Park Boxcars"))
+    billing = resolve(_artist_scan(info="Tony Allen",
+                                   folder_name="Tony Allen _ Nathalie Natiembé & Bumcello _ Le Pont 2009.10.28"))
     base = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25"))
-    assert strong.artist.logit - base.artist.logit >= C.FOLDER_TEMPLATE_SCORE["artist"]
-    assert 0 < weak.artist.logit - base.artist.logit < C.FOLDER_TEMPLATE_SCORE["artist"]
+    for r in (lead, inside):
+        assert r.artist.logit - base.artist.logit >= C.FOLDER_TEMPLATE_SCORE["artist"]
+    assert billing.artist.value == "Tony Allen"
+    assert any(e["source"] == "folder" and e["score"] == C.FOLDER_TEMPLATE_SCORE["artist"]
+               for e in billing.artist.evidence)
 
 
 def test_a_longer_lead_is_not_a_strong_agreement(monkeypatch):

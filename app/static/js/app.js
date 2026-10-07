@@ -245,22 +245,21 @@ const App = (() => {
   // toggle: it is per-machine, and it must apply before the first paint — see
   // the inline script in index.html, which stamps the saved id and knows
   // nothing else about palettes.
-  // `mode` is text polarity ('light' = light ground, dark text); main.css keys
-  // its light/dark rules on it. `group` is only where the picker shows it.
+  // Light ground to dark, which is also the picker's order. `mode` is text polarity
+  // ('light' = light ground, dark text); main.css keys its light/dark rules on it.
   const PALETTES = [
-    { id: 'steely',  label: 'Steely',  mode: 'light', group: 'light', note: 'Cool paper, petrol accent' },
-    { id: 'krauss',  label: 'Krauss',  mode: 'light', group: 'light', note: 'Warm ivory, sage accent' },
-    { id: 'monk',    label: 'Monk',    mode: 'light', group: 'light', note: 'Near-white, ink, bold blue' },
-    { id: 'joni',    label: 'Joni',    mode: 'light', group: 'mid',   note: 'Powder blue-grey, deep indigo' },
-    { id: 'gillian', label: 'Gillian', mode: 'light', group: 'mid',   note: 'Dust-bowl khaki, oxblood' },
-    { id: 'hazel',   label: 'Hazel',   mode: 'light', group: 'mid',   note: 'Grey-green, dark plum' },
-    { id: 'chet',    label: 'Chet',    mode: 'dark',  group: 'mid',   note: 'Smoky slate, muted brass' },
-    { id: 'townes',  label: 'Townes',  mode: 'dark',  group: 'mid',   note: 'Olive drab, faded denim' },
-    { id: 'gram',    label: 'Gram',    mode: 'dark',  group: 'mid',   note: 'Spruce green, faded rose' },
-    { id: 'cale',    label: 'Cale',    mode: 'dark',  group: 'dark',  note: 'Warm ash, amber-tan accent' },
-    { id: 'miles',   label: 'Miles',   mode: 'dark',  group: 'dark',  note: 'Midnight slate, icy blue' },
-    { id: 'alice',   label: 'Alice',   mode: 'dark',  group: 'dark',  note: 'Deep aubergine, gold accent' },
-    { id: 'eno',     label: 'Eno',     mode: 'dark',  group: 'dark',  note: 'Neutral graphite, chrome blue' },
+    { id: 'steely', label: 'Steely', mode: 'light' },
+    { id: 'krauss', label: 'Krauss', mode: 'light' },
+    { id: 'monk',   label: 'Monk',   mode: 'light' },
+    { id: 'joni',   label: 'Joni',   mode: 'light' },
+    { id: 'hazel',  label: 'Hazel',  mode: 'light' },
+    { id: 'townes', label: 'Townes', mode: 'dark' },
+    { id: 'chet',   label: 'Chet',   mode: 'dark' },
+    { id: 'gram',   label: 'Gram',   mode: 'dark' },
+    { id: 'cale',   label: 'Cale',   mode: 'dark' },
+    { id: 'miles',  label: 'Miles',  mode: 'dark' },
+    { id: 'alice',  label: 'Alice',  mode: 'dark' },
+    { id: 'eno',    label: 'Eno',    mode: 'dark' },
   ]
   // Cale is the app default because it is the palette every existing install is
   // already running — shipping a new set should not silently relight anyone's
@@ -297,8 +296,8 @@ const App = (() => {
   const NAMING_SCHEME_LABELS = [
     ['original',      'Keep original'],
     ['number_title',  'Number and title'],
-    ['etree',         'etree'],
-    ['etree_sets',    'etree, sets'],
+    ['etree_tracks',  'etree'],
+    ['etree',         'etree with disc'],
     ['custom',        'Custom'],
   ]
   // Mirrors app/utils/file_naming.py's PRESETS — display only, so the
@@ -307,6 +306,7 @@ const App = (() => {
   const NAMING_PRESET_TEMPLATES = {
     original:     '{original}',
     number_title: '{track} - {title}',
+    etree_tracks: '{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].t{track}',
     etree:        '{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].[d{disc}]t{track_in_disc}',
     etree_sets:   '{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}][s{set}]t{track_in_set}',
   }
@@ -337,15 +337,12 @@ const App = (() => {
     } catch (e) { /* leave it empty rather than showing a broken strip */ }
   }
 
+  // The same wording as the top of Add Recordings (Ryan, 2026-10-06), so the
+  // two screens describe File Handling in one voice.
   function fileHandlingStripHtml(fh) {
-    // Reduced to the mode label + Change (2026-09-27, unified ingest queue
-    // table): the rename/tag detail this used to spell out in full every
-    // time now lives only in Settings, which keeps its own labels.
-    const modeLabel = fh.file_handling_mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
-    return `<span class="fh-strip">
-      <b>${esc(modeLabel)}</b><span class="sep">·</span>
-      <a href="#/settings/files" class="change">Change</a></span>`
+    return `<span class="fh-strip">${_biFileHandlingHtml(fh)}</span>`
   }
+
 
   // ── Resizable sidebar ──────────────────────────────────────────────────────
   ;(function () {
@@ -575,13 +572,14 @@ const App = (() => {
     // with the surface. Details panel toggle: Lucide 'panel-right'.
     'brain':        '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/>',
     'panel-right':  '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
-    // Lomax (2026-10-05). The tape-reel mark: two reels on a baseline. 'lomax' is the
-    // 14px form beside the tab name; 'lomax-full' adds hubs and feet for the chat
-    // avatar. Never on a button. 'info' is Lucide 'info', the (i) beside level
-    // toggles and Resolver values.
+    // Lomax (2026-10-06). A portrait of Alan Lomax: swept-back hair, goatee, open
+    // collar (source: tools/design/lomax-portrait.svg). A FILLED path, not a Lucide stroke icon, so the
+    // <path> overrides icon()'s stroke/fill. 'lomax' sits beside the tab name and
+    // 'lomax-full' is the chat avatar; both are the same mark. Never on a button.
+    // 'info' is Lucide 'info', the (i) beside level toggles and Resolver values.
     'info':         '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
-    'lomax':        '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><path d="M3 19h18"/>',
-    'lomax-full':   '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M7 15l2 4"/><path d="M17 15l-2 4"/><path d="M3 19h18"/>',
+    'lomax':        '<path fill="currentColor" stroke="none" d="M1.6 23.16C1.56 23.12 1.62 22.85 1.78 22.40C2.58 20.11 4.62 18.18 7.35 17.14C7.85 16.95 7.96 16.92 8.01 16.96C8.03 16.97 8.15 17.31 8.27 17.69C8.51 18.45 8.55 18.54 8.72 18.61C8.89 18.68 11.66 19.16 11.82 19.14C11.9 19.13 11.98 19.12 12.01 19.12C12.04 19.12 12.12 19.13 12.2 19.14C12.36 19.16 15.14 18.68 15.31 18.61C15.47 18.54 15.51 18.45 15.75 17.70C15.87 17.31 15.98 16.99 15.99 16.97C16.03 16.91 16.25 16.98 16.88 17.23C19.49 18.29 21.44 20.18 22.22 22.40C22.38 22.85 22.44 23.12 22.4 23.16C22.35 23.22 1.65 23.22 1.6 23.16ZM10.32 18.46C8.83 18.2 8.91 18.22 8.88 18.13C8.79 17.9 8.33 16.38 8.34 16.35C8.35 16.31 8.43 16.28 8.6 16.23C9.52 15.95 9.57 15.94 9.67 16.03C9.7 16.06 9.83 16.16 9.97 16.25L10.21 16.42 10.77 17.19C11.31 17.95 11.7 18.55 11.7 18.63C11.7 18.65 11.69 18.67 11.67 18.68C11.65 18.69 11.05 18.59 10.32 18.46ZM12.36 18.68C12.3 18.66 12.32 18.59 12.5 18.30C12.66 18.03 13.69 16.56 13.81 16.43C13.84 16.4 13.92 16.33 14 16.28C14.08 16.23 14.19 16.15 14.26 16.09C14.44 15.93 14.44 15.93 14.96 16.09C15.63 16.28 15.67 16.3 15.69 16.35C15.7 16.38 15.24 17.9 15.15 18.13C15.11 18.22 15.17 18.21 13.7 18.46C13.02 18.58 12.45 18.68 12.43 18.68C12.4 18.69 12.37 18.69 12.36 18.68ZM11.59 16.31C10.88 16.19 9.87 15.57 9.47 15.00C9.42 14.93 9.3 14.75 9.2 14.61C9.09 14.46 8.92 14.15 8.74 13.79C8.31 12.92 8.1 12.25 7.96 11.29C7.94 11.12 7.91 10.91 7.9 10.82C7.88 10.74 7.86 10.53 7.85 10.37C7.83 10.11 7.81 10.01 7.69 9.65C7.33 8.55 7.18 7.37 7.31 6.61C7.43 5.93 7.67 5.29 7.95 4.88C8.01 4.79 8.08 4.69 8.1 4.66C8.28 4.4 8.84 3.88 9.2 3.65C9.71 3.33 10.57 3.03 11.31 2.90C11.62 2.85 12.68 2.84 13.05 2.89C14.02 3.02 14.63 3.24 15.32 3.71C16 4.17 16.55 5.17 16.77 6.34C16.83 6.63 16.85 7.52 16.8 7.86C16.79 7.96 16.76 8.14 16.75 8.26C16.74 8.39 16.71 8.54 16.7 8.60C16.61 9.03 16.58 9.15 16.49 9.44C16.42 9.66 16.35 9.81 16.28 9.92C16.2 10.05 16.18 10.11 16.18 10.19C16.18 10.31 16.11 10.83 16.06 11.14C16.04 11.26 16.02 11.42 16.01 11.50C16 11.58 15.99 11.68 15.98 11.72C15.96 11.77 15.94 11.89 15.92 11.97C15.73 13.03 14.96 14.6 14.28 15.29C13.52 16.06 12.48 16.46 11.59 16.31ZM11.18 15.51C11.18 15.46 10.91 15.11 10.81 15.03C10.79 15.01 10.73 14.93 10.68 14.86C10.64 14.79 10.55 14.68 10.5 14.61C10.34 14.42 10.21 14.14 10.09 13.75C10.02 13.55 9.92 13.25 9.87 13.09C9.7 12.55 9.71 12.36 9.95 12.12C10.15 11.92 10.49 11.75 10.94 11.64C11.28 11.56 12.78 11.56 13.09 11.65C13.58 11.78 13.9 11.95 14.11 12.18C14.32 12.41 14.31 12.58 14.01 13.47C13.75 14.27 13.67 14.44 13.37 14.80C13.33 14.85 13.24 14.96 13.17 15.05C13.1 15.13 12.99 15.26 12.93 15.33C12.81 15.48 12.8 15.53 12.88 15.53C13.08 15.53 13.88 14.92 14.09 14.62C14.14 14.55 14.25 14.38 14.34 14.25C14.51 13.99 14.89 13.26 15.02 12.94C15.13 12.64 15.23 12.31 15.36 11.81C15.4 11.64 15.46 11.28 15.5 10.95C15.51 10.82 15.54 10.57 15.56 10.40C15.58 10.23 15.6 10.05 15.6 10.00C15.6 9.95 15.62 9.83 15.64 9.72C15.77 9.15 15.62 7.98 15.39 7.74C15.2 7.56 14.53 7.31 13.99 7.23C13.33 7.13 13.09 7.11 12.01 7.11C10.93 7.11 10.78 7.12 10.03 7.23C9.81 7.26 9.37 7.37 9.11 7.47C8.68 7.63 8.47 8.07 8.4 8.95C8.35 9.58 8.34 9.68 8.37 9.77C8.39 9.82 8.41 10 8.42 10.16C8.45 10.43 8.48 10.75 8.55 11.29C8.56 11.39 8.58 11.52 8.6 11.57C8.61 11.62 8.64 11.75 8.66 11.86C8.85 12.76 9.28 13.7 9.86 14.54C10.14 14.93 10.89 15.52 11.12 15.52C11.15 15.52 11.18 15.52 11.18 15.51ZM12.52 12.89C12.87 12.83 13.01 12.71 12.88 12.59C12.65 12.38 11.33 12.39 11.12 12.60C11.08 12.63 11.07 12.66 11.08 12.71C11.11 12.82 11.28 12.87 11.84 12.94C11.95 12.95 12.29 12.93 12.52 12.89Z"/>',
+    'lomax-full':   '<path fill="currentColor" stroke="none" d="M1.6 23.16C1.56 23.12 1.62 22.85 1.78 22.40C2.58 20.11 4.62 18.18 7.35 17.14C7.85 16.95 7.96 16.92 8.01 16.96C8.03 16.97 8.15 17.31 8.27 17.69C8.51 18.45 8.55 18.54 8.72 18.61C8.89 18.68 11.66 19.16 11.82 19.14C11.9 19.13 11.98 19.12 12.01 19.12C12.04 19.12 12.12 19.13 12.2 19.14C12.36 19.16 15.14 18.68 15.31 18.61C15.47 18.54 15.51 18.45 15.75 17.70C15.87 17.31 15.98 16.99 15.99 16.97C16.03 16.91 16.25 16.98 16.88 17.23C19.49 18.29 21.44 20.18 22.22 22.40C22.38 22.85 22.44 23.12 22.4 23.16C22.35 23.22 1.65 23.22 1.6 23.16ZM10.32 18.46C8.83 18.2 8.91 18.22 8.88 18.13C8.79 17.9 8.33 16.38 8.34 16.35C8.35 16.31 8.43 16.28 8.6 16.23C9.52 15.95 9.57 15.94 9.67 16.03C9.7 16.06 9.83 16.16 9.97 16.25L10.21 16.42 10.77 17.19C11.31 17.95 11.7 18.55 11.7 18.63C11.7 18.65 11.69 18.67 11.67 18.68C11.65 18.69 11.05 18.59 10.32 18.46ZM12.36 18.68C12.3 18.66 12.32 18.59 12.5 18.30C12.66 18.03 13.69 16.56 13.81 16.43C13.84 16.4 13.92 16.33 14 16.28C14.08 16.23 14.19 16.15 14.26 16.09C14.44 15.93 14.44 15.93 14.96 16.09C15.63 16.28 15.67 16.3 15.69 16.35C15.7 16.38 15.24 17.9 15.15 18.13C15.11 18.22 15.17 18.21 13.7 18.46C13.02 18.58 12.45 18.68 12.43 18.68C12.4 18.69 12.37 18.69 12.36 18.68ZM11.59 16.31C10.88 16.19 9.87 15.57 9.47 15.00C9.42 14.93 9.3 14.75 9.2 14.61C9.09 14.46 8.92 14.15 8.74 13.79C8.31 12.92 8.1 12.25 7.96 11.29C7.94 11.12 7.91 10.91 7.9 10.82C7.88 10.74 7.86 10.53 7.85 10.37C7.83 10.11 7.81 10.01 7.69 9.65C7.33 8.55 7.18 7.37 7.31 6.61C7.43 5.93 7.67 5.29 7.95 4.88C8.01 4.79 8.08 4.69 8.1 4.66C8.28 4.4 8.84 3.88 9.2 3.65C9.71 3.33 10.57 3.03 11.31 2.90C11.62 2.85 12.68 2.84 13.05 2.89C14.02 3.02 14.63 3.24 15.32 3.71C16 4.17 16.55 5.17 16.77 6.34C16.83 6.63 16.85 7.52 16.8 7.86C16.79 7.96 16.76 8.14 16.75 8.26C16.74 8.39 16.71 8.54 16.7 8.60C16.61 9.03 16.58 9.15 16.49 9.44C16.42 9.66 16.35 9.81 16.28 9.92C16.2 10.05 16.18 10.11 16.18 10.19C16.18 10.31 16.11 10.83 16.06 11.14C16.04 11.26 16.02 11.42 16.01 11.50C16 11.58 15.99 11.68 15.98 11.72C15.96 11.77 15.94 11.89 15.92 11.97C15.73 13.03 14.96 14.6 14.28 15.29C13.52 16.06 12.48 16.46 11.59 16.31ZM11.18 15.51C11.18 15.46 10.91 15.11 10.81 15.03C10.79 15.01 10.73 14.93 10.68 14.86C10.64 14.79 10.55 14.68 10.5 14.61C10.34 14.42 10.21 14.14 10.09 13.75C10.02 13.55 9.92 13.25 9.87 13.09C9.7 12.55 9.71 12.36 9.95 12.12C10.15 11.92 10.49 11.75 10.94 11.64C11.28 11.56 12.78 11.56 13.09 11.65C13.58 11.78 13.9 11.95 14.11 12.18C14.32 12.41 14.31 12.58 14.01 13.47C13.75 14.27 13.67 14.44 13.37 14.80C13.33 14.85 13.24 14.96 13.17 15.05C13.1 15.13 12.99 15.26 12.93 15.33C12.81 15.48 12.8 15.53 12.88 15.53C13.08 15.53 13.88 14.92 14.09 14.62C14.14 14.55 14.25 14.38 14.34 14.25C14.51 13.99 14.89 13.26 15.02 12.94C15.13 12.64 15.23 12.31 15.36 11.81C15.4 11.64 15.46 11.28 15.5 10.95C15.51 10.82 15.54 10.57 15.56 10.40C15.58 10.23 15.6 10.05 15.6 10.00C15.6 9.95 15.62 9.83 15.64 9.72C15.77 9.15 15.62 7.98 15.39 7.74C15.2 7.56 14.53 7.31 13.99 7.23C13.33 7.13 13.09 7.11 12.01 7.11C10.93 7.11 10.78 7.12 10.03 7.23C9.81 7.26 9.37 7.37 9.11 7.47C8.68 7.63 8.47 8.07 8.4 8.95C8.35 9.58 8.34 9.68 8.37 9.77C8.39 9.82 8.41 10 8.42 10.16C8.45 10.43 8.48 10.75 8.55 11.29C8.56 11.39 8.58 11.52 8.6 11.57C8.61 11.62 8.64 11.75 8.66 11.86C8.85 12.76 9.28 13.7 9.86 14.54C10.14 14.93 10.89 15.52 11.12 15.52C11.15 15.52 11.18 15.52 11.18 15.51ZM12.52 12.89C12.87 12.83 13.01 12.71 12.88 12.59C12.65 12.38 11.33 12.39 11.12 12.60C11.08 12.63 11.07 12.66 11.08 12.71C11.11 12.82 11.28 12.87 11.84 12.94C11.95 12.95 12.29 12.93 12.52 12.89Z"/>',
     // Preview transport on Add Recording (2026-08-28). Lucide 'skip-back' /
     // 'skip-forward' — the SAME two glyphs the player bar draws inline in
     // index.html, so the two transports cannot drift apart. Kept here as well
@@ -624,9 +622,10 @@ const App = (() => {
     'chevron-down':  '<path d="m6 9 6 6 6-6"/>',
     // Archive Downloads (2026-10-01): the sidebar's Downloads
     // link, and the drag handle on the queue's Up next rows. Lucide 'download'
-    // and 'grip-vertical', copied verbatim from lucide-static. 'ticket' is
-    // Live Recordings' icon (a concert).
-    'ticket':       '<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>',
+    // and 'grip-vertical', copied verbatim from lucide-static.
+    // 'reels' is Live Recordings' icon (Ryan, 2026-10-06): the tape-reel mark that
+    // was Lomax's until Lomax got its own. Two reels with hubs and feet on a baseline.
+    'reels':        '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M7 15l2 4"/><path d="M17 15l-2 4"/><path d="M3 19h18"/>',
     'landmark':     '<path d=\"M10 18v-7\"/><path d=\"M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z\"/><path d=\"M14 18v-7\"/><path d=\"M18 18v-7\"/><path d=\"M3 22h18\"/><path d=\"M6 18v-7\"/>',
     // Reserved for the Bluegrass Archive entry (Ryan, 2026-10-01).
     'guitar':       '<path d=\"m11.9 12.1 4.514-4.514\"/><path d=\"M20.1 2.3a1 1 0 0 0-1.4 0l-1.114 1.114A2 2 0 0 0 17 4.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 17.828 7h1.344a2 2 0 0 0 1.414-.586L21.7 5.3a1 1 0 0 0 0-1.4z\"/><path d=\"m6 16 2 2\"/><path d=\"M8.23 9.85A3 3 0 0 1 11 8a5 5 0 0 1 5 5 3 3 0 0 1-1.85 2.77l-.92.38A2 2 0 0 0 12 18a4 4 0 0 1-4 4 6 6 0 0 1-6-6 4 4 0 0 1 4-4 2 2 0 0 0 1.85-1.23z\"/>',
@@ -796,16 +795,6 @@ const App = (() => {
     // the peer door has no editing endpoints at all, so an affordance here
     // could only ever produce an error.
     return hasEditRole() && getViewMode() === 'admin' && libraryState.activeId == null
-  }
-
-  // Where Home goes -- #/bulk-ingest while a Bulk Ingest run is running or
-  // paused, #/ otherwise. Shared by the sidebar shelf-head link
-  // (renderSidebar) and the wordmark click (wireHeaderNav) so the two never
-  // drift apart.
-  function homeHash() {
-    const active = state.bulkIngest
-                   && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
-    return active ? '#/bulk-ingest' : '#/'
   }
 
   // True only for the admin role -- narrower than hasEditRole() (which also
@@ -1846,7 +1835,10 @@ const App = (() => {
   async function leaveLibrary(id) {
     const lib = libraryState.remotes.find(r => r.id === id)
     const name = lib ? lib.display_name : 'this library'
-    if (!confirm(`Leave ${name}?\n\nYou will lose access until they invite you again. Nothing of yours is deleted.`)) return
+    if (!await _appConfirm({
+      title: `Leave ${name}?`,
+      body: 'You will lose access until they invite you again. Nothing of yours is deleted.',
+      confirm: 'Leave', danger: true })) return
     try {
       await API.remotes.leave(id)
     } catch (e) {
@@ -1895,7 +1887,7 @@ const App = (() => {
   // OTHER ARCHIVES: the Live Music Archive (admin only) and one entry per
   // library joined through an invite, which any role may browse. A peer entry
   // switches library exactly as the header selector does (switchLibrary).
-  // All entries carry the icon Live Recordings had before it became a ticket.
+  // Peer entries carry 'library', the icon Live Recordings had before it became reels.
   function _otherArchivesHtml() {
     const lma = _dlAllowed()
       ? `<a class="nav-item" data-nav="archive-lma" href="#/archive/lma">${icon('landmark', 'nav-ic')}Live Music Archive</a>`
@@ -2005,12 +1997,14 @@ const App = (() => {
     // Rows waiting across the listed runs (ready + needs review); the Add
     // Recordings button carries the count.
     const biWaiting = remote ? 0 : _biWaitingCount()
-    const homeHashUrl = remote ? '#/' : homeHash()
+    // Live Recordings always goes to the library, run or no run (Ryan,
+    // 2026-10-06): a link that sends you somewhere else is a broken link.
+    const homeHashUrl = '#/'
     nav.innerHTML = `
       <div class="nav-scroll">
         ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="${biHash || '#/ingest'}"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings${biWaiting ? `<span class="nav-add-count">${biWaiting}</span>` : ''}</a>` : ''}
         <a class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate" data-nav="library" href="${homeHashUrl}">${esc(shelfTitle)}</a>
-        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('library', 'nav-ic')}Live Recordings</a>
+        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('reels', 'nav-ic')}Live Recordings</a>
         <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
         <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
         ${_dlAllowed() ? `<a class="nav-item" data-nav="downloads" href="#/downloads">${icon('download', 'nav-ic')}Downloads<span class="nav-record-count nav-dl-count" data-dl-count>${DL.folderCount || ''}</span></a>` : ''}
@@ -2935,344 +2929,296 @@ const App = (() => {
   //   Used    — history, and NOT deletable: the device it produced still works,
   //             and removing the row would erase the record of a live access.
   //             Killing that access is a device revocation, a third thing again.
-  function peerInvitesHtml(invites) {
-    if (!invites || !invites.length) return ''
-    const rows = invites.map(i => {
-      const made = `Created ${esc(fmtDateAdded(i.created_at))}`
-      if (i.status === 'used') {
-        return `<div class="peer-inv">
-          <span class="peer-inv-state peer-inv-state--used">Used</span>
-          <span class="peer-inv-when truncate">${made}${
-            i.consumed_at ? ` · joined ${esc(fmtDateAdded(i.consumed_at))}` : ''}</span>
+  /** An app-styled yes/no dialog. Resolves true on confirm, false on cancel,
+   *  Escape or a click outside. For destructive actions only. */
+  function _appConfirm({ title, body, confirm = 'Confirm', danger = false }) {
+    return new Promise(resolve => {
+      const wrap = document.createElement('div')
+      wrap.className = 'modal-overlay'
+      wrap.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="appc-title">
+          <div class="modal-header"><h3 id="appc-title">${esc(title)}</h3></div>
+          ${body ? `<div class="modal-body"><p>${esc(body)}</p></div>` : ''}
+          <div class="modal-footer">
+            <button class="btn btn-sm btn-ghost" data-r="0">Cancel</button>
+            <button class="btn btn-sm btn-primary${danger ? ' btn-danger' : ''}" data-r="1">${esc(confirm)}</button>
+          </div>
         </div>`
-      }
-      const live = i.status === 'pending'
-      return `<div class="peer-inv">
-        <span class="peer-inv-state${live ? ' peer-inv-state--live' : ''}">${
-          live ? 'Unused' : 'Expired'}</span>
-        <span class="peer-inv-when truncate">${made} · ${
-          live ? 'expires' : 'expired'} ${esc(fmtDateAdded(i.expires_at))}</span>
-        <button class="btn btn-ghost btn-xs peer-inv-del" data-invite-id="${i.id}"${
-          live ? ' data-live="1"' : ''}>${live ? 'Cancel' : 'Clear'}</button>
-      </div>`
-    }).join('')
-    return `<div class="peer-inv-list"><div class="peer-inv-head">Previous invites</div>${rows}</div>`
+      const done = v => { wrap.remove(); document.removeEventListener('keydown', onKey); resolve(v) }
+      const onKey = e => { if (e.key === 'Escape') done(false) }
+      document.addEventListener('keydown', onKey)
+      wrap.addEventListener('click', e => {
+        if (e.target === wrap) return done(false)
+        const btn = e.target.closest('[data-r]')
+        if (btn) done(btn.dataset.r === '1')
+      })
+      document.body.appendChild(wrap)
+      wrap.querySelector('[data-r="1"]').focus()
+    })
   }
 
-  async function renderPeersPage(preSelectId = null) {
-    setActiveNav('peers')
-    setNavCurrent('Sharing')
-    setLoading()
+  /** Settings › Sharing (2026-10-06; replaces the #/peers page). Three parts:
+   *  the public address, the people this library is shared with, and the
+   *  libraries this install has joined. Sharing is implied: a peer always holds
+   *  the Full Library grant (server side, api/peers.py), so there is no switch.
+   *  One peer is open at a time; its detail is fetched when it opens. */
+  async function _renderSharingPane(host) {
+    let peers = [], openId = null
+    try { peers = await API.peers.list() }
+    catch (e) { host.innerHTML = `<p class="set-hint">${esc(e.message)}</p>`; return }
 
-    let peers = [], collections = []
-    try {
-      [peers, collections] = await Promise.all([
-        API.peers.list(), API.collections.list(),
-      ])
-    } catch (e) {
-      setMainHTML(`<div class="empty-state"><div class="empty-title">Could not load peers</div><div class="empty-sub">${esc(e.message)}</div></div>`)
-      return
-    }
+    host.innerHTML = `
+      <div class="set-field">
+        <label class="set-label" for="peer-share-url">Public Address</label>
+        <div class="set-actions">
+          <input class="set-input" type="text" id="peer-share-url"
+                 placeholder="https://share.example.com" autocomplete="off" spellcheck="false">
+          <span class="set-flash" id="peer-share-url-flash"></span>
+        </div>
+        <p class="set-hint" id="peer-share-url-hint" hidden>Set via the SHARE_BASE_URL environment variable, which always wins. Unset it there to edit this from here.</p>
+      </div>
+      <div class="set-field">
+        <div class="sh-head"><span class="set-label">Peers</span>
+          <button class="btn btn-ghost btn-sm" id="peer-new">Add Peer</button></div>
+        <div class="sh-add" id="peer-add" hidden>
+          <input class="set-input" id="peer-add-name" maxlength="120" placeholder="Name" autocomplete="off">
+          <button class="btn btn-primary btn-sm" id="peer-add-go">Add</button>
+          <span class="set-flash" id="peer-add-flash"></span>
+        </div>
+        <div class="sh-list" id="peer-list"></div>
+      </div>
+      <div class="set-field">
+        <div class="sh-head"><span class="set-label">Joined Libraries</span>
+          <button class="btn btn-ghost btn-sm" id="lib-join">Join a Library</button></div>
+        <div class="sh-list" id="lib-list"></div>
+      </div>`
+    const $ = id => document.getElementById(id)
 
-    let activeId = preSelectId || (peers[0] && peers[0].id) || null
-
-    setMainHTML(entityShellHtml({
-      title: 'Sharing',
-      stats: [
-        [peers.filter(p => p.is_active).length, 'Peers'],
-        [collections.length, collections.length === 1 ? 'Collection' : 'Collections'],
-      ],
-      actions: `<button class="btn btn-ghost btn-sm" id="peer-new">+ Add peer</button>`,
-      tabs: [{
-        id: 'peers', label: 'Peers',
-        html: `
-          <div class="peer-share-address">
-            <label class="set-label" for="peer-share-url">Public address</label>
-            <div class="set-actions">
-              <input class="set-input" type="text" id="peer-share-url"
-                     placeholder="https://share.example.com" autocomplete="off">
-              <button class="btn btn-primary btn-sm" id="peer-share-url-save">Save</button>
-              <span class="set-flash" id="peer-share-url-flash"></span>
-            </div>
-            <p class="set-hint" id="peer-share-url-hint">The address peer invites point at (your Cloudflare Tunnel hostname, or whatever's fronting this instance). Without this, invites show a bare code instead of a paste-able link.</p>
-          </div>
-          <div class="peer-layout">
-            <div class="peer-list" id="peer-list"></div>
-            <div class="peer-detail" id="peer-detail"></div>
-          </div>`,
-      }],
-    }))
-    wireEntityShell(mainContent, null)
-
-    // ── Public address (SHARE_BASE_URL) — commit-on-blur, same shape as Settings ──
+    // ── Public address: commit on blur or Enter, like every other setting ──
     ;(async () => {
-      const input = document.getElementById('peer-share-url')
-      const hint = document.getElementById('peer-share-url-hint')
-      const saveBtn = document.getElementById('peer-share-url-save')
-      if (!input) return
+      const input = $('peer-share-url')
       let current = ''
       try {
-        const s = await API.peers.getShareAddress()
-        current = s.share_base_url || ''
+        const st = await API.peers.getShareAddress()
+        current = st.share_base_url || ''
         input.value = current
-        if (s.from_env) {
-          input.disabled = true
-          saveBtn.disabled = true
-          hint.textContent = 'Set via the SHARE_BASE_URL environment variable, which always wins. Unset it there to edit this from here.'
-        }
-      } catch (e) { /* non-fatal — field just stays empty */ }
-      const commit = async () => {
+        if (st.from_env) { input.disabled = true; $('peer-share-url-hint').hidden = false }
+      } catch (_) { /* the field just stays empty */ }
+      input.addEventListener('blur', async () => {
         const v = input.value.trim()
         if (v === current) return
         try {
-          const s = await API.peers.setShareAddress(v)
-          current = s.share_base_url || ''
+          const st = await API.peers.setShareAddress(v)
+          current = st.share_base_url || ''
           input.value = current
-          _settingsSaved(document.getElementById('peer-share-url-flash'))
+          _settingsSaved($('peer-share-url-flash'))
         } catch (e) {
           input.value = current
-          _settingsSaved(document.getElementById('peer-share-url-flash'), e.message)
+          _settingsSaved($('peer-share-url-flash'), e.message)
         }
-      }
-      input.addEventListener('blur', commit)
+      })
       input.addEventListener('keydown', e => { if (e.key === 'Enter') input.blur() })
-      saveBtn?.addEventListener('click', commit)
     })()
 
-    function renderList() {
-      const el = document.getElementById('peer-list')
-      if (!peers.length) {
-        el.innerHTML = `<div class="peer-empty">No peers yet.<br>Add one to start sharing.</div>`
-        return
-      }
-      el.innerHTML = peers.map(p => `
-        <div class="peer-row${p.id === activeId ? ' active' : ''}${p.is_active ? '' : ' is-revoked'}" data-id="${p.id}">
-          <div class="peer-row-name truncate">${esc(p.name)}</div>
-          <div class="peer-row-meta">${
-            !p.is_active ? 'Revoked'
-            : p.has_joined ? `${p.grant_count} collection${p.grant_count === 1 ? '' : 's'}`
-            : p.pending_invites ? 'Invited, not joined'
-            : 'Not invited'
-          }</div>
-        </div>`).join('')
-      el.querySelectorAll('.peer-row').forEach(row =>
-        row.addEventListener('click', () => {
-          activeId = Number(row.dataset.id)
-          renderList(); renderDetail()
-        }))
+    // ── Peers ────────────────────────────────────────────────────────────────
+    const status = p => !p.is_active ? 'Revoked'
+      : p.has_joined ? (p.last_seen_at ? `Joined · last seen ${fmtDateAdded(p.last_seen_at)}` : 'Joined')
+      : p.pending_invites ? 'Invited, not joined'
+      : 'Not invited'
+
+    function renderPeers() {
+      const el = $('peer-list')
+      el.innerHTML = peers.length ? peers.map(p => `
+        <div class="sh-row${p.id === openId ? ' open' : ''}${p.is_active ? '' : ' is-revoked'}" data-id="${p.id}">
+          <button type="button" class="sh-row-head" aria-expanded="${p.id === openId}">
+            <span class="sh-name truncate">${esc(p.name)}</span>
+            <span class="sh-meta">${esc(status(p))}</span>
+          </button>
+          <div class="sh-body"></div>
+        </div>`).join('') : `<div class="sh-empty">No peers yet.</div>`
+      el.querySelectorAll('.sh-row-head').forEach(head => head.addEventListener('click', () => {
+        const id = Number(head.parentElement.dataset.id)
+        openId = openId === id ? null : id
+        renderPeers()
+      }))
+      if (openId != null) renderPeerBody(el.querySelector(`.sh-row[data-id="${openId}"] .sh-body`))
     }
 
-    async function renderDetail() {
-      const el = document.getElementById('peer-detail')
-      if (activeId == null) {
-        el.innerHTML = `<div class="peer-empty">Select a peer, or add one.</div>`
-        return
-      }
-      el.innerHTML = `<div class="peer-empty">Loading…</div>`
-      let p
-      try { p = await API.peers.get(activeId) }
-      catch (e) { el.innerHTML = `<div class="peer-empty">Failed to load: ${esc(e.message)}</div>`; return }
+    async function refreshPeers() {
+      try { peers = await API.peers.list() } catch (_) { /* keep what is on screen */ }
+      renderPeers()
+    }
 
-      const granted = new Set(p.grants.map(g => g.collection_id))
-      el.innerHTML = `
-        <div class="pp-sec-row">
-          <h2 class="pp-block-title" id="peer-name" title="Click to edit">${esc(p.name)}</h2>
-          ${p.is_active
-            ? `<button class="btn btn-ghost btn-xs" id="peer-revoke" style="margin-left:auto; color:var(--red)">Revoke access</button>`
-            : `<span style="margin-left:auto; display:flex; align-items:center; gap:8px">
-                 <span class="peer-badge peer-badge--revoked">Revoked</span>
-                 <button class="btn btn-ghost btn-xs" id="peer-unrevoke">Restore access</button>
-               </span>`}
-        </div>
-        <div class="pp-desc pp-editable ${p.contact_note ? '' : 'pp-empty'}" id="peer-note" title="Click to edit">${
-          p.contact_note ? esc(p.contact_note) : 'Add a note: who is this?'}</div>
-
-        <div class="pp-block">
-          <h2 class="pp-block-title">Access</h2>
-          <div class="pp-block-hint">Sharing gives this person your whole library, read-only. Anything you add later appears for them automatically; anything you move out to Workshop or Backlog disappears.</div>
-          ${(() => {
-            // MVP is share-everything (Ryan, 2026-08-24). Per-collection
-            // checkboxes are DELIBERATELY not rendered: offering them invites
-            // exactly the partial grants that were deferred, and every partial
-            // grant needs every filtered endpoint to be exactly right.
-            //
-            // Underneath this is still an ordinary CollectionGrant against the
-            // Full Library system collection, so nothing about the grant model
-            // changed and selective sharing can return as an advanced option
-            // without a migration. The existing change handler is reused as-is
-            // — it keys on data-col-id and does not care that there is now one
-            // box instead of six.
-            const full = collections.find(c => c.is_system)
-            if (!full) {
-              return `<div class="peer-empty">No Full Library collection in this database. Run <span class="join-hash">scripts/migrate_add_system_collections.py</span>.</div>`
-            }
-            const on = granted.has(full.id)
-            return `
-            <div class="peer-grants">
-              <label class="peer-grant peer-grant--system${on ? ' is-on' : ''}">
-                <input type="checkbox" data-col-id="${full.id}" ${on ? 'checked' : ''} ${p.is_active ? '' : 'disabled'}>
-                <span class="peer-grant-name truncate">Share my library</span>
-                <span class="peer-grant-count">${full.recording_count}</span>
-                <span class="peer-grant-note">They see everything on the shelf (Browse, Search and your collections) but cannot change anything.</span>
-              </label>
-            </div>`
-          })()}
-        </div>
-
-        <div class="pp-block">
-          <h2 class="pp-block-title">Invite</h2>
-          <div class="pp-block-hint">Generates a one-time code. It is shown once and stored only as a hash. If it's lost, mint a new one.</div>
-          <div class="ai-assist-cta">
-            <button class="btn btn-primary btn-sm" id="peer-invite" ${p.is_active ? '' : 'disabled'}>
-              ${p.has_joined ? 'New invite' : 'Create invite'}</button>
-            <div class="ai-assist-hint">${
-              p.has_joined ? `Joined · ${p.devices.length} device${p.devices.length === 1 ? '' : 's'}`
-              : p.pending_invites ? `${p.pending_invites} invite pending`
-              : 'Not yet invited'}</div>
+    // One live invite per peer (a new one replaces it), kept so it can be
+    // copied whenever it is needed.
+    function inviteBoxHtml(inv) {
+      if (!inv) return ''
+      return `
+        <div class="peer-invite-box">
+          <code class="peer-invite-code">${esc(inv.invite)}</code>
+          <div class="peer-invite-actions">
+            <button class="btn btn-ghost btn-xs" id="peer-invite-copy">Copy</button>
           </div>
-          <div id="peer-invite-out"></div>
-          ${peerInvitesHtml(p.invites)}
-        </div>
-
-        <div class="pp-block">
-          <h2 class="pp-block-title">Activity</h2>
-          <div class="pp-block-hint">${p.last_seen_at ? 'Last seen ' + esc(fmtDateAdded(p.last_seen_at)) : 'Never connected.'}</div>
-          <div id="peer-activity"></div>
+          ${inv.base_url_set ? '' : `
+            <div class="peer-invite-warn">No public address set. Fill in the field above and mint again to get a single paste-able link instead of a bare code.</div>`}
         </div>`
+    }
+    function wireInviteCopy(text) {
+      $('peer-invite-copy')?.addEventListener('click', () => {
+        navigator.clipboard?.writeText(text)
+        $('peer-invite-copy').textContent = 'Copied'
+      })
+    }
 
-      makeInlineEditable(document.getElementById('peer-name'), {
-        get: () => p.name,
-        onSave: async v => {
-          v = v.trim(); if (!v || v === p.name) return
+    async function renderPeerBody(body) {
+      if (!body) return
+      let p
+      try { p = await API.peers.get(openId) }
+      catch (e) { body.innerHTML = `<p class="set-hint">${esc(e.message)}</p>`; return }
+      body.innerHTML = `
+        <div class="set-field">
+          <label class="set-label" for="peer-name">Name</label>
+          <div class="set-actions">
+            <input class="set-input" id="peer-name" maxlength="120" value="${esc(p.name)}" autocomplete="off">
+            <span class="set-flash" id="peer-name-flash"></span>
+          </div>
+        </div>
+        <div class="set-field">
+          <span class="set-label">Note</span>
+          <div class="pp-desc pp-editable ${p.contact_note ? '' : 'pp-empty'}" id="peer-note">${
+            p.contact_note ? esc(p.contact_note) : 'Add a note: who is this?'}</div>
+        </div>
+        ${p.is_active ? `
+        <div class="set-field">
+          <span class="set-label">Invite</span>
+          <div id="peer-invite-out">${inviteBoxHtml(p.current_invite)}</div>
+          <div class="set-actions">
+            <button class="btn btn-ghost btn-sm" id="peer-invite">${p.current_invite ? 'New Invite' : 'Create Invite'}</button>
+            <span class="set-flash" id="peer-invite-flash"></span>
+          </div>
+        </div>
+        <div class="set-field" id="peer-activity-wrap" hidden>
+          <span class="set-label">Recently Played</span>
+          <div id="peer-activity"></div>
+        </div>
+        <div class="sh-actions"><button class="btn btn-ghost btn-sm sh-revoke" id="peer-revoke">Revoke Access</button>
+          <span class="set-flash" id="peer-revoke-flash"></span></div>` : `
+        <div class="sh-actions"><button class="btn btn-ghost btn-sm" id="peer-unrevoke">Restore Access</button>
+          <span class="set-flash" id="peer-revoke-flash"></span></div>`}`
+
+      const nameInput = $('peer-name')
+      nameInput.addEventListener('blur', async () => {
+        const v = nameInput.value.trim()
+        if (!v || v === p.name) { nameInput.value = p.name; return }
+        try {
           await API.peers.update(p.id, { name: v })
           p.name = v
           const row = peers.find(x => x.id === p.id); if (row) row.name = v
-          renderList()
-        },
+          const label = body.parentElement.querySelector('.sh-name'); if (label) label.textContent = v
+          _settingsSaved($('peer-name-flash'))
+        } catch (e) { nameInput.value = p.name; _settingsSaved($('peer-name-flash'), e.message) }
       })
-      makeInlineEditable(document.getElementById('peer-note'), {
+      nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur() })
+
+      makeInlineEditable($('peer-note'), {
         multiline: true, placeholder: 'Add a note: who is this?',
         get: () => p.contact_note || '',
         onSave: async v => { v = v.trim(); p.contact_note = v; await API.peers.update(p.id, { contact_note: v || null }) },
       })
 
-      // Grants toggle immediately — a checkbox that needs a Save button is a
-      // checkbox that will be left unsaved.
-      el.querySelectorAll('.peer-grants input').forEach(cb =>
-        cb.addEventListener('change', async () => {
-          const cid = Number(cb.dataset.colId)
-          cb.disabled = true
-          try {
-            if (cb.checked) await API.peers.addGrants(p.id, [cid])
-            else await API.peers.revokeGrant(p.id, cid)
-            cb.closest('.peer-grant').classList.toggle('is-on', cb.checked)
-            const row = peers.find(x => x.id === p.id)
-            if (row) { row.grant_count += cb.checked ? 1 : -1; renderList() }
-          } catch (e) {
-            cb.checked = !cb.checked
-            alert('Failed: ' + e.message)
-          } finally { cb.disabled = false }
-        }))
-
-      document.getElementById('peer-invite')?.addEventListener('click', async () => {
-        const out = document.getElementById('peer-invite-out')
-        out.innerHTML = `<div class="peer-empty">Creating…</div>`
+      if (p.current_invite) wireInviteCopy(p.current_invite.invite)
+      $('peer-invite')?.addEventListener('click', async () => {
         try {
           const inv = await API.peers.mintInvite(p.id)
-          // Shown ONCE. The server stores only a SHA-256 hash, so there is no
-          // "show it again" — say so plainly rather than letting someone
-          // navigate away assuming they can come back for it.
-          out.innerHTML = `
-            <div class="peer-invite-box">
-              <div class="peer-invite-label">${inv.invite ? 'Send this to your peer' : 'Invite code'}</div>
-              <code class="peer-invite-code" id="peer-invite-code">${esc(inv.invite || inv.code)}</code>
-              <div class="peer-invite-actions">
-                <button class="btn btn-ghost btn-xs" id="peer-invite-copy">Copy</button>
-                <span class="peer-invite-note">Shown once · expires ${esc(fmtDateAdded(inv.expires_at))}</span>
-              </div>
-              ${inv.base_url_set ? '' : `
-                <div class="peer-invite-warn">No public address set. Fill in the field above and mint again to get a single paste-able link instead of a bare code.</div>`}
-            </div>`
-          document.getElementById('peer-invite-copy').addEventListener('click', () => {
-            navigator.clipboard?.writeText(inv.invite || inv.code)
-            document.getElementById('peer-invite-copy').textContent = 'Copied'
-          })
+          const text = inv.invite || inv.code
+          $('peer-invite-out').innerHTML = inviteBoxHtml({ invite: text, base_url_set: inv.base_url_set })
+          wireInviteCopy(text)
+          $('peer-invite').textContent = 'New Invite'
           const row = peers.find(x => x.id === p.id)
-          if (row) { row.pending_invites += 1; renderList() }
-        } catch (e) { out.innerHTML = `<div class="peer-empty" style="color:var(--red)">${esc(e.message)}</div>` }
+          if (row && !row.has_joined) { row.pending_invites = 1; body.parentElement.querySelector('.sh-meta').textContent = status(row) }
+        } catch (e) { _settingsSaved($('peer-invite-flash'), e.message) }
       })
 
-      el.querySelectorAll('.peer-inv-del').forEach(btn =>
-        btn.addEventListener('click', async () => {
-          const live = btn.dataset.live === '1'
-          if (live && !confirm(
-                'Cancel this unused invite?\n\n' +
-                'The code stops working immediately. Anyone who has already ' +
-                'joined your library is unaffected. This is not the same as ' +
-                'revoking access.')) return
-          btn.disabled = true
-          try {
-            await API.peers.deleteInvite(p.id, Number(btn.dataset.inviteId))
-            peers = await API.peers.list()
-            renderList(); renderDetail()
-          } catch (e) { btn.disabled = false; alert('Failed: ' + e.message) }
-        }))
-
-      document.getElementById('peer-revoke')?.addEventListener('click', async () => {
-        if (!confirm(`Revoke all access for "${p.name}"?\n\nThis kills every grant and every device token at once. You can restore it from this page afterward if you change your mind.`)) return
-        try {
-          await API.peers.revoke(p.id)
-          peers = await API.peers.list()
-          renderList(); renderDetail()
-        } catch (e) { alert('Failed: ' + e.message) }
+      $('peer-revoke')?.addEventListener('click', async () => {
+        if (!await _appConfirm({
+          title: `Revoke access for ${p.name}?`,
+          body: 'They lose access to your library right away. You can restore it here afterward.',
+          confirm: 'Revoke Access', danger: true })) return
+        try { await API.peers.revoke(p.id); await refreshPeers() }
+        catch (e) { _settingsSaved($('peer-revoke-flash'), e.message) }
+      })
+      $('peer-unrevoke')?.addEventListener('click', async () => {
+        try { await API.peers.unrevoke(p.id); await refreshPeers() }
+        catch (e) { _settingsSaved($('peer-revoke-flash'), e.message) }
       })
 
-      document.getElementById('peer-unrevoke')?.addEventListener('click', async () => {
-        try {
-          await API.peers.unrevoke(p.id)
-          peers = await API.peers.list()
-          renderList(); renderDetail()
-        } catch (e) { alert('Failed: ' + e.message) }
-      })
-
+      if (!p.is_active) return
       try {
         const acts = await API.peers.activity(p.id)
-        const box = document.getElementById('peer-activity')
-        if (box) {
-          // A studio row has no venue/date, so it needs recIdentity's own
-          // title/artist/year shape rather than the live [artist, date] line.
-          const activityLine = a => {
-            if (a.kind === 'studio') {
-              const id = recIdentity({ kind: 'studio', title: a.title, artist: a.artist,
-                                        start_year: a.date ? parseInt(a.date, 10) : null })
-              return [id.lead, id.sub, id.dateText].filter(Boolean).join(' · ')
-            }
-            return [a.artist, a.date].filter(Boolean).join(' · ')
+        const box = $('peer-activity')
+        if (!box || !acts.length) return
+        const line = a => {
+          if (a.kind === 'studio') {
+            const id = recIdentity({ kind: 'studio', title: a.title, artist: a.artist,
+                                      start_year: a.date ? parseInt(a.date, 10) : null })
+            return [id.lead, id.sub, id.dateText].filter(Boolean).join(' · ')
           }
-          box.innerHTML = acts.length
-            ? `<div>${acts.slice(0, 12).map(a => `
-                <div class="peer-act">
-                  <span class="truncate">${esc(activityLine(a) || a.track_title || 'track')}</span>
-                  <span class="peer-act-when">${esc(fmtDateAdded(a.occurred_at))}</span>
-                </div>`).join('')}</div>`
-            : `<div class="peer-empty">Nothing streamed yet.</div>`
+          return [a.artist, a.date].filter(Boolean).join(' · ')
         }
-      } catch (_) { /* activity is nice-to-have, never blocks the page */ }
+        box.innerHTML = acts.slice(0, 5).map(a => `
+          <div class="peer-act">
+            <span class="truncate">${esc(line(a) || a.track_title || '')}</span>
+            <span class="peer-act-when">${esc(fmtDateAdded(a.occurred_at))}</span>
+          </div>`).join('')
+        $('peer-activity-wrap').hidden = false
+      } catch (_) { /* activity never blocks the pane */ }
     }
 
-    onAdminClick('peer-new', async () => {
-      const name = prompt('Peer name (your own label for this person):')
-      if (!name || !name.trim()) return
+    $('peer-new').addEventListener('click', () => {
+      const row = $('peer-add')
+      row.hidden = !row.hidden
+      if (!row.hidden) $('peer-add-name').focus()
+    })
+    const addPeer = async () => {
+      const input = $('peer-add-name')
+      const name = input.value.trim()
+      if (!name) return
       try {
-        const created = await API.peers.create({ name: name.trim() })
-        peers = await API.peers.list()
-        activeId = created.id
-        renderList(); renderDetail()
-      } catch (e) { alert('Failed: ' + e.message) }
+        const created = await API.peers.create({ name })
+        input.value = ''
+        $('peer-add').hidden = true
+        openId = created.id
+        await refreshPeers()
+      } catch (e) { _settingsSaved($('peer-add-flash'), e.message) }
+    }
+    $('peer-add-go').addEventListener('click', addPeer)
+    $('peer-add-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') addPeer()
+      if (e.key === 'Escape') $('peer-add').hidden = true
     })
 
-    renderList()
-    renderDetail()
+    // ── Joined libraries ─────────────────────────────────────────────────────
+    function renderLibs() {
+      const libs = libraryState.remotes || []
+      const el = $('lib-list')
+      el.innerHTML = libs.length ? libs.map(l => `
+        <div class="sh-row">
+          <div class="sh-row-head sh-row-head--static">
+            <span class="sh-name truncate">${esc(l.display_name)}</span>
+            <span class="sh-meta">${l.enrolled_at ? `Joined ${esc(fmtDateAdded(l.enrolled_at))}` : ''}</span>
+            <button type="button" class="btn btn-ghost btn-xs sh-leave" data-id="${l.id}">Leave</button>
+          </div>
+        </div>`).join('') : `<div class="sh-empty">None yet.</div>`
+      el.querySelectorAll('.sh-leave').forEach(btn => btn.addEventListener('click', async () => {
+        await leaveLibrary(Number(btn.dataset.id))
+        renderLibs()
+      }))
+    }
+    $('lib-join').addEventListener('click', () => openJoinLibraryModal())
+    await loadRemotes()
+    renderLibs()
+
+    renderPeers()
   }
 
   const renderVenueForm = () => renderCreateForm({
@@ -6281,30 +6227,52 @@ const App = (() => {
         </div>
         ${c.status === 'mismatch' ? `<div class="cksum-detail">expected ${esc(c.expected || '')}</div>` : ''}`
     }).join('')
-    const md5Note = withData.some(t => t.checksum.type === 'md5')
-      ? `<p class="cksum-hint">MD5 checks the whole file, tags included. Any tag edit (including Write Tags to Files) will flip a match to a mismatch. Expected, not corruption.</p>` : ''
     const st5Note = withData.some(t => t.checksum.type === 'st5')
       ? `<p class="cksum-hint">ST5 verification is best-effort. Treat a mismatch as worth a second look, not a hard failure.</p>` : ''
-    return `${summary}<div class="cksum-rows">${rows}</div>${md5Note}${st5Note}`
+    return `${summary}<div class="cksum-rows">${rows}</div>${st5Note}`
   }
 
-  // Add Recording's Checksums pane is detection-only — the files haven't been
-  // copied yet at review time, so there's nothing to verify against; real
-  // verification happens automatically on Confirm (see api/ingest.py
-  // _do_confirm) once the copy exists at a stable library path.
+  // Add Recording's Checksums pane (Ryan, 2026-10-06): the FFP is checked
+  // against the source folder now, before import, because this is when it is
+  // reviewed. Header reads only, so it is quick. MD5 lists are not shown: only
+  // a failed FFP matters. Same rows and summary as View Recording's pane.
   function buildChecksumsPreviewHtml(fingerprints) {
-    fingerprints = fingerprints || []
-    if (!fingerprints.length) {
+    if (!(fingerprints || []).length) {
       return `<div class="info-panel-empty">No checksum/fingerprint files (.ffp / .md5 / .st5) found in this folder.</div>`
     }
-    const rows = fingerprints.map(fp => `
-      <div class="cksum-row">
-        <span class="cksum-type">${esc((fp.type || '').toUpperCase())}</span>
-        <span class="cksum-title">${esc(fp.filename)}</span>
-      </div>`).join('')
-    return `<div class="cksum-summary">Found ${fingerprints.length} fingerprint file${fingerprints.length === 1 ? '' : 's'}. Verified automatically against the copied files when you confirm.</div>
-      <div class="cksum-rows">${rows}</div>`
+    return `<div class="info-panel-empty">Checking…</div>`
   }
+
+  function buildChecksumsAuditHtml(files) {
+    const ffp = (files || []).filter(f => f.type === 'ffp' || f.type === 'st5')
+    if (!ffp.length) return `<div class="info-panel-empty">No FFP file in this folder.</div>`
+    const tracks = ffp.flatMap(f => (f.tracks || []).map(t => Object.assign({ type: f.type }, t)))
+    const bad = tracks.filter(t => t.status === 'mismatch').length
+    const summary = bad
+      ? `<div class="cksum-summary cksum-summary--warn">${bad} track${bad === 1 ? '' : 's'} did not match ${bad === 1 ? 'its' : 'their'} recorded checksum.</div>`
+      : `<div class="cksum-summary cksum-summary--ok">All checked tracks match their recorded checksum.</div>`
+    const rows = tracks.map((t, i) => `
+        <div class="cksum-row">
+          <span class="cksum-num">${String(i + 1).padStart(2, '0')}</span>
+          <span class="cksum-title">${esc(t.filename)}</span>
+          <span class="cksum-type">${esc(t.type.toUpperCase())}</span>
+          <span class="cksum-status cksum-status--${esc(t.status)}">${t.status === 'unmatched' ? 'no fingerprint' : (CKSUM_STATUS_LABEL[t.status] || esc(t.status))}</span>
+        </div>
+        ${t.status === 'mismatch' ? `<div class="cksum-detail">expected ${esc(t.expected || '')}</div>` : ''}`).join('')
+    return `${summary}<div class="cksum-rows">${rows}</div>`
+  }
+
+  async function _wireIngestChecksums(folderPath, fingerprints) {
+    const el = document.getElementById('ingest-cksum-root')
+    if (!el || !folderPath || !(fingerprints || []).length) return
+    try {
+      const j = await API.quality.fingerprints(folderPath)
+      if (document.body.contains(el)) el.innerHTML = buildChecksumsAuditHtml(j.files)
+    } catch (e) {
+      if (document.body.contains(el)) el.innerHTML = `<div class="info-panel-empty">${esc(e.message)}</div>`
+    }
+  }
+
 
   // ── Lomax ─────────────────────────────────────────────────────────────────
   // Every Lomax surface is built from the helpers in this section, so a new
@@ -6436,7 +6404,7 @@ const App = (() => {
       ${last}
       <textarea class="lx-q" rows="${o.rows || 2}" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.placeholder || 'Question')}"></textarea>
       <div class="lx-ask-row">
-        <button type="button" class="btn btn-sm lx-go" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
+        <button type="button" class="btn lx-go lx-go--ask" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
       </div>
     </div>`
   }
@@ -6481,6 +6449,8 @@ const App = (() => {
       `</span></span>`
   }
 
+  // Lomax named as a menu item or a label: Lomax colour plus the reel. In a sentence, plain text.
+  function lomaxMark() { return `<span class="lx-mark">${icon('lomax')}Lomax</span>` }
   function lomaxAvatar() { return `<span class="lx-av" aria-hidden="true">${icon('lomax-full')}</span>` }
 
   // Working (with the time it has taken, counted from the server's own start
@@ -6759,12 +6729,23 @@ const App = (() => {
     }
   }
   document.addEventListener('click', lxOnClick)
+  // A suggested prompt sends itself, as if typed into the ask bar below it.
+  document.addEventListener('click', ev => {
+    const chip = ev.target.closest && ev.target.closest('[data-lx-suggest]')
+    if (!chip) return
+    const pane = chip.closest('.slide-pane')
+    const q = pane && pane.querySelector('.lx-q')
+    if (!q) return
+    q.value = chip.textContent.trim()
+    pane.querySelector('.lx-go')?.click()
+  })
   document.addEventListener('scroll', ev => {
     if (!(ev.target && ev.target.closest && ev.target.closest('.lx-pop'))) lxClosePops()
   }, true)
   document.addEventListener('keydown', ev => {
     if (ev.key === 'Escape') lxClosePops()
-    else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && ev.target && ev.target.matches && ev.target.matches('.lx-q')) {
+    else if (ev.key === 'Enter' && !ev.shiftKey && !ev.isComposing && ev.target && ev.target.matches && ev.target.matches('.lx-q')) {
+      ev.preventDefault()
       ev.target.closest('[data-lx-ask]')?.querySelector('.lx-go')?.click()
     }
   })
@@ -6864,11 +6845,30 @@ const App = (() => {
     return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub">${parts.join('') || '<div class="lx-none">Nothing to add</div>'}${lomaxUsageLine(run)}</div></div>`
   }
 
-  // o: {leave (show the leave-the-page line), addNotes (async fn(text), or null)}
+  // Lomax opens every chat with a greeting (Ryan, 2026-10-06). Which one is
+  // fixed per chat (by its first run), so a repaint never swaps it.
+  const LX_INTROS = [
+    { t: (u) => `How's it going ${u}? Here is what I found for this show.` },
+    { t: (u, a) => `What's up? I dug around for info about this ${a} recording, here's what I've got.`, artist: true },
+    { t: (u) => `Hey ${u}. I went through the files on this one and checked around. Here's what turned up.` },
+    { t: (u, a) => `Good to see you, ${u}. I looked into this ${a} show. Here's what I found.`, artist: true },
+    { t: (u, a) => `Alright ${u}, I took a pass at this ${a} recording. Here's what I came up with.`, artist: true },
+    { t: (u) => `Hi ${u}. I read the info file and asked around about this one. Here's the rundown.` },
+  ]
+  function lxIntroHtml(c, o) {
+    const first = c.runs[0]
+    const user = String((state.user && (state.user.display_name || state.user.username)) || 'there').trim().split(/\s+/)[0]
+    const artist = String((o.artist && o.artist()) || '').trim()
+    const pool = artist ? LX_INTROS : LX_INTROS.filter(v => !v.artist)
+    const line = pool[(first && first.id ? first.id : 0) % pool.length].t(user, artist)
+    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub lx-intro">${esc(line)}</div></div>`
+  }
+
+  // o: {leave (show the leave-the-page line), addNotes (async fn(text), or null), artist (fn)}
   function lomaxChatHtml(c, o = {}) {
     if (!c.loaded) return '<div class="lx-empty">Loading…</div>'
     const latest = c.latest()
-    let html = '', day = null
+    let html = c.runs.length ? lxIntroHtml(c, o) : '', day = null
     for (const run of c.runs) {
       const d = lxDay(run.created_at)
       if (d && d !== day) { day = d; html += `<div class="lx-day">${esc(d)}</div>` }
@@ -6878,8 +6878,11 @@ const App = (() => {
       else html += `<div class="lx-msg">${lomaxRunState(run, { avatar: true, leave: o.leave })}</div>`
     }
     if (c.error) html += `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub"><div class="lx-error" role="alert">${esc(c.error)}</div></div></div>`
-    if (!c.runs.length && !c.error) {
-      html = `<div class="lx-empty">${lomaxAvatar()}<div>Lomax checks this recording's details, track titles and songwriters.</div></div>`
+    if (!c.runs.length && !c.error && !c.pending) {
+      // Nothing asked yet: a suggested prompt to click (Ryan, 2026-10-06).
+      const text = o.kind && o.kind() === 'studio'
+        ? 'Confirm all the details of this album' : 'Find out more info about this live recording.'
+      html = `<div class="lx-suggest"><button type="button" class="lx-chip lx-edit" data-lx-suggest>${esc(text)}</button></div>`
     }
     return html
   }
@@ -6894,7 +6897,7 @@ const App = (() => {
     const view = ctl => {
       if (!document.body.contains(pane)) return false
       lxRepaint(body, lomaxChatHtml(ctl, o), { stick: true })
-      lxRepaint(bar, lomaxAskBar({ placeholder: 'Anything you want checked (optional)', busy: !!ctl.pending }))
+      lxRepaint(bar, lomaxAskBar({ placeholder: 'Anything else you want Lomax to research?', busy: !!ctl.pending }))
       return true
     }
     const own = !c
@@ -7012,11 +7015,11 @@ const App = (() => {
     const state = c.pending ? lomaxRunState(c.pending, { leave: o.leave }) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')
     return `<div class="lx-res-body">
       ${state}
-      <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>Lomax</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-      ${tracks.length ? `<div class="lx-sec"><div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Trellis</th><th>Lomax</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${lxTrackRowsHtml(tracks, tp)}</tbody></table></div>` : ''}
+      <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>${lomaxMark()}</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      ${tracks.length ? `<div class="lx-sec"><div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Trellis</th><th>${lomaxMark()}</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${lxTrackRowsHtml(tracks, tp)}</tbody></table></div>` : ''}
       ${answer ? `<div class="lx-sec">${q}${answer}</div>` : ''}
       ${lxEarHtml(run || {})}
-    </div>${lomaxAskBar({ pin: true, placeholder: 'Anything you want checked (optional)', last: run, busy: !!c.pending })}`
+    </div>`
   }
 
   // The same Resolver table for a saved recording (View Recording). The Trellis column is what is
@@ -7274,15 +7277,15 @@ const App = (() => {
     // static facts rendered here, since that wiring never runs for them.
     const releaseAdmin = isAdmin() && canEdit
     const showReleaseBlock = isStudioKind && (releaseAdmin || releaseIsLinked)
-    const releaseStaticHtml = (!releaseAdmin && releaseIsLinked) ? `
-            <div class="pp-mb-linked">
+    const releaseLinkHtml = () => `<div class="pp-mb-linked">
               <a class="pp-mb-name" href="${esc(mbReleaseUrl(rec.mb_release_id))}" target="_blank" rel="noopener">${esc(
                 [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean).join(' · ') || rec.title || 'Release')} ↗</a>
-            </div>` : ''
-    const releaseItemHtml = showReleaseBlock ? `
+            </div>`
+    const releaseStaticHtml = (!releaseAdmin && releaseIsLinked) ? releaseLinkHtml() : ''
+    const releaseItemHtml = releaseIsLinked && isStudioKind ? `
         <div class="rec-sl-item rec-sl-item--release">
           <span class="mg-row-label">Release</span>
-          <div id="rec-release">${releaseStaticHtml}</div>
+          <div id="rec-release-head">${releaseLinkHtml()}</div>
         </div>` : ''
     const discsItemHtml = rec.disc_count > 1 ? `
         <div class="rec-sl-item">
@@ -7541,7 +7544,7 @@ const App = (() => {
               <button class="pane-act act-suppressed" id="btn-rec-save-info" data-for="info" hidden disabled>Save to File</button>
               <button class="pane-act" id="btn-info-edit" data-for="info">Edit File</button>` : ''}
               ${canEdit ? `
-              <button class="pane-act" id="btn-analyze-audio" data-for="quality">Analyze Audio</button>` : ''}
+              ${rec.audio_scorable !== false ? '<button class="pane-act" id="btn-analyze-audio" data-for="quality">Analyze Audio</button>' : ''}` : ''}
               ${canEdit ? `
               <span class="pane-act-note${stagedCount > 0 ? '' : ' act-suppressed'}" id="tags-staged-note" data-for="filetags"
                     ${stagedCount > 0 ? '' : 'hidden'}>Edits not yet written to the files</span>
@@ -7587,6 +7590,13 @@ const App = (() => {
               <div class="slide-pane-scroll" id="sp-checksums-body">${buildChecksumsPaneHtml(rec.tracks)}</div>
             </div>
 
+            ${isStudioKind ? `
+            <!-- MusicBrainz: the same tab as Add Recording's Album layout (2026-10-06). -->
+            <div class="slide-pane" id="sp-mb">
+              <div class="slide-pane-scroll"><div class="rev-raw-section"><div id="rec-release">${releaseStaticHtml}</div>
+                <div id="rec-release-detail"></div></div></div>
+            </div>` : ''}
+
             ${showResolver && !isStudioKind ? `
             <!-- Resolver pane: the same Lomax table as Add Recording -->
             <div class="slide-pane" id="sp-resolver">
@@ -7604,7 +7614,7 @@ const App = (() => {
           </div>
           </div>
           <nav class="slide-index" aria-label="Details">
-            ${detailsTabsHtml('data-pane', '', { resolver: showResolver && !isStudioKind, research: canEdit, staged: stagedCount > 0, info: !isStudioKind })}
+            ${detailsTabsHtml('data-pane', '', { resolver: showResolver && !isStudioKind, research: canEdit, staged: stagedCount > 0, info: !isStudioKind, mb: isStudioKind })}
           </nav>
         </div>
         ` : ''}
@@ -7823,8 +7833,21 @@ const App = (() => {
       if (on && document.getElementById('sp-filetags')?.classList.contains('active')) {
         loadFileTags(recordingId)
       }
+      if (on) autoWriteStagedTags()
     }
     function markStaged() { setTagsStaged(true) }
+    // "Write changes to file tags immediately upon update" (Ryan, 2026-10-06):
+    // with the setting on, a staged change is written straight away. Debounced
+    // so a burst of edits becomes one write.
+    let _autoWriteTimer = null
+    function autoWriteStagedTags() {
+      clearTimeout(_autoWriteTimer)
+      _autoWriteTimer = setTimeout(async () => {
+        let fh = null
+        try { fh = await fileHandling() } catch (_) { return }
+        if (fh && fh.write_tags_default && document.getElementById('btn-write-tags')) _doWriteTags()
+      }, 600)
+    }
     function refreshTrackRow(t) {
       const row = mainContent.querySelector(`.track-row[data-track-id="${t.id}"]`)
       if (!row) return
@@ -8161,7 +8184,30 @@ const App = (() => {
         const facts = [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean)
         return facts.length ? facts.join(' · ') : (rec.title || '')
       }
+      // The release facts under the link, as on Add Recording's MusicBrainz tab.
+      let _relDetailFor = null
+      function renderReleaseDetail() {
+        const det = document.getElementById('rec-release-detail')
+        const linked = rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked'
+        const head = document.getElementById('rec-release-head')
+        if (head) head.innerHTML = linked ? releaseLinkHtml() : ''
+        if (!det) return
+        if (!linked) { det.innerHTML = ''; _relDetailFor = null; return }
+        if (_relDetailFor === rec.mb_release_id) return
+        _relDetailFor = rec.mb_release_id
+        const want = rec.mb_release_id
+        det.innerHTML = '<div class="pp-mb-empty">Fetching…</div>'
+        API.ingest.releaseDetail(want)
+          .then(r => {
+            if (_relDetailFor !== want) return
+            det.innerHTML = r && r.release ? mbReleaseDetailsHtml(r.release)
+              : '<div class="pp-mb-empty">Lookup failed: release not found</div>'
+          })
+          .catch(e => { if (_relDetailFor === want) det.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message || String(e))}</div>` })
+      }
+
       function renderReleaseBlock() {
+        renderReleaseDetail()
         const box = document.getElementById('rec-release')
         if (!box) return
         // canEditLibrary() on every mutating control (S7) -- an admin in
@@ -8191,9 +8237,7 @@ const App = (() => {
               : (rec.mb_release_status === 'unlinked' || rec.mb_release_status === 'error')
                 ? ''
                 : 'Not looked up yet.'
-          box.innerHTML = `
-            ${msg ? `<div class="pp-mb-empty">${msg}</div>` : ''}
-            <button type="button" class="btn btn-primary btn-xs" id="rec-release-find">Find release</button>`
+          box.innerHTML = mbFindHtml('rec-release-find', 'Find release', msg)
         } else {
           box.innerHTML = ''
         }
@@ -8248,7 +8292,6 @@ const App = (() => {
                 <span class="pp-mb-cand-meta">${[
                   c.label, c.catalog_number, c.country, c.date,
                 ].filter(Boolean).map(esc).join(' · ')}</span>
-                <span class="pp-mb-cand-score" title="MusicBrainz match score">${c.score ?? ''}</span>
                 <a class="pp-mb-cand-view" href="${esc(mbReleaseUrl(c.mbid))}"
                    target="_blank" rel="noopener" title="Open on musicbrainz.org">View ↗</a>
               </div>`).join('')}
@@ -8280,6 +8323,7 @@ const App = (() => {
       }
 
       if (showReleaseBlock) renderReleaseBlock()
+      else if (isStudioKind) renderReleaseDetail()
 
       // ── Info File: locked → Edit File → Save to File ────────────────────
       // Replaces the old always-hot textarea that autosaved on blur (see the
@@ -8453,6 +8497,8 @@ const App = (() => {
         if (canEdit) {
           lomaxMountChat(document.getElementById('sp-ai'), null, {
             leave: true,
+            artist: () => perf && perf.artist,
+            kind: () => rec.kind,
             addNotes: async text => {
               const cur = String(rec.notes || '').trim()
               const next = cur ? `${cur}\n${text}` : text
@@ -8480,6 +8526,14 @@ const App = (() => {
       setAll('Analyzing…', true)
       try {
         const result = await API.recordings.reprocess(recordingId)
+        // The score is the part this button is for: if it failed, say so and
+        // why, rather than "Done" over a pane that stays empty (2026-10-06).
+        if (result.score === 'failed') {
+          setAll('Analyze Audio', false)
+          const why = (result.errors || []).find(e => /^score:/.test(e)) || 'unknown error'
+          qualityShowError('sp-quality-body', why.replace(/^score:\s*/, ''))
+          return
+        }
         setAll(`Done (${result.analysed} track${result.analysed === 1 ? '' : 's'})`, true)
         setTimeout(() => {
           setAll('Analyze Audio', false)
@@ -8492,7 +8546,7 @@ const App = (() => {
         }
       } catch (e) {
         setAll('Analyze Audio', false)
-        alert('Analysis failed: ' + e.message)
+        qualityShowError('sp-quality-body', e.message)
       }
     }
 
@@ -8596,8 +8650,8 @@ const App = (() => {
     const NAMING_SCHEME_LABELS = [
       ['original',      'Keep original'],
       ['number_title',  'Number and title'],
-      ['etree',         'etree'],
-      ['etree_sets',    'etree, sets'],
+      ['etree_tracks',  'etree'],
+      ['etree',         'etree with disc'],
     ]
     function renamePreviewRowsHtml(plan) {
       const rows = plan.slice(0, 3).map(p => `
@@ -8862,7 +8916,7 @@ const App = (() => {
       // The row always shows: it carries the pane's title even with no action.
       const tab = document.querySelector(`.slide-tab[data-pane="${pane}"]`)
       const title = document.getElementById('pane-title')
-      if (title && tab) title.textContent = tab.textContent
+      if (title && tab) title.innerHTML = tab.innerHTML     // the Lomax tab carries its icon
       if (row) row.hidden = false
     }
 
@@ -9020,8 +9074,7 @@ const App = (() => {
       } catch (e) {
         // 404 is the normal "never analysed" case, not a failure worth shouting
         // about — offer the button that fixes it.
-        body.innerHTML = `<div class="rq-empty">Run Analyze Audio</div>
-          ${canEdit ? '<button class="pane-act" id="btn-analyze-audio-empty">Analyze Audio</button>' : ''}`
+        body.innerHTML = qualityEmptyHtml('btn-analyze-audio-empty', rec.audio_scorable !== false)
         document.getElementById('btn-analyze-audio-empty')?.addEventListener('click', onAnalyzeAudio)
         return
       }
@@ -9116,29 +9169,7 @@ const App = (() => {
 
     // ── Spectrogram — load for default track, reload when track changes ───────
     function loadSpectrogram(trackId, trackTitle) {
-      const wrap    = document.getElementById('spectrogram-wrap')
-      const imgEl   = document.getElementById('spectrogram-img')
-      const loading = document.getElementById('spectrogram-loading')
-      const label   = document.getElementById('spectrogram-track-name')
-      if (!wrap || !imgEl) return
-
-      if (label) label.textContent = trackTitle ? `: ${trackTitle}` : ''
-      imgEl.style.display = 'none'
-      if (loading) { loading.style.display = ''; loading.textContent = 'Generating…' }
-
-      const url = `/api/tracks/${trackId}/spectrogram?t=${Date.now()}`
-      imgEl.onload  = () => { imgEl.style.display = 'block'; if (loading) loading.style.display = 'none' }
-      imgEl.onerror = async () => {
-        // Fetch the URL as text to get the actual error from the server
-        try {
-          const r = await fetch(url)
-          const body = await r.json()
-          if (loading) loading.textContent = `Error: ${body.error || r.status}`
-        } catch (_) {
-          if (loading) loading.textContent = 'Spectrogram failed'
-        }
-      }
-      imgEl.src = url
+      qualitySpectrogram(`/api/tracks/${trackId}/spectrogram?t=${Date.now()}`, trackTitle)
     }
 
     // Spectrogram loads lazily when the tab is opened (see slide tab wiring above)
@@ -9506,7 +9537,7 @@ const App = (() => {
         return
       }
       let picked
-      try { picked = await api.pick_folder() }
+      try { picked = await api.pick_folder(here) }
       catch (e) { say('Could not open the folder dialog: ' + e.message); return }
       if (picked) choose(picked)
     }
@@ -9578,6 +9609,50 @@ const App = (() => {
      report from the triage pass's numbers — see loadIngestQualityPane. Takes
      the payload shape both /api/quality/recording/<id> and
      /api/quality/staging/features return: { verdict_band, interpretation }. */
+  // Load the Quality pane's spectrogram from `url` (View Recording: a track;
+  // Add Recording: a file not yet imported). One loader for both panels.
+  function qualitySpectrogram(url, title) {
+    const imgEl   = document.getElementById('spectrogram-img')
+    const loading = document.getElementById('spectrogram-loading')
+    const label   = document.getElementById('spectrogram-track-name')
+    if (!imgEl) return
+    if (label) label.textContent = title ? `: ${title}` : ''
+    imgEl.style.display = 'none'
+    if (loading) { loading.style.display = ''; loading.textContent = 'Generating…' }
+    imgEl.onload  = () => { imgEl.style.display = 'block'; if (loading) loading.style.display = 'none' }
+    imgEl.onerror = async () => {
+      // Fetch the URL as text to get the actual error from the server
+      try {
+        const r = await fetch(url)
+        const body = await r.json()
+        if (loading) loading.textContent = `Error: ${body.error || r.status}`
+      } catch (_) {
+        if (loading) loading.textContent = 'Spectrogram failed'
+      }
+    }
+    imgEl.src = url
+  }
+
+  // The Quality pane before any analysis, on both panels (Ryan, 2026-10-06):
+  // the line and the button sit centred in the pane.
+  // No FLAC (MP3 and the like): nothing is offered, since the analysis cannot
+  // read it (Ryan, 2026-10-06). A failure shows beside the button, never a popup.
+  function qualityEmptyHtml(btnId, scorable = true) {
+    if (!scorable) return `<div class="rq-empty-wrap"><div class="rq-empty">Quality analysis works on FLAC files only.</div></div>`
+    return `<div class="rq-empty-wrap"><div class="rq-empty">Click below to generate a quick audio quality analysis.</div>
+      ${canEditLibrary() ? `<button type="button" class="btn btn-ghost" id="${btnId}">Analyze Audio</button>` : ''}
+      <div class="rq-err" data-rq-err></div></div>`
+  }
+
+  // Show an Analyze Audio failure inside the Quality pane (bodyId), at the top.
+  function qualityShowError(bodyId, msg) {
+    const body = document.getElementById(bodyId)
+    if (!body) return
+    let el = body.querySelector('[data-rq-err]')
+    if (!el) { el = document.createElement('div'); el.className = 'rq-err'; el.setAttribute('data-rq-err', ''); body.prepend(el) }
+    el.textContent = 'Analysis failed: ' + msg
+  }
+
   function buildQualityPaneHtml(q, opts) {
     const it = q.interpretation || {}
     const band = q.verdict_band || 'unknown'
@@ -9594,7 +9669,7 @@ const App = (() => {
     // The dev surface in tools/ still shows the full decimal.
     const head = `
       <div class="rq-head">
-        <span class="lq-verdict lq-verdict--${esc(band)}">${_LQ_BAND_TEXT[band] || ''}</span>
+        <span class="rq-band iq-band iq-band--${esc(band)}">${_LQ_BAND_TEXT[band] || ''}</span>
       </div>`
 
     // Quick facts line — format, bitrate, cutoff. Same strip the triage card
@@ -9667,10 +9742,8 @@ const App = (() => {
          </div>`
       : `<div class="rq-clean">No technical issues detected.</div>`
 
-    // Add Recording passes { spectrogram: false }: a spectrogram is drawn from
-    // a track that has been analysed and given an id, and nothing on that page
-    // has been ingested yet. An empty image frame there would read as a broken
-    // spectrogram rather than an absent one.
+    // Both panels show it (2026-10-06): Add Recording draws it from the file
+    // not yet imported. { spectrogram: false } leaves it out.
     const spectro = (opts && opts.spectrogram === false) ? '' : `
       <div class="rq-spectrogram">
         <div class="rq-section-label">Spectrogram <span class="spectrogram-track-name" id="spectrogram-track-name"></span></div>
@@ -9789,14 +9862,10 @@ const App = (() => {
     return list.map(_ingestReasonLabel).filter(Boolean)
   }
 
-  function _iqBandPill(band, concern) {
+  // Quality and Metadata as coloured text, no pill (Ryan, 2026-10-06).
+  function _iqBandPill(band) {
     if (!band) return ''
-    // `concern` (2026-09-27) adds the same amber treatment the triage
-    // page's concern chips use (.lq-concern--warn) on top of the normal
-    // band colour, WITHOUT touching the High/Medium/Low text -- a concern
-    // (possible duplicate, failed checksum, ...) is a flag on the reading,
-    // not a different reading.
-    return `<span class="lq-verdict lq-verdict--${band}${concern ? ' lq-concern--warn' : ''}">${esc(_LQ_BAND_TEXT[band] || band)}</span>`
+    return `<span class="iq-band iq-band--${band}">${esc(_LQ_BAND_TEXT[band] || band)}</span>`
   }
 
   // The default action group: Ingest / Review / Move(caret) / chevron. A
@@ -9839,10 +9908,14 @@ const App = (() => {
   // never instead of it, and never a fingerprint row or tab anywhere here.
   function _iqExpandHtml(row, opts) {
     const d = row.detail || {}
-    const baseRows = [
+    // An Album shows the Album fields (Ryan, 2026-10-06), as the Album form does.
+    const baseRows = row.kind === 'studio' ? [
+      ['Artist', d.artist], ['Album Title', d.title], ['Year', d.date],
+      ['Format', row.format], ['Type', 'Album'], ['Tracks', d.tracksText],
+    ] : [
       ['Artist', d.artist], ['Date', d.date], ['Venue', d.venue],
       ['Location', d.location], ['Source', d.source], ['Lineage', d.lineage],
-      ['Format', row.format], ['Type', row.kind === 'studio' ? 'Album' : (row.kind ? 'Live' : null)],
+      ['Format', row.format], ['Type', row.kind ? 'Live' : null],
       ['Tracks', d.tracksText],
     ]
     const listingRow = d.trackListing ? `
@@ -9873,13 +9946,16 @@ const App = (() => {
   // column instead of riding in the grey title line, where they read as part
   // of the recording's name. The alert glyph stays because the Queue's note
   // line tells the person to check it.
+  // "Needs Review" with the issues on hover; "Ready" with a check, so the two
+  // line up (Ryan, 2026-10-06).
   function _iqStatusCell(row) {
     if (row.needs_review) {
       const issues = (row.review_issues && row.review_issues.length)
         ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
-      return `<span class="iq-status iq-status--issue">${icon('alert', 'iq-status-ic')}<span>${issues.map(esc).join(', ')}</span></span>`
+      return `<span class="iq-status iq-status--issue lq-tip">${icon('alert', 'iq-status-ic')}<span>Needs Review</span>
+        ${issues.length ? `<span class="lq-tipbox">${issues.map(i => `<div class="ab">${esc(i)}</div>`).join('')}</span>` : ''}</span>`
     }
-    if (row.status === 'ready') return '<span class="iq-status iq-status--ready">Ready</span>'
+    if (row.status === 'ready') return `<span class="iq-status iq-status--ready">${icon('check', 'iq-status-ic')}<span>Ready</span></span>`
     return ''
   }
 
@@ -9893,12 +9969,20 @@ const App = (() => {
     else metaLine = row.meta === '' ? '' : (row.meta || '—')
 
     const actions = opts.actionsHtml ? opts.actionsHtml(row) : _iqDefaultActions(row, opts)
-    const canExpand = row.status !== 'pending' && row.status !== 'ingesting'
+    // A skipped row (an exact duplicate) is out of the work: greyed, nothing
+    // to open, no format or scores (Ryan, 2026-10-06).
+    const skipped = row.status === 'skipped'
+    const canExpand = row.status !== 'pending' && row.status !== 'ingesting' && !skipped
 
     return `<div class="lq-row iq-row${open ? ' is-open' : ''}" data-id="${esc(row.id)}">
       <div class="lq-brow ${cls}${row.status === 'pending' ? ' lq-brow--pending' : ''}${
            row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}${
-           row.needs_review ? ' iq-brow--issue' : ''}">
+           row.needs_review ? ' iq-brow--issue' : ''}${skipped ? ' iq-brow--skipped' : ''}">
+        ${canExpand /* first column (Ryan, 2026-10-06) */
+          ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
+                title="${open ? 'Hide the detail' : 'Show the detail for this recording'}"
+                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`
+          : '<span class="lq-brow-caret lq-brow-caret--spacer"></span>'}
         <div class="lq-brow-main${row.thumb ? ' iq-main--thumb' : ''}">
           ${row.thumb ? (row.thumb.url
             ? `<img class="brow-av brow-av--img iq-thumb" src="${esc(row.thumb.url)}" alt="" loading="lazy">`
@@ -9910,18 +9994,13 @@ const App = (() => {
             ${metaLine ? `<div class="lq-brow-sub">${metaLine}</div>` : ''}
           </div>
         </div>
-        <span class="iq-col-format">${row.format ? `<span class="iq-pill">${esc(row.format)}</span>` : ''}</span>
-        <span class="iq-col-type">${row.kind ? `<span class="iq-pill">${row.kind === 'studio' ? 'Album' : 'Live'}</span>` : ''}</span>
-        ${opts.soundQuality ? `<span class="lq-brow-band">${_iqBandPill(row.sound_band)}</span>` : ''}
-        <span class="lq-brow-meta">${_iqBandPill(row.meta_band, !!(row.concerns && row.concerns.length))}</span>
+        <span class="iq-col-format">${!skipped && row.format ? esc(row.format) : ''}</span>
+        <span class="iq-col-type">${!skipped && row.kind ? (row.kind === 'studio' ? 'Album' : 'Live') : ''}</span>
+        ${opts.soundQuality ? `<span class="lq-brow-band">${skipped ? '' : _iqBandPill(row.sound_band)}</span>` : ''}
+        <span class="lq-brow-meta">${skipped ? '' : _iqBandPill(row.meta_band)}</span>
         <span class="iq-col-status">${_iqStatusCell(row)}</span>
         ${opts.lomaxCell ? `<span class="iq-col-lx">${opts.lomaxCell(row)}</span>` : ''}
         <span class="lq-actions iq-actions">${actions}</span>
-        ${canExpand
-          ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
-                title="${open ? 'Hide the detail' : 'Show the detail for this recording'}"
-                aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`
-          : '<span class="lq-brow-caret lq-brow-caret--spacer"></span>'}
       </div>
       ${open ? _iqExpandHtml(row, opts) : ''}
     </div>`
@@ -10496,6 +10575,30 @@ const App = (() => {
     return `<a class="pp-mb-name" href="${esc(mbReleaseUrl(p.mbid))}" target="_blank" rel="noopener">${esc(facts)} ↗</a>`
   }
 
+  // Before a release is linked, on both MusicBrainz tabs (Ryan, 2026-10-06): a
+  // line saying what MusicBrainz is, then a normal-size Find release button.
+  function mbFindHtml(btnId, label = 'Find release', msg = '') {
+    return `<p class="mb-intro">MusicBrainz is an open music encyclopedia kept up by its community. Linking this album to its release there brings in the label, catalog number, release date and track list.</p>
+      ${msg ? `<div class="pp-mb-empty">${msg}</div>` : ''}
+      <div class="mb-find-row"><button type="button" class="btn btn-ghost" id="${btnId}">${esc(label)}</button></div>`
+  }
+
+  // What MusicBrainz knows about a picked release, as a short fact table
+  // (Ryan, 2026-10-06): enough to show the release was found and is the right one.
+  function mbReleaseDetailsHtml(d) {
+    if (!d) return ''
+    const rows = [
+      ['Title', d.title], ['Artist', d.artist_credit], ['Released', d.date], ['Country', d.country],
+      ['Label', d.label], ['Catalog number', d.catalog_number], ['Format', d.format],
+      ['Type', d.release_type], ['Tracks', d.track_count != null ? String(d.track_count) : null],
+      ['Barcode', d.barcode],
+    ].filter(([, v]) => v)
+    const tracks = (d.tracks || []).length
+      ? `<div class="mb-rel-tracks">${d.tracks.map(t => `<div class="iq-track"><span class="iq-track-n">${String(t.position).padStart(2, '0')}</span> ${esc(t.title || '')}</div>`).join('')}</div>` : ''
+    return `<div class="mb-rel">${rows.map(([k, v]) =>
+      `<div class="iq-expand-row"><span class="iq-expand-label">${esc(k)}</span><span class="iq-expand-val">${esc(v)}</span></div>`).join('')}${tracks}</div>`
+  }
+
   // Read the current value of a proposal's target field (for revert).
   function getFormField(field) {
     const g = id => document.getElementById(id)?.value || ''
@@ -11027,7 +11130,7 @@ const App = (() => {
     })
     const tab = document.querySelector(`#ingest-slide-panel .slide-tab[data-ipane="${paneId}"]`)
     const title = document.getElementById('ingest-pane-title')
-    if (title && tab) title.textContent = tab.textContent
+    if (title && tab) title.innerHTML = tab.innerHTML     // the Lomax tab carries its icon
     row.hidden = false
   }
 
@@ -11091,9 +11194,14 @@ const App = (() => {
       // A row can exist with the analysis never having produced a score (an
       // errored or interrupted pass). Treat that as "nothing to show" too.
       if (!q || q.listening_quality == null) throw new Error('no analysis')
-      body.innerHTML = buildQualityPaneHtml(
-        { verdict_band: q.verdict_band, interpretation: q.interpretation },
-        { spectrogram: false })
+      body.innerHTML = buildQualityPaneHtml({ verdict_band: q.verdict_band, interpretation: q.interpretation })
+      // The spectrogram, as on View Recording, from the folder's first track.
+      const first = ((ingest.scan && ingest.scan.audio_files) || [])[0]
+      if (first && first.path) {
+        const t = (ingest.tracks || [])[0]
+        qualitySpectrogram(`/api/tracks/spectrogram-file?path=${encodeURIComponent(first.path)}`,
+                           (t && t.title) || first.filename)
+      }
       body.querySelectorAll('.rq-adv-toggle').forEach(btn => {
         btn.addEventListener('click', () => {
           const wrap = btn.closest('.rq-grp')?.querySelector('.rq-adv')
@@ -11107,8 +11215,8 @@ const App = (() => {
       if (ingest.folderPath !== forFolder) return
       // Same empty state and button as View Recording's Quality pane. The old line here promised a
       // measurement during import that does not happen for review rows, albums or in-library runs.
-      body.innerHTML = `<div class="rq-empty">Run Analyze Audio</div>
-        ${canEditLibrary() ? '<button class="pane-act" id="btn-ingest-analyze">Analyze Audio</button>' : ''}`
+      const flac = ((ingest.scan && ingest.scan.audio_files) || []).some(a => /\.flac$/i.test(a.filename || a.path || ''))
+      body.innerHTML = qualityEmptyHtml('btn-ingest-analyze', flac)
       document.getElementById('btn-ingest-analyze')?.addEventListener('click', e => _ingestAnalyze(e.currentTarget, forFolder))
     }
   }
@@ -11135,7 +11243,7 @@ const App = (() => {
       if (ingest.folderPath !== forFolder) return
       btn.disabled = false
       btn.textContent = 'Analyze Audio'
-      alert('Analysis failed: ' + e.message)
+      qualityShowError('isp-quality-body', e.message)
     }
   }
 
@@ -11705,7 +11813,6 @@ const App = (() => {
                 <audio id="ingest-preview-audio" preload="metadata"></audio>
               </div>
             </div>
-            ${studio ? `<div class="pp-mb-linked" id="ingest-mb-facts">${ingestMbFactsHtml()}</div>` : ''}
             <div style="overflow:auto; margin-bottom:4px">
               <table class="track-review-table">
                 <thead>
@@ -11811,7 +11918,7 @@ const App = (() => {
                 <div class="slide-pane-scroll"><pre class="filetags-json">${esc(scanFileTagsJson())}</pre></div>
               </div>
               <div class="slide-pane" id="isp-checksums">
-                <div class="slide-pane-scroll">${buildChecksumsPreviewHtml(ingest.scan.fingerprints)}</div>
+                <div class="slide-pane-scroll" id="ingest-cksum-root">${buildChecksumsPreviewHtml(ingest.scan.fingerprints)}</div>
               </div>
               ${hasResolver && !studio ? `<div class="slide-pane" id="isp-resolver">
                 <div class="slide-pane-scroll lx-col"><div class="lx-res" id="lx-res-root"></div></div>
@@ -12933,7 +13040,10 @@ const App = (() => {
         })
         ingest.lxSyncRes = () => lxSyncResolver(resRoot, resOpts())
       }
+      _wireIngestChecksums(ingest.scan.folder_path, ingest.scan.fingerprints)
       lomaxMountChat(chatPane, null, {
+        artist: () => getFormField('artist'),
+        kind: () => ingest.kind,
         addNotes: async text => {
           const el = document.getElementById('f-notes')
           if (!el) return
@@ -12954,21 +13064,28 @@ const App = (() => {
       if (!root) return
       const m = () => (ingest.mb = ingest.mb || { state: 'idle', cands: [], picked: null, error: '' })
       const val = id => (document.getElementById(id)?.value || '').trim()
-      const paintFacts = () => {
-        const box = document.getElementById('ingest-mb-facts')
-        if (box) box.innerHTML = ingestMbFactsHtml()
-      }
       const findBtn = label => `<button type="button" class="btn ${label === 'Find release' ? 'btn-primary' : 'btn-ghost'} btn-xs" id="ingest-mb-find">${label}</button>`
       function paint() {
         if (!document.body.contains(root)) return
         const st = m()
+        if (st.picked && !st.picked.detail && !st.picked._asked && st.picked.mbid) {
+          // A link made earlier on this form: fetch the release facts once.
+          st.picked._asked = true
+          const picked = st.picked
+          API.ingest.releaseDetail(picked.mbid)
+            .then(r => { if (m().picked === picked) { picked.detail = (r && r.release) || null; picked._err = r && r.release ? '' : 'release not found'; paint() } })
+            .catch(e => { if (m().picked === picked) { picked._err = e.message || String(e); paint() } })
+        }
         if (st.picked) {
           root.innerHTML = `
             <div class="pp-mb-linked">${ingestMbFactsHtml()}</div>
             <div class="pp-mb-foot">
               <span class="pp-mb-dot"></span>Linked by you
               <button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-unlink">Unlink</button>
-            </div>`
+            </div>
+            ${st.picked.detail ? mbReleaseDetailsHtml(st.picked.detail)
+              : st.picked._err ? `<div class="pp-mb-empty">Lookup failed: ${esc(st.picked._err)}</div>`
+              : '<div class="pp-mb-empty">Fetching…</div>'}`
         } else if (st.state === 'loading') {
           root.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
         } else if (st.state === 'fetching') {
@@ -12990,13 +13107,13 @@ const App = (() => {
             </div>
             <div class="pp-mb-foot"><button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-cancel">Cancel</button></div>`
         } else {
-          root.innerHTML = findBtn('Find release')
+          root.innerHTML = mbFindHtml('ingest-mb-find')
         }
         document.getElementById('ingest-mb-find')?.addEventListener('click', search)
         document.getElementById('ingest-mb-cancel')?.addEventListener('click', () => { m().state = 'idle'; paint() })
         document.getElementById('ingest-mb-unlink')?.addEventListener('click', () => {
           const st2 = m(); st2.picked = null; st2.state = 'idle'; st2.cands = []
-          paintFacts(); paint()
+          paint()
         })
         root.querySelectorAll('.pp-mb-cand').forEach(el => {
           el.addEventListener('click', e => { if (!e.target.closest('.pp-mb-cand-view')) pick(el.dataset.mbid) })
@@ -13042,9 +13159,9 @@ const App = (() => {
             }
           })
         }
-        st.picked = { mbid, title: d.title, label: d.label, catalog_number: d.catalog_number, country: d.country, date: d.date }
+        st.picked = { mbid, title: d.title, label: d.label, catalog_number: d.catalog_number, country: d.country, date: d.date, detail: d }
         st.state = 'idle'
-        paintFacts(); paint(); reScore()
+        paint(); reScore()
       }
       paint()
     })()
@@ -13578,7 +13695,7 @@ const App = (() => {
         const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
         const locProps = edit ? lxProps(run).filter(p => LOC.some(([f]) => f === p.field) && !p.agrees && lxShown(p) &&
           (p.decision === 'accepted' || !same(v[p.field], p.proposed))) : []
-        lxRepaint(lxLoc, locProps.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Field</th><th>Now</th><th>Lomax</th><th></th></tr></thead><tbody>${
+        lxRepaint(lxLoc, locProps.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Field</th><th>Now</th><th>${lomaxMark()}</th><th></th></tr></thead><tbody>${
           locProps.map(p => `<tr><th scope="row">${esc(LOC.find(([f]) => f === p.field)[1])}</th><td><span class="lx-tv">${esc(v[p.field] || '')}</span></td>` +
             `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`).join('')}</tbody></table>` : '')
 
@@ -14528,12 +14645,9 @@ const App = (() => {
     document.getElementById('nav-back')?.addEventListener('click', () => _navGo(-1))
     document.getElementById('nav-fwd')?.addEventListener('click', () => _navGo(1))
 
-    // Wordmark (spec 7c): the other home control, alongside the sidebar's
-    // My Library link (renderSidebar) -- both go to #/bulk-ingest while a Bulk
-    // Ingest run is running or paused, and to Library otherwise. This is
-    // the single place that decision is made for a plain click.
+    // Wordmark: always the Library, run or no run (Ryan, 2026-10-06).
     document.querySelector('.app-wordmark')?.addEventListener('click', () => {
-      window.location.hash = homeHash()
+      window.location.hash = '#/'
     })
 
     // "Add Recordings" is a same-hash link whenever the user is already on
@@ -14602,26 +14716,19 @@ const App = (() => {
     try {
       const d = await API.bulkIngest.runs()
       state.biRuns = d.runs || []
-      state.biWaiting = typeof d.waiting === 'number' ? d.waiting : null
-    } catch (e) { state.biRuns = []; state.biWaiting = 0 }
+    } catch (e) { state.biRuns = [] }
   }
 
-  // Distinct folders waiting on a person (ready + needs review) across every
-  // listed run. The server dedupes by folder; the per-run sum is only a
-  // fallback, since one folder can sit in two runs' queues.
+  // There is one Queue (Ryan, 2026-10-06). The Add Recordings count is its
+  // Queue tab count, from the same Queue payload the page shows.
   function _biWaitingCount() {
-    if (typeof state.biWaiting === 'number') return state.biWaiting
-    return (state.biRuns || []).reduce((n, r) => {
-      const c = r.counts || {}
-      return n + (c.ready || 0) + (c.review || 0)
-    }, 0)
+    const q = state.bulkIngest
+    return (state.biRuns || []).length && q ? _biTabCounts(q).queue : 0
   }
 
-  // The import page of the most recent listed run, or null when none is listed.
+  // The import page while the Queue holds anything, else null.
   function _biOpenRunHash() {
-    const runs = state.biRuns || []
-    if (!runs.length) return null
-    return '#/bulk-ingest/' + runs.reduce((a, b) => (b.id > a.id ? b : a)).id
+    return (state.biRuns || []).length ? '#/bulk-ingest' : null
   }
 
   // On navigation: refetch the list and repaint the sidebar only when it
@@ -14674,7 +14781,9 @@ const App = (() => {
       : status === 'paused' ? ['resume', 'Resume Scan', 'btn-ingest-secondary']
       : ['rescan', 'Rescan Folder', 'btn-ghost']
     const c = (run && run.counts) || {}
-    const queued = (c.ready || 0) + (c.review || 0) + (c.pending || 0)
+    // Reset Queue shows while the page holds anything, the Imported tabs
+    // included: it empties all of it (Ryan, 2026-10-06).
+    const queued = Object.values(c).reduce((a, b) => a + (b || 0), 0)
     // The Lomax row sits under Mode. Without a key the toggle is locked to Off.
     const hasKey = lxHasKey()
     const lxLine = 'Lomax checks recordings that need review and helps to fill out info.'
@@ -14685,13 +14794,14 @@ const App = (() => {
           <div class="seg" role="group" aria-label="Import mode">${seg('auto', 'Import Automatically')}${seg('hold', 'Review First')}</div>
           <span class="bi-scan-desc">${desc}</span>
         </div>
-        ${canEditLibrary() ? `<span class="bi-scan-lbl bi-scan-lbl--lx">${icon('lomax')}Lomax</span>
+        ${canEditLibrary() ? `<span class="bi-scan-lbl">${lomaxMark()}</span>
         <div class="bi-scan-cell">
           ${lomaxImportSwitch({ on: lxImportLevel() !== 'off', disabled: !hasKey })}
-          <span class="bi-scan-desc">${lxDesc}</span>
+          <span class="bi-scan-desc" id="bi-lx-desc">${(run && _lxQStatusHtml()) || lxDesc}</span>
         </div>` : ''}
       </div>
       <div class="bi-scan-row">
+        ${run ? `<span id="bi-ingest-all-wrap" class="bi-ingest-all-wrap">${_biIngestAllHtml(run)}</span>` : ''}
         <button type="button" class="btn ${scan[2]}" data-scan="${scan[0]}">${scan[1]}</button>
         ${queued ? '<button type="button" class="btn btn-ghost" data-scan="reset">Reset Queue</button>' : ''}
       </div>`
@@ -14702,10 +14812,10 @@ const App = (() => {
 
   // Start a run on `path` and open its import page. Shared by the Add
   // Recordings picker and the Downloads / Workshop / Backlog Ingest buttons.
-  async function _biStartAndOpen(path, mode) {
-    const run = await API.bulkIngest.start(path, mode)
+  async function _biStartAndOpen(path, mode, paused) {
+    const run = await API.bulkIngest.start(path, mode, paused)
     await refreshBulkIngestStatus()
-    window.location.hash = '#/bulk-ingest/' + run.id
+    window.location.hash = '#/bulk-ingest'
   }
 
   // Called after an action on the bulkIngest page itself might have changed run
@@ -14718,13 +14828,11 @@ const App = (() => {
     renderSidebar()
   }
 
-  // The run this page shows. #/bulk-ingest/<id> names it; bare #/bulk-ingest
-  // resolves to the current run once and then sticks to that id, so a later
-  // run starting never swaps the table under the person.
+  // The Queue this page shows (one per install, id "queue").
   let _biRun = null
   let _biPageRunId = null
 
-  async function renderBulkIngestView(runId) {
+  async function renderBulkIngestView() {
     setActiveNav('ingest')
     setActiveArtist(null)
     setNavCurrent('Add Recordings')
@@ -14735,7 +14843,7 @@ const App = (() => {
 
     let data
     try {
-      data = await API.bulkIngest.current(runId || null)
+      data = await API.bulkIngest.current()
     } catch (e) {
       setMainHTML(`
         <div class="empty-state">
@@ -14745,8 +14853,7 @@ const App = (() => {
       return
     }
     const run = _bulkIngestRun(data)
-    // Nav item and home routing follow the CURRENT run only.
-    if (!runId) state.bulkIngest = run
+    state.bulkIngest = run
     await _fetchBulkIngestRuns()
     renderSidebar()
     if (!run) { window.location.hash = '#/'; return }
@@ -14780,11 +14887,10 @@ const App = (() => {
         const r = _bulkIngestRun(d)
         if (!r) { _stopBulkIngestPoll(); return }
         _biRun = r
-        if (state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
-        // The Add Recordings badge comes from this same payload's counts.
-        const badgeChanged = _biSyncRunCounts(state.biRuns, r)
-        // The badge is a deduped count from /runs; refetch it only when this
-        // run's waiting count moved, not on every tick.
+        // The Add Recordings badge comes from this same Queue payload.
+        const before = _biWaitingCount()
+        state.bulkIngest = r
+        const badgeChanged = before !== _biWaitingCount()
         if (badgeChanged) await _fetchBulkIngestRuns()
         await _paintBulkIngestPage(r)
         if (r.status !== 'running') {
@@ -14796,19 +14902,6 @@ const App = (() => {
 
   let _biTickBusy = false
 
-  // Copy a freshly polled run's status and counts into the listed-runs entry
-  // the sidebar badge reads, so the badge follows the poll without another
-  // request. Returns true when the waiting count changed.
-  function _biSyncRunCounts(runs, r) {
-    const entry = (runs || []).find(x => x.id === r.id)
-    if (!entry) return false
-    const before = ((entry.counts || {}).ready || 0) + ((entry.counts || {}).review || 0)
-    entry.counts = r.counts
-    entry.status = r.status
-    const after = ((r.counts || {}).ready || 0) + ((r.counts || {}).review || 0)
-    return before !== after
-  }
-
   // After an action that woke the worker (Ingest, Convert, Ingest all ready,
   // Move): refetch the run, repaint, patch the rows, and make sure the poll is
   // running. A finished run is flipped back to running by those routes, so the
@@ -14819,7 +14912,8 @@ const App = (() => {
     const r = _bulkIngestRun(d)
     if (!r) return
     _biRun = r
-    if (state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
+    state.bulkIngest = r
+    await _fetchBulkIngestRuns()
     await _paintBulkIngestPage(r)
     // The worker may already have finished, which skips the poll's own table
     // patch, so patch here.
@@ -14841,7 +14935,7 @@ const App = (() => {
       try { d = await API.bulkIngest.current(pid) } catch (e) { return }
       const r = _bulkIngestRun(d)
       if (r) _biRun = r
-      if (r && state.bulkIngest && state.bulkIngest.id === r.id) state.bulkIngest = r
+      if (r) state.bulkIngest = r
       if (!r) { _stopBulkIngestPoll(); return }
       await _paintBulkIngestPage(r)
       if ((r.scored || 0) >= (r.scorable || 0)) _stopBulkIngestPoll()
@@ -14872,13 +14966,9 @@ const App = (() => {
   let _biReviewFilter = false    // header "Review"/"Show all" toggle (2026-09-27)
   let _biTab = 'queue'           // 'queue' | 'live' | 'album' (2026-10-01)
 
-  // Rolling rate/ETA window -- unrelated to the table above, kept across
-  // polls the same way.
-  let _biRateSamples = []     // [{t, processed}], rolling 5-minute window
   let _biLastPaintedKey = null   // run.id + ':' + (done ? 'done' : 'active')
 
   function _biResetProgressState() {
-    _biRateSamples = []
     _biLastPaintedKey = null
     _biRowsCache = new Map()
     _biLoadedCount = 0
@@ -14890,41 +14980,6 @@ const App = (() => {
     _biOpenRows = new Set()
     _biReviewFilter = false
     _biTab = 'queue'
-  }
-
-  // Integers, largest unit, minimum "1 minute" (spec).
-  function _biFmtDuration(minutes) {
-    const m = Math.max(1, Math.round(minutes))
-    if (m < 60) return `${m} minute${m === 1 ? '' : 's'}`
-    const h = Math.round(m / 60)
-    if (h < 24) return `${h} hour${h === 1 ? '' : 's'}`
-    const d = Math.max(1, Math.round(h / 24))
-    return `${d} day${d === 1 ? '' : 's'}`
-  }
-
-  // Records one (timestamp, processed) sample, trims the window to the last
-  // five minutes, and returns {rateText, etaText} computed from it -- or
-  // null until there are at least two samples to compare. The ETA half is
-  // withheld until the window itself spans at least two minutes (spec);
-  // the rate can show sooner off whatever samples exist so far.
-  function _biRateAndEta(processed, found) {
-    const now = Date.now()
-    _biRateSamples.push({ t: now, processed })
-    const cutoff = now - 5 * 60 * 1000
-    _biRateSamples = _biRateSamples.filter(s => s.t >= cutoff)
-    if (_biRateSamples.length < 2) return null
-    const oldest = _biRateSamples[0]
-    const spanMs = now - oldest.t
-    const delta = processed - oldest.processed
-    if (spanMs <= 0 || delta <= 0) return null
-    const perMinute = delta / (spanMs / 60000)
-    const rateText = `${Math.round(perMinute)} per minute`
-    let etaText = null
-    if (spanMs >= 2 * 60 * 1000 && perMinute > 0) {
-      const minutesLeft = Math.max(0, found - processed) / perMinute
-      etaText = `about ${_biFmtDuration(minutesLeft)} left`
-    }
-    return { rateText, etaText }
   }
 
   const _BI_SKIPPED_REASON_PHRASE = {
@@ -14988,7 +15043,8 @@ const App = (() => {
     const skippedCodes = it.status === 'skipped' ? String(it.reason || '').split(',').filter(Boolean) : []
     const skippedPhrases = skippedCodes.map(c => _BI_SKIPPED_REASON_PHRASE[c]).filter(Boolean)
     const statusText = it.status === 'skipped'
-      ? `Skipped${skippedPhrases.length ? ' ' + skippedPhrases.join(', ') : ''}`
+      ? (skippedCodes.includes('duplicate_content') ? 'Exact duplicate in the library, skipped.'
+        : `Skipped${skippedPhrases.length ? ' ' + skippedPhrases.join(', ') : ''}`)
       : it.status === 'failed' ? (it.detail || 'Could not be read') : null
     const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
       ? '' : _biMetaLine(it)
@@ -15034,9 +15090,11 @@ const App = (() => {
       detail: {
         artist: it.artist, date: it.date_text, venue: it.venue,
         location: it.location, source: it.source, lineage: it.lineage,
-        tracksText: it.track_count != null ? String(it.track_count) : null,
-        trackListing: (it.tracks || []).map(t =>
-          `<div class="iq-track"><span class="iq-track-n">${esc(String(t.n ?? '').padStart(2, '0'))}</span> ${esc(t.title)}</div>`).join(''),
+        title: it.title,
+        tracksText: it.track_count != null ? _rowSizeText(it) : null,
+        // Numbered in order, never by the TRACKNUMBER tag (it restarts per disc).
+        trackListing: (it.tracks || []).map((t, i) =>
+          `<div class="iq-track"><span class="iq-track-n">${String(i + 1).padStart(2, '0')}</span> ${esc(t.title)}</div>`).join(''),
         issuesHtml: '',
         path: it.rel_path,
       },
@@ -15132,14 +15190,14 @@ const App = (() => {
 
   function _lxQueueCell(row) {
     const it = row._it
-    if (row.status === 'ready') return '<span class="lx-qc lx-qc--dim">Not needed</span>'
+    if (row.status === 'ready') return '<span class="lx-qc lx-qc--dim">OK</span>'
     if (!row.needs_review || !it) return ''
     const cell = _lxQ.cells.get(it.id)
     let inner = ''
     if (cell && cell.state === 'working') inner = '<span class="lq-spin"></span>Working'
     else if (cell && cell.state === 'done') {
       inner = cell.n
-        ? `<a href="#" class="lx-qc-link" data-lx-review="${esc(it.id)}">${lxPlural(cell.n, 'suggestion')}</a>`
+        ? `<a href="#" class="lx-qc-link" data-lx-review="${esc(it.id)}">Findings</a>`
         : 'Nothing to add'
     } else if (cell && cell.state === 'skipped') inner = 'Skipped: not reachable'
     else if (cell || lxImportLevel() !== 'off') inner = 'Queued'
@@ -15159,17 +15217,31 @@ const App = (() => {
     _lxQPaintLine()
   }
 
-  function _lxQPaintLine() {
-    const el = document.getElementById('bi-lomax-line')
-    if (!el) return
+  // Lomax's progress sits beside its switch, in place of the description line
+  // (Ryan, 2026-10-06): "N of M checked" with Pause/Resume while it runs,
+  // "M of M completed" once done. Empty when Lomax has nothing queued.
+  function _lxQStatusHtml() {
     const q = _lxQ
+    if (!q) return ''
     _lxQReadPause(q)
-    if (!_biRun || !_lxColShown() || !q.items.size) { el.innerHTML = ''; return }
+    // Only rows still in the Queue count: once it is emptied or reset, the
+    // switch's own line comes back (Ryan, 2026-10-06).
+    if (!_biRun || !_lxColShown() || !document.getElementById('bi-rows')) return ''
+    const ids = [...q.items.keys()].filter(id => _biRowsCache.has(id))
+    if (!ids.length) return ''
     let checked = 0
-    for (const c of q.cells.values()) if (c.state === 'done' || c.state === 'skipped') checked++
-    el.innerHTML = `<span class="bi-lx-lbl">${icon('lomax')}Lomax</span>` +
-      `<span class="bi-lx-sum">${checked} of ${q.items.size} checked</span>` +
-      (checked >= q.items.size ? '' : `<button type="button" class="btn btn-sm lx-go" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`)
+    for (const id of ids) { const c = q.cells.get(id); if (c && (c.state === 'done' || c.state === 'skipped')) checked++ }
+    if (checked >= ids.length) return `<span class="bi-lx-sum">${checked} of ${ids.length} completed</span>`
+    return `<span class="bi-lx-sum">${checked} of ${ids.length} checked</span>` +
+      `<button type="button" class="btn btn-sm lx-go" data-lx-pause>${q.paused ? 'Resume' : 'Pause'}</button>`
+  }
+
+  function _lxQPaintLine() {
+    const el = document.getElementById('bi-lx-desc')
+    if (!el) return
+    const html = _lxQStatusHtml()
+    el.innerHTML = html || 'Lomax checks recordings that need review and helps to fill out info.'
+      + (lxHasKey() ? '' : ' Lomax requires your Anthropic key to be set.')
   }
 
   // Redraw the header and every loaded row (the column came or went).
@@ -15293,10 +15365,10 @@ const App = (() => {
     const sq = _biSoundCol()
     const lx = _lxColShown()
     return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}${lx ? ' iq-brow--lx' : ''}">
-      <span>Recording</span>
+      <span></span><span>Recording</span>
       <span>Format</span><span>Type</span>
-      ${sq ? '<span>Sound Quality</span>' : ''}
-      <span>Metadata</span><span></span>${lx ? '<span>Lomax</span>' : ''}<span></span><span></span>
+      ${sq ? '<span>Quality</span>' : ''}
+      <span>Metadata</span><span class="iq-head-status">Status</span>${lx ? `<span>${lomaxMark()}</span>` : ''}<span></span>
     </div>`
   }
 
@@ -15334,7 +15406,7 @@ const App = (() => {
       btns.push(`<button class="lq-act lq-act--convert" data-convert="${id}">Convert to FLAC</button>`)
     }
     // Move is for brought-in folders; one inside the library is never moved.
-    if (_biRun && _biRun.placement === 'bring_in' && triageDests().length) {
+    if (it.placement === 'bring_in' && triageDests().length) {
       btns.push(`<div class="lq-move-wrap">
         <button type="button" class="lq-act lq-act--move" data-path="${id}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
         <div class="lq-move-menu" hidden>${triageDests().map(d =>
@@ -15477,8 +15549,13 @@ const App = (() => {
       if (!el) continue
       const tmp = document.createElement('div')
       tmp.innerHTML = _biRowHtml(it).trim()
-      el.replaceWith(tmp.firstElementChild)
+      const fresh = tmp.firstElementChild
+      el.replaceWith(fresh)
+      // A row that turned out to be skipped joins the others at the bottom,
+      // where the server's order puts it on the next load.
+      if (it.status === 'skipped') listEl.append(fresh)
     }
+    _lxQPaintLine()
   }
 
   function _biReconcile(items) {
@@ -15511,6 +15588,7 @@ const App = (() => {
       prevEl = el
     }
     _biLoadedCount = items.length
+    _lxQPaintLine()
   }
 
   // Tab strip above the table, with live counts from the run summary.
@@ -15568,7 +15646,7 @@ const App = (() => {
       .reduce((n, [, c]) => n + c, 0)
   }
 
-  // Above the Queue list: Import All Ready (Review First only) imports every
+  // In the scan row, left of the scan button: Import All Ready (Review First only) imports every
   // item that is ready; Convert All to FLAC (any mode) shows only while a
   // Queue row has unsupported audio. Same button family as the row actions,
   // one size up.
@@ -15578,7 +15656,9 @@ const App = (() => {
     let html = ''
     if (run.mode === 'hold') {
       const ready = (run.counts && run.counts.ready) || 0
-      html += `<button type="button" class="lq-act lq-act--ingest lq-act--lg" id="bi-ingest-all"${ready && idle ? '' : ' disabled'}>Import All Ready</button>`
+      const waiting = ready + ((run.counts && run.counts.review) || 0)
+      html += `<button type="button" class="btn btn-import-ready" id="bi-ingest-all"${ready && idle ? '' : ' disabled'}>Import All Ready</button>`
+      html += `<button type="button" class="btn btn-ghost" id="bi-import-everything"${waiting && idle ? '' : ' disabled'}>Import All</button>`
     }
     if (_biUnsupportedCount(run) > 0) {
       html += `<button type="button" class="lq-act lq-act--convert lq-act--lg" id="bi-convert-all"${idle ? '' : ' disabled'}>Convert All to FLAC</button>`
@@ -15618,7 +15698,7 @@ const App = (() => {
       const scan = await API.recordings.scan(abs)
       ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = abs
       ingest.form = {}; ingest.tracks = []
-      ingest.returnTo = _biRun ? '#/bulk-ingest/' + _biRun.id : null; ingest._resume = true
+      ingest.returnTo = _biRun ? '#/bulk-ingest' : null; ingest._resume = true
       window.location.hash = '#/ingest'
       renderIngestStep()
     } catch (e) {
@@ -15889,19 +15969,8 @@ const App = (() => {
     const scored   = run.scored   || 0
     const scoring  = scorable > 0 && scored < scorable
 
-    const dupes = run.duplicates || []
-    const dupesHtml = dupes.length ? `
-      <div class="bi-dupes">
-        <h2>Possible Duplicates</h2>
-        <ul>
-          ${dupes.map(d => `<li>
-            <a href="#/recording/${d.recording_id}">${esc(d.rel_path_basename)}</a>
-            <a href="#/recording/${d.duplicate_of}">${esc(d.duplicate_basename || String(d.duplicate_of))}</a>
-          </li>`).join('')}
-        </ul>
-      </div>` : ''
-
-    return `${scoring ? `<p class="batch-subtitle" id="bi-scoring-line">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''}${dupesHtml}`
+    // The Possible Duplicates list was removed (Ryan, 2026-10-06): the rows say it.
+    return scoring ? `<p class="batch-subtitle" id="bi-scoring-line">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''
   }
 
   // Header's second line: which File Handling mode is active, with a text
@@ -15935,30 +16004,6 @@ const App = (() => {
     try {
       el.innerHTML = _biFileHandlingHtml(await fileHandling())
     } catch (e) { /* leave it empty rather than showing a broken line */ }
-  }
-
-  // Progress bar -- same markup as Review & Ingest's own (.lq-progress),
-  // processed/found plus the in-progress folder name, then rate and ETA in
-  // the same muted style once they are available. Hidden once done.
-  function _biProgressHtml(run) {
-    if (run.status === 'done') return ''
-    const c = run.counts || {}
-    const found    = Object.values(c).reduce((a, b) => a + b, 0)
-    const added    = c.ingested || 0
-    const review   = c.review || 0
-    const skipped  = c.skipped || 0
-    const failed   = run.failed || 0
-    const processed = added + review + skipped + failed
-    const rate = _biRateAndEta(processed, found)
-    return `
-      <div class="lq-progress">
-        <div class="lq-progress-bar"><i style="width:${
-          Math.round(100 * processed / Math.max(1, found))}%"></i></div>
-        <span class="lq-progress-count">${processed}/${found}</span>
-        ${run.now ? `<span class="lq-progress-current">${esc(run.now)}</span>` : ''}
-        ${rate ? `<span class="lq-progress-current">${esc(rate.rateText)}</span>` : ''}
-        ${rate && rate.etaText ? `<span class="lq-progress-current">${esc(rate.etaText)}</span>` : ''}
-      </div>`
   }
 
   // The mode the import page's toggle shows. Follows the run while it runs
@@ -15996,7 +16041,7 @@ const App = (() => {
       const act = b.dataset.scan
       if (act === 'reset') {
         _confirmDialog('Remove every recording from the queue? Your files are not touched.', 'Reset Queue', async () => {
-          try { await API.bulkIngest.resetQueue(run.id) } catch (err) {}
+          try { await API.bulkIngest.resetQueue() } catch (err) {}
           await refreshBulkIngestStatus()
           _biPickerPath = run.root
           window.location.hash = '#/ingest?new=1'
@@ -16004,14 +16049,17 @@ const App = (() => {
         return
       }
       if (act === 'pause' || act === 'resume') {
-        try { await API.bulkIngest[act](run.id) } catch (err) {}
+        try { await API.bulkIngest[act]() } catch (err) {}
         await refreshBulkIngestStatus()
-        renderBulkIngestView(run.id)
+        renderBulkIngestView()
       } else if (act === 'rescan') {
-        let again = null
-        try { again = await API.bulkIngest.start(run.root, _biScanMode) } catch (err) {}
+        // Every source folder behind the Queue is looked at again.
+        const roots = [...new Set((state.biRuns || []).map(r => r.root))]
+        for (const root of (roots.length ? roots : [run.root])) {
+          try { await API.bulkIngest.start(root, _biScanMode) } catch (err) {}
+        }
         await refreshBulkIngestStatus()
-        renderBulkIngestView(again && again.id)
+        renderBulkIngestView()
       }
     })
   }
@@ -16030,8 +16078,6 @@ const App = (() => {
       _biPaintScan(run)
       const noticesEl = document.getElementById('bi-notices')
       if (noticesEl) noticesEl.innerHTML = _biNoticesHtml(run)
-      const progEl = document.getElementById('bi-progress-wrap')
-      if (progEl) progEl.innerHTML = _biProgressHtml(run)
       const tabBefore = _biTab
       _biPaintTabs(run)
       // The open tab emptied and fell back to Queue: reload what it shows.
@@ -16056,13 +16102,10 @@ const App = (() => {
         </div>
         <div id="bi-scan" class="bi-scan"></div>
 
-        <div id="bi-progress-wrap">${_biProgressHtml(run)}</div>
 
         <div class="pp-tabs bi-tabs" id="bi-tabs" role="tablist">${_biTabsHtml(run)}</div>
         <div class="bi-tab-note-wrap" id="bi-tab-note">${_biTabNoteHtml(run)}</div>
         <div id="bi-applyall"></div>
-        <div id="bi-ingest-all-wrap" class="bi-ingest-all-wrap">${_biIngestAllHtml(run)}</div>
-        <div id="bi-lomax-line" class="bi-lomax-line"></div>
         <div id="bi-notices">${_biNoticesHtml(run)}</div>
 
         <div class="lq-cards lq-cards--compact" id="bi-table">
@@ -16074,9 +16117,17 @@ const App = (() => {
     _biApplyMode()
     _biPaintApplyAll()
     document.addEventListener('click', _closeMoveMenus)
-    document.getElementById('bi-ingest-all-wrap')?.addEventListener('click', e => {
+    // Import All Ready sits in the scan row (Ryan, 2026-10-06), which repaints;
+    // the listener lives on #bi-scan, which does not.
+    document.getElementById('bi-scan')?.addEventListener('click', e => {
       const b = e.target.closest('#bi-ingest-all')
       if (b) _biIngestAllReady(b)
+      const all = e.target.closest('#bi-import-everything')
+      if (all) _confirmDialog('Try and import all recordings, including ones that Need Review?', 'Import All', async () => {
+        all.disabled = true
+        try { await API.bulkIngest.ingestAll() } catch (err) { alert(err.message) }
+        await _biAfterAction()
+      })
       const c = e.target.closest('#bi-convert-all')
       if (c) _biConvertAll(c)
     })
@@ -16086,7 +16137,11 @@ const App = (() => {
     _biPaintScan(run)
     _biWireScan()
     _wireBiFileHandling()
-    document.getElementById('bi-browse')?.addEventListener('click', () => { location.hash = '#/ingest?new=1' })
+    // Browse opens on the Source Folder shown beside it.
+    document.getElementById('bi-browse')?.addEventListener('click', () => {
+      _biPickerPath = (_biRun && _biRun.root) || null
+      location.hash = '#/ingest?new=1'
+    })
     document.getElementById('bi-table')?.addEventListener('click', _biOnTableClick)
     document.getElementById('bi-tabs')?.addEventListener('click', async e => {
       const t = e.target.closest('[data-bitab]')
@@ -16193,20 +16248,6 @@ const App = (() => {
   }
 
   // Downloads page "Modified": Today / Yesterday / Sep 28.
-  function _dlModified(v) {
-    if (v == null || v === '') return ''
-    const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)
-    if (isNaN(d.getTime())) return String(v)
-    const today = new Date()
-    const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
-    const diff = Math.round((day(today) - day(d)) / 86400000)
-    if (diff === 0) return 'Today'
-    if (diff === 1) return 'Yesterday'
-    const opts = d.getFullYear() === today.getFullYear()
-      ? { month: 'short', day: 'numeric' }
-      : { month: 'short', day: 'numeric', year: 'numeric' }
-    return d.toLocaleDateString('en-US', opts)
-  }
 
   const _dlPct = j => (j && j.total_bytes)
     ? Math.max(0, Math.min(100, Math.round(j.done_bytes * 100 / j.total_bytes))) : 0
@@ -16843,15 +16884,22 @@ const App = (() => {
 
   // ── Downloads page: #/downloads ────────────────────────────────────────────
 
-  // Checksum verdict from the server: 'verified', 'failed' (with the file
-  // names in checksum_errors) or null. Same fingerprint glyph, tip box and
-  // green/red tokens as the checksum verdicts elsewhere in the app.
+  // Fingerprint verdict from the server, one per working-folder row (2026-10-06):
+  // valid, invalid, unchecked
+  // (MD5 only, never run automatically) or absent. Same glyph and tip box as
+  // the checksum verdicts elsewhere. A row still downloading shows none.
+  const _DL_FP = {
+    valid:      ['ok',   'Checksums verified'],
+    invalid:    ['bad',  'Checksums failed'],
+    unchecked:  ['dim',  'Not checked'],
+    absent:     ['dim',  'No checksums'],
+  }
   function _dlChecksumHtml(f) {
-    if (f.checksums !== 'verified' && f.checksums !== 'failed') return '<span></span>'
-    const bad = f.checksums === 'failed'
-    const heading = bad ? 'Checksums failed' : 'Checksums verified'
-    const files = bad ? (f.checksum_errors || []).join(', ') : ''
-    return `<span class="lq-brow-fp lq-tip dl-fp dl-fp--${bad ? 'bad' : 'ok'}" role="img"
+    const v = _DL_FP[f.fingerprints]
+    if (!v) return '<span></span>'
+    const [cls, heading] = v
+    const files = (f.fingerprint_detail || []).join(', ')
+    return `<span class="lq-brow-fp lq-tip dl-fp dl-fp--${cls}" role="img"
                   aria-label="${esc(files ? `${heading}: ${files}` : heading)}">
       ${icon('fingerprint', 'lq-fp-ic')}
       <span class="lq-tipbox">
@@ -16860,45 +16908,89 @@ const App = (() => {
       </span></span>`
   }
 
-  function _dlRowHtml(f) {
-    let job = f.downloading ? DL.jobs.find(j => j.id === f.job_id) : null
-    // Progress shows only for a download that is genuinely running: the
-    // server's flag, and a job that has not since been cancelled or failed.
-    const busy = f.downloading === true && (!job || _dlIsLive(job))
-    if (!busy) job = null
-    const dests = (DL.folder && DL.folder.destinations) || []
+  // ── Working-folder pages: Downloads, Workshop, Backlog (one design) ──────
+  // All three render the same rows, header and menu (Ryan, 2026-10-06). Only
+  // Downloads has live download progress; only the destinations differ.
+
+  // Modified as YYYY-MM-DD in local time, never "Today".
+  function _dlDate(v) {
+    if (v == null || v === '') return ''
+    const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)
+    if (isNaN(d.getTime())) return String(v)
+    const p2 = n => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`
+  }
+
+  // Sort shared by the three pages: Name (A to Z) by default, Modified on click.
+  const _fsort = { key: 'name', dir: 1 }
+  function _fsorted(folders) {
+    const k = _fsort.key, d = _fsort.dir
+    return (folders || []).slice().sort((x, y) => {
+      const a = k === 'modified' ? (x.modified || '') : String(x.name || '').toLowerCase()
+      const b = k === 'modified' ? (y.modified || '') : String(y.name || '').toLowerCase()
+      return a < b ? -d : a > b ? d : 0
+    })
+  }
+  function _fsortHead(key, label, right) {
+    const on = _fsort.key === key
+    return `<button type="button" class="arc-hd arc-hd--sort${right ? ' arc-hd--r' : ''}${on ? ' is-on' : ''}"
+      data-sort="${key}" aria-sort="${on ? (_fsort.dir > 0 ? 'ascending' : 'descending') : 'none'}">${label}${
+      on ? chevronIcon(_fsort.dir > 0 ? 'caret-ic--up' : 'caret-ic--down') : ''}</button>`
+  }
+  function _folderHeadHtml() {
+    return `
+      <div class="brow dl-row dl-cols">
+        ${_fsortHead('name', 'Name')}<span></span><span class="arc-hd arc-hd--r">Files</span><span class="arc-hd arc-hd--r">Size</span>
+        <span class="arc-hd arc-hd--r">Format</span>${_fsortHead('modified', 'Modified', true)}<span></span>
+      </div>`
+  }
+
+  function _folderRowHtml(f, dests, job) {
+    const busy = !!job
+    const noAudio = !busy && f.has_audio === false
     const order = ['workshop', 'backlog']
-    const sorted = dests.slice().sort((a, b) => {
+    const sorted = (dests || []).slice().sort((a, b) => {
       const ia = order.indexOf(a), ib = order.indexOf(b)
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
     })
     const actions = busy
       ? `<span class="dl-prog"><span class="dl-bar"><span class="dl-bar-fill" style="width:${_dlPct(job)}%"></span></span>${_dlPct(job)}%</span>`
-      : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Import</button>
-         ${sorted.length ? `
+      : `${noAudio ? '' : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Add to Library</button>`}
          <div class="lq-move-wrap">
            <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
            <div class="lq-move-menu" hidden>
              ${sorted.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
+             <button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-trash="1">Move to Trash</button>
            </div>
-         </div>` : ''}`
+         </div>`
+    const middle = noAudio
+      ? `<span class="dl-noaudio">No audio files in this folder.</span>`
+      : `${_dlChecksumHtml(f)}
+        <span class="arc-num">${esc(f.files != null ? f.files : '')}</span>
+        <span class="arc-num">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
+        <span class="arc-num">${esc(f.format || '')}</span>`
     return `
       <div class="brow dl-row" data-name="${esc(f.name)}">
         <span class="arc-name">${esc(f.name)}</span>
-        ${_dlChecksumHtml(f)}
-        <span class="arc-num">${esc(f.files != null ? f.files : '')}</span>
-        <span class="arc-num">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
-        <span class="arc-num">${esc(f.format || '')}</span>
-        <span class="arc-num arc-num--dim">${esc(busy ? 'Now' : _dlModified(f.modified))}</span>
+        ${middle}
+        <span class="arc-num arc-num--dim">${esc(_dlDate(f.modified))}</span>
         <span class="dl-acts">${actions}</span>
       </div>`
+  }
+
+  function _dlJob(f) {
+    const job = f.downloading ? DL.jobs.find(j => j.id === f.job_id) : null
+    // Progress shows only for a download that is genuinely running: the
+    // server's flag, and a job that has not since been cancelled or failed.
+    return f.downloading === true && (!job || _dlIsLive(job)) ? (job || {}) : null
   }
 
   function _dlRepaintDownloadsPage() {
     const rows = document.getElementById('dl-rows')
     if (!rows || !DL.folder) return
     if (rows.querySelector('.lq-move-menu:not([hidden])')) return   // a menu is open
-    const html = (DL.folder.folders || []).map(_dlRowHtml).join('')
+    const dests = DL.folder.destinations || []
+    const html = _fsorted(DL.folder.folders).map(f => _folderRowHtml(f, dests, _dlJob(f))).join('')
     if (rows._html === html) return
     rows._html = html
     rows.innerHTML = html
@@ -16907,7 +16999,77 @@ const App = (() => {
   }
 
   function _dlCloseMenus() {
-    document.querySelectorAll('#dl-rows .lq-move-menu').forEach(m => { m.hidden = true })
+    document.querySelectorAll('.dl-rows .lq-move-menu').forEach(m => { m.hidden = true })
+  }
+
+  /** One page for Downloads, Workshop and Backlog. `which` is 'downloads',
+   *  'workshop' or 'backlog'; `load` refreshes the data and `paint` redraws. */
+  function _renderFolderPage({ which, title, path, load, paint }) {
+    setMainHTML(`
+      <div class="dl-page">
+        <div class="arc-head">
+          <h1 class="arc-title">${esc(title)}</h1>
+          <span class="dl-path" id="dl-path">${esc(path || '')}</span>
+          <button type="button" class="btn btn-ghost btn-sm arc-refresh" id="dl-refresh">${icon('rotate-cw', 'lq-browse-ic')} Refresh</button>
+        </div>
+        <div class="dl-list">
+          <div id="dl-head">${_folderHeadHtml()}</div>
+          <div class="dl-rows" id="dl-rows"></div>
+        </div>
+      </div>`)
+    paint()
+
+    if (!DL.docWired) {
+      DL.docWired = true
+      document.addEventListener('click', _dlCloseMenus)
+    }
+    document.getElementById('dl-refresh').addEventListener('click', async () => {
+      try { await load() } catch (_) { return }
+      paint()
+    })
+    document.getElementById('dl-head').addEventListener('click', e => {
+      const h = e.target.closest('[data-sort]')
+      if (!h) return
+      const key = h.dataset.sort
+      if (_fsort.key === key) _fsort.dir = -_fsort.dir
+      else { _fsort.key = key; _fsort.dir = key === 'modified' ? -1 : 1 }
+      document.getElementById('dl-head').innerHTML = _folderHeadHtml()
+      const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
+      paint()
+    })
+    const dir = name => `${String(document.getElementById('dl-path')?.textContent || '').replace(/\/+$/, '')}/${name}`
+    document.getElementById('dl-rows').addEventListener('click', async e => {
+      const ingest = e.target.closest('.dl-ingest')
+      if (ingest) {
+        // Add to Library (Ryan, 2026-10-06): opens Add Recordings with the
+        // folder queued and the scan paused; the person starts it. Outside the
+        // library: the remembered outside mode, Review First by default.
+        _biStartAndOpen(dir(ingest.dataset.name), _biMode(false), true).catch(err => alert(err.message))
+        return
+      }
+      const mv = e.target.closest('.dl-move')
+      if (mv) {
+        e.stopPropagation()
+        const menu = mv.nextElementSibling
+        const wasHidden = menu.hidden
+        _dlCloseMenus()
+        menu.hidden = !wasHidden
+        return
+      }
+      const opt = e.target.closest('.lq-move-opt')
+      if (!opt) return
+      const name = opt.dataset.name
+      _dlCloseMenus()
+      // Move to another working folder, or to the system Trash (Ryan,
+      // 2026-10-06). Nothing is deleted outright from a working folder.
+      try {
+        if (opt.dataset.trash) await API.downloads.trash(which, name)
+        else await API.quality.move(dir(name), opt.dataset.dest)
+      } catch (err) { alert(`Move failed: ${err.message}`); return }
+      try { await load() } catch (_) { /* keep what is on screen */ }
+      const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
+      paint()
+    })
   }
 
   async function renderDownloadsView() {
@@ -16925,81 +17087,10 @@ const App = (() => {
         </div>`)
       return
     }
-    const f = DL.folder
-    setMainHTML(`
-      <div class="dl-page">
-        <div class="arc-head">
-          <h1 class="arc-title">Downloads</h1>
-          <span class="dl-path" id="dl-path">${esc(f.path || '')}</span>
-        </div>
-        <div class="dl-list">
-          <div class="brow dl-row dl-cols">
-            <span class="arc-hd">Name</span><span></span><span class="arc-hd arc-hd--r">Files</span><span class="arc-hd arc-hd--r">Size</span>
-            <span class="arc-hd arc-hd--r">Format</span><span class="arc-hd arc-hd--r">Modified</span><span></span>
-          </div>
-          <div class="dl-rows" id="dl-rows"></div>
-        </div>
-      </div>`)
-    _dlRepaintDownloadsPage()
-
-    if (!DL.docWired) {
-      DL.docWired = true
-      document.addEventListener('click', _dlCloseMenus)
-    }
-    const dir = name => `${String(DL.folder.path || '').replace(/\/+$/, '')}/${name}`
-    document.getElementById('dl-rows').addEventListener('click', async e => {
-      const ingest = e.target.closest('.dl-ingest')
-      if (ingest) {
-        // Outside the library: the remembered outside mode, Review First by
-        // default. A folder still downloading is refused server-side.
-        _biStartAndOpen(dir(ingest.dataset.name), _biMode(false)).catch(err => alert(err.message))
-        return
-      }
-      const mv = e.target.closest('.dl-move')
-      if (mv) {
-        e.stopPropagation()
-        const menu = mv.nextElementSibling
-        const wasHidden = menu.hidden
-        _dlCloseMenus()
-        menu.hidden = !wasHidden
-        return
-      }
-      const opt = e.target.closest('.lq-move-opt')
-      if (!opt) return
-      const name = opt.dataset.name
-      _dlCloseMenus()
-      // No Delete on any working-folder page (Ryan, 2026-10-01): Move only.
-      try { await API.quality.move(dir(name), opt.dataset.dest) }
-      catch (err) { alert(`Move failed: ${err.message}`); return }
-      await _dlRefreshFolder()
-      _dlRepaintDownloadsPage()
+    _renderFolderPage({
+      which: 'downloads', title: 'Downloads', path: DL.folder.path,
+      load: _dlRefreshFolder, paint: _dlRepaintDownloadsPage,
     })
-  }
-
-  // ── Workshop / Backlog pages: #/workshop, #/backlog (2026-10-01) ─────────
-  // The Downloads page design for the other two working folders: the same
-  // folder rows, Ingest, and Move to the other working folder. No Delete:
-  // Trellis deletes nothing from a working folder (2026-10-01).
-  function _wfRowHtml(f, dests) {
-    return `
-      <div class="brow dl-row" data-name="${esc(f.name)}">
-        <span class="arc-name">${esc(f.name)}</span>
-        <span></span>
-        <span class="arc-num">${esc(f.files != null ? f.files : '')}</span>
-        <span class="arc-num">${esc(f.size_bytes ? fmtBytes(f.size_bytes) : '')}</span>
-        <span class="arc-num">${esc(f.format || '')}</span>
-        <span class="arc-num arc-num--dim">${esc(_dlModified(f.modified))}</span>
-        <span class="dl-acts">
-          <button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Import</button>
-          ${dests.length ? `
-          <div class="lq-move-wrap">
-            <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
-            <div class="lq-move-menu" hidden>
-              ${dests.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
-            </div>
-          </div>` : ''}
-        </span>
-      </div>`
   }
 
   async function renderWorkingFolderView(which) {
@@ -17019,51 +17110,11 @@ const App = (() => {
       return
     }
     const paint = () => {
-      const rows = document.getElementById('wf-rows')
-      if (rows) rows.innerHTML = (data.folders || []).map(f => _wfRowHtml(f, data.destinations || [])).join('')
+      const rows = document.getElementById('dl-rows')
+      if (!rows || rows.querySelector('.lq-move-menu:not([hidden])')) return
+      rows.innerHTML = _fsorted(data.folders).map(f => _folderRowHtml(f, data.destinations || [], null)).join('')
     }
-    setMainHTML(`
-      <div class="dl-page">
-        <div class="arc-head">
-          <h1 class="arc-title">${esc(label)}</h1>
-          <span class="dl-path">${esc(data.path || '')}</span>
-        </div>
-        <div class="dl-list">
-          <div class="brow dl-row dl-cols">
-            <span class="arc-hd">Name</span><span></span><span class="arc-hd arc-hd--r">Files</span><span class="arc-hd arc-hd--r">Size</span>
-            <span class="arc-hd arc-hd--r">Format</span><span class="arc-hd arc-hd--r">Modified</span><span></span>
-          </div>
-          <div class="dl-rows" id="wf-rows"></div>
-        </div>
-      </div>`)
-    paint()
-    const closeMenus = () => document.querySelectorAll('#wf-rows .lq-move-menu').forEach(m => { m.hidden = true })
-    document.addEventListener('click', closeMenus, { once: true })
-    const dir = name => `${String(data.path || '').replace(/\/+$/, '')}/${name}`
-    document.getElementById('wf-rows').addEventListener('click', async e => {
-      const ingestBtn = e.target.closest('.dl-ingest')
-      if (ingestBtn) {
-        _biStartAndOpen(dir(ingestBtn.dataset.name), _biMode(false)).catch(err => alert(err.message))
-        return
-      }
-      const mv = e.target.closest('.dl-move')
-      if (mv) {
-        e.stopPropagation()
-        const menu = mv.nextElementSibling
-        const wasHidden = menu.hidden
-        closeMenus()
-        menu.hidden = !wasHidden
-        document.addEventListener('click', closeMenus, { once: true })
-        return
-      }
-      const opt = e.target.closest('.lq-move-opt')
-      if (!opt) return
-      closeMenus()
-      try { await API.quality.move(dir(opt.dataset.name), opt.dataset.dest) }
-      catch (err) { alert(`Move failed: ${err.message}`); return }
-      try { await load() } catch (_) {}
-      paint()
-    })
+    _renderFolderPage({ which, title: label, path: data.path, load, paint })
   }
 
   function route() {
@@ -17180,7 +17231,7 @@ const App = (() => {
 
     } else if (/^#\/bulk-ingest(\/\d+)?$/.test(hash.split('?')[0])) {
       // #/bulk-ingest/<run_id> is one run; bare #/bulk-ingest is the current run.
-      renderBulkIngestView(Number((hash.split('?')[0].split('/')[2])) || null)
+      renderBulkIngestView()     // one Queue: an old #/bulk-ingest/<id> opens it too
 
     } else if (hash === '#/archive/lma') {
       renderArchiveLmaView()
@@ -17234,7 +17285,8 @@ const App = (() => {
     } else if (hash === '#/settings' || hash.startsWith('#/settings/')) {
       renderSettingsPage(hash.split('/')[2] || 'profile')
     } else if (hash === '#/peers') {
-      renderPeersPage()
+      history.replaceState(null, '', '#/settings/sharing')
+      renderSettingsPage('sharing')
     } else if (hash === '#/collections') {
       renderCollectionsIndex()
 
@@ -17358,34 +17410,22 @@ const App = (() => {
    *  rather than in the one the card is advertising. */
   function _palettePickerHtml() {
     const active = currentPalette().id
-    const group = (title, grp) => `
-      <div class="pal-group">
-        <div class="pal-group-title">${title}</div>
-        <div class="pal-grid">
-          ${PALETTES.filter(p => p.group === grp).map(p => `
-            <button type="button" class="pal-card${p.id === active ? ' active' : ''}"
-                    data-palette="${esc(p.id)}" aria-pressed="${p.id === active}">
-              <span class="pal-mini" data-pal-preview="${esc(p.id)}">
-                <span class="pal-mini-nav"></span>
-                <span class="pal-mini-body">
-                  <span class="pal-mini-card">
-                    <span class="pal-mini-line a"></span>
-                    <span class="pal-mini-line b"></span>
-                    <span class="pal-mini-line c"></span>
-                  </span>
-                </span>
-              </span>
-              <span class="pal-meta">
-                <span class="pal-name">${esc(p.label)}</span>
-                <span class="pal-note">${esc(p.note)}</span>
-              </span>
-            </button>`).join('')}
-        </div>
-      </div>`
     return `<div class="pal-picker" id="set-palette" role="group" aria-label="Palette">
-        ${group('Light', 'light')}${group('In between', 'mid')}${group('Dark', 'dark')}
+        ${PALETTES.map(p => `
+          <button type="button" class="pal-card${p.id === active ? ' active' : ''}"
+                  data-palette="${esc(p.id)}" aria-pressed="${p.id === active}" aria-label="${esc(p.label)}">
+            <span class="pal-mini" data-pal-preview="${esc(p.id)}" aria-hidden="true">
+              <span class="pal-mini-nav"><i></i><i></i><i></i></span>
+              <span class="pal-mini-bill">
+                <span class="pal-mini-disc"></span>
+                <span class="pal-mini-lines"><i></i><i></i><span class="pal-mini-chips"><i></i><i></i><i></i></span></span>
+              </span>
+              <span class="pal-meta"><span class="pal-name">${esc(p.label)}</span></span>
+            </span>
+          </button>`).join('')}
       </div>`
   }
+
 
   /** Settings › Files (2026-10-05 tabbed redesign). The naming controls are
    *  rendered only while Rename Files is on, and the template field only for
@@ -17401,7 +17441,8 @@ const App = (() => {
           <label class="set-label" for="fh-scheme">Naming Scheme</label>
           <div class="set-actions">
             <select class="set-input" id="fh-scheme">
-              ${NAMING_SCHEME_LABELS.map(([v, label]) =>
+              ${(NAMING_SCHEME_LABELS.some(([v]) => v === fh.naming_scheme) ? NAMING_SCHEME_LABELS
+                 : [...NAMING_SCHEME_LABELS, [fh.naming_scheme, 'etree, sets']]).map(([v, label]) =>
                 `<option value="${v}"${v === fh.naming_scheme ? ' selected' : ''}>${esc(label)}</option>`).join('')}
             </select>
             <span class="set-flash" id="fh-scheme-flash"></span>
@@ -17436,7 +17477,8 @@ const App = (() => {
 
       <div class="set-field">
         <span class="set-label">Rename</span>
-        <label class="check"><input type="checkbox" id="fh-rename-folders" ${fh.rename_folders ? 'checked' : ''}><div>Folders</div></label>
+        <label class="check"><input type="checkbox" id="fh-rename-folders" ${fh.rename_folders ? 'checked' : ''}>
+          <div>Folders<div class="hint">Folders will be renamed as [Artist] - [Date] - [Venue] - [Location] ([Source])</div></div></label>
         <label class="check"><input type="checkbox" id="fh-rename-files" ${renaming ? 'checked' : ''}><div>Files</div></label>
         <span class="set-flash" id="fh-switches-flash"></span>
       </div>
@@ -17445,9 +17487,9 @@ const App = (() => {
       <div class="set-field">
         <span class="set-label">Tags</span>
         <label class="check"><input type="checkbox" id="fh-write-tags-ingest" ${fh.write_tags_on_ingest ? 'checked' : ''}>
-          <div>Write tags when a recording is added<div class="hint">FFP and ST5 checksums still verify. MD5 will not.</div></div></label>
+          <div>Write tags to FLACs and MP3s when a new recording is added</div></label>
         <label class="check"><input type="checkbox" id="fh-write-tags-default" ${fh.write_tags_default ? 'checked' : ''}>
-          <div>Write tags to files without asking each time</div></label>
+          <div>Write changes to file tags immediately upon update<div class="hint">When you make changes to a recording, it stores it in the database and stages updates to the file tags. By default you must apply the changes; with this setting, they will apply automatically.</div></div></label>
         <span class="set-flash" id="fh-tags-flash"></span>
       </div>`
   }
@@ -17456,15 +17498,19 @@ const App = (() => {
    *  it, and the three working folders (filled in by _wireSettings, desktop
    *  only, since the folder dialog is PyWebView's). */
   function _foldersSectionHtml(fh, about) {
+    // The examples name the real library: its folder and the one above it.
+    const rootTail = String(about.library_root || '').split('/').filter(Boolean).slice(-2).join('/')
     return `
       <div class="set-field">
         <span class="set-label">Library</span>
         <div class="set-path">${esc(about.library_root || '')}</div>
       </div>
       <div class="set-field">
-        <span class="set-label">Placement</span>
-        <label class="check"><input type="radio" name="fh-place" value="artist" ${fh.placement === 'artist' ? 'checked' : ''}><div>Under the artist folder</div></label>
-        <label class="check"><input type="radio" name="fh-place" value="root" ${fh.placement === 'root' ? 'checked' : ''}><div>Library root</div></label>
+        <span class="set-label">Where should Trellis place new recordings?</span>
+        <label class="check"><input type="radio" name="fh-place" value="artist" ${fh.placement === 'artist' ? 'checked' : ''}>
+          <div>Under the artist folder<div class="hint">${esc(rootTail)}/[Artist Name]</div></div></label>
+        <label class="check"><input type="radio" name="fh-place" value="root" ${fh.placement === 'root' ? 'checked' : ''}>
+          <div>In the library root<div class="hint">${esc(rootTail)}</div></div></label>
         <span class="set-flash" id="fh-place-flash"></span>
       </div>
       <div id="set-folders"></div>`
@@ -17499,11 +17545,11 @@ const App = (() => {
     const model      = prefs.ai_model || 'claude-sonnet-5'
     const editable   = canEditLibrary()
 
-    // Files and Folders are install-level and admin-only, so in Playback mode
+    // Files, Folders and Sharing are install-level and admin-only, so in Playback mode
     // they are absent rather than shown and refused.
     const tabs = [
       ['profile', 'Profile'], ['appearance', 'Appearance'],
-      ...(editable ? [['files', 'Files'], ['folders', 'Folders']] : []),
+      ...(editable ? [['files', 'Files'], ['folders', 'Folders'], ['sharing', 'Sharing']] : []),
       ['lomax', 'Lomax'], ['about', 'About'],
     ]
     if (!tabs.some(([id]) => id === _settingsTab)) {
@@ -17514,21 +17560,11 @@ const App = (() => {
     const panes = {
       profile: `
         <div class="set-field">
-          <label class="set-label" for="set-name">Display Name</label>
+          <label class="set-label" for="set-name">Name</label>
           <div class="set-actions">
-            <input class="set-input" id="set-name" maxlength="120"
-                   value="${esc(me.display_name || '')}"
-                   placeholder="${esc(me.username)}" autocomplete="off">
+            <input class="set-input" id="set-name" maxlength="64"
+                   value="${esc(me.name || me.username)}" autocomplete="off" spellcheck="false">
             <span class="set-flash" id="set-name-flash"></span>
-          </div>
-        </div>
-        <div class="set-field">
-          <label class="set-label" for="set-username">Sign-in Name</label>
-          <div class="set-actions">
-            <input class="set-input" id="set-username" maxlength="64"
-                   value="${esc(me.username)}" autocomplete="off"
-                   autocorrect="off" autocapitalize="off" spellcheck="false">
-            <span class="set-flash" id="set-username-flash"></span>
           </div>
         </div>
         <div class="set-field">
@@ -17545,18 +17581,17 @@ const App = (() => {
             </div>
           </div>
         </div>
-        ${editable ? `
-        <div class="set-field">
-          <span class="set-label">Sharing</span>
-          <button class="btn btn-ghost btn-sm" id="set-peers">Manage Sharing</button>
-        </div>` : ''}`,
+`,
 
       appearance: _palettePickerHtml(),
 
       files:   editable ? _fileHandlingSectionHtml(fh) : '',
       folders: editable ? _foldersSectionHtml(fh, about) : '',
+      sharing: editable ? `<p class="set-intro">Your library lives on your computer or server. With some additional setup on your system, you can share your library with others by extending them an invite. Currently sharing only supports browsing and streaming. <a href="https://trellismusiclibrary.com/docs/sharing-overview/" target="_blank" rel="noopener">How sharing works</a></p>
+        <div id="set-sharing"></div>` : '',
 
       lomax: `
+        <p class="set-intro">${esc(LX_IMPORT_TIP)}</p>
         <div class="set-field">
           <label class="set-label" for="set-key">Anthropic API Key</label>
           <div class="set-actions">
@@ -17584,9 +17619,12 @@ const App = (() => {
         <dl class="set-about">
           <dt>Version</dt><dd>${esc(about.app_name || 'Trellis')} ${esc(about.version || '')}${
             about.installed ? '' : ' <span class="set-about-tag">running from source</span>'}</dd>
+          <dt>Requirements</dt><dd>macOS 14 (Sonoma) or later</dd>
           <dt>Library Data</dt><dd class="set-path">${esc(about.database || '')}</dd>
         </dl>
-        <p class="set-about-credit">Place data from GeoNames (geonames.org), CC BY 4.0.</p>`,
+        <p class="set-about-credit">© 2026 Trellis Music Library. All rights reserved.</p>
+        <p class="set-about-credit">Place data from GeoNames (geonames.org), CC BY 4.0.</p>
+        <p class="set-about-contact">Questions? Comments? Bugs? Email <a href="mailto:ryan@trellismusiclibrary.com">ryan@trellismusiclibrary.com</a></p>`,
     }
 
     setMainHTML(`
@@ -17595,7 +17633,7 @@ const App = (() => {
         <div class="pp-tabs set-tabs" role="tablist">
           ${tabs.map(([id, label]) => `
             <button class="pp-tab${id === _settingsTab ? ' active' : ''}" data-set-tab="${id}"
-                    role="tab" aria-selected="${id === _settingsTab}">${label}</button>`).join('')}
+                    role="tab" aria-selected="${id === _settingsTab}">${id === 'lomax' ? lomaxMark() : label}</button>`).join('')}
         </div>
         ${tabs.map(([id]) => `
           <section class="set-pane${id === _settingsTab ? ' active' : ''}" data-set-pane="${id}" role="tabpanel">
@@ -17606,6 +17644,11 @@ const App = (() => {
     // Switching tabs is in-page: every pane is already rendered and wired, so
     // the hash is replaced (not pushed, and no hashchange) to keep a reload or
     // a deep link on the same tab without a refetch.
+    // The desktop window does not hand a mailto: link to the system; macOS `open` does.
+    document.querySelectorAll('.set-about-contact a[href^="mailto:"]').forEach(a => a.addEventListener('click', e => {
+      const api = window.pywebview && window.pywebview.api
+      if (api && api.open_in_browser) { e.preventDefault(); api.open_in_browser(a.href) }
+    }))
     document.querySelectorAll('[data-set-tab]').forEach(btn => btn.addEventListener('click', () => {
       _settingsTab = btn.dataset.setTab
       document.querySelectorAll('[data-set-tab]').forEach(b => {
@@ -17626,13 +17669,18 @@ const App = (() => {
 
     // ── Display name — commits on blur or Enter, never on every keystroke ────
     const nameInput = $('set-name')
-    let lastName = me.display_name || ''
+    // One name since 2026-10-06 (Ryan): it is both what peers see and the
+    // sign-in name, so a save writes the username and clears display_name,
+    // which leaves User.name falling back to it. The desktop app never asks
+    // anyone to sign in, so the credential role costs nothing there.
+    let lastName = me.name || me.username
     const commitName = async () => {
       const v = nameInput.value.trim()
+      if (!v) { nameInput.value = lastName; return }
       if (v === lastName) return
       try {
-        const updated = await API.auth.updateProfile({ display_name: v })
-        lastName = updated.display_name || ''
+        const updated = await API.auth.updateProfile({ username: v, display_name: '' })
+        lastName = updated.name || updated.username
         nameInput.value = lastName
         state.user = { ...(state.user || {}), ...updated }
         _settingsSaved($('set-name-flash'))
@@ -17647,38 +17695,6 @@ const App = (() => {
     }
     nameInput?.addEventListener('blur', commitName)
     nameInput?.addEventListener('keydown', e => { if (e.key === 'Enter') nameInput.blur() })
-
-    // ── Sign-in name — same commit-on-blur shape (Ryan, 2026-08-28) ─────────
-    // Editable at last. It is the credential, so a rejected value snaps back
-    // to the last one the server accepted rather than sitting there looking
-    // saved. Changing it does NOT sign you out: Flask-Login carries the row
-    // id, not the name.
-    const userInput = $('set-username')
-    let lastUsername = me.username
-    const commitUsername = async () => {
-      const v = userInput.value.trim()
-      if (v === lastUsername) return
-      try {
-        const updated = await API.auth.updateProfile({ username: v })
-        lastUsername = updated.username
-        userInput.value = lastUsername
-        state.user = { ...(state.user || {}), ...updated }
-        _settingsSaved($('set-username-flash'))
-        // The display-name field shows the sign-in name as its placeholder —
-        // that is the "leave it empty and go by this" promise, so it has to
-        // follow a rename or it quietly promises the old name.
-        if (nameInput) nameInput.placeholder = lastUsername
-        // Same for the picture initial when there is no display name and no
-        // picture: it is derived from whichever name is in force.
-        if (!updated.has_avatar) $('set-avatar').innerHTML =
-          `<span class="set-avatar-initial">${esc(_settingsInitial(updated.name))}</span>`
-      } catch (e) {
-        userInput.value = lastUsername
-        _settingsSaved($('set-username-flash'), e.message)
-      }
-    }
-    userInput?.addEventListener('blur', commitUsername)
-    userInput?.addEventListener('keydown', e => { if (e.key === 'Enter') userInput.blur() })
 
     // ── Picture ─────────────────────────────────────────────────────────────
     const file = $('set-avatar-file')
@@ -17730,49 +17746,24 @@ const App = (() => {
     // failure is always surfaced, never swallowed, and the fh cache is
     // dropped on every successful save so the ingest screens' strip and any
     // other open Settings tab pick the new value up on next read.
-    // Spec 1.1: changing the mode in Settings shows a one-sentence
-    // confirmation before it rewrites every switch below to match --
-    // unlike first run, this can flip switches an admin already set
-    // deliberately, so it does not apply silently on a click.
-    function _confirmModeChange(mode, onConfirm) {
-      const label = mode === 'organize' ? 'Organize my files' : 'Keep my files as-is'
-      const wrap = document.createElement('div')
-      wrap.className = 'modal-overlay'
-      wrap.innerHTML = `
-        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="fhmode-title">
-          <div class="modal-header"><h3 id="fhmode-title">Change file handling</h3></div>
-          <div class="modal-body">
-            <p>Switching to "${esc(label)}" rewrites the switches below to match it.</p>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-sm btn-ghost" id="fhmode-cancel">Cancel</button>
-            <button class="btn btn-sm btn-primary" id="fhmode-confirm">Change</button>
-          </div>
-        </div>`
-      document.body.appendChild(wrap)
-      const close = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
-      const onKey = e => { if (e.key === 'Escape') close() }
-      document.addEventListener('keydown', onKey)
-      wrap.querySelector('#fhmode-cancel').addEventListener('click', close)
-      wrap.addEventListener('click', e => { if (e.target === wrap) close() })
-      wrap.querySelector('#fhmode-confirm').addEventListener('click', () => { close(); onConfirm() })
-    }
+    // The mode applies on click (Ryan, 2026-10-06: no confirmation). It
+    // rewrites the switches below, and the repaint shows that.
     if ($('fh-mode')) {
       $('fh-mode').addEventListener('click', e => {
         const btn = e.target.closest('button[data-mode]')
         if (!btn) return
         const mode = btn.dataset.mode
         if (btn.classList.contains('on')) return
-        _confirmModeChange(mode, async () => {
+        ;(async () => {
           try {
-            const result = await API.system.setFileHandling({ file_handling_mode: mode })
+            await API.system.setFileHandling({ file_handling_mode: mode })
             await fileHandling(true)
             _settingsSaved($('fh-mode-flash'))
             renderSettingsPage()   // switches/scheme/tags all follow the mode
           } catch (err) {
             _settingsSaved($('fh-mode-flash'), err.message || 'Could not save')
           }
-        })
+        })()
       })
     }
 
@@ -17935,9 +17926,10 @@ const App = (() => {
       try { data = await API.lomax.usage(50, 0) } catch (_) { return }
       const t = data.totals || {}
       let loaded = (data.runs || []).length
-      const tot = (n, l) => `<div class="lx-tot"><div class="lx-tot-n">${n}</div><div class="lx-tot-l">${l}</div></div>`
-      host.innerHTML = `<div class="lx-tots">${tot((t.runs || 0).toLocaleString(), 'Runs')}${tot((t.total_tokens || 0).toLocaleString(), 'Tokens')}` +
-        `${tot((t.web_searches || 0).toLocaleString(), 'Web searches')}${tot(`${t.accepted || 0} of ${t.proposals || 0}`, 'Suggestions accepted')}</div>` +
+      const tot = (n, l) => `<span><b>${n}</b> ${l}</span>`
+      host.innerHTML = `<span class="set-label">Usage</span><div class="set-usage">${tot((t.runs || 0).toLocaleString(), 'runs')}` +
+        `${tot((t.total_tokens || 0).toLocaleString(), 'tokens')}${tot((t.web_searches || 0).toLocaleString(), 'web searches')}` +
+        `${tot(`${t.accepted || 0} of ${t.proposals || 0}`, 'suggestions accepted')}</div>` +
         ((data.runs || []).length ? `<table class="lx-tbl lx-hist"><thead><tr><th>Date</th><th>Job</th><th>Subject</th>` +
           `<th class="num">Suggestions</th><th class="num">Tokens</th><th class="num">Searches</th></tr></thead>` +
           `<tbody id="set-lx-rows">${data.runs.map(row).join('')}</tbody></table>` +
@@ -17956,7 +17948,7 @@ const App = (() => {
       })
     })()
 
-    $('set-peers')?.addEventListener('click', () => { window.location.hash = '#/peers' })
+    if ($('set-sharing')) _renderSharingPane($('set-sharing'))
   }
 
   document.getElementById('settings-btn')?.addEventListener('click',

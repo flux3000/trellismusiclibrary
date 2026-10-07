@@ -484,6 +484,9 @@ def get_recording(recording_id):
             {"id": l.collection.id, "name": l.collection.name}
             for l in db.session.query(CollectionRecording).filter_by(recording_id=rec.id).all()
         ],
+        # Listening Quality reads FLAC only; the Quality tab offers Analyze
+        # Audio only when there is something it can read (2026-10-06).
+        "audio_scorable": any(str(t.file_path or "").lower().endswith(".flac") for t in rec.tracks),
         "tracks": [
             {
                 "id":              t.id,

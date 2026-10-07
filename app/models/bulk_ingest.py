@@ -54,6 +54,10 @@ class BulkIngestRun(db.Model):
     # inferred for the fields it sets. NULL = nothing staged.
     applied_json = db.Column(db.Text, nullable=True)
 
+    # Set by Reset Queue (2026-10-06): the person emptied everything, the
+    # Imported tabs included, so this run is never shown on the page again.
+    cleared_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
     items = db.relationship("BulkIngestItem", back_populates="run",
                             cascade="all, delete-orphan")
 

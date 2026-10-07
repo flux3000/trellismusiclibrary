@@ -41,6 +41,7 @@ from app.models.artist import Artist
 from app.utils import quality_store as qs
 from app.utils.ingest import resolve_shows_in_dir
 from app.utils.paths import within_import_roots
+from app.utils.authz import admin_required
 
 bp = Blueprint("quality", __name__)
 
@@ -763,6 +764,9 @@ def _bulk_ingest_review_reasons():
         reasons = [r for r in (reason or "").split(",") if r]
         base = bulk_ingest_run.item_base(root)
         out[qs.norm_path(os.path.normpath(os.path.join(base, rel_path)))] = reasons
+        # item_base() resolves symlinks (macOS /tmp is /private/tmp), while a
+        # card's folder_path may not: key the path as the run stored it too.
+        out.setdefault(qs.norm_path(os.path.normpath(os.path.join(root, rel_path))), reasons)
     return out
 
 
@@ -1000,6 +1004,22 @@ def convert_cancel(job_id):
 def _within_import_roots(path):
     """Same containment rule browse() applies — this endpoint reads audio."""
     return within_import_roots(path)
+
+
+@bp.route("/fingerprints", methods=["GET"])
+@admin_required
+def fingerprints():
+    """
+    The FFP check for a folder before it is imported (Add Recording's Checksums
+    tab, Ryan 2026-10-06): header reads only, so it is quick. MD5 lists are not
+    reported; only a failed FFP matters.
+    """
+    folder = request.args.get("path") or ""
+    if not folder or not os.path.isdir(folder) or not _within_import_roots(folder):
+        return jsonify({"error": "Folder not found"}), 400
+    audit = _fingerprint_audit(folder, deep=False)
+    files = [f for f in audit.get("files", []) if f.get("type") in ("ffp", "st5")]
+    return jsonify({"files": files})
 
 
 @bp.route("/browse", methods=["GET"])

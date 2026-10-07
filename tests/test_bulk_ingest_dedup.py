@@ -75,9 +75,10 @@ def test_rerun_skips_already_ingested_and_reoffers_review(app, tmp_path):
 
     run2_rels = {it.rel_path for it in
                 _db.session.query(BulkIngestItem).filter_by(run_id=run2.id).all()}
-    # ShowA (already ingested in run1) is never re-offered; ShowReview (still
-    # needing a decision) and the new ShowB both are.
-    assert run2_rels == {"ShowReview", "ShowB"}
+    # ShowA (already ingested in run1) is never re-offered; ShowReview is still
+    # waiting in the one Queue (Ryan, 2026-10-06), so it is not queued twice;
+    # the new ShowB is.
+    assert run2_rels == {"ShowB"}
 
 
 def test_ffp_hash_match_skips_exact_duplicate(app, tmp_path):

@@ -185,9 +185,11 @@ def test_mb_tab_wiring_and_data_paths():
     assert "addEventListener('click', search)" in r
     assert "!titleEl.value.trim()" in r and "!yearEl.value.trim()" in r and r.count("/^track\\s*\\d+$/i") == 1
     assert "pp-mb-cand-score" not in r and "Unlink" in r and "Linked by you" in r
-    # Saved with the record, studio only; shown under the title; cleared with the folder.
+    # Saved with the record, studio only; cleared with the folder. Not shown above the
+    # tracks any more (Ryan, 2026-10-06): the MusicBrainz tab shows the release facts.
     assert "payload.mb_release_id = (payload.kind === 'studio' && ingest.mb && ingest.mb.picked)" in r
-    assert 'id="ingest-mb-facts"' in r and "ingest.mb = null" in r
+    assert 'id="ingest-mb-facts"' not in r and "ingest.mb = null" in r
+    assert "mbReleaseDetailsHtml(st.picked.detail)" in r
     # Facts line is label, catalog number, country, as on View Recording.
     f = APP_JS[APP_JS.index("function ingestMbFactsHtml()"):][:500]
     assert "[p.label, p.catalog_number, p.country]" in f

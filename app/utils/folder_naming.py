@@ -13,7 +13,12 @@ Date formats (partial dates degrade gracefully):
 Source formats:
   source only: SBD
 
+An Album (recording.kind == "studio") is named "{Artist} - {Album Title}"
+(Ryan, 2026-10-06): it has no date, venue or place, and naming it like a show
+gave "Ahmad Jamal - 1973 - Unknown Venue - Unknown Location".
+
 Examples:
+  Ahmad Jamal - Ahmad Jamal '73
   Grateful Dead - 1977-05-08 - Barton Hall - Ithaca, NY (SBD)
   Bela Fleck - 1998-01-15 - Bill and Claire's Living Room - Hickory, NC (SBD)
   Unknown Artist - 1963 - Unknown Venue - Unknown Location
@@ -87,6 +92,7 @@ def build_folder_name(
     venue_name=None,
     city=None, state=None, country=None,
     source=None,
+    kind=None, title=None,
 ):
     """
     Generate the canonical folder name for a recording.
@@ -102,6 +108,8 @@ def build_folder_name(
         str — folder name safe for macOS filesystem
     """
     artist  = _sanitize(artist_name or "Unknown Artist")
+    if kind == "studio":
+        return f"{artist} - {_sanitize(title or 'Untitled')}"
     date    = _format_date_range(start_year, start_month, start_day,
                                  end_year,   end_month,   end_day)
     venue   = _sanitize(venue_name or "Unknown Venue")
@@ -151,6 +159,8 @@ def build_folder_name_from_recording(recording, performance, artist, venue):
         state           = state,
         country         = country,
         source          = recording.source,
+        kind            = getattr(recording, "kind", None),
+        title           = getattr(recording, "title", None),
     )
 
 

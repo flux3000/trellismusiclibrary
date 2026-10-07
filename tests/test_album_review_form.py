@@ -45,7 +45,8 @@ def test_confirm_body_carries_kind_and_title():
 def test_studio_layout_hides_live_only_fields():
     r = _review()
     assert "Album Title" in r and 'id="f-album-title"' in r
-    assert APP_JS.count("Album Title") == 1
+    # The form's label, plus the Queue row's Album expand panel (2026-10-06).
+    assert APP_JS.count("Album Title") == 2
     # Month, Day, Venue, Event, Stage, end date, location, quality/source/lineage, source tag/shnid.
     assert r.count("${hid}") == 5
     assert r.count("${studio ? '; display:none' : ''}") == 4

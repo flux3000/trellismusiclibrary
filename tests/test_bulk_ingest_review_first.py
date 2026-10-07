@@ -112,21 +112,25 @@ def _hold_run(env, *names, flagged=()):
 # ── mode ────────────────────────────────────────────────────────────────────
 
 def test_mode_defaults_and_idempotent_start(app, env):
+    # One Queue, one mode (Ryan, 2026-10-06): the first source takes its
+    # placement's default, a later source joins the Queue's mode, and an
+    # explicit mode applies to the whole Queue.
     c = app.test_client()
     _admin(c)
     _good(env.incoming, "S1")
-    assert c.post("/api/bulk-ingest/start", json={}).get_json()["mode"] == "auto"
+    first = c.post("/api/bulk-ingest/start", json={}).get_json()
+    assert first["mode"] == "auto"
     out = c.post("/api/bulk-ingest/start", json={"path": str(env.incoming)}).get_json()
-    assert out["mode"] == "hold"
-    # Starting an active root again keeps that run's mode, whatever is asked.
-    again = c.post("/api/bulk-ingest/start",
-                   json={"path": str(env.incoming), "mode": "auto"}).get_json()
-    assert again["id"] == out["id"] and again["mode"] == "hold"
-    # An explicit mode wins over the default for a new run.
+    assert out["mode"] == "auto"
+    # Starting an active root again returns the same run.
+    again = c.post("/api/bulk-ingest/start", json={"path": str(env.incoming)}).get_json()
+    assert again["id"] == out["id"]
     sub = env.lib / "Sub"
     sub.mkdir()
     out = c.post("/api/bulk-ingest/start", json={"path": str(sub), "mode": "hold"}).get_json()
     assert out["mode"] == "hold"
+    assert {r.mode for r in _db.session.query(BulkIngestRun)
+            .filter(BulkIngestRun.status.in_(("running", "paused"))).all()} <= {"hold"}
     assert c.post("/api/bulk-ingest/start",
                   json={"path": str(env.incoming), "mode": "bogus"}).status_code == 400
 
@@ -145,7 +149,7 @@ def test_hold_run_leaves_items_ready_scored_and_library_empty(env):
     row = _db.session.query(QualityAnalysis).filter(
         QualityAnalysis.folder_path.like("%/S1")).first()
     assert row.listening_quality == 77.0 and row.recording_id is None
-    assert env.score_calls["n"] == 1                            # flagged is not scored
+    assert env.score_calls["n"] == 2              # Needs Review is scored too (Ryan, 2026-10-06)
 
 
 def test_hold_reuses_current_analysis(env):
@@ -377,7 +381,7 @@ def test_ready_and_moved_in_counts_queue_and_runs(app, env):
     # A finished hold run with ready/review items stays listed ...
     listed = c.get("/api/bulk-ingest/runs").get_json()["runs"]
     assert [r["id"] for r in listed] == [run.id] and listed[0]["mode"] == "hold"
-    assert c.get("/api/bulk-ingest/current").get_json()["id"] == run.id
+    assert c.get("/api/bulk-ingest/current").get_json()["id"] == "queue"
     # ... and drops off once only moved/ingested items remain.
     for it in _db.session.query(BulkIngestItem).filter_by(run_id=run.id).all():
         if it.status in ("ready", "review", "pending"):
@@ -868,3 +872,100 @@ def test_queued_convert_all_rows_report_converting(app, env):
         assert got["converting"] is None
     finally:
         api._CONVERT_ALL_QUEUED.discard(it.id)
+
+
+def test_add_to_library_queues_the_folder_paused(app, env):
+    # Add to Library on a working folder (Ryan, 2026-10-06): the folder is in the
+    # Queue, nothing has been scanned, and the run waits for the person's Start.
+    _good(env.incoming, "S1")
+    c = app.test_client()
+    _admin(c)
+    out = c.post("/api/bulk-ingest/start", json={"path": str(env.incoming / "S1"), "paused": True})
+    assert out.status_code == 200
+    run = _db.session.get(BulkIngestRun, out.get_json()["id"])
+    assert run.status == "paused"
+    items = _db.session.query(BulkIngestItem).filter_by(run_id=run.id).all()
+    assert [i.status for i in items] == ["pending"]
+
+
+# ── One Queue (Ryan, 2026-10-06: "There should only be one queue. Ever.") ────
+
+def test_two_sources_make_one_queue_and_reset_clears_both(app, env):
+    _good(env.incoming, "S1")
+    _good(env.incoming, "S2", day=9)
+    c = app.test_client()
+    _admin(c)
+    for name in ("S1", "S2"):
+        assert c.post("/api/bulk-ingest/start",
+                      json={"path": str(env.incoming / name), "paused": True}).status_code == 200
+    q = c.get("/api/bulk-ingest/current").get_json()
+    assert q["id"] == "queue" and q["counts"]["pending"] == 2
+    assert c.get("/api/bulk-ingest/queue/items?status=queue").get_json()["total"] == 2
+    assert c.post("/api/bulk-ingest/queue/reset").status_code == 200
+    assert c.get("/api/bulk-ingest/current").get_json() == {"run": None}
+    assert c.get("/api/bulk-ingest/runs").get_json()["runs"] == []
+
+
+def test_an_overlapping_source_never_queues_a_folder_twice(app, env):
+    _good(env.incoming, "S1")
+    c = app.test_client()
+    _admin(c)
+    c.post("/api/bulk-ingest/start", json={"path": str(env.incoming / "S1"), "paused": True})
+    c.post("/api/bulk-ingest/start", json={"path": str(env.incoming), "paused": True})
+    assert c.get("/api/bulk-ingest/queue/items?status=queue").get_json()["total"] == 1
+
+
+def test_pause_and_resume_apply_to_the_whole_queue(app, env):
+    _good(env.incoming, "S1")
+    _good(env.incoming, "S2", day=9)
+    c = app.test_client()
+    _admin(c)
+    for name in ("S1", "S2"):
+        c.post("/api/bulk-ingest/start", json={"path": str(env.incoming / name), "paused": True})
+    c.post("/api/bulk-ingest/queue/resume")
+    assert {r.status for r in _db.session.query(BulkIngestRun).all()} <= {"running", "done"}
+    c.post("/api/bulk-ingest/queue/pause")
+    runs = _db.session.query(BulkIngestRun).all()
+    assert all(r.status in ("paused", "done") for r in runs)
+
+
+def test_import_all_requests_ready_and_review_and_skipped_sort_last(app, env):
+    run = _run(env.incoming, mode="hold")
+    run.status = "done"
+    for rel, st in (("A", "skipped"), ("B", "ready"), ("C", "review")):
+        _db.session.add(BulkIngestItem(run_id=run.id, rel_path=rel, status=st))
+    _db.session.commit()
+    c = app.test_client()
+    _admin(c)
+    rows = c.get("/api/bulk-ingest/queue/items?status=queue").get_json()["items"]
+    assert [r["rel_path"] for r in rows] == ["B", "C", "A"]
+    assert c.post("/api/bulk-ingest/queue/ingest-all").get_json()["queued"] == 2
+    asked = {it.rel_path for it in _db.session.query(BulkIngestItem)
+             .filter_by(run_id=run.id, ingest_requested=True).all()}
+    assert asked == {"B", "C"}
+
+
+# ── Pre-import checks on Add Recording (2026-10-06) ──────────────────────────
+
+def test_fingerprint_and_spectrogram_routes_are_admin_only(app, env):
+    _good(env.incoming, "S1")
+    anon = app.test_client()
+    assert anon.get(f"/api/quality/fingerprints?path={env.incoming / 'S1'}").status_code in (401, 403)
+    assert anon.get(f"/api/tracks/spectrogram-file?path={env.incoming / 'S1'}").status_code in (401, 403)
+    c = app.test_client()
+    _admin(c)
+    out = c.get(f"/api/quality/fingerprints?path={env.incoming / 'S1'}")
+    assert out.status_code == 200 and isinstance(out.get_json()["files"], list)
+    assert c.get(f"/api/tracks/spectrogram-file?path={env.incoming / 'nope.flac'}").status_code == 404
+
+
+def test_reset_queue_clears_the_imported_rows_from_the_page(app, env):
+    run = _run(env.incoming, mode="hold")
+    run.status = "done"
+    _db.session.add(BulkIngestItem(run_id=run.id, rel_path="A", status="ingested", kind="live"))
+    _db.session.commit()
+    c = app.test_client()
+    _admin(c)
+    assert c.get("/api/bulk-ingest/current").get_json()["counts"]["ingested"] == 1
+    assert c.post("/api/bulk-ingest/queue/reset").status_code == 200
+    assert c.get("/api/bulk-ingest/current").get_json() == {"run": None}

@@ -83,6 +83,42 @@ _SET_PREFIX_LABELS = {
 _DISC_PREFIXES = {"D", "CD", "DISC", "DISK", "VOL", "VOLUME", "PART", "TAPE", "SHOW"}
 
 
+# Disc folders named after the show, the disc token at the END of the name
+# ("jdb1999-05-27d1.shnf", "gd77-05-08 cd2"): taper conventions do this all the
+# time. The token is only trusted when two or more SIBLINGS carry the same stem
+# with different numbers, so a lone folder ending in a digit is never a disc
+# (Ryan, 2026-10-06, Jerry Douglas 1999-05-27 queued as two recordings).
+_SIBLING_DISC_RE = re.compile(r"^(.*?)(?:cd|disc|disk|d)\s*[-_]?\s*(\d{1,2})$", re.IGNORECASE)
+_DIR_SUFFIX_RE = re.compile(r"\.[A-Za-z][A-Za-z0-9]{1,4}$")
+
+
+def _sibling_discs(names):
+    """{name: disc number} for sibling folders that are one show's discs by the
+    stem rule above, else {}. Needs 2+ siblings, one stem, distinct numbers."""
+    by_stem = {}
+    for n in names:
+        if _parse_set_dir(n):
+            continue
+        m = _SIBLING_DISC_RE.match(_DIR_SUFFIX_RE.sub("", (n or "").strip()))
+        if m and m.group(1).strip(" -_."):
+            by_stem.setdefault(m.group(1).lower(), []).append((n, int(m.group(2))))
+    out = {}
+    for group in by_stem.values():
+        nums = [k for _, k in group]
+        if len(group) >= 2 and len(set(nums)) == len(nums):
+            out.update(dict(group))
+    return out
+
+
+def _parse_set_dir_among(name, siblings):
+    """_parse_set_dir, or the sibling stem rule when the name alone says nothing."""
+    parsed = _parse_set_dir(name)
+    if parsed:
+        return parsed
+    k = _sibling_discs(siblings).get(name)
+    return (f"Disc {k}", k, "disc") if k is not None else None
+
+
 def _parse_set_dir(name):
     """
     Parse a set/disc subdir name into (canonical_label, number, kind).
@@ -217,7 +253,8 @@ def _audio_subdirs(path, unreadable=None):
 def _is_multi_disc(subs):
     """2+ audio-bearing subdirs named for a disc/set: the parent is ONE show.
     Shared by resolve_shows and is_show_root so they cannot disagree."""
-    return sum(1 for s in subs if _parse_set_dir(s.name)) >= 2
+    names = [s.name for s in subs]
+    return sum(1 for n in names if _parse_set_dir_among(n, names)) >= 2
 
 
 def is_show_root(path):
@@ -651,7 +688,7 @@ def scan_folder(folder_path):
     # rest of the pipeline the FLAC TRACKNUMBER tags reset per disc.)
     set_dirs = []   # [(abs_dirpath, label, number, kind)]
     for e in subdirs:
-        parsed = _parse_set_dir(e)
+        parsed = _parse_set_dir_among(e, subdirs)
         if not parsed:
             continue
         label, num, kind = parsed
@@ -1418,6 +1455,8 @@ _MONTH_NAMES = {
 
 # Track line: "01 Title", "1. Title", "1 - Title", "11: Title"
 _TRACK_PATTERN = re.compile(r"^\s*(\d{1,3})(?:[.:\-\s]\s*|\)\s*)(.+)$")
+# "02." or "02)" alone on a line: a numbered track with no title.
+_BLANK_TRACK_RE = re.compile(r"^\s*(\d{1,3})\s*[.)]$")
 
 # A bare "H:MM:SS" or "M:SS" value with nothing else on the line — almost
 # always a stated total running time in the header ("1:46:28"), never a
@@ -2355,6 +2394,20 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
                 header_idx.append(line_idx)
             continue
 
+        # A numbered line with no title, inside a track list ("02."): the track
+        # exists, its title is unknown. Kept, so the list still lines up with
+        # the audio files by position (Ryan, 2026-10-06, Jerry Douglas
+        # 2003-07-18, whose list names only 4 of 16 tracks).
+        mb = _BLANK_TRACK_RE.match(stripped) if in_tracks else None
+        if mb:
+            num = int(mb.group(1))
+            if last_raw_num is not None and num <= last_raw_num:
+                disc_offset += last_raw_num
+            last_raw_num = num
+            track_pairs.append((disc_offset + num, "", None))
+            track_meta.append({"line": line_idx, "seconds": None})
+            continue
+
         m = _TRACK_PATTERN.match(stripped)
         if m:
             num   = int(m.group(1))
@@ -2826,8 +2879,8 @@ def build_scan_payload(folder_path, info_override=None):
     fingerprints = []
     for fp in files["fingerprints"]:
         try:
-            with open(fp["path"], "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
+            from app.utils.checksums import read_checksum_text
+            content = read_checksum_text(fp["path"])
         except OSError:
             content = None
         fingerprints.append({

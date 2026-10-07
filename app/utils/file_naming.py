@@ -115,6 +115,10 @@ def parse_template(text):
 PRESETS = {
     "original":     "{original}",
     "number_title": "{track} - {title}",
+    # "etree" in the picker (2026-10-06): one continuous track number, no disc.
+    # The older "etree" key below keeps its with-disc meaning so a saved
+    # choice does not change under anyone; the picker calls it "etree with disc".
+    "etree_tracks": "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].t{track}",
     "etree":        "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].[d{disc}]t{track_in_disc}",
     "etree_sets":   "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}][s{set}]t{track_in_set}",
 }
@@ -133,7 +137,7 @@ def flattens(scheme, template=None):
     """
     if scheme == "original":
         return False
-    if scheme in ("number_title", "etree", "etree_sets"):
+    if scheme in ("number_title", "etree_tracks", "etree", "etree_sets"):
         return True
     if scheme == "custom":
         t = template or ""

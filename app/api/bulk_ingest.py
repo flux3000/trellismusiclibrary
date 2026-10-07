@@ -60,7 +60,7 @@ import os
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import login_required, current_user
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 
 from app.extensions import db
 from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
@@ -184,25 +184,6 @@ def _item_name(it, run):
     return _rel_name(it.rel_path, run)
 
 
-def _current_run():
-    """The run named by an optional ?run_id= (or JSON run_id), else the most
-    recently started run of any status -- so /current still has something to
-    report right after a run finishes."""
-    run_id = request.args.get("run_id", type=int)
-    if run_id is None:
-        run_id = (request.get_json(silent=True) or {}).get("run_id")
-    if run_id is not None:
-        return db.session.get(BulkIngestRun, run_id)
-    # Prefer a run the person still has something to do with (unfinished, or a
-    # Review First queue with ready/review items) over a newer finished one.
-    listed = bulk_ingest_run.listed_runs()
-    if listed:
-        return listed[-1]
-    return (db.session.query(BulkIngestRun)
-            .order_by(BulkIngestRun.id.desc())
-            .first())
-
-
 @bp.route("/start", methods=["POST"])
 @admin_required
 def start():
@@ -228,7 +209,8 @@ def start():
     mode = (request.get_json(silent=True) or {}).get("mode")
     if mode not in (None, "auto", "hold"):
         return jsonify({"error": "mode must be 'auto' or 'hold'"}), 400
-    run = bulk_ingest_run.start_run(root, mode)
+    paused = (request.get_json(silent=True) or {}).get("paused") is True
+    run = bulk_ingest_run.start_run(root, mode, paused=paused)
     return jsonify(_serialize_run(run))
 
 
@@ -255,14 +237,55 @@ def runs():
     return jsonify({"runs": out, "waiting": len(waiting)})
 
 
+def _queue_or_latest():
+    """The runs behind the Queue, or the most recent run when the Queue is
+    empty (so the page still has something to report right after it drains)."""
+    runs = bulk_ingest_run.queue_runs()
+    if runs:
+        return runs
+    latest = (db.session.query(BulkIngestRun).filter(BulkIngestRun.cleared_at.is_(None))
+              .order_by(BulkIngestRun.id.desc()).first())
+    return [latest] if latest else []
+
+
+def _serialize_queue(runs):
+    """The one Queue as a single run-shaped payload (id "queue"): counts and
+    tallies summed over its runs; status running if any run runs, else paused
+    if any is paused; mode, root and Bulk Value Apply from the newest run."""
+    parts = [_serialize_run(r) for r in runs]
+    out = dict(parts[-1])
+    out["id"] = "queue"
+    statuses = {p["status"] for p in parts}
+    out["status"] = ("running" if "running" in statuses
+                     else "paused" if "paused" in statuses else "done")
+    for key in ("counts", "reasons", "skipped_reasons"):
+        total = {}
+        for p in parts:
+            for k, v in (p.get(key) or {}).items():
+                total[k] = total.get(k, 0) + v
+        out[key] = total
+    for key in ("failed", "studio", "scored", "scorable"):
+        out[key] = sum(p.get(key) or 0 for p in parts)
+    out["last_error"] = next((p["last_error"] for p in reversed(parts) if p.get("last_error")), None)
+    return out
+
+
 @bp.route("/current", methods=["GET"])
 @login_required
 def current():
-    run = _current_run()
-    if run is None:
+    # ?run_id= names one run (kept for callers that ask); otherwise the Queue.
+    run_id = request.args.get("run_id", type=int)
+    if run_id is not None:
+        one = db.session.get(BulkIngestRun, run_id)
+        runs = [one] if one else []
+    else:
+        runs = _queue_or_latest()
+    if not runs:
         return jsonify({"run": None})
+    ids = [r.id for r in runs]
+    by_id = {r.id: r for r in runs}
 
-    payload = _serialize_run(run)
+    payload = _serialize_run(runs[0]) if run_id is not None else _serialize_queue(runs)
     if getattr(current_user, "role", None) != "admin":
         # R2-N1: last_error is a full Python traceback with absolute
         # filesystem paths -- fine for the admin who can already see and
@@ -271,21 +294,21 @@ def current():
         payload.pop("last_error", None)
 
     current_item = (db.session.query(BulkIngestItem)
-                    .filter(BulkIngestItem.run_id == run.id,
+                    .filter(BulkIngestItem.run_id.in_(ids),
                             BulkIngestItem.status == "in_progress")
                     .order_by(BulkIngestItem.id.asc())
                     .first())
-    payload["current"] = _item_name(current_item, run) if current_item else None
+    payload["current"] = _item_name(current_item, by_id[current_item.run_id]) if current_item else None
     payload["now"] = payload["current"]
 
     # "Up next" (spec chunk 5e, 2026-09-27): the next eight pending items in
     # the order process() will actually reach them (id asc), basenames only.
-    upcoming_rows = (db.session.query(BulkIngestItem.rel_path)
-                     .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "pending")
+    upcoming_rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestItem.run_id)
+                     .filter(BulkIngestItem.run_id.in_(ids), BulkIngestItem.status == "pending")
                      .order_by(BulkIngestItem.id.asc())
                      .limit(8)
                      .all())
-    payload["upcoming"] = [_rel_name(rp, run) for (rp,) in upcoming_rows]
+    payload["upcoming"] = [_rel_name(rp, by_id[rid]) for (rp, rid) in upcoming_rows]
 
     # "Recently added" (spec chunk 5e): the last twelve ingested items,
     # newest first, one join -- never a per-item loop.
@@ -296,7 +319,7 @@ def current():
                    .join(Recording, Recording.id == BulkIngestItem.recording_id)
                    .join(Performance, Performance.id == Recording.performance_id)
                    .join(Artist, Artist.id == Performance.artist_id)
-                   .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "ingested")
+                   .filter(BulkIngestItem.run_id.in_(ids), BulkIngestItem.status == "ingested")
                    .order_by(BulkIngestItem.id.desc())
                    .limit(12)
                    .all())
@@ -309,9 +332,9 @@ def current():
     } for recording_id, title, kind, artist_name, start_year, start_month, start_day in recent_rows]
 
     duplicates = []
-    if run.status == "done":
+    if payload["status"] == "done":
         dupe_items = (db.session.query(BulkIngestItem)
-                      .filter(BulkIngestItem.run_id == run.id,
+                      .filter(BulkIngestItem.run_id.in_(ids),
                               BulkIngestItem.duplicate_of.isnot(None))
                       .all())
         # N2: the second link used to show the bare recording id as its
@@ -327,7 +350,7 @@ def current():
             }
         duplicates = [{
             "item_id":       it.id,
-            "rel_path_basename": _item_name(it, run),
+            "rel_path_basename": _item_name(it, by_id[it.run_id]),
             "recording_id":  it.recording_id,
             "duplicate_of":  it.duplicate_of,
             "duplicate_basename": basenames.get(it.duplicate_of),
@@ -378,18 +401,23 @@ def reset(run_id):
     return jsonify({"removed": removed, "run": _serialize_run(run)})
 
 
+@bp.route("/queue/items", methods=["GET"], defaults={"run_id": None})
 @bp.route("/<int:run_id>/items", methods=["GET"])
 @admin_required
 def items(run_id):
-    run, err = _get_run_or_404(run_id)
-    if err:
-        return err
+    if run_id is None:
+        ids = [r.id for r in _queue_or_latest()]
+    else:
+        run, err = _get_run_or_404(run_id)
+        if err:
+            return err
+        ids = [run_id]
 
     status = request.args.get("status")
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(500, max(1, request.args.get("per_page", 100, type=int)))
 
-    q = db.session.query(BulkIngestItem).filter(BulkIngestItem.run_id == run_id)
+    q = db.session.query(BulkIngestItem).filter(BulkIngestItem.run_id.in_(ids))
     # ?ids=1,2,3 -- the poll's cheap path: just the rows that can still change
     # (pending / in progress / requested), so a tick over a big queue costs a
     # handful of rows instead of re-serializing every loaded page.
@@ -416,7 +444,9 @@ def items(run_id):
         # pending, in progress, ready, review, skipped, failed. Discovery
         # order. 'moved' items went to Backlog/Workshop: terminal, not queued.
         q = q.filter(BulkIngestItem.status.notin_(("ingested", "moved")))
-        order = BulkIngestItem.id.asc()
+        # Skipped rows (exact duplicates) sit at the bottom: they are out of
+        # the work (Ryan, 2026-10-06).
+        order = (case((BulkIngestItem.status == "skipped", 1), else_=0), BulkIngestItem.id.asc())
     elif status in ("live", "album"):
         # The two completed tabs: ingested, split by kind. A NULL kind on an
         # ingested item counts as live, the model default.
@@ -442,12 +472,12 @@ def items(run_id):
         # then the rest in discovery order.
         ordered = bulk_ingest_run.lead_first(
             q.with_entities(BulkIngestItem.id, BulkIngestItem.meta)
-            .order_by(order).all())
+            .order_by(*(order if isinstance(order, tuple) else (order,))).all())
         by_id = {it.id: it for it in
                  q.filter(BulkIngestItem.id.in_(ordered[(page - 1) * per_page:page * per_page])).all()}
         rows = [by_id[i] for i in ordered[(page - 1) * per_page:page * per_page] if i in by_id]
     else:
-        rows = (q.order_by(order)
+        rows = (q.order_by(*(order if isinstance(order, tuple) else (order,)))
                 .offset((page - 1) * per_page)
                 .limit(per_page)
                 .all())
@@ -485,6 +515,8 @@ def _serialize_item(it, image_urls=None):
         # root for an in-library run and to the run root otherwise, and is "."
         # for an outside single-show folder, so the client cannot rebuild it.
         "abs_path":     bulk_ingest_run.item_abs_path(it),
+        # Per item, since one Queue holds sources inside and outside the library.
+        "placement":    "in_place" if bulk_ingest_run.is_in_library(it.run.root) else "bring_in",
         "updated_at":   it.updated_at.isoformat() if it.updated_at else None,
         **_item_meta_fields(it),
     }
@@ -521,6 +553,7 @@ def _item_meta_fields(it):
         "lineage":   meta.get("lineage"),
         "title":     meta.get("title"),
         "track_count": meta.get("track_count"),
+        "duration_sec": meta.get("duration_sec"),
         "tracks":      meta.get("tracks") or [],
         # Metadata band for the unified ingest queue table (2026-09-27) --
         # computed once at extraction time (bulk_ingest_run.py::process),
@@ -831,3 +864,105 @@ def convert_unsupported(run_id):
             daemon=True,
         ).start()
     return jsonify({"queued": len(ready), "run": _serialize_run(run)}), 202
+
+
+# ── Queue-wide actions (Ryan, 2026-10-06: one Queue) ────────────────────────
+# Each applies to every run behind the Queue; the per-run routes above stay
+# for callers that name one run.
+
+def _queue_payload():
+    runs = _queue_or_latest()
+    return _serialize_queue(runs) if runs else None
+
+
+@bp.route("/queue/pause", methods=["POST"])
+@admin_required
+def queue_pause():
+    bulk_ingest_run.pause_queue()
+    return jsonify(_queue_payload())
+
+
+@bp.route("/queue/resume", methods=["POST"])
+@admin_required
+def queue_resume():
+    bulk_ingest_run.resume_queue()
+    return jsonify(_queue_payload())
+
+
+@bp.route("/queue/reset", methods=["POST"])
+@admin_required
+def queue_reset():
+    removed = bulk_ingest_run.reset_whole_queue()
+    return jsonify({"removed": removed, "run": _queue_payload()})
+
+
+@bp.route("/queue/ingest-ready", methods=["POST"])
+@admin_required
+def queue_ingest_ready():
+    runs = bulk_ingest_run.queue_runs()
+    if any(r.status == "paused" for r in runs):
+        return jsonify({"error": "run is paused"}), 409
+    queued = 0
+    for run in runs:
+        resp = ingest_ready(run.id)
+        body, code = (resp if isinstance(resp, tuple) else (resp, resp.status_code))
+        if code >= 400:
+            return resp
+        queued += (body.get_json() or {}).get("queued", 0)
+    return jsonify({"queued": queued, "run": _queue_payload()}), 202
+
+
+@bp.route("/queue/applied", methods=["PUT"])
+@admin_required
+def queue_set_applied():
+    """Bulk Value Apply for the whole Queue: stored on every run behind it
+    (a source added later copies it, see start_run)."""
+    runs = _queue_or_latest()
+    for run in runs:
+        resp = set_applied(run.id)
+        if isinstance(resp, tuple) and resp[1] >= 400:
+            return resp
+    return jsonify(_queue_payload())
+
+
+@bp.route("/queue/convert-unsupported", methods=["POST"])
+@admin_required
+def queue_convert_unsupported():
+    runs = bulk_ingest_run.queue_runs()
+    if any(r.status == "paused" for r in runs):
+        return jsonify({"error": "run is paused"}), 409
+    queued = 0
+    for run in runs:
+        resp = convert_unsupported(run.id)
+        body, code = (resp if isinstance(resp, tuple) else (resp, resp.status_code))
+        if code >= 400 and code != 409:
+            return resp
+        queued += (body.get_json() or {}).get("queued", 0)
+    return jsonify({"queued": queued, "run": _queue_payload()}), 202
+
+
+@bp.route("/queue/ingest-all", methods=["POST"])
+@admin_required
+def queue_ingest_all():
+    """Import All (Ryan, 2026-10-06): request ingest for every ready AND
+    review row in the Queue. A row that still cannot be ingested (no artist,
+    exact duplicate) comes back flagged, as a single "Import anyway" does.
+    Rows held back for unsupported audio are left alone: they need converting."""
+    runs = bulk_ingest_run.queue_runs()
+    if any(r.status == "paused" for r in runs):
+        return jsonify({"error": "run is paused"}), 409
+    queued = 0
+    for run in runs:
+        rows = (db.session.query(BulkIngestItem)
+                .filter(BulkIngestItem.run_id == run.id,
+                        BulkIngestItem.status.in_(("ready", "review")))
+                .all())
+        rows = [it for it in rows if not _unsupported(it)]
+        if not rows:
+            continue
+        err = _converting_error(rows)
+        if err:
+            return err
+        _request_ingest(run, rows)
+        queued += len(rows)
+    return jsonify({"queued": queued, "run": _queue_payload()}), 202
