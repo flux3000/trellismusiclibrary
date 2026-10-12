@@ -1,8 +1,8 @@
-"""
-Resolver v2 chunk 7b: Artist.confirmed_at (a person confirmed this act) and the resolver
-feature built on it. Human saves set it (the confirm path, a direct edit, adding an artist),
-unattended saves never do, it is never cleared, the migration backfills every existing row,
-and an exact match to a confirmed act is an independent source for the artist field.
+"""Resolver v2 chunk 7b: Artist.confirmed_at (a person confirmed this act) and the
+resolver feature built on it. Human saves set it (the confirm path, a direct
+edit, adding an artist), unattended saves never do, it is never cleared, the
+migration backfills every existing row, and an exact match to a confirmed act
+is an independent source for the artist field.
 """
 import sqlite3
 import subprocess
@@ -204,9 +204,11 @@ def test_only_a_confirmed_row_adds_the_independent_source(env):
 
 @pytest.fixture()
 def artist_bar():
-    """A bar low enough for the +3 bonus to show (tau .94, m 12). The shipped bar is higher: G1's
-    own rows at this logit are right 95% of the time, so a confirmed G3-style row is NOT confident
-    under the shipped calibration (see the chunk 7b report); this test is about the mechanism."""
+    """A bar low enough for the +3 bonus to show (tau .94, m 12). The shipped bar
+    is higher: G1's own rows at this logit are right 95% of the time, so a
+    confirmed G3-style row is NOT confident under the shipped calibration; this
+    test is about the mechanism.
+    """
     import copy
     cal = copy.deepcopy(C.load_calibration(force=True))
     cal["fields"]["artist"].update(tau=0.94, m=12.0)

@@ -1,14 +1,12 @@
-"""
-tests/test_folder_collision_e2e.py — collision protection driven through the
+"""tests/test_folder_collision_e2e.py — collision protection driven through the
 REAL API endpoints against a REAL library directory, not the helpers in
 isolation.
 
-Ryan's 2026-09-01 report: two "Various Artists" recordings at Ryman
-Auditorium, 1964, both ending up with unlabeled Source — their files ended up
-merged into one folder. tests/test_folder_naming.py proves
-unique_folder_name() and rename_recording_folder() dedupe correctly on their
-own; this file proves the ENDPOINTS actually reach that protection, since a
-helper that works and a caller that skips it look identical from the outside.
+recordings at Ryman Auditorium, 1964, both ending up with unlabeled Source —
+their files ended up merged into one folder. tests/test_folder_naming.py proves
+unique_folder_name and rename_recording_folder dedupe correctly on their own;
+this file proves the ENDPOINTS actually reach that protection, since a helper
+that works and a caller that skips it look identical from the outside.
 
 Each test asserts the strong property, not just the folder name: no folder
 ever ends up holding both recordings' audio.
@@ -61,7 +59,6 @@ def ryman(app, tmp_path):
     """
     app.config["LIBRARY_ROOT"] = str(tmp_path)
     node_settings.apply_mode("organize")   # folder renaming is organize's default,
-                                            # not unconditional -- see chunk 7
 
     artist = Artist(name="Various Artists")
     _db.session.add(artist)
@@ -163,7 +160,7 @@ def test_repeated_saves_do_not_grow_more_suffixes(client, ryman):
     assert folders == [BASE, f"{BASE} (2)"], folders
 
 
-# ── Track FILE name collisions (2026-09-01) ───────────────────────────────────
+# ── Track FILE name collisions ───────────────────────────────────
 # The folder cases above are about directories, where os.rename() at least
 # refuses a non-empty target. Files have no such mercy: os.rename() REPLACES
 # the destination silently, so a retitle that lands on a sibling's filename
@@ -175,7 +172,6 @@ def two_tracks(app, tmp_path):
     title — the shape a retitle can collapse."""
     app.config["LIBRARY_ROOT"] = str(tmp_path)
     node_settings.apply_mode("organize")   # file renaming is organize's default,
-                                            # not unconditional -- see chunk 7
 
     artist = Artist(name="Various Artists")
     _db.session.add(artist)
@@ -238,8 +234,8 @@ def test_retitling_a_track_to_a_free_name_keeps_the_plain_name(client, two_track
     assert (folder / "01 - Wabash Blues.flac").read_bytes() == b"second"
 
 
-# ── Shared-folder guard (2026-09-01) ──────────────────────────────────────────
-# The ingest merge bug left Ryan's library with eight recordings pointing at
+# ── Shared-folder guard ──────────────────────────────────────────
+# The ingest merge bug left the user's library with eight recordings pointing at
 # ONE folder (146 files, eight tracks numbered 01). Renaming that folder to
 # match any one of them would move the other seven's audio and strand their
 # folder_path. The rename refuses instead — non-fatally, so the metadata save
@@ -253,7 +249,7 @@ def test_rename_refuses_to_move_a_folder_other_recordings_share(client, ryman):
 
     shared_rel = f"Various Artists/{BASE}"
     aud = _db.session.get(Recording, ryman["aud_id"])
-    aud.folder_path = shared_rel          # the merged state, as on Ryan's disk
+    aud.folder_path = shared_rel          # the merged state, as on the user's disk
     _db.session.commit()
 
     resp = client.put(f"/api/recordings/{ryman['aud_id']}", json={"source": "SBD"})
@@ -287,7 +283,7 @@ def test_unshared_folder_still_renames_normally(client, ryman):
     assert "folder_rename_error" not in resp.get_json(), resp.get_json()
     assert (artist_dir / f"{BASE} (SBD)").is_dir()
 
-# ── 'keep' mode: metadata saves and retitles never touch disk (chunk 7) ──────
+# ── 'keep' mode: metadata saves and retitles never touch disk ──────
 
 def test_metadata_save_in_keep_mode_never_renames_the_folder(client, ryman):
     """rename_folders off (the 'keep' default): a Recording PUT and a

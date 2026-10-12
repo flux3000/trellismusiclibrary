@@ -1,9 +1,6 @@
-"""
-app/utils/downloads_dir.py -- where downloaded and incoming material lands,
+"""app/utils/downloads_dir.py -- where downloaded and incoming material lands,
 and the one place that creates it.
 
-2026-10-01 (Archive Downloads). run.py resolves IMPORT_DIR at boot; for an
-imported library with no Downloads folder set it is now ~/Downloads/Trellis.
 That folder is NOT created at boot: a macOS permission prompt for ~/Downloads
 at launch, with no context, is a bad first impression. It is created here, the
 first time something actually needs it (a queued download, the Downloads page,

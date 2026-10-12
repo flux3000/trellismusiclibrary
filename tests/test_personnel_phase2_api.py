@@ -1,9 +1,8 @@
-"""
-tests/test_personnel_phase2_api.py — Per-Show Personnel, Phase 2 API surface
-(2026-07-18): stint CRUD endpoints, Artist.default_personnel_mode, the
-manual Performance.personnel_mode toggle (snapshot-on-explicit,
-clear-on-inherit), and per-row instrument/note editing. These back the
-Artist-page stint editor and the recording-page personnel pill row.
+"""tests/test_personnel_phase2_api.py — Per-Show Personnel, Phase 2 API surface:
+stint CRUD endpoints, Artist.default_personnel_mode, the manual
+Performance.personnel_mode toggle (snapshot-on-explicit, clear-on-inherit), and
+per-row instrument/note editing. These back the Artist-page stint editor and
+the recording-page personnel pill row.
 """
 
 import pytest

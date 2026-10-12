@@ -1,7 +1,4 @@
-"""
-scripts/migrate_add_genre_color_and_performer_images.py
-
-Two additive changes, 2026-08-07:
+"""scripts/migrate_add_genre_color_and_performer_images.py
 
   1. `genre.color` — nullable `#rrggbb` string driving the Browse cards' colour
      flair, editable through a colour picker in the Genre editor. Seeded with a
@@ -17,9 +14,8 @@ Both additive and idempotent — safe to re-run.
 
 `performer.image_ext` is deliberately NOT dropped. SQLite cannot drop a column
 without a full table rebuild, and this project has already been bitten by
-rebuild-adjacent DDL (the 2026-07-22 stale-FK episode, repaired by
-tools/repair_stale_fk_ddl.py). The column is backfilled into `performer_image`
-and then simply ignored by the application.
+rebuild-adjacent DDL. The column is backfilled into `performer_image` and then
+simply ignored by the application.
 
 The backfill DOES NOT MOVE OR RENAME ANY FILE. The legacy image keeps its
 `profile<ext>` name on disk and the new row records that name verbatim, so an
@@ -43,12 +39,12 @@ DB = os.environ.get(
 )
 
 # Starting palette. Matched case-insensitively against genre.name, so it fits
-# the vocabulary in THIS database (Ryan renamed the seeded 20 down to 14
-# combined categories) rather than the original spec list. Chosen to stay
-# legible on both themes' backgrounds — the dark theme is a warm near-black
-# (#1a1714), the light a warm cream (#f0ebe3), so fully-saturated primaries
-# read badly on one or the other. These are starting points; the whole reason
-# the picker exists is that Ryan will disagree with some of them.
+# the vocabulary in THIS database rather than the original spec list. Chosen
+# to stay legible on both themes' backgrounds — the dark theme is a warm
+# near-black (#1a1714), the light a warm cream (#f0ebe3), so fully-saturated
+# primaries read badly on one or the other. These are starting points; the
+# whole reason the picker exists is that the user will disagree with some of
+# them.
 SEED_COLORS = {
     "bluegrass & traditional":   "#7a9a5b",   # grass green
     "acoustic jazz & newgrass":  "#5fa39a",   # teal, adjacent to bluegrass
@@ -141,9 +137,8 @@ def main():
             con.commit()
 
     # ── 2b. performer_image.source_ref ───────────────────────────────────────
-    # Added 2026-08-07, after the table shipped: records which Commons file a
-    # fetched image came from so a repeat fetch can skip it. Separate step
-    # because the table may already exist from an earlier run of this script.
+    # Separate step because the table may already exist from an earlier run of
+    # this script.
     if "performer_image" in tables():
         if "source_ref" in cols("performer_image"):
             print("performer_image.source_ref already exists.")

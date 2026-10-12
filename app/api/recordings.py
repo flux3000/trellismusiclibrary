@@ -82,10 +82,10 @@ def _card_eager(query):
         selectinload(Recording.performance)
         .selectinload(Performance.artist)
         .selectinload(Artist.genre),
-        # Recording-level artwork (Studio Records spec v1, chunk 5) --
-        # image_url on every row is now unconditional (not gated behind
-        # card=True), so this eager-load has to ride along with every
-        # card-bearing query too, same N+1 reasoning as the two above.
+        # Recording-level artwork -- image_url on every row is now
+        # unconditional (not gated behind card=True), so this
+        # eager-load has to ride along with every card-bearing query
+        # too, same N+1 reasoning as the two above.
         selectinload(Recording.images),
         selectinload(Recording.performance)
         .selectinload(Performance.venue)
@@ -116,10 +116,6 @@ def _image_chain_eager():
 def recent_recordings():
     limit = request.args.get("limit", 50, type=int) or 50
     limit = max(1, min(limit, 200))
-    # Paging, added 2026-08-23 so Recently Added can scroll indefinitely
-    # instead of stopping at a hardcoded 50 (Ryan). Offset over keyset is fine
-    # here: the ordering column is created_at, which does not change under the
-    # reader, so a page boundary cannot skip or repeat a row mid-scroll.
     offset = max(0, request.args.get("offset", 0, type=int) or 0)
     waveform = request.args.get("waveform", "").lower() in ("1", "true", "yes")
     # `card=1` adds genre colour + primary image for Browse's Recently Added
@@ -139,12 +135,11 @@ def recent_recordings():
 
 
 # ── GET /api/recordings/recommended ───────────────────────────────────────────
-# Browse view's "Recommended" module (Library Browse View design spec,
-# 2026-08-02). Randomly-selected high-quality (A/A+ only — not A-) recordings,
-# weighted toward ones absent from play_log, diverse by Artist (hard rule)
-# and Genre (soft preference, degrades silently while genre_id is
-# NULL/absent). Seeded by date so picks are stable within a day; the client's
-# "Show me three more" control advances `reroll` to get a fresh draw.
+# Browse view's "Recommended" module. Randomly-selected high-quality (A/A+ only
+# — not A-) recordings, weighted toward ones absent from play_log, diverse by
+# Artist (hard rule) and Genre (soft preference, degrades silently while
+# genre_id is NULL/absent). Seeded by date so picks are stable within a day; the
+# client's "Show me three more" control advances `reroll` to get a fresh draw.
 
 def _recommended_pool_query():
     return (
@@ -223,16 +218,15 @@ def _select_diverse(candidates, limit, perf_by_rec, genre_by_artist):
 
 
 def _diverse_sequence(candidates, perf_by_rec, genre_by_artist):
-    """
-    The WHOLE pool, ordered so no Artist comes round again until every
+    """The WHOLE pool, ordered so no Artist comes round again until every
     other Artist has had a turn.
 
-    This is what makes the Top Shelf a record bin (Ryan, 2026-09-02) rather
-    than a single draw of six: the strip is now flipped through one tile at a
-    time, left to right, until the pool runs out. A cursor into a stable
-    sequence is the right shape for that — the alternative, asking the server
-    for "one more, excluding these 47 ids", grows the request with every click
-    and gives the diversity rule nothing to reason about.
+    This is what makes the Top Shelf a record bin rather than a single draw of
+    six: the strip is now flipped through one tile at a time, left to right,
+    until the pool runs out. A cursor into a stable sequence is the right shape
+    for that — the alternative, asking the server for "one more, excluding
+    these 47 ids", grows the request with every click and gives the diversity
+    rule nothing to reason about.
 
     Built as repeated rounds of `_select_diverse`, so **round one is
     byte-for-byte the old six-tile draw** and the existing behaviour (and its
@@ -257,17 +251,13 @@ def _diverse_sequence(candidates, perf_by_rec, genre_by_artist):
 @login_required
 def recommended_recordings():
     limit = request.args.get("limit", 3, type=int) or 3
-    # Raised from 12 on 2026-09-03. The Top Shelf now asks for as many tiles as
-    # the window has room for, and a wide monitor fits more than twelve — the
-    # old cap would have answered short and left exactly the gap the measuring
-    # was added to remove.
     limit = max(1, min(limit, 24))
     reroll = request.args.get("reroll", 0, type=int) or 0
-    # Cursor into the ordered sequence (2026-09-02). Absent or 0 reproduces the
-    # old single-draw behaviour exactly, which is why nothing else had to
-    # change: offset 0 IS the first round of `_diverse_sequence`. Past the end
-    # of the pool this returns `[]`, and that empty answer is what tells the
-    # Top Shelf its bin is empty and the right-hand chevron should go.
+    # Cursor into the ordered sequence. Absent or 0 reproduces the old
+    # single-draw behaviour exactly, which is why nothing else had to change:
+    # offset 0 IS the first round of `_diverse_sequence`. Past the end of the
+    # pool this returns `[]`, and that empty answer is what tells the Top Shelf
+    # its bin is empty and the right-hand chevron should go.
     offset = max(0, request.args.get("offset", 0, type=int) or 0)
 
     pool = _card_eager(_recommended_pool_query()).all()
@@ -307,10 +297,6 @@ def recommended_recordings():
         # picker. Building the whole sequence to take the first six of it
         # would be the same answer for more work on every Browse load.
         picks = _select_diverse(ordered, limit, perf_by_rec, genre_by_artist)
-    # No waveform as of 2026-08-07: the Browse card is a handbill rendered from
-    # metadata, so shipping downsampled peaks here was pure payload. The
-    # serializer's opt-in param is untouched and still tested.
-    #
     # card=True unconditionally — unlike /recent, this endpoint has exactly one
     # consumer (the Recommended module), so there is no flat-list caller to
     # protect and no reason to make it a parameter.
@@ -318,19 +304,17 @@ def recommended_recordings():
 
 
 # ── GET /api/recordings/on-this-day ───────────────────────────────────────────
-# Browse view's "On This Day" module. Recordings whose performance date
-# matches today's month/day, any year — no schema change, just a date-part
-# match. Compact list, not cards, so no waveform. Hidden client-side when
-# empty, which is most days (see the design spec's "every module hides
-# entirely when empty" rule).
+# Browse view's "On This Day" module. Recordings whose performance date matches
+# today's month/day, any year — no schema change, just a date-part match.
+# Compact list, not cards, so no waveform. Hidden client-side when empty, which
+# is most days.
 
 @bp.route("/on-this-day")
 @login_required
 def on_this_day():
     # The client passes its OWN month/day. Using the server's UTC date was
     # wrong for anyone west of Greenwich: after 17:00 Pacific, UTC is already
-    # tomorrow, so the module showed tomorrow's shows (Ryan, 2026-08-23 —
-    # "it's off by a day according to my local clock"). There is no correct
+    # tomorrow, so the module showed tomorrow's shows. There is no correct
     # server-side answer, because "today" is a property of where the reader is
     # standing. UTC stays as the fallback for a caller that says nothing.
     month = request.args.get("month", type=int)
@@ -351,11 +335,11 @@ def on_this_day():
 
 
 # ── GET /api/recordings/kind-counts ───────────────────────────────────────────
-# {"live": n, "studio": n} over the whole library. Powers the Albums nav
-# entry / page existence check (Studio Records spec v1, contract item 3): a
-# live-only collector must not pay for or see an entry point to an empty
-# page. ONE GROUP BY, not a per-row scan -- this can run on every sidebar
-# render alongside list_artists() above, which is held to the same bar.
+# {"live": n, "studio": n} over the whole library. Powers the Albums nav entry /
+# page existence check: a live-only collector must not pay for or see an entry
+# point to an empty page. ONE GROUP BY, not a per-row scan -- this can run on
+# every sidebar render alongside list_artists above, which is held to the same
+# bar.
 
 @bp.route("/kind-counts")
 @login_required
@@ -450,11 +434,10 @@ def get_recording(recording_id):
         "is_favorite":          bool(rec.is_favorite),
         "is_complete":          rec.is_complete,
         "is_official":          bool(rec.is_official),
-        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        # Live show vs studio release.
         "kind":                 rec.kind,
-        # MusicBrainz release lookup (Studio Records spec v1, section 2) -- the
-        # eight columns, so the Release block on View Recording (chunk 3) can
-        # render them without a second endpoint.
+        # MusicBrainz release lookup -- the eight columns, so the Release block
+        # on View Recording can render them without a second endpoint.
         "mb_release_id":         rec.mb_release_id,
         "mb_release_group_id":   rec.mb_release_group_id,
         "mb_release_status":     rec.mb_release_status,
@@ -474,18 +457,18 @@ def get_recording(recording_id):
         # Ingest provenance for the Resolver tab. Owner-only: app/api/share.py
         # has its own serializer and deliberately does not carry this.
         "resolver_json":        _sources_plain(_json.loads(rec.resolver_json)) if rec.resolver_json else None,
-        # Junction rows ONLY, deliberately (2026-08-24). System collections are
-        # dynamic and Full Library covers every published recording, so
-        # resolving them here would stamp the same chip on all 580 recording
-        # pages — noise, and it would read as a curation the user did not make.
-        # This is the one membership reader that should NOT learn about system
-        # collections; every other one lives on the Collection model.
+        # Junction rows ONLY, deliberately. System collections are dynamic and
+        # Full Library covers every published recording, so resolving them here
+        # would stamp the same chip on all 580 recording pages — noise, and it
+        # would read as a curation the user did not make. This is the one
+        # membership reader that should NOT learn about system collections;
+        # every other one lives on the Collection model.
         "collections": [
             {"id": l.collection.id, "name": l.collection.name}
             for l in db.session.query(CollectionRecording).filter_by(recording_id=rec.id).all()
         ],
         # Listening Quality reads FLAC only; the Quality tab offers Analyze
-        # Audio only when there is something it can read (2026-10-06).
+        # Audio only when there is something it can read.
         "audio_scorable": any(str(t.file_path or "").lower().endswith(".flac") for t in rec.tracks),
         "tracks": [
             {
@@ -531,10 +514,10 @@ def get_recording(recording_id):
             }
             for e in rec.events
         ],
-        # Recording-level artwork (Studio Records spec v1, chunk 5) -- the
-        # full gallery (for the header portrait + createPhotoGallery()) plus
-        # a bare image_url matching every list row's field, so the header can
-        # render before the gallery component itself has loaded.
+        # Recording-level artwork -- the full gallery (for the header
+        # portrait + createPhotoGallery) plus a bare image_url matching every
+        # list row's field, so the header can render before the gallery
+        # component itself has loaded.
         "images":     [ei.image_payload(i, _RECORDING_IMG_URL) for i in rec.images],
         "image_url":  _primary_recording_image_url(rec),
     })
@@ -545,16 +528,13 @@ def get_recording(recording_id):
 @bp.route("/favorites")
 @login_required
 def favorite_recordings():
-    """
-    GET /api/recordings/favorites[?limit=N]
+    """GET /api/recordings/favorites[?limit=N]
 
-    Every starred recording, for the sidebar's Favorites list (2026-08-22; no
-    longer a collapsible section as of the 2026-08-23 Left Nav Refinement, but
-    still its own endpoint for the same reason). Its own endpoint rather than
-    a `?favorite=1` flag on /recent, because the two answer different
-    questions and want different orders: /recent is "what arrived lately" and
-    is inherently capped, this is "the shelf I keep coming back to" and wants
-    to be complete.
+    Every starred recording, for the sidebar's Favorites list. Its own endpoint
+    rather than a `?favorite=1` flag on /recent, because the two answer
+    different questions and want different orders: /recent is "what arrived
+    lately" and is inherently capped, this is "the shelf I keep coming back to"
+    and wants to be complete.
 
     Ordered by artist then date — a Favorites list is browsed by looking for
     a name, not by when the star happened to be clicked. `is_favorite` carries
@@ -563,22 +543,13 @@ def favorite_recordings():
 
     The limit is a runaway guard, not a feature. 200 favourites in a sidebar is
     already unusable and would want its own page.
-
-    card=True unconditionally, added 2026-08-23 — the sidebar row now shows a
-    small artist thumbnail beside the show's full title, which needs
-    `image_id`. Eager-loaded via `_card_eager` for the same N+1 reason every
-    other card=True caller uses it (see that function's docstring); a
-    favorites list can realistically run to the same size as /recent's card
-    rows, so the same care applies here.
     """
     limit = request.args.get("limit", 200, type=int) or 200
     limit = max(1, min(limit, 500))
     # coalesce(sort_name, name), not sort_name: the column is NULL for every one
-    # of the 179 artists in the library (checked 2026-08-22 —
-    # scripts/backfill_sort_names.py has never been run against it). Ordering on
-    # it alone would tie every row and fall back to whatever order SQLite felt
-    # like. This expression is the right one regardless of whether that backfill
-    # ever happens.
+    # of the 179 artists in the library. Ordering on it alone would tie every
+    # row and fall back to whatever order SQLite felt like. This expression is
+    # the right one regardless of whether that backfill ever happens.
     sort_key = db.func.coalesce(Artist.sort_name, Artist.name)
     recs = _card_eager(
         Recording.query
@@ -598,19 +569,11 @@ def favorite_recordings():
 @bp.route("/scan", methods=["POST"])
 @login_required
 def scan_recording():
-    """
-    Step 1 of ingest — non-destructive scan of a source folder.
+    """Step 1 of ingest — non-destructive scan of a source folder.
     Returns two parallel metadata sets (from_tags, from_info_file) for
     the user to review field by field in the UI. Nothing is written to DB.
     Delegates to build_scan_payload() — the same function batch import uses,
     so a folder's health score never differs between the two flows.
-
-    Also runs Paula (app.utils.paula.compute_paula_score) — the free,
-    non-AI completeness/confidence scorer, 2026-07-16. Paula needs real DB
-    data to fuzzy-match tag/txt-inferred Artist and Venue names, which is
-    why she runs here (DB access) rather than inside build_scan_payload
-    (kept DB-free/pure, same as compute_health()). Scoped to the interactive
-    Add Recording flow only for now — batch-scan is untouched.
     """
     from app.utils.debug_log import log_step
 
@@ -621,11 +584,11 @@ def scan_recording():
     if not folder_path or not os.path.isdir(folder_path):
         return jsonify({"error": "Invalid or inaccessible folder path"}), 400
 
-    # Rescan (2026-09-01): the reviewer edited the info file in the Details
-    # panel and asked for the inference to be re-run over it. The edited text
-    # rides on the request rather than being written to their disk first —
-    # "try again" must not be a silent modification of the collector's source
-    # folder, and the info file is the taper's own words.
+    # Rescan: the reviewer edited the info file in the Details panel and asked
+    # for the inference to be re-run over it. The edited text rides on the
+    # request rather than being written to their disk first — "try again" must
+    # not be a silent modification of the collector's source folder, and the
+    # info file is the taper's own words.
     #
     # Absent key = an ordinary first scan, byte-for-byte as before. An empty
     # STRING is a real value (the reviewer cleared the box), so the test is on
@@ -673,9 +636,6 @@ def update_recording(recording_id):
     # TODO: validate archivist permission for this recording's artist
 
     data = request.get_json()
-    # "rating" deliberately absent since 2026-08-18 — the field is retired from
-    # the product, so accepting a write for it would quietly repopulate a column
-    # nothing reads. See app/utils/serialize.py for the rationale.
     updatable = ["title", "source", "lineage",
                  "quality", "is_complete", "notes", "info_file_content",
                  "source_tag"]
@@ -683,9 +643,9 @@ def update_recording(recording_id):
         if field in data:
             setattr(rec, field, data[field])
 
-    # kind -- live show vs studio release (Bulk Ingest spec chunk 2). Its own
-    # branch rather than the blind setattr loop above: it needs validation, the
-    # updatable fields above never do.
+    # kind -- live show vs studio release. Its own branch rather than the blind
+    # setattr loop above: it needs validation, the updatable fields above never
+    # do.
     if "kind" in data:
         if data["kind"] not in ("live", "studio"):
             return jsonify({"error": "kind must be 'live' or 'studio'"}), 400
@@ -720,16 +680,15 @@ def update_recording(recording_id):
     )
     db.session.add(event)
 
-    # Folder name follows the metadata (decided 2026-07-25, built 2026-08-09)
-    # — only Source lives on Recording and feeds the folder name, but this
-    # runs on every save rather than gating on "source" in data: it's a cheap
-    # no-op comparison when nothing folder-relevant changed, and staying
-    # unconditional means one fewer place this can drift out of sync with
-    # build_folder_name() later growing a new input field. Non-fatal: a
-    # rename failure never blocks the metadata commit below.
-    # rename_folders governs this (spec section 1.1): off means the folder
-    # name is never touched by a metadata save, however much the metadata
-    # feeding build_folder_name() has drifted.
+    # Folder name follows the metadata — only Source lives on Recording and
+    # feeds the folder name, but this runs on every save rather than gating
+    # on "source" in data: it's a cheap no-op comparison when nothing
+    # folder-relevant changed, and staying unconditional means one fewer
+    # place this can drift out of sync with build_folder_name later growing a
+    # new input field. Non-fatal: a rename failure never blocks the metadata
+    # commit below. rename_folders governs this (spec section 1.1): off means
+    # the folder name is never touched by a metadata save, however much the
+    # metadata feeding build_folder_name has drifted.
     library_root  = current_app.config.get("LIBRARY_ROOT", "")
     rename_error  = (rename_recording_folder(rec, library_root)
                      if node_settings.get_file_handling()["rename_folders"]
@@ -743,12 +702,12 @@ def update_recording(recording_id):
     return jsonify(resp)
 
 
-# ── MusicBrainz release lookup (Studio Records spec v1, section 2/chunk 3) ──
-# Mirrors app/api/artists.py's musicbrainz_lookup/candidates/resolve trio
-# exactly -- automatic matching either lands outright (via try_match_release()
-# in the background worker) or defers to a human, and these three endpoints
-# are how a human finishes the job for a studio recording. Admin-gated: this
-# writes Performance dates and Track titles, not just a status flag.
+# ── MusicBrainz release lookup ── Mirrors app/api/artists.py's
+# musicbrainz_lookup/candidates/resolve trio exactly -- automatic matching
+# either lands outright (via try_match_release in the background worker) or
+# defers to a human, and these three endpoints are how a human finishes the
+# job for a studio recording. Admin-gated: this writes Performance dates and
+# Track titles, not just a status flag.
 
 def _require_admin_for_release():
     if getattr(current_user, "role", None) != "admin":
@@ -825,7 +784,7 @@ def release_unlink(recording_id):
     return jsonify({"status": "unlinked"})
 
 
-# ── Recording-level artwork (Studio Records spec v1, chunk 5) ────────────────
+# ── Recording-level artwork ────────────────
 # Five standard photo routes, generated exactly as venues/musicians/events
 # get them -- see app/utils/entity_images.py::register_image_routes(). The
 # only wrinkle: images_dir_for keys on the recording's numeric id (image_dir()
@@ -846,14 +805,14 @@ ei.register_image_routes(
 
 
 # ── POST /api/recordings/<id>/images/from-artist | from-venue ────────────────
-# "Use the artist image" / "Use the venue image" (Ryan, 2026-10-04). Copies the
-# source's primary image FILE into this recording's own image folder and makes
-# the copy primary, so the recording keeps its picture if the artist's or
-# venue's photo is later replaced or deleted -- a reference would silently
-# change under it. Credit and caption travel with the copy: a Commons licence
-# credit is part of the image. Idempotent: source_ref "<kind>-image:<id>" is
-# the dedupe key, so choosing the same image twice re-promotes the existing
-# copy instead of stacking duplicates.
+# "Use the artist image" / "Use the venue image". Copies the source's primary
+# image FILE into this recording's own image folder and makes the copy primary,
+# so the recording keeps its picture if the artist's or venue's photo is later
+# replaced or deleted -- a reference would silently change under it. Credit and
+# caption travel with the copy: a Commons licence credit is part of the image.
+# Idempotent: source_ref "<kind>-image:<id>" is the dedupe key, so choosing the
+# same image twice re-promotes the existing copy instead of stacking
+# duplicates.
 
 def _copy_image_into_recording(rec, src, src_dir, kind):
     import secrets
@@ -944,13 +903,11 @@ def _delete_tracks_of_recording(recording_id):
 @bp.route("/<int:recording_id>", methods=["DELETE"])
 @login_required
 def delete_recording(recording_id):
-    """
-    Delete a recording and all its child records (tracks, events, fingerprints).
+    """Delete a recording and all its child records (tracks, events, fingerprints).
     Then prune any performance/artist/canonical-artist left empty by the
     delete.
 
-    `?delete_files=1` ALSO removes the recording's folder from disk (Ryan,
-    2026-08-21 — offered as an unchecked option in the confirm dialog). Default
+    `?delete_files=1` ALSO removes the recording's folder from disk. Default
     remains files-untouched: for a ROIO collector the tape is the irreplaceable
     thing and the database row is not, so destroying audio is never the default
     and never implicit.
@@ -1036,27 +993,24 @@ def delete_recording(recording_id):
 @bp.route("/<int:recording_id>/info-file", methods=["POST"])
 @login_required
 def save_recording_info_file(recording_id):
-    """
-    POST /api/recordings/<id>/info-file
+    """POST /api/recordings/<id>/info-file
     Body: { content }
     Returns: { ok, wrote_file, filename|null, reason|null }
 
     Persist edited info-file text to the recording row and, when the library
     folder already holds a text file, rewrite that file in place.
 
-    It deliberately does NOT create a file when the folder has none (Ryan,
-    2026-08-21). The database is the source of truth and a write into a
-    collector's library is always an explicit act; inventing a filename for a
-    folder that never carried an info file would be Flux authoring content in
-    someone else's archive. In that case the DB save still happens and the
-    caller gets wrote_file=False with a reason the pane can show.
+    It deliberately does NOT create a file when the folder has none. The
+    database is the source of truth and a write into a collector's library is
+    always an explicit act; inventing a filename for a folder that never
+    carried an info file would be Trellis authoring content in someone else's
+    archive. In that case the DB save still happens and the caller gets
+    wrote_file=False with a reason the pane can show.
 
-    The target file is picked with the same scoring scan_folder() uses, and
+    The target file is picked with the same scoring scan_folder uses, and
     checksum lists are excluded by the same content sniff — so the file the
     pane was populated from is the file that gets rewritten, rather than an
-    .md5 list that happens to sort first. (See the 2026-08-02 trap in
-    CONTEXT.md: a checksum file named after the show once won info-file
-    scoring outright.)
+    .md5 list that happens to sort first.
     """
     from app.utils.ingest import _score_text_file, fingerprint_type_for_file
 
@@ -1115,8 +1069,7 @@ def save_recording_info_file(recording_id):
 @bp.route("/<int:recording_id>/move", methods=["POST"])
 @login_required
 def move_recording_out(recording_id):
-    """
-    POST /api/recordings/<id>/move
+    """POST /api/recordings/<id>/move
     Body: { destination: "workshop" | "backlog" }
     Returns: { ok, destination, moved_to_name }
 
@@ -1125,12 +1078,12 @@ def move_recording_out(recording_id):
     The library record survives in full — metadata, lineage, checksums, event
     history — so a show that comes back does not have to be re-ingested.
 
-    Deliberately its OWN endpoint rather than reusing POST /api/quality/move
-    (Ryan, 2026-08-21). That one takes an absolute folder path from the client,
-    which is fine for triage — the client is looking at a scan of a folder it
-    named — but it is exactly what the library's path obfuscation forbids: the
-    frontend knows recording IDs and nothing else, and Flask resolves paths.
-    Here the id is the input and the path is derived server-side.
+    Deliberately its OWN endpoint rather than reusing POST /api/quality/move.
+    That one takes an absolute folder path from the client, which is fine for
+    triage — the client is looking at a scan of a folder it named — but it is
+    exactly what the library's path obfuscation forbids: the frontend knows
+    recording IDs and nothing else, and Flask resolves paths. Here the id is
+    the input and the path is derived server-side.
 
     Same paranoia as the delete-files path, for the same reason: this moves
     user files. The source must resolve INSIDE LIBRARY_ROOT, be a directory,

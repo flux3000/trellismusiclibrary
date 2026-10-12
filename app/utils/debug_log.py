@@ -1,5 +1,4 @@
-"""
-utils/debug_log.py — shared in-memory debug log buffer (2026-07-19).
+"""utils/debug_log.py — shared in-memory debug log buffer.
 
 Was previously a module-level deque inside app/api/debug.py, holding only
 entries forwarded from the JS fetch wrapper (one line per API call, AFTER it

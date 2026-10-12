@@ -1,5 +1,4 @@
-"""
-rescore_quality.py — re-score stored quality rows from cached features.
+"""rescore_quality.py — re-score stored quality rows from cached features.
 
 No audio decode. Use after any change to quality_scoring.py (weights, curves,
 calibration constants, source offsets) so existing rows stop displaying numbers
@@ -12,10 +11,8 @@ Rows whose `analysis_version` is behind the current extractor are reported as
 `stale_features` and SKIPPED — they predate a feature the new scoring reads, so
 they need a real re-analysis (re-run Analyze in the app), not a rescore.
 
-Context: on 2026-07-31 the engine went to score v3 (presence/scoop dropped, hum
-demoted, crowd SNR added, source as an input, calibrated bands) AND to analysis
-v2 (three new audience/room features). Rows written before that date are
-analysis v1, so they will show up as stale_features and must be re-analysed.
+Rows written before that date are analysis v1, so they will show up as
+stale_features and must be re-analysed.
 """
 
 import sys

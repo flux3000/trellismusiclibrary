@@ -1,10 +1,4 @@
-"""
-app/utils/rate_limit.py — a small in-process sliding-window limiter.
-
-Built 2026-08-25 for `/api/share/enroll`, which is the ONLY route on the peer
-door reachable with no credentials at all — a peer holding an invite has no
-token yet, so the invite code has to be presentable by a stranger. Everything
-else on that door demands a bearer token before it does any work.
+"""app/utils/rate_limit.py — a small in-process sliding-window limiter.
 
 Deliberately NOT a dependency
 -----------------------------

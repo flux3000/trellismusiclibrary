@@ -5,7 +5,7 @@ from app.extensions import db
 from app.lomax import evidence as ev
 from app.lomax import filters
 from app.lomax.prompts import EvidenceSection
-from app.lomax.skills.base import Skill
+from app.lomax.skills.base import REPLY_PROP, Skill
 from app.lomax.sources import trusted_section
 
 INSTRUCTIONS = """SKILL: Venue History.
@@ -29,6 +29,7 @@ SUBMIT = {
         "properties": {
             "thinking": {"type": "string"},
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
+            "reply": REPLY_PROP,
             "history": {"type": "string"},
             "former_names": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "from": {"type": "string"}, "to": {"type": "string"},
@@ -68,7 +69,7 @@ def normalize(raw, subject):
             p = dict(p, proposed=code, agrees=filters.same_text(code, filters.state_code(subject.obj.state, ctry)))
         props.append(p)
     former = [n for n in (raw.get("former_names") or []) if isinstance(n, dict) and n.get("name")]
-    result = {"thinking": raw.get("thinking", ""), "answer": raw.get("answer", ""),
+    result = {"thinking": raw.get("thinking", ""), "answer": raw.get("answer", ""), "reply": raw.get("reply", ""),
               "history": raw.get("history", ""),
               "former_names": former,
               "proposals": props,

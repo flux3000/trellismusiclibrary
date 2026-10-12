@@ -1,5 +1,4 @@
-"""
-tests/test_venue_media.py — Venue photos (2026-08-07).
+"""tests/test_venue_media.py — Venue photos.
 
 Venue images are a PARALLEL table to artist_image with SHARED behaviour
 (app/utils/entity_images.py). These tests exist to prove the sharing actually
@@ -49,8 +48,7 @@ def test_upload_list_serve_delete(api, app, venue, tmp_path):
 
     # Files land under DATA_DIR/images/venues/, NOT under LIBRARY_ROOT and NOT
     # alongside artist photos — a venue and an act can share a name
-    # ("Fillmore") and must not collide (Bulk Ingest spec chunk 2 -- image
-    # store moved out of the library).
+    # ("Fillmore") and must not collide.
     images_dir = tmp_path / "data" / "images" / "venues" / "The Fillmore"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
 

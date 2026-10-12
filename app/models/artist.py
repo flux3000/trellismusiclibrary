@@ -1,5 +1,4 @@
-"""
-models/artist.py — Artist (a performing act) and its member ordering.
+"""models/artist.py — Artist (a performing act) and its member ordering.
 
 An Artist is the billed act: the name that goes on the FLAC ARTIST tag and
 that headlines a browse row — "Béla Fleck and Jerry Douglas", "Grateful Dead",
@@ -9,7 +8,6 @@ An Artist must have at least one member. A solo act's single member is just
 the person of the same name.
 
 Aggregation of "everything by X" hangs off the Musician via Membership.
-(Named Performer until the 2026-09-16 rename.)
 """
 
 from datetime import datetime, timezone
@@ -24,79 +22,73 @@ class Artist(db.Model):
     sort_name  = db.Column(db.String(255), nullable=True)
     bio        = db.Column(db.Text,        nullable=True)
 
-    # etree band abbreviation (2026-09-25), the {artist_abbr} naming token
-    # (e.g. "gd" for Grateful Dead). Null falls back to the lowercase initials
-    # of the artist name's words at render time -- not stored, so a later
-    # abbreviation still overrides it.
+    # etree band abbreviation, the {artist_abbr} naming token (e.g. "gd" for
+    # Grateful Dead). Null falls back to the lowercase initials of the artist
+    # name's words at render time -- not stored, so a later abbreviation still
+    # overrides it.
     abbreviation = db.Column(db.String(16), nullable=True)
 
     # Personnel resolution mode new Performances of this act start in.
     # 'inherit' (default) = act roster/stints apply; 'explicit' = every show
     # starts with an empty lineup that must be entered per-show (rotating
     # billings like "Acoustic All-Stars" set this once and never fight the
-    # default again). See app/utils/personnel.py. No manual UI control since
-    # the 2026-07-22 Members/Guests redesign — the field and its automatic
-    # behavior (new-performance default, case-5 auto-flip) are unchanged.
+    # default again). See app/utils/personnel.py.
     default_personnel_mode = db.Column(db.String(16), nullable=False, default="inherit")
 
-    # ⚠ LEGACY as of 2026-08-07 — NOTHING READS THIS. Superseded by the
-    # `artist_image` table (multiple images, one flagged primary); see
-    # app/models/artist_image.py. Kept only because SQLite cannot drop a
-    # column without a full table rebuild, and this project has already been
-    # bitten once by rebuild-adjacent DDL (the 07-22 stale-FK episode). The
-    # migration backfilled every populated value here into a ArtistImage
-    # row and left the file on disk untouched.
+    # Superseded by the `artist_image` table (multiple images, one flagged
+    # primary); see app/models/artist_image.py. Kept only because SQLite
+    # cannot drop a column without a full table rebuild, and this project
+    # has already been bitten once by rebuild-adjacent DDL (the 07-22
+    # stale-FK episode). The migration backfilled every populated value here
+    # into a ArtistImage row and left the file on disk untouched.
     #
     # Original note, still true of the replacement: the folder path is
     # derived from the Artist's CURRENT name at request time, not stored —
     # renaming an act without a corresponding folder rename would orphan an
     # already-uploaded picture. Matches how recording folders already behave
     # on an Artist rename (nothing renames those either); flagged here
-    # rather than solved, per Ryan's scope-discipline call on this feature.
+    # rather than solved, per the user's scope-discipline call on this
+    # feature.
     image_ext = db.Column(db.String(8), nullable=True)
 
-    # Latest AI Dossier research pass (2026-07-22) — a drafted biography +
-    # suggested external resource links, JSON-encoded like
+    # Latest AI Dossier research pass — a drafted biography + suggested
+    # external resource links, JSON-encoded like
     # Recording.ai_research_json. Nothing is auto-applied: the Dossier UI
-    # only ever proposes; Ryan copies the bio into `bio` and picks which
-    # resource links to add, by hand — same "AI suggests, human approves"
-    # rule as the ingest-side AI Assist (see the 2026-07-20/21 AI Assist
-    # Refinement spec in Context Library — auto-apply was removed there
-    # after it silently overwrote a recording with a wrong date).
+    # only ever proposes; the user copies the bio into `bio` and picks
+    # which resource links to add, by hand — same "AI suggests, human
+    # approves" rule as the ingest-side AI Assist.
     dossier_json = db.Column(db.Text, nullable=True)
 
-    # Latest AI lineup-research pass (2026-09-07) — the researched roster with
-    # per-person stint dates, JSON-encoded, held for review.
+    # Latest AI lineup-research pass — the researched roster with per-person
+    # stint dates, JSON-encoded, held for review.
     #
     # ITS OWN COLUMN, not folded into dossier_json: the two passes are separate
     # actions on separate buttons with separate output shapes, and sharing one
     # blob would mean each run silently destroyed the other's result.
     #
     # I argued against persisting this at all — a saved roster proposal sits
-    # beside the authoritative Membership rows and can drift from them. Ryan
-    # overruled it (2026-09-07) and was right: research the human paid tokens
-    # for, that vanishes on navigating away, is not a duplicate-data problem,
-    # it is a lost-work problem. The drift concern is real but belongs in the
-    # RENDER — the UI checks each row against the live roster and marks the
-    # ones already applied, rather than trusting a stored "applied" flag.
+    # beside the authoritative Membership rows and can drift from them. The
+    # user overruled it and was right: research the human paid tokens for, that
+    # vanishes on navigating away, is not a duplicate-data problem, it is a
+    # lost-work problem. The drift concern is real but belongs in the RENDER —
+    # the UI checks each row against the live roster and marks the ones already
+    # applied, rather than trusting a stored "applied" flag.
     #
     # Nothing here is authoritative. It is a proposal awaiting a human, exactly
     # like dossier_json, and applying a row writes real Membership rows.
     lineup_json = db.Column(db.Text, nullable=True)
 
-    # Genre (2026-08-02) — a proper dimension, its own table, one FK per
-    # Artist (never M2M — see the Genre design spec in Context Library).
+    # Genre — a proper dimension, its own table, one FK per Artist.
     # Nullable: all existing artists start unassigned, and a non-null
     # constraint would be wrong anyway — plenty of acts resist a single
-    # label. Nothing may create a Genre implicitly; pickers only ever select
-    # from the existing table.
+    # label. Nothing may create a Genre implicitly; pickers only ever
+    # select from the existing table.
     genre_id = db.Column(db.Integer, db.ForeignKey("genre.id"), nullable=True)
 
-    # ── MusicBrainz (2026-08-07) ────────────────────────────────────────────
     # Structured facts fetched once at Artist creation — see
     # app/utils/musicbrainz.py. Stored as REAL COLUMNS rather than a JSON blob
-    # (Ryan's call) so they are queryable: "which acts formed in New Orleans"
-    # is a legitimate question and a blob cannot answer it.
+    # so they are queryable: "which acts formed in New Orleans" is a legitimate
+    # question and a blob cannot answer it.
     #
     # MusicBrainz is a curated database, not a model, so these land directly
     # rather than going through AI Assist's approve-first rule. The risk here
@@ -116,7 +108,7 @@ class Artist(db.Model):
     # 'matched' vs 'linked' exists purely so the page can say "Matched
     # automatically" or "Linked by you" ACCURATELY. Claiming an automatic match
     # for work a person did is a small lie that makes every other automatic
-    # claim in the app less believable (Ryan, 2026-08-07).
+    # claim in the app less believable.
     mb_status         = db.Column(db.String(16), nullable=True)
     mb_type           = db.Column(db.String(32), nullable=True)   # Group / Person
     mb_area           = db.Column(db.String(120), nullable=True)  # origin
@@ -142,9 +134,9 @@ class Artist(db.Model):
     # review confirmation, "Ingest anyway") or edited the artist directly. NULL until then, and
     # always NULL for a row only an unattended import has touched. Never cleared once set. The
     # resolver counts an exact match to a confirmed Artist as an independent source for the
-    # artist (reader/confidence.py); see mark_artist_confirmed() in utils/artists.py.
-    # Resolver v2 chunk 7b (2026-10-05). scripts/migrate_add_artist_confirmed.py adds it to an
-    # existing database and backfills every existing row.
+    # artist (reader/confidence.py); see mark_artist_confirmed in utils/artists.py.
+    # scripts/migrate_add_artist_confirmed.py adds it to an existing database and
+    # backfills every existing row.
     confirmed_at = db.Column(db.DateTime, nullable=True)
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -156,9 +148,9 @@ class Artist(db.Model):
                                    cascade="all, delete-orphan",
                                    order_by="Membership.order")
     performances = db.relationship("Performance", back_populates="artist")
-    # Profile images (2026-08-07) — multiple, one flagged primary. Ordered so
-    # the primary is first and `images[0]` is always the card face; see
-    # artist_image.primary_for() for the same rule server-side.
+    # Profile images — multiple, one flagged primary. Ordered so the primary
+    # is first and `images[0]` is always the card face; see
+    # artist_image.primary_for for the same rule server-side.
     images       = db.relationship("ArtistImage", back_populates="artist",
                                    cascade="all, delete-orphan",
                                    order_by="desc(ArtistImage.is_primary), "
@@ -172,12 +164,10 @@ class Artist(db.Model):
 
     @property
     def musicians(self):
-        """
-        Member Musicians (people) in billing order — each person appears once,
+        """Member Musicians (people) in billing order — each person appears once,
         even if they have multiple Membership STINTS (e.g. Mickey Hart's two
-        Dead tenures). `memberships` is already ordered by Membership.order,
-        so taking the first occurrence per musician naturally applies the
-        design doc's "dedupe by musician, earliest stint wins the order" rule.
+        Dead tenures). `memberships` is already ordered by Membership.order, so
+        taking the first occurrence, earliest stint wins the order" rule.
         """
         seen = {}
         for m in self.memberships:

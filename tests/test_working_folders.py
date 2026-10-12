@@ -1,5 +1,4 @@
-"""
-tests/test_working_folders.py: the working-folder pages (2026-10-06).
+"""tests/test_working_folders.py: the working-folder pages.
 
 A complete folder must never read as incomplete because its MD5 list also names
 artwork and text files, or because the list was written in Windows-1252. A

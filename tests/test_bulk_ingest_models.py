@@ -1,5 +1,4 @@
-"""
-tests/test_bulk_ingest_models.py — Bulk Ingest models (spec chunk 2).
+"""tests/test_bulk_ingest_models.py — Bulk Ingest models.
 
 BulkIngestRun / BulkIngestItem persistence, and the new Recording.kind column
 they travel alongside (live vs studio).

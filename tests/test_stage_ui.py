@@ -1,7 +1,7 @@
-"""
-tests/test_stage_ui.py -- Stage (Performance.stage) as an optional field beside Event and Venue
-(Resolver v2, chunk 5). The backend half is covered in test_resolve_event_stage.py; this file holds
-the performances-API round trip, the peer payload and the JS wiring that has no browser test.
+"""tests/test_stage_ui.py -- Stage (Performance.stage) as an optional field beside
+Event and Venue. The backend half is covered in test_resolve_event_stage.py;
+this file holds the performances-API round trip, the peer payload and the JS
+wiring that has no browser test.
 """
 
 import re

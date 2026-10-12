@@ -1,10 +1,9 @@
-"""
-Migration: add spectral_flatness, duration_s, non_music_score to track_analysis.
+"""Migration: add spectral_flatness, duration_s, non_music_score to track_analysis.
 
-The non-music signal (2026-08-28) — see app/utils/track_signals.py. The first
-two are raw per-track measurements written by analyse_track(); the third is
-derived at the recording level and is NULL until a recording has been analysed
-with at least four tracks.
+The non-music signal — see app/utils/track_signals.py. The first two are raw
+per-track measurements written by analyse_track; the third is derived at the
+recording level and is NULL until a recording has been analysed with at least
+four tracks.
 
 Run after stopping Flask:
     cd ~/Workshop/dev/trellis && python3 scripts/migrate_add_non_music_signal.py

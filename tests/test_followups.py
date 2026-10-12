@@ -1,7 +1,6 @@
-"""
-tests/test_followups.py -- Bulk Ingest follow-up queue (spec section 1.6,
-chunk 6): the typed queue in app/api/ingest.py, enqueue_followups(), and the
-/api/ingest/pipeline pending_by_kind report.
+"""tests/test_followups.py -- Bulk Ingest follow-up queue: the typed queue in
+app/api/ingest.py, enqueue_followups, and the /api/ingest/pipeline
+pending_by_kind report.
 """
 
 import queue
@@ -259,7 +258,7 @@ def test_audio_pass_unreachable_audio_writes_no_score_row(app, seeded_ids):
 
 
 def test_audio_handler_never_calls_checksum_verify(app, monkeypatch, seeded_ids):
-    """MD5 is never automatic (Ryan, 2026-09-27)."""
+    """MD5 is never automatic."""
     _neutralize_seed(seeded_ids)
     rec = _live(seeded_ids["performance_id"], "X/NoChecksumCall")
     from app.api import recordings as recordings_api
@@ -423,7 +422,7 @@ def test_bulk_ingest_run_completion_enqueues_audio_for_every_ingested_recording(
     assert ("audio", item.recording_id) in ingest_api._QUEUED_KEYS
 
 
-# ── Genre for artists matched before genres were fetched (Ryan, 2026-10-05) ──
+# ── Genre for artists matched before genres were fetched ──
 
 def test_matched_artists_without_genre_are_owed_one_genre_fetch(app, monkeypatch, seeded_ids):
     from app.models.genre import Genre

@@ -39,20 +39,19 @@ def _is_unbounded(membership):
 
 
 def set_artist_members(artist, member_names):
-    """
-    Sync an artist's roster to the given ordered list of names — the plain
+    """Sync an artist's roster to the given ordered list of names — the plain
     "list of names" editing path (Artist page, ingest). Covers the 90% case
-    with no stint dates involved; see Per-Show Personnel design doc §7.6.
+    with no stint dates involved.
 
-    STINT-SAFE (2026-07-18 rewrite): the old version deleted and recreated the
-    whole roster on every call, which would silently destroy stint date bounds
-    (e.g. Mickey Hart's two Membership rows — 1967-71 and 1974-95 — would
-    collapse into one row and both sets of dates would vanish). Instead:
+    STINT-SAFE: the old version deleted and recreated the whole roster on every
+    call, which would silently destroy stint date bounds (e.g. Mickey Hart's
+    two Membership rows — 1967-71 and 1974-95 — would collapse into one row and
+    both sets of dates would vanish). Instead:
 
       - a name already linked to this artist keeps ALL of its existing
         stint row(s) untouched; only its `order` moves to the new position
         (order is a per-PERSON concept — the earliest stint's row carries it,
-        per the design doc's dedupe rule)
+    )
       - a brand-new name gets one fresh unbounded stint row (NULL bounds =
         "always a member," identical to pre-personnel behavior)
       - a name dropped from the list is deleted ONLY if it has exactly one
@@ -155,18 +154,17 @@ def mark_artist_confirmed(artist):
 
 
 def resolve_or_create_artist(name, member_names=None, lookup=True):
-    """
-    Find an Artist by name (case-insensitive) or create it. On create, seed
+    """Find an Artist by name (case-insensitive) or create it. On create, seed
     members from member_names if provided (otherwise the Artist starts with no
     Musicians). Does NOT change an existing artist's members — use
     set_artist_members.
 
-    lookup=False (Bulk Ingest, chunk 5) skips the synchronous MusicBrainz
-    lookup below on a brand-new artist. The artist is created with mb_status
-    and mb_checked_at both left at their column defaults (NULL) -- the same
-    "never looked up" state try_match_artist() itself uses to mean nobody has
-    checked yet, so a later manual "Look up" on the artist page behaves
-    exactly as it would for any other never-checked artist.
+    lookup=False skips the synchronous MusicBrainz lookup below on a brand-new
+    artist. The artist is created with mb_status and mb_checked_at both left at
+    their column defaults (NULL) -- the same "never looked up" state
+    try_match_artist itself uses to mean nobody has checked yet, so a later
+    manual "Look up" on the artist page behaves exactly as it would for any
+    other never-checked artist.
     """
     name = (name or "").strip()
     artist = db.session.query(Artist).filter(
@@ -179,11 +177,11 @@ def resolve_or_create_artist(name, member_names=None, lookup=True):
     if member_names:
         set_artist_members(artist, member_names)
 
-    # MusicBrainz lookup on creation (2026-08-07). Synchronous, and deliberately
-    # so: this runs inside the ingest BACKGROUND job, where the user is already
-    # watching a copy progress bar, and doing it here means the facts are set on
-    # the in-session object before the caller commits — no second thread, no
-    # race against an uncommitted row.
+    # MusicBrainz lookup on creation. Synchronous, and deliberately so: this
+    # runs inside the ingest BACKGROUND job, where the user is already watching
+    # a copy progress bar, and doing it here means the facts are set on the
+    # in-session object before the caller commits — no second thread, no race
+    # against an uncommitted row.
     #
     # Cannot fail an ingest: try_match_artist() swallows everything, is a
     # no-op under TESTING, and a process-wide circuit breaker stops retrying
@@ -196,9 +194,8 @@ def resolve_or_create_artist(name, member_names=None, lookup=True):
     return artist
 
 
-# ── Similar-act resolution (moved from app/api/ingest.py, Ingest Field
-# Resolver spec v1 section 6 -- the route layer imports utils, not the
-# other way round) ────────────────────────────────────────────────────────
+# ── Similar-act resolution
+# ────────────────────────────────────────────────────────
 
 # How close two act names must read before they count as the same act. 0.85
 # is the threshold parse_info_file() already uses for fuzzy artist/venue
@@ -206,10 +203,7 @@ def resolve_or_create_artist(name, member_names=None, lookup=True):
 # duplicate check never disagree about whether two names are "the same".
 _ARTIST_SIMILARITY = 0.85
 
-# Words that decorate an act name without changing who it is. "Aoife
-# O'Donovan" and "Aoife O'Donovan Band" are one act to a collector and two
-# rows in the DB, which is exactly the variant Ryan asked this to catch
-# (2026-08-02).
+# Words that decorate an act name without changing who it is.
 _ACT_NOISE_WORDS = {"band", "trio", "quartet", "quintet", "group", "ensemble",
                     "orchestra", "the", "and", "with", "featuring", "feat"}
 
@@ -222,8 +216,7 @@ def _act_key(name):
 
 
 def resolve_similar_artist_ids(artist_name):
-    """
-    Every Artist that plausibly IS the act named `artist_name`.
+    """Every Artist that plausibly IS the act named `artist_name`.
 
     Three widening passes, because a duplicate that goes unnoticed costs an
     accidental re-ingest and a duplicate flagged wrongly costs one glance:
@@ -236,8 +229,7 @@ def resolve_similar_artist_ids(artist_name):
          drift ("Bela Fleck" / "Béla Fleck")
 
     Then the ARTIST (person) side: if a person of that name exists, every
-    Artist they are a member of counts too -- Ryan asked for "artist or
-    musician, or a similar variant of either", and the 07-11 remodel makes
+    Artist they are a member of counts too --, and the 07-11 remodel makes
     those genuinely different tables.
     """
     from difflib import SequenceMatcher

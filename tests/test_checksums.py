@@ -198,9 +198,7 @@ def test_file_md5_matches_hashlib():
         os.unlink(path)
 
 
-# ── shntool .st5 filename parsing (2026-08-02) ───────────────────────────────
-# Ryan asked whether ST5 support was worth keeping, because the UI reported
-# "0 of 18 entries matched" on a file that plainly contained everything needed.
+# ── shntool .st5 filename parsing ───────────────────────────────
 #
 # It was never an ST5 problem. shntool writes
 #     <hash>  [shntool]  Track 01.flac

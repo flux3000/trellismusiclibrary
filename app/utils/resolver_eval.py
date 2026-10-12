@@ -1,16 +1,13 @@
-"""
-app/utils/resolver_eval.py -- evaluation harness for the ingest resolver.
+"""app/utils/resolver_eval.py -- evaluation harness for the ingest resolver.
 
-Resolver v2, chunk 0 (2026-10-03). Every later chunk is gated on a diff from
-this module, so it lives in the app, not in tools/: it is a capability.
+It lives in the app, not in tools/: it is a capability.
 
 Run:
     python3 -m app.utils.resolver_eval --tier G1 --reader-only
     python3 -m app.utils.resolver_eval --tier G1 --resolve --diff
     python3 -m app.utils.resolver_eval --export-g1            # snapshot -> g1.jsonl
 
-Tiers
-    G1  Ryan's library: snapshot rows joined to the stored info text
+    G1  the user's library: snapshot rows joined to the stored info text
         (corpus/g1.jsonl, written by --export-g1)
     G2  Live Music Archive sample           (corpus/g2.jsonl)
     G3  bluegrassarchive.com sample         (corpus/g3.jsonl)
@@ -54,9 +51,6 @@ LAST_RUN = "last_run.json"
 
 
 # ── Normalising and judging ──────────────────────────────────────────────────
-# Same rules as the 2026-10-03 baseline (proposal 2.1): accents, case,
-# punctuation, "&"/"and" and a leading "The" are ignored; "partial" means one
-# string contains the other.
 
 def norm(s):
     s = unicodedata.normalize("NFKD", str(s or ""))
@@ -109,10 +103,10 @@ def _has_words(small, big):
     return f" {small} " in f" {big} "
 
 
-# Ensemble and billing variants of one act (Ryan, 2026-10-04): "Miles Davis" and "Miles Davis
-# Quintet", "Dave Matthews" and "Dave Matthews Band", "Bob Weir and Friends", "Phil Lesh with
-# Warren Haynes". Unattended import still files each spelling under its own Artist row; the
-# harness only stops counting the difference as an error.
+# Ensemble and billing variants of one act: "Miles Davis" and "Miles Davis Quintet", "Dave
+# Matthews" and "Dave Matthews Band", "Bob Weir and Friends", "Phil Lesh with Warren Haynes".
+# Unattended import still files each spelling under its own Artist row; the harness only
+# stops counting the difference as an error.
 _VARIANT_TAIL = re.compile(
     r"(?:\s+(?:trio|quartet|quintet|sextet|septet|octet|band|group|orchestra))+$"
     r"|\s+and\s+friends$|\s+and\s+(?:his|her)\s+.+$|\s+with\s+.+$")
@@ -196,7 +190,7 @@ def judge_field(field, gold, pred):
     return judge_text(gold, pred)
 
 
-# ── Archive tiers (chunk 7): G3 catalog key, G2 metadata key ─────────────────
+# ── Archive tiers: G3 catalog key, G2 metadata key ─────────────────
 # The key is not in Trellis's field shapes, so the place fields are scored against the
 # key's own strings. G3: venue and location are one string ("Venue, City, ST", sometimes
 # "Event, Venue, City, ST"). G2: free-text venue and coverage, uploader-typed and noisy.
@@ -219,7 +213,7 @@ def judge_artist_archive(gold, pred):
         if j in ("partial", "wrong") and part is not False:
             g, p = _act_key(part), _act_key(pred)
             if g and p and (g == p or g.replace(" ", "") == p.replace(" ", "")):
-                j = "variant"      # "Mc Govern String Band" is "McGovern String Band" (2026-10-05)
+                j = "variant"      # "Mc Govern String Band" is "McGovern String Band"
         if best is None or _ART_RANK.get(j, 9) < _ART_RANK.get(best, 9):
             best = j
     return best
@@ -229,7 +223,7 @@ def judge_artist_archive(gold, pred):
 # (Theater/Theatre, Center/Centre, Fairground/Fairgrounds). Scoring only: not a reader rule.
 _VENUE_WORDS = {"theatre": "theater", "centre": "center", "grounds": "ground", "fairgrounds": "fairground",
                 "ft": "fort", "mtn": "mountain", "mt": "mount",
-                "st": "saint", "ctr": "center", "ave": "avenue"}      # 2026-10-05: plain abbreviations the 20-row G3 check found scored wrong
+                "st": "saint", "ctr": "center", "ave": "avenue"}
 
 
 def _vnorm(s):
@@ -253,7 +247,7 @@ def judge_catalog_venue(raw, venue, event=None, city=None, state=None):
     if not pv and not pe:
         return "empty"
     parts = _parts(raw, _vnorm)
-    # "DelFest" and "Del Fest" are one name: compare with the spaces removed too (2026-10-05)
+    # "DelFest" and "Del Fest" are one name: compare with the spaces removed too
     sq = lambda t: t.replace(" ", "")
     if (pv and sq(pv) in {sq(p) for p in parts}) or (pe and sq(pe) in {sq(p) for p in parts}):
         return "right"
@@ -440,7 +434,7 @@ order by r.id
 
 
 def _nfc(s):
-    # macOS stores filenames decomposed, SQLite composed (CONTEXT.md trap).
+    # macOS stores filenames decomposed, SQLite composed.
     return unicodedata.normalize("NFC", s) if isinstance(s, str) else s
 
 
@@ -603,8 +597,10 @@ def _parse(item):
 
 def venue_or_event(r):
     """Corpus convention: a festival-only file carries the festival as its venue
-    (gold in G1 to G3 was written that way). Resolved has its own event field since
-    chunk 4, so the convention now lives only here, in how a prediction is scored."""
+    (gold in G1 to G3 was written that way). Resolved has its own event field,
+    so the convention now lives only here, in how a prediction
+    is scored.
+    """
     return r.get("venue") or r.get("event")
 
 
@@ -832,7 +828,6 @@ def run_tier(tier, mode="reader", corpus_dir=None, fixtures_dir=None, limit=None
             **aggregate(results), "items": results}
 
 
-# ── Calibration (chunk 6) ────────────────────────────────────────────────────
 
 CAL_POPS = ("none", "loo")
 

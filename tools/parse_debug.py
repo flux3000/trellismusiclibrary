@@ -12,7 +12,7 @@ Usage:
     python3 tools/parse_debug.py *.txt --tracks
 
 Options:
-    --db        Load known artist/venue names from the Flux Audio SQLite DB
+    --db        Load known artist/venue names from the Trellis SQLite DB
                 for fuzzy match scoring. DB path read from .env or default.
     --tracks    Print the full track list (default: show count only).
     --no-color  Disable ANSI color output.
@@ -50,7 +50,7 @@ def red(t):    return _c(t, "31")
 
 
 def load_known_names_from_db():
-    """Pull artist and venue names from the Flux Audio SQLite DB."""
+    """Pull artist and venue names from the Trellis SQLite DB."""
     try:
         from dotenv import load_dotenv
         load_dotenv(REPO_ROOT / ".env")
@@ -147,7 +147,7 @@ def report_file(file_path, known_artists, known_venues, show_tracks):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Debug the Flux Audio info-file parser against text files."
+        description="Debug the Trellis info-file parser against text files."
     )
     parser.add_argument("paths", nargs="+", help="File(s) or folder(s) to parse")
     parser.add_argument("--db",       action="store_true", help="Load known artists/venues from DB")

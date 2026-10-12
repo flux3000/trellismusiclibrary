@@ -1,6 +1,5 @@
-"""
-tests/test_bulk_ingest_run.py -- Bulk Ingest worker (app/utils/bulk_ingest_run.py),
-spec chunk 5b/5c/5e.
+"""tests/test_bulk_ingest_run.py -- Bulk Ingest worker
+(app/utils/bulk_ingest_run.py), spec chunk 5b/5c/5e.
 
 Real files under a temp LIBRARY_ROOT, run through discover()/process()
 directly with a stop_flag that never fires -- no thread, no app.config
@@ -70,9 +69,9 @@ def _build_tree(root):
           ARTIST="Grateful Dead", DATE="1977-05-08", VENUE="Barton Hall")
 
     # Year + venue, no month/day -> REVIEW as of the Ingest Field Resolver
-    # spec v1 (2026-09-28): the old "year+venue" auto-ingest rule is gone.
-    # Auto-ingest now requires a full date with no conflicts (or a studio
-    # record) -- year-only, with or without a venue, needs a month.
+    # spec v1: the old "year+venue" auto-ingest rule is gone. Auto-ingest
+    # now requires a full date with no conflicts (or a studio record) --
+    # year-only, with or without a venue, needs a month.
     _flac(root / "YearVenueShow" / "01.flac",
           ARTIST="Phish", DATE="1995", VENUE="The Gorge")
 
@@ -156,7 +155,7 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
     orig = _mb.try_match_artist
     _mb.try_match_artist = _boom
     try:
-        # R2-N4: process() reaching 'done' starts the real follow-up thread
+        # process() reaching 'done' starts the real follow-up thread
         # (enqueue_followups -> _enqueue) against this test's temp DB. Left
         # unpatched, that background thread keeps running after the test (and
         # its session/engine) tear down, and has intermittently logged a
@@ -185,9 +184,7 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
     assert items["YearVenueShow"].status == "review"
     assert items["YearVenueShow"].reason == "needs_month"
 
-    # Year only, no venue -> needs_month, not the old blanket "needs_date"
-    # (Ingest Field Resolver spec v1 section 5: needs_date means NO year at
-    # all; a bare year gets its own reason).
+    # Year only, no venue -> needs_month, not the old blanket "needs_date".
     assert items["YearOnlyNoVenueShow"].status == "review"
     assert items["YearOnlyNoVenueShow"].reason == "needs_month"
 
@@ -255,7 +252,7 @@ def test_staging_endpoint_tolerates_null_scores(app, tmp_path, seeded_ids, monke
     run = BulkIngestRun(root=str(root), status="running")
     _db.session.add(run)
     _db.session.commit()
-    # R2-N4: process() reaching 'done' starts the real follow-up thread
+    # process() reaching 'done' starts the real follow-up thread
     # (enqueue_followups -> _enqueue) against this test's temp DB. Left
     # unpatched, that background thread keeps running after the test (and
     # its session/engine) tear down, and has intermittently logged a
@@ -354,7 +351,7 @@ def test_bulk_ingest_never_writes_tags_even_with_switch_on(app, tmp_path, seeded
     _db.session.add(run)
     _db.session.commit()
 
-    # R2-N4: process() reaching 'done' starts the real follow-up thread
+    # process() reaching 'done' starts the real follow-up thread
     # (enqueue_followups -> _enqueue) against this test's temp DB. Left
     # unpatched, that background thread keeps running after the test (and
     # its session/engine) tear down, and has intermittently logged a

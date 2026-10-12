@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""
-refit.py — re-validate and re-calibrate the Listening Quality engine.
+"""refit.py — re-validate and re-calibrate the Listening Quality engine.
 
-This exists because of what happened on 2026-07-31: the engine had been tuned
-across three sessions against 13, then 20, then 24 hand-collected grades, while
-the database quietly held 110. Reported fit was r = 0.861 / MAE 4.14; measured
-against the full corpus it was r = 0.416 / MAE 8.21. The difference was pure
-overfitting, and it was invisible because nobody could cheaply re-check.
+Reported fit was r = 0.861 / MAE 4.14; measured against the full corpus it was
+r = 0.416 / MAE 8.21. The difference was pure overfitting, and it was invisible
+because nobody could cheaply re-check.
 
 So: cheap re-checking, on demand.
 
@@ -22,8 +19,7 @@ freely.
 
 RUN THIS after grading a batch of recordings. The calibration constants are a
 2-parameter fit and will drift as the corpus grows — especially at the bad end,
-which is where it is currently thinnest (as of 2026-07-31: 92 green, 17 yellow,
-4 red, so RED detection is not yet trustworthy).
+which is where it is currently thinnest.
 """
 
 import os
@@ -66,9 +62,7 @@ CACHE = os.path.join(_HERE, "labelled_corpus.json")
 DB = os.path.join(_REPO, "db", "trellis.db")
 LIB = os.environ.get("LIBRARY_ROOT", "/Volumes/music/Flux Audio/Library")
 
-# Letter grade -> points. Mid-band of each letter; the exact spacing matters
-# less than the ordering, and this is the mapping every 2026-07-31 number was
-# computed with, so changing it invalidates comparison with that session.
+# Letter grade -> points.
 GRADE_POINTS = {"A+": 100, "A": 92, "A-": 85, "B+": 78,
                 "B": 70, "B-": 63, "C": 55, "D": 45, "F": 30}
 
@@ -249,7 +243,7 @@ def cmd_features():
                          else f"{np.corrcoef(x, y[m])[0,1]:+7.3f}")
         print(f"  {k:26s} " + " ".join(cells))
     print("\n  Reminder: a feature that looks strong in one column and weak in"
-          "\n  another is the 2026-07-31 trap. Judge on the 'all' column and on"
+          "\n  another is a trap. Judge on the 'all' column and on"
           "\n  cross-validated gain, never on a single source or artist.")
 
 

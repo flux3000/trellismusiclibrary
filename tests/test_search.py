@@ -1,5 +1,4 @@
-"""
-tests/test_search.py — global search (IO-46 V1).
+"""tests/test_search.py — global search.
 
 Two halves, deliberately:
 
@@ -102,8 +101,6 @@ def test_two_digit_year_pivot_follows_the_current_year():
 
 @pytest.mark.parametrize("token", ["83", "26", "4/12", "9:30", "1899", "abc", ""])
 def test_ambiguous_or_non_dates_are_not_dates(token):
-    """Ryan, 2026-08-18: shows span 1940–2026, so a bare two-digit token is
-    genuinely ambiguous and must fall through to text rather than be guessed."""
     assert se.parse_date_token(token, today_year=2026) is None
 
 
@@ -296,9 +293,9 @@ def test_group_order_is_fixed():
 
 
 def _album_index():
-    """A tiny corpus with one live show and one studio album by the same
-    act -- `kind` is what routes each row to its own group (Studio Records
-    spec v1, contract item 4)."""
+    """A tiny corpus with one live show and one studio album by the same act --
+    `kind` is what routes each row to its own group.
+    """
     artists = [{"id": 1, "name": "Grateful Dead", "sort_name": None}]
     recordings = [
         {"id": 300, "performance_id": 400, "artist_id": 1, "kind": "live",
@@ -518,7 +515,7 @@ def test_typed_query_pages_one_group(client):
     assert r.status_code == 200
     body = r.get_json()
     assert body["type"] == "recordings"
-    assert body["label"] == "Recordings"
+    assert body["label"] == "Live Recordings"
     assert body["total"] == 1
     assert body["limit"] == 1
     assert body["offset"] == 0
@@ -553,7 +550,7 @@ def test_date_terms_are_reported_back_for_the_ui(client):
 def test_track_titles_are_not_searchable(client):
     """THE RULE. The seed has a track called "My Foolish Heart"; searching it
     must find nothing. If this test ever fails, someone widened the scope
-    without the conversation — IO-46's Jira text still asks for it."""
+    without the conversation."""
     body = client.get("/api/search?q=foolish").get_json()
     assert body["groups"] == []
     assert body["total"] == 0
@@ -647,10 +644,11 @@ def test_venue_recording_count_is_derived_correctly(app, client):
 
 
 def test_artist_recording_count_includes_albums(app, client):
-    """_derived_counts (app/api/search.py) used to walk index["recordings"]
-    only, which is live-only as of Studio Records spec v1 -- an act with
-    nothing but a studio album showed a recording_count of 0 next to its own
-    listed album, in the same search response."""
+    """_derived_counts (app/api/search.py) used to walk index["recordings"] only,
+    which is live-only as of Studio Records spec v1 -- an act with nothing but
+    a studio album showed a recording_count of 0 next to its own listed album,
+    in the same search response.
+    """
     artist = Artist(name="Albums Only Act")
     _db.session.add(artist)
     _db.session.flush()
@@ -667,10 +665,8 @@ def test_artist_recording_count_includes_albums(app, client):
     assert groups["albums"]["items"][0]["title"] == "Solo Debut"
 
 
-def test_share_search_puts_studio_hit_in_albums_group(app, client):
-    """share.py's /search mirror, over Studio Records spec v1 contract item
-    4: an album must land in the SAME group with the SAME shape a local
-    search would give it."""
+def test_share_search_withholds_studio_hit(app, client):
+    """share.py's /search must not surface a studio album to a peer."""
     from app.models.recording import Recording
     from app.models.performance import Performance
     from app.models.collection import Collection, SYSTEM_FULL_LIBRARY
@@ -704,9 +700,9 @@ def test_share_search_puts_studio_hit_in_albums_group(app, client):
     assert peer_resp.status_code == 200
     peer_groups = {g["type"]: g for g in peer_resp.get_json()["groups"]}
 
-    assert "albums" in owner_groups and "albums" in peer_groups
-    assert peer_groups["albums"]["items"][0]["title"] == \
-        owner_groups["albums"]["items"][0]["title"] == "Conversations With Myself"
-    assert peer_groups["albums"]["items"][0]["id"] == owner_groups["albums"]["items"][0]["id"]
+    # The owner finds the album; the share layer withholds studio records
+    # (app/utils/share_policy.py), so the peer's search does not.
+    assert "albums" in owner_groups
+    assert "albums" not in peer_groups
     assert "recordings" not in peer_groups
 

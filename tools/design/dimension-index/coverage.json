@@ -1,0 +1,50 @@
+{
+ "snapshot": "2026-10-03 19:27 UTC",
+ "coverage": {
+  "artists": {
+   "total": 277,
+   "image": 137,
+   "text": 16,
+   "both": 14,
+   "genre": 204,
+   "area": 129,
+   "members": 161
+  },
+  "musicians": {
+   "total": 482,
+   "image": 2,
+   "text": 9,
+   "instrument": 73,
+   "on_record": 383,
+   "multi_artist": 68
+  },
+  "venues": {
+   "total": 549,
+   "image": 6,
+   "text": 1,
+   "city": 535,
+   "country": 534,
+   "on_record": 532,
+   "multi_rec": 95
+  },
+  "events": {
+   "total": 30,
+   "image": 2,
+   "text": 0,
+   "venue": 30,
+   "place": 30,
+   "year": 30,
+   "day_precise": 29,
+   "multi_artist": 12
+  },
+  "genres": {
+   "total": 13,
+   "color": 12,
+   "text": 0,
+   "with_artists": 13,
+   "artists_unassigned": 73,
+   "recs_no_genre_colour": 108,
+   "recs": 803
+  }
+ }
+}

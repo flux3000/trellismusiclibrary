@@ -1,19 +1,18 @@
-"""
-Strict date grammar for info text and tags (Resolver v2, chunk 1, 2026-10-03).
+"""Strict date grammar for info text and tags.
 
 Why this exists: the old path handed lines to dateutil's fuzzy parser, which
-fills any missing month, day or even year from today's date ("JULY 11,1981"
-became 2026-07-11, "August 1974" became 1974-08-03). A made-up full date then
-outranked a correct year-only tag. Here every mention records which components
-the text actually wrote, and a component that was not written stays None.
+fills any missing month, day or even year from today's date. A made-up full
+date then outranked a correct year-only tag. Here every mention records which
+components the text actually wrote, and a component that was not written stays
+None.
 
 Two layers:
   find_dates(text)      every mention, with span, written set and role hint
   best_show_date(text)  picks the show date and combines consistent mentions
 
-Two-digit years (Ryan, 2026-10-03): yy at or below the current two-digit year
-is 20yy, above it is 19yy. Live tapes from 1900-1926 essentially do not exist,
-so a small yy is read as 20yy rather than left unknown.
+Two-digit years: yy at or below the current two-digit year is 20yy, above it is
+19yy. Live tapes from 1900-1926 essentially do not exist, so a small yy is read
+as 20yy rather than left unknown.
 
 Numeric dates with both parts 12 or under ("5/6/83") read month first (US
 order): most tapers and seeders are in the US or use that style. Day first

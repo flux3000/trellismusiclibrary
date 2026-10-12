@@ -188,10 +188,10 @@ def test_new_recording_appears_without_touching_the_grant(world):
 # ── Both authorization paths still agree ──────────────────────────────────────
 
 def test_both_access_paths_agree_over_a_system_collection(world):
-    """`peer_can_access_recording_id` (milestone 1, streaming) and
-    `peer_visible_recording_ids` (milestone 2, browse) are separate
-    implementations taught about system collections separately. Disagreement
-    means a peer either sees something unplayable or plays something unlisted.
+    """`peer_can_access_recording_id` and `peer_visible_recording_ids` are
+    separate implementations taught about system collections separately.
+    Disagreement means a peer either sees something unplayable or plays
+    something unlisted.
 
     Asserted over EVERY recording in the database, including the unpublished one.
     """
@@ -300,11 +300,6 @@ def test_owner_collection_list_reports_the_dynamic_count(world, app):
 def test_owner_favorites_do_not_reach_a_peer(app):
     """`is_favorite` means "the VIEWER starred this" everywhere in the UI.
 
-    Passing the OWNER's value through would scatter Ryan's private bookmarks
-    across Matt's screen looking, to Matt, like his own — and it would do it
-    through the recording payload even with the Favorites nav section removed,
-    which is exactly how this nearly shipped (2026-08-24).
-
     Asserted across every share endpoint that serialises a recording, because
     the leak is per-serialiser, not per-page.
     """
@@ -356,7 +351,7 @@ def test_owner_favorites_do_not_reach_a_peer(app):
 
 
 def test_share_door_has_no_favorites_endpoint(app):
-    """Removed deliberately rather than left dormant (2026-08-24).
+    """Removed deliberately rather than left dormant.
 
     An unused endpoint that exposes owner-side data is precisely what gets
     wired up later by someone who does not know why it existed.

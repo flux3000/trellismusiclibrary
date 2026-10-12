@@ -1,5 +1,4 @@
-"""
-tests/test_peer_surface_parity.py — the three lists that must agree.
+"""tests/test_peer_surface_parity.py — the three lists that must agree.
 
 WHY THIS FILE EXISTS
 
@@ -23,7 +22,6 @@ fails differently, which is why they kept being diagnosed as data problems:
                                  answer is a perfectly valid empty result. This
                                  is the worst of the three: nothing errors
                                  anywhere. Peer search returned nothing for an
-                                 afternoon on 2026-08-24 for exactly this
                                  reason.
 
 So the lists are asserted against each other rather than trusted. Adding an

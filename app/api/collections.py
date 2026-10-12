@@ -51,10 +51,10 @@ def get_collection(collection_id):
     c = db.session.get(Collection, collection_id)
     if not c:
         return jsonify({"error": "Not found"}), 404
-    # card=True: the collection page renders handbill cards (Ryan, 2026-08-07),
-    # which need the artist's genre colour and primary photo. Collections
-    # are small — a few dozen rows — so the extra joins are cheap here in a way
-    # they would not be on the 544-row flat List.
+    # card=True: the collection page renders handbill cards, which need the
+    # artist's genre colour and primary photo. Collections are small — a few
+    # dozen rows — so the extra joins are cheap here in a way they would not be
+    # on the 544-row flat List.
     #
     # ⚠ PERF: for a system collection this is the whole library — 580 rows with
     # card eager-loads, which is precisely the case the comment above says is

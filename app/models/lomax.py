@@ -47,6 +47,18 @@ class LomaxRun(db.Model):
                       db.Index("ix_lomax_run_key", "subject_key"))
 
 
+class LomaxEasterEggSeen(db.Model):
+    """One row per egg a user has been shown (app/lomax/eggs.py): an egg never repeats for a user."""
+    __tablename__ = "lomax_easter_egg_seen"
+
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    egg_key = db.Column(db.String(32), nullable=False)
+    seen_at = db.Column(db.DateTime, default=_now)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "egg_key", name="uq_lomax_egg_user_key"),)
+
+
 class LomaxProposal(db.Model):
     __tablename__ = "lomax_proposal"
 

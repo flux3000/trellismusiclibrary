@@ -1,10 +1,10 @@
-"""
-migrate_add_artist_confirmed.py -- add artist.confirmed_at and backfill it.
+"""migrate_add_artist_confirmed.py -- add artist.confirmed_at and backfill it.
 
-Resolver v2, chunk 7b (2026-10-05). confirmed_at records when a person first confirmed an
-Artist row (a hand save of a recording under it, or a direct edit). The resolver counts an
-exact match to a confirmed Artist as an independent source for the artist. See
-app/models/artist.py and mark_artist_confirmed() in app/utils/artists.py.
+Resolver v2, chunk 7b. confirmed_at records when a person first confirmed an
+Artist row (a hand save of a recording under it, or a direct edit). The
+resolver counts an exact match to a confirmed Artist as an independent source
+for the artist. See app/models/artist.py and mark_artist_confirmed in
+app/utils/artists.py.
 
 Run it against the database the app uses (from the repo, .venv active, app stopped):
 

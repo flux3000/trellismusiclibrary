@@ -1,13 +1,9 @@
-"""
-scripts/diagnose_commons.py — show exactly where the photo chain breaks.
+"""scripts/diagnose_commons.py — show exactly where the photo chain breaks.
 
 The Commons lookup is a four-link chain across two external APIs:
 
     performer.mb_links_json  →  Wikidata QID  →  P18/P373  →  Commons file  →  bytes
 
-Any link failing produces the same user-visible outcome ("no freely-licensed
-photo found"), which is why a systematic break — the wbgetclaims parameter bug
-on 2026-08-08 — looked identical to an obscure act simply not having a picture.
 This prints each link separately so the two can never be confused again.
 
     python3 scripts/diagnose_commons.py                  # 5 well-known acts

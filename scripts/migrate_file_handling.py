@@ -1,7 +1,4 @@
-"""
-scripts/migrate_file_handling.py -- 2026-09-25 file handling + disc/set split.
-
-Same shape as scripts/migrate_rename_artist_musician.py: dry run by default,
+"""Same shape as scripts/migrate_rename_artist_musician.py: dry run by default,
 one transaction, assertions before commit.
 
 1. ALTER TABLE for the seven new columns:
@@ -80,14 +77,13 @@ def add_columns(con):
 
 
 def seed_file_handling_mode(con):
-    """
-    Seed file_handling_mode=organize (plus its switches) ONLY when the key
-    is absent -- a fresh database that already looks organized. S11
-    (re-review, 2026-09-25): this used to ON CONFLICT DO UPDATE, so a second
-    --apply against a database where the OWNER had since chosen 'keep' (or
-    hand-tuned an individual switch) silently flipped it back to organize's
-    defaults on every re-run. ON CONFLICT DO NOTHING makes this a true
-    no-op once the key exists, whatever value it holds.
+    """Seed file_handling_mode=organize (plus its switches) ONLY when the key is
+    absent -- a fresh database that already looks organized. S11: this used to
+    ON CONFLICT DO UPDATE, so a second --apply against a database where the
+    OWNER had since chosen 'keep' (or hand-tuned an individual switch) silently
+    flipped it back to organize's defaults on every re-run. ON CONFLICT DO
+    NOTHING makes this a true no-op once the key exists, whatever value it
+    holds.
     """
     n_recordings = con.execute("SELECT count(*) FROM recording").fetchone()[0]
     if n_recordings == 0:
@@ -251,22 +247,22 @@ def main():
         sys.exit(f"No database at {args.db}")
 
     if args.apply:
-        # S11 (review, 2026-09-25): --apply used to open the live database
-        # with no check for a running app and no backup, on a script that
-        # rewrites 112 track rows and deletes a preference. A non-empty -wal
-        # sidecar means SQLite has uncommitted writes sitting outside the
-        # main file -- most likely Trellis itself still running -- so refuse
-        # rather than risk applying against a half-written page cache.
+        # S11: --apply used to open the live database with no check for a
+        # running app and no backup, on a script that rewrites 112 track
+        # rows and deletes a preference. A non-empty -wal sidecar means
+        # SQLite has uncommitted writes sitting outside the main file --
+        # most likely Trellis itself still running -- so refuse rather than
+        # risk applying against a half-written page cache.
         wal_path = args.db.with_name(args.db.name + "-wal")
         if wal_path.exists() and wal_path.stat().st_size > 0:
             sys.exit(f"{wal_path} is non-empty -- quit Trellis first (or checkpoint the WAL) "
                       "before applying this migration.")
-        # sqlite3 .backup semantics (S11, re-review 2026-09-25), not a raw
-        # file copy: a plain shutil.copy2 against a live SQLite file can
-        # read it mid-write (a torn page) even with the WAL check above --
-        # Connection.backup() uses SQLite's own online backup API, which
-        # takes its own read lock and copies a transactionally consistent
-        # snapshot page by page.
+        # sqlite3 .backup semantics, not a raw file copy: a plain
+        # shutil.copy2 against a live SQLite file can read it mid-write (a
+        # torn page) even with the WAL check above -- Connection.backup
+        # uses SQLite's own online backup API, which takes its own read
+        # lock and copies a transactionally consistent snapshot page by
+        # page.
         backup_path = args.db.with_name(args.db.name + ".pre-file-handling-migration.bak")
         backup_src = sqlite3.connect(f"file:{args.db}?mode=ro", uri=True)
         backup_dst = sqlite3.connect(str(backup_path))

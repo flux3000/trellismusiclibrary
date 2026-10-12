@@ -18,8 +18,7 @@ FIRST, build, then tag the commit you built.
 
 __version__ = "0.2.4"
 
-# The app has two names on purpose (Ryan, 2026-08-25 — "we should be calling it
-# Trellis Music Library, not just Trellis").
+# The app has two names on purpose.
 #
 # APP_NAME is the real name: the Finder icon, the About box, the installer.
 # SHORT_NAME is for places with a hard length budget — macOS puts CFBundleName

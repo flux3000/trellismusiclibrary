@@ -11,7 +11,7 @@ Routes:
 
 Note what is deliberately NOT here: an endpoint that mounts the drive. Mount
 ownership belongs to the LaunchAgent (tools/mount_library.py), which runs
-whether or not Flux is open and keeps the share available to Finder and
+whether or not Trellis is open and keeps the share available to Finder and
 everything else. The app's job is to notice and report, not to mount.
 
 This module also exposes `require_library`, the pre-flight guard that
@@ -175,8 +175,6 @@ def put_library_layout():
     return jsonify({"file_under_artist_folder": value})
 
 
-# ── File handling (2026-09-25) ───────────────────────────────────────────────
-#
 # The mode (keep/organize) and its six switches, plus placement. Admin-gated
 # for the same reason as library-layout above: one install, one shape.
 

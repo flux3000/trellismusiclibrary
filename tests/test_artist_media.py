@@ -1,8 +1,7 @@
-"""
-tests/test_artist_media.py — Artist profile picture + Dossier
-(2026-07-22): migration idempotency, image upload/serve/delete endpoints, and
-the shared AI-cost-computation helper both this feature and ingest-side AI
-Assist depend on.
+"""tests/test_artist_media.py — Artist profile picture + Dossier: migration
+idempotency, image upload/serve/delete endpoints, and the shared
+AI-cost-computation helper both this feature and ingest-side AI Assist depend
+on.
 """
 
 import sqlite3
@@ -48,7 +47,7 @@ def test_migrate_add_performer_image_dossier_idempotent(tmp_path):
     assert "dossier_json" in cols
 
 
-# ── Profile pictures — multi-image (rewritten 2026-08-07) ───────────────────
+# ── Profile pictures — multi-image ───────────────────
 # The singular /image endpoints were replaced by /images (plural, keyed by
 # image id) when a Artist gained multiple photos with one flagged primary.
 
@@ -71,8 +70,7 @@ def test_upload_get_delete_artist_image(api, app, seeded_ids, tmp_path):
     assert img["is_primary"] is True
     assert img["origin"] == "upload"
 
-    # Files live under DATA_DIR/images/artists/, not under LIBRARY_ROOT
-    # (Bulk Ingest spec chunk 2 -- image store moved out of the library).
+    # Files live under DATA_DIR/images/artists/, not under LIBRARY_ROOT.
     images_dir = tmp_path / "data" / "images" / "artists" / "Bill Evans"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
     assert api.get(f"/api/artists/{pid}").get_json()["has_image"] is True

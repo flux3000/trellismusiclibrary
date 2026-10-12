@@ -1,9 +1,4 @@
-"""
-scripts/bulk_retag.py — rewrite every recording's FLAC tags under the
-2026-09-16 taxonomy (see "Artist-Musician Rename and FLAC Tag Taxonomy — Design
-Spec v1", §3).
-
-A loop over write_flac_tags(), the same function the Write Tags button calls.
+"""A loop over write_flac_tags(), the same function the Write Tags button calls.
 Nothing about WHAT gets written lives here.
 
 Safety, in order of what matters:
@@ -15,10 +10,7 @@ Safety, in order of what matters:
   * Resumable. Each finished recording gets a `tags_written` RecordingEvent,
     committed immediately, and recordings with one dated on or after --since
     are skipped. Ctrl-C loses at most the recording in progress.
-  * Whole-file MD5s will no longer match. Accepted (Ryan, 2026-09-09).
-
-Must run on the Mac with the library mounted; a Cowork session cannot write
-the FLACs. Quit Trellis first so nobody edits metadata mid-run.
+  * Whole-file MD5s will no longer match. Accepted.
 
     python3 scripts/bulk_retag.py                  # dry run
     python3 scripts/bulk_retag.py --apply --limit 5

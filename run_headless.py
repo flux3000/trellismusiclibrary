@@ -1,13 +1,12 @@
-"""
-run_headless.py — Flux Audio entry point WITHOUT PyWebView.
+"""run_headless.py — Trellis entry point WITHOUT PyWebView.
 
 Why this exists
 ---------------
 `run.py` starts Flask in a background thread and opens a native window. That is
 right for the Mac app and wrong for two situations:
 
-1. **The two-node peer-sharing dev rig** (2026-08-08). Developing the consumer
-   side needs a second Flux node to enroll into and browse. A second PyWebView
+1. **The two-node peer-sharing dev rig**. Developing the consumer
+   side needs a second Trellis node to enroll into and browse. A second PyWebView
    window is pure noise — node B is a server, not something to look at.
 2. **Server exposure.** Running behind a Cloudflare Tunnel means running
    headless. This has been on the pre-live blocking list since July.

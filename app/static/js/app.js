@@ -18,13 +18,6 @@ const App = (() => {
     currentRecId:    null,   // recording id currently in detail view
     playingTrackId:  null,   // track id currently in player
     skipNonMusic:    false,  // filter announcements/banter/tuning from queue
-    // Generic "where did I come from" navigation tracking (2026-07-23),
-    // replacing three earlier ad hoc mechanisms (a selectedArtist-based
-    // back-link that only worked one hop, a one-shot recFrom that only
-    // covered Recording→Artist/Venue, and several hardcoded '#/'
-    // fallbacks) — see route() for how these are kept in sync, and the
-    // 2026-07-23 project memory entry for the bug this fixed (Recently
-    // Added → Recording → Back landed on Library instead of Recently Added).
     //   navCurrent — { hash, label } for the page ON SCREEN right now, set
     //     by that page's own render function once its label is known
     //     (setNavCurrent()). A same-page reload (direct render*View() call,
@@ -37,11 +30,11 @@ const App = (() => {
     //     re-dispatch (a reload must never overwrite the real back target).
     navCurrent:      null,
     navBack:         null,
-    // Bulk Ingest (spec 1.9/4, chunk 7c) — just enough of /api/bulk-ingest/
-    // current's own shape to decide the nav item and home routing without
-    // every reader re-fetching it. null until the boot fetch (or a later
-    // refresh from the bulkIngest page itself) resolves; {run: null} once
-    // resolved with nothing active. See refreshBulkIngestStatus().
+    // Bulk Ingest — just enough of /api/bulk-ingest/ current's own shape to
+    // decide the nav item and home routing without every reader re-fetching
+    // it. null until the boot fetch (or a later refresh from the bulkIngest
+    // page itself) resolves; {run: null} once resolved with nothing active.
+    // See refreshBulkIngestStatus.
     bulkIngest:        null,
   }
 
@@ -49,29 +42,27 @@ const App = (() => {
   // Every flag list/label/skip-set is derived from this one array. `nonMusic`
   // marks flags whose tracks are skipped by the "Skip non-music" filter.
   //
-  // ALPHABETICAL BY LABEL (Ryan, 2026-09-01). The previous order was the order
-  // the flags were thought of in, which is not an order anyone can predict —
-  // twelve pills in an arbitrary sequence means reading all twelve every time
-  // to find one. Alphabetical is the only ordering a reader can navigate
-  // without learning it first.
+  // Issues first (in the order a track fails: start, middle, end), then Content
+  // alphabetically by label.
   //
   // ⚠ Nothing may depend on this ORDER. `NON_MUSIC_FLAGS` and `FLAG_LABELS`
   // below are both order-independent, and `trackChipsArray` iterates the
   // TRACK'S own `flags` array rather than this one, so chip order on a row is
   // unaffected. Keep it that way: this list is a vocabulary, not a sequence.
+  // `group` sets which section of the track menu a flag sits in: 'issues' are
+  // problems with the audio, 'content' is what the track contains.
   const TRACK_FLAGS = [
-    { key: 'announcement',    label: 'Announcement',    nonMusic: true  },
-    { key: 'audience',        label: 'Audience',        nonMusic: true  },
-    { key: 'band_intros',     label: 'Band Intros',     nonMusic: true  },
-    { key: 'banter',          label: 'Banter',          nonMusic: true  },
-    { key: 'end_truncated',   label: 'End Truncated',   nonMusic: false },
-    { key: 'incomplete',      label: 'Incomplete',      nonMusic: false },
-    { key: 'interview',       label: 'Interview',       nonMusic: true  },
-    { key: 'introduction',    label: 'Introduction',    nonMusic: true  },
-    { key: 'medley',          label: 'Medley',          nonMusic: false },
-    { key: 'start_truncated', label: 'Start Truncated', nonMusic: false },
-    { key: 'tuning',          label: 'Tuning',          nonMusic: true  },
-    { key: 'unknown_title',   label: 'Unknown Title',   nonMusic: false },
+    { key: 'start_truncated', label: 'Start Truncated', nonMusic: false, group: 'issues'  },
+    { key: 'incomplete',      label: 'Incomplete',      nonMusic: false, group: 'issues'  },
+    { key: 'end_truncated',   label: 'End Truncated',   nonMusic: false, group: 'issues'  },
+    { key: 'announcement',    label: 'Announcement',    nonMusic: true,  group: 'content' },
+    { key: 'audience',        label: 'Audience',        nonMusic: true,  group: 'content' },
+    { key: 'band_intros',     label: 'Band Intros',     nonMusic: true,  group: 'content' },
+    { key: 'banter',          label: 'Banter',          nonMusic: true,  group: 'content' },
+    { key: 'interview',       label: 'Interview',       nonMusic: true,  group: 'content' },
+    { key: 'introduction',    label: 'Introduction',    nonMusic: true,  group: 'content' },
+    { key: 'outro',           label: 'Outro',           nonMusic: true,  group: 'content' },
+    { key: 'tuning',          label: 'Tuning',          nonMusic: true,  group: 'content' },
   ]
   const NON_MUSIC_FLAGS = TRACK_FLAGS.filter(f => f.nonMusic).map(f => f.key)
   const FLAG_LABELS     = Object.fromEntries(TRACK_FLAGS.map(f => [f.key, f.label]))
@@ -79,33 +70,31 @@ const App = (() => {
   // ── Placeholder venue names ("Unknown Venue", "TBD", ...) ──────────────────
   // These aren't real, canonical physical places — they're a stand-in every
   // show without a known venue reuses. Must mirror app/utils/venues.py's
-  // PLACEHOLDER_VENUE_NAMES exactly (Ryan, 2026-07-15 — see that module's
-  // docstring for the full contamination story and the confirmed audit).
+  // PLACEHOLDER_VENUE_NAMES exactly.
   const PLACEHOLDER_VENUE_NAMES = new Set(['unknown venue', 'unknown', 'tbd', 'n/a', 'various'])
   function isPlaceholderVenue(name) {
     return !!name && PLACEHOLDER_VENUE_NAMES.has(String(name).trim().toLowerCase())
   }
 
-  /** Official badge + flag chips ("bubble tags") for a track, as an ordered
-   *  array of individual chip HTML strings — official badge first, then each
-   *  flag. Add Recording's track table (renderIngestReview) uses the array
-   *  directly: first chip stays under the title, any rest go in a dedicated
-   *  full-width row (Ryan, 2026-07-15 — stacking multiples under the title
-   *  in that narrow input-constrained cell was pushing the title text up). */
+  /* Official badge + flag chips ("bubble tags") for a track, as an ordered
+     array of individual chip HTML strings — official badge first, then each
+     flag. Add Recording's track table (renderIngestReview) uses the array
+     directly: first chip stays under the title, any rest go in a dedicated
+     full-width row. */
   function trackChipsArray(t, opts) {
     const chips = []
-    // Add Recording passes { hideOfficial: true } (Ryan, 2026-08-08): the
-    // form already has its own "Official release" checkbox right below the
-    // track table, so a © badge on every row it cascades to is redundant —
-    // View Recording (the only other caller) keeps showing it, since that's
-    // a read-only page with no checkbox in view.
+    // Add Recording passes { hideOfficial: true }: the form already has its
+    // own "Official release" checkbox right below the track table, so a ©
+    // badge on every row it cascades to is redundant — View Recording (the
+    // only other caller) keeps showing it, since that's a read-only page
+    // with no checkbox in view.
     if (t.is_official && !(opts && opts.hideOfficial)) {
       chips.push(`<span class="track-official-badge" title="Officially released">©</span>`)
     }
-    ;(t.flags || []).forEach(f => chips.push(`<span class="track-flag-chip">${FLAG_LABELS[f] || f}</span>`))
-    // The non-music audio signal is deliberately NOT surfaced here (Ryan,
-    // 2026-08-28). It exists to inform the ingestion and metadata engines,
-    // not to put a second, hedged opinion next to a real flag in the UI.
+    ;(t.flags || []).filter(f => FLAG_LABELS[f]).forEach(f => chips.push(`<span class="track-flag-chip">${FLAG_LABELS[f]}</span>`))
+    // The non-music audio signal is deliberately NOT surfaced here. It
+    // exists to inform the ingestion and metadata engines, not to put a
+    // second, hedged opinion next to a real flag in the UI.
     return chips
   }
 
@@ -133,19 +122,16 @@ const App = (() => {
   }
 
   // ── Waveform (wavesurfer.js) ──────────────────────────────────────────────
-  // Officially adopted 2026-07-15 (was a spike prototype) — replaces the old
-  // hand-rolled canvas RAF-loop renderer. Ryan: "fully wired into the
-  // persistent player. It should not be separate." Deliberately does NOT use
-  // wavesurfer's own `media`/`url` binding, though — that mechanism fetches
-  // the whole file as a blob to decode it, which (a) defeats the browser's
-  // native HTTP range-request streaming we rely on for large lossless files
-  // and (b) replaces the shared #audio-el's src with a blob: URL that gets
-  // revoked on destroy(), risking a playback interruption just from
-  // navigating away. Instead: wavesurfer renders purely from our own
+  // Deliberately does NOT use wavesurfer's own `media`/`url` binding, though —
+  // that mechanism fetches the whole file as a blob to decode it, which (a)
+  // defeats the browser's native HTTP range-request streaming we rely on for
+  // large lossless files and (b) replaces the shared #audio-el's src with a
+  // blob: URL that gets revoked on destroy, risking a playback interruption
+  // just from navigating away. Instead: wavesurfer renders purely from our own
   // precomputed peaks (`_waveformMap`, already computed server-side — no
-  // network fetch at all) and its OWN internal silent audio element, which
-  // we never play. All REAL playback stays owned by Player/#audio-el, the
-  // one true audio channel:
+  // network fetch at all) and its OWN internal silent audio element, which we
+  // never play. All REAL playback stays owned by Player/#audio-el, the one
+  // true audio channel:
   //   - click/drag on the waveform → 'interaction' event → we set
   //     #audio-el's currentTime directly (loading this recording's queue
   //     first, paused, if it wasn't already the active one)
@@ -211,13 +197,12 @@ const App = (() => {
   // ── Kill native spellcheck/autocorrect on text inputs ─────────────────────
   // This app runs inside PyWebView's underlying WKWebView, which applies
   // macOS's own spellcheck/text-replacement to any unmarked text input — pops
-  // an unwanted correction bubble while typing artist/venue/person names
-  // (proper nouns trip it constantly; Ryan, 2026-07-23, typing "Ricky
-  // Simpkins" got auto-"corrected" toward "Simpkin's"). Delegated on focusin
-  // at the document level rather than patched into every input's template —
-  // most of these inputs (add-picker rows, inline edits) are created well
-  // after their page's own setMainHTML() call, so a one-time sweep wouldn't
-  // reach them; this catches every text input, present and future.
+  // an unwanted correction bubble while typing artist/venue/person names.
+  // Delegated on focusin at the document level rather than patched into every
+  // input's template — most of these inputs (add-picker rows, inline edits)
+  // are created well after their page's own setMainHTML call, so a one-time
+  // sweep wouldn't reach them; this catches every text input, present and
+  // future.
   document.addEventListener('focusin', e => {
     const el = e.target
     if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search')) {
@@ -228,12 +213,6 @@ const App = (() => {
   })
 
   // ── Palette ────────────────────────────────────────────────────────────────
-  // Seven named schemes, v1, chosen 2026-08-30. This registry carries ids,
-  // labels and one line of description — NO colours. Every hex lives in the
-  // palette blocks in main.css, and the Settings picker paints its swatches
-  // straight from those blocks via [data-pal-preview], so the JS and the CSS
-  // cannot drift apart about what a scheme looks like. Adding a scheme means a
-  // block there and an entry here, with matching ids.
   //
   // The id sits on <html>, not on <body> the way the old theme class did. That
   // was a real bug and not a stylistic choice: buildWaveform() reads --t2 /
@@ -280,6 +259,7 @@ const App = (() => {
     const p = paletteById(id)
     if (!p) return null
     document.documentElement.setAttribute('data-palette', p.id)
+    document.documentElement.setAttribute('data-mode', p.mode)      // 'light' | 'dark': the header image dims on a light ground
     localStorage.setItem(PALETTE_KEY, p.id)
     return p
   }
@@ -337,8 +317,8 @@ const App = (() => {
     } catch (e) { /* leave it empty rather than showing a broken strip */ }
   }
 
-  // The same wording as the top of Add Recordings (Ryan, 2026-10-06), so the
-  // two screens describe File Handling in one voice.
+  // The same wording as the top of Add Recordings, so the two screens
+  // describe File Handling in one voice.
   function fileHandlingStripHtml(fh) {
     return `<span class="fh-strip">${_biFileHandlingHtml(fh)}</span>`
   }
@@ -394,9 +374,8 @@ const App = (() => {
   }
 
   // Start date, extended with an end date when the performance spans more
-  // than one day (2026-07-23 — e.g. the Danny Gatton Cellar Door stand,
-  // start/end a day apart). Same month+year → compact "Jan 25–26, 1979";
-  // otherwise a full "Start – End" range.
+  // than one day. Same month+year → compact "Jan 25–26, 1979"; otherwise
+  // a full "Start – End" range.
   function fmtDateRangeLong(perf) {
     const start = fmtDateLong(perf.start_year, perf.start_month, perf.start_day)
     if (!perf.end_year && !perf.end_month && !perf.end_day) return start
@@ -435,14 +414,13 @@ const App = (() => {
     return iso ? iso.slice(0, 10) : ''
   }
 
-  // Studio vs live naming layer (Studio Records spec v1, chunk 5 — Ryan
-  // approved). Every render helper that decides how to label a recording row
-  // routes through this instead of assuming a live show's date/venue/source.
-  // Live (kind !== 'studio', including missing kind) returns exactly what
-  // every call site already computed before this helper existed, so nothing
-  // about live rendering changes. Studio never carries a venue, location or
-  // source -- `lead`/`sub`/`dateText` are the only three fields a studio row
-  // ever needs.
+  // Studio vs live naming layer. Every render helper that decides how to
+  // label a recording row routes through this instead of assuming a live
+  // show's date/venue/source. Live (kind !== 'studio', including missing
+  // kind) returns exactly what every call site already computed before this
+  // helper existed, so nothing about live rendering changes. Studio never
+  // carries a venue, location or source -- `lead`/`sub`/`dateText` are the
+  // only three fields a studio row ever needs.
   function recIdentity(r) {
     const isStudio = !!(r && r.kind === 'studio')
     if (!isStudio) {
@@ -508,9 +486,9 @@ const App = (() => {
   function esc(s) { return escHtml(s) }
 
   // Shared byte formatter — used by the Add Recordings folder navigator's
-  // size column (2026-08-22). One decimal above 1 GB, none below, because a
-  // show folder in single-digit GB and a multi-disc box set in double digits
-  // both want to be scannable at a glance.
+  // size column. One decimal above 1 GB, none below, because a show folder
+  // in single-digit GB and a multi-disc box set in double digits both want
+  // to be scannable at a glance.
   function fmtBytes(n) {
     if (!n) return '—'
     if (n >= 1e9) return (n / 1e9).toFixed(1) + ' GB'
@@ -519,14 +497,10 @@ const App = (() => {
     return n + ' B'
   }
 
-  // Shared expand/contract chevron (Ryan, 2026-08-23 — "the tiny caret just
-  // isn't big enough... do this replacement for all uses throughout the
-  // site"). Replaces the bare ▸/▾ unicode triangle everywhere it was used as
-  // a real expand/collapse control. A unicode triangle's visual weight varies
-  // wildly by font/OS — which is why the 2026-08-02 pass that bumped these to
-  // a bigger font-size and an 18px hit target (see .nav-caret) never actually
-  // fixed the complaint. One crisp inline SVG instead, coloured with
-  // currentColor so it inherits whatever the container already sets.
+  // Shared expand/contract chevron. Replaces the bare ▸/▾ unicode triangle
+  // everywhere it was used as a real expand/collapse control. One crisp inline
+  // SVG instead, coloured with currentColor so it inherits whatever the
+  // container already sets.
   //
   // Drawn pointing right (closed); every call site already rotates its
   // container 90° on an `.open`/`.expanded` class to mean "expanded", so that
@@ -539,14 +513,14 @@ const App = (() => {
   // quality report's lq-tab chevrons and the ingest review "parsed tracks"
   // toggle, both ▴/▾ swap-based rather than rotate-based.
   //
-  // ⚠ THE MENU EXCEPTION IS OVER (Ryan, 2026-08-28). Dropdown openers used a
-  // DIFFERENT chevron on the theory that a menu is not an expander — true of
-  // the semantics, invisible to the eye, and indefensible once the triage
-  // row put "Move ⌄" forty pixels from an expand caret: two chevrons of
-  // different stroke weight and different proportions, side by side. Lucide's
-  // chevron in a 24-unit box renders a ~0.8px stroke at this size; this one in
-  // an 8-unit box renders ~2.1px — and the THIN one is the keeper. chevronIcon()
-  // now emits that Lucide glyph and is the ONLY chevron in the app.
+  // ⚠ THE MENU EXCEPTION IS OVER. Dropdown openers used a DIFFERENT chevron on
+  // the theory that a menu is not an expander — true of the semantics, invisible
+  // to the eye, and indefensible once the triage row put "Move ⌄" forty pixels
+  // from an expand caret: two chevrons of different stroke weight and different
+  // proportions, side by side. Lucide's chevron in a 24-unit box renders a
+  // ~0.8px stroke at this size; this one in an 8-unit box renders ~2.1px — and
+  // the THIN one is the keeper. chevronIcon now emits that Lucide glyph and is
+  // the ONLY chevron in the app.
   // ── Icons ─────────────────────────────────────────────────────────────────
   // Lucide v1.33.0, ISC — app/static/js/LUCIDE-LICENSE.txt.
   //
@@ -567,46 +541,48 @@ const App = (() => {
   // Only icons actually in use belong here. A grab-bag of unused glyphs is how
   // icons end up sprinkled on everything.
   const ICONS = {
-    // Research (2026-10-04). Lucide 'brain' replaced 'sparkles' on every Research
-    // button; the colour is what ties those buttons together, the glyph may vary
-    // with the surface. Details panel toggle: Lucide 'panel-right'.
+    // Research. Lucide 'brain' replaced 'sparkles' on every Research button; the
+    // colour is what ties those buttons together, the glyph may vary with the
+    // surface. Details panel toggle: Lucide 'panel-right'.
     'brain':        '<path d="M12 18V5"/><path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"/><path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"/><path d="M17.997 5.125a4 4 0 0 1 2.526 5.77"/><path d="M18 18a4 4 0 0 0 2-7.464"/><path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"/><path d="M6 18a4 4 0 0 1-2-7.464"/><path d="M6.003 5.125a4 4 0 0 0-2.526 5.77"/>',
     'panel-right':  '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
-    // Lomax (2026-10-06). A portrait of Alan Lomax: swept-back hair, goatee, open
-    // collar (source: tools/design/lomax-portrait.svg). A FILLED path, not a Lucide stroke icon, so the
-    // <path> overrides icon()'s stroke/fill. 'lomax' sits beside the tab name and
-    // 'lomax-full' is the chat avatar; both are the same mark. Never on a button.
-    // 'info' is Lucide 'info', the (i) beside level toggles and Resolver values.
+    // Lomax. A portrait of Alan Lomax: swept-back hair, goatee, open collar (source:
+    // tools/design/lomax-portrait.svg). A FILLED path, not a Lucide stroke icon, so the <path>
+    // overrides icon's stroke/fill. 'lomax' sits beside the tab name and 'lomax-full' is the chat
+    // avatar; both are the same mark. Never on a button. 'info' is Lucide 'info', the (i) beside
+    // level toggles and Resolver values.
     'info':         '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
     'lomax':        '<path fill="currentColor" stroke="none" d="M1.6 23.16C1.56 23.12 1.62 22.85 1.78 22.40C2.58 20.11 4.62 18.18 7.35 17.14C7.85 16.95 7.96 16.92 8.01 16.96C8.03 16.97 8.15 17.31 8.27 17.69C8.51 18.45 8.55 18.54 8.72 18.61C8.89 18.68 11.66 19.16 11.82 19.14C11.9 19.13 11.98 19.12 12.01 19.12C12.04 19.12 12.12 19.13 12.2 19.14C12.36 19.16 15.14 18.68 15.31 18.61C15.47 18.54 15.51 18.45 15.75 17.70C15.87 17.31 15.98 16.99 15.99 16.97C16.03 16.91 16.25 16.98 16.88 17.23C19.49 18.29 21.44 20.18 22.22 22.40C22.38 22.85 22.44 23.12 22.4 23.16C22.35 23.22 1.65 23.22 1.6 23.16ZM10.32 18.46C8.83 18.2 8.91 18.22 8.88 18.13C8.79 17.9 8.33 16.38 8.34 16.35C8.35 16.31 8.43 16.28 8.6 16.23C9.52 15.95 9.57 15.94 9.67 16.03C9.7 16.06 9.83 16.16 9.97 16.25L10.21 16.42 10.77 17.19C11.31 17.95 11.7 18.55 11.7 18.63C11.7 18.65 11.69 18.67 11.67 18.68C11.65 18.69 11.05 18.59 10.32 18.46ZM12.36 18.68C12.3 18.66 12.32 18.59 12.5 18.30C12.66 18.03 13.69 16.56 13.81 16.43C13.84 16.4 13.92 16.33 14 16.28C14.08 16.23 14.19 16.15 14.26 16.09C14.44 15.93 14.44 15.93 14.96 16.09C15.63 16.28 15.67 16.3 15.69 16.35C15.7 16.38 15.24 17.9 15.15 18.13C15.11 18.22 15.17 18.21 13.7 18.46C13.02 18.58 12.45 18.68 12.43 18.68C12.4 18.69 12.37 18.69 12.36 18.68ZM11.59 16.31C10.88 16.19 9.87 15.57 9.47 15.00C9.42 14.93 9.3 14.75 9.2 14.61C9.09 14.46 8.92 14.15 8.74 13.79C8.31 12.92 8.1 12.25 7.96 11.29C7.94 11.12 7.91 10.91 7.9 10.82C7.88 10.74 7.86 10.53 7.85 10.37C7.83 10.11 7.81 10.01 7.69 9.65C7.33 8.55 7.18 7.37 7.31 6.61C7.43 5.93 7.67 5.29 7.95 4.88C8.01 4.79 8.08 4.69 8.1 4.66C8.28 4.4 8.84 3.88 9.2 3.65C9.71 3.33 10.57 3.03 11.31 2.90C11.62 2.85 12.68 2.84 13.05 2.89C14.02 3.02 14.63 3.24 15.32 3.71C16 4.17 16.55 5.17 16.77 6.34C16.83 6.63 16.85 7.52 16.8 7.86C16.79 7.96 16.76 8.14 16.75 8.26C16.74 8.39 16.71 8.54 16.7 8.60C16.61 9.03 16.58 9.15 16.49 9.44C16.42 9.66 16.35 9.81 16.28 9.92C16.2 10.05 16.18 10.11 16.18 10.19C16.18 10.31 16.11 10.83 16.06 11.14C16.04 11.26 16.02 11.42 16.01 11.50C16 11.58 15.99 11.68 15.98 11.72C15.96 11.77 15.94 11.89 15.92 11.97C15.73 13.03 14.96 14.6 14.28 15.29C13.52 16.06 12.48 16.46 11.59 16.31ZM11.18 15.51C11.18 15.46 10.91 15.11 10.81 15.03C10.79 15.01 10.73 14.93 10.68 14.86C10.64 14.79 10.55 14.68 10.5 14.61C10.34 14.42 10.21 14.14 10.09 13.75C10.02 13.55 9.92 13.25 9.87 13.09C9.7 12.55 9.71 12.36 9.95 12.12C10.15 11.92 10.49 11.75 10.94 11.64C11.28 11.56 12.78 11.56 13.09 11.65C13.58 11.78 13.9 11.95 14.11 12.18C14.32 12.41 14.31 12.58 14.01 13.47C13.75 14.27 13.67 14.44 13.37 14.80C13.33 14.85 13.24 14.96 13.17 15.05C13.1 15.13 12.99 15.26 12.93 15.33C12.81 15.48 12.8 15.53 12.88 15.53C13.08 15.53 13.88 14.92 14.09 14.62C14.14 14.55 14.25 14.38 14.34 14.25C14.51 13.99 14.89 13.26 15.02 12.94C15.13 12.64 15.23 12.31 15.36 11.81C15.4 11.64 15.46 11.28 15.5 10.95C15.51 10.82 15.54 10.57 15.56 10.40C15.58 10.23 15.6 10.05 15.6 10.00C15.6 9.95 15.62 9.83 15.64 9.72C15.77 9.15 15.62 7.98 15.39 7.74C15.2 7.56 14.53 7.31 13.99 7.23C13.33 7.13 13.09 7.11 12.01 7.11C10.93 7.11 10.78 7.12 10.03 7.23C9.81 7.26 9.37 7.37 9.11 7.47C8.68 7.63 8.47 8.07 8.4 8.95C8.35 9.58 8.34 9.68 8.37 9.77C8.39 9.82 8.41 10 8.42 10.16C8.45 10.43 8.48 10.75 8.55 11.29C8.56 11.39 8.58 11.52 8.6 11.57C8.61 11.62 8.64 11.75 8.66 11.86C8.85 12.76 9.28 13.7 9.86 14.54C10.14 14.93 10.89 15.52 11.12 15.52C11.15 15.52 11.18 15.52 11.18 15.51ZM12.52 12.89C12.87 12.83 13.01 12.71 12.88 12.59C12.65 12.38 11.33 12.39 11.12 12.60C11.08 12.63 11.07 12.66 11.08 12.71C11.11 12.82 11.28 12.87 11.84 12.94C11.95 12.95 12.29 12.93 12.52 12.89Z"/>',
     'lomax-full':   '<path fill="currentColor" stroke="none" d="M1.6 23.16C1.56 23.12 1.62 22.85 1.78 22.40C2.58 20.11 4.62 18.18 7.35 17.14C7.85 16.95 7.96 16.92 8.01 16.96C8.03 16.97 8.15 17.31 8.27 17.69C8.51 18.45 8.55 18.54 8.72 18.61C8.89 18.68 11.66 19.16 11.82 19.14C11.9 19.13 11.98 19.12 12.01 19.12C12.04 19.12 12.12 19.13 12.2 19.14C12.36 19.16 15.14 18.68 15.31 18.61C15.47 18.54 15.51 18.45 15.75 17.70C15.87 17.31 15.98 16.99 15.99 16.97C16.03 16.91 16.25 16.98 16.88 17.23C19.49 18.29 21.44 20.18 22.22 22.40C22.38 22.85 22.44 23.12 22.4 23.16C22.35 23.22 1.65 23.22 1.6 23.16ZM10.32 18.46C8.83 18.2 8.91 18.22 8.88 18.13C8.79 17.9 8.33 16.38 8.34 16.35C8.35 16.31 8.43 16.28 8.6 16.23C9.52 15.95 9.57 15.94 9.67 16.03C9.7 16.06 9.83 16.16 9.97 16.25L10.21 16.42 10.77 17.19C11.31 17.95 11.7 18.55 11.7 18.63C11.7 18.65 11.69 18.67 11.67 18.68C11.65 18.69 11.05 18.59 10.32 18.46ZM12.36 18.68C12.3 18.66 12.32 18.59 12.5 18.30C12.66 18.03 13.69 16.56 13.81 16.43C13.84 16.4 13.92 16.33 14 16.28C14.08 16.23 14.19 16.15 14.26 16.09C14.44 15.93 14.44 15.93 14.96 16.09C15.63 16.28 15.67 16.3 15.69 16.35C15.7 16.38 15.24 17.9 15.15 18.13C15.11 18.22 15.17 18.21 13.7 18.46C13.02 18.58 12.45 18.68 12.43 18.68C12.4 18.69 12.37 18.69 12.36 18.68ZM11.59 16.31C10.88 16.19 9.87 15.57 9.47 15.00C9.42 14.93 9.3 14.75 9.2 14.61C9.09 14.46 8.92 14.15 8.74 13.79C8.31 12.92 8.1 12.25 7.96 11.29C7.94 11.12 7.91 10.91 7.9 10.82C7.88 10.74 7.86 10.53 7.85 10.37C7.83 10.11 7.81 10.01 7.69 9.65C7.33 8.55 7.18 7.37 7.31 6.61C7.43 5.93 7.67 5.29 7.95 4.88C8.01 4.79 8.08 4.69 8.1 4.66C8.28 4.4 8.84 3.88 9.2 3.65C9.71 3.33 10.57 3.03 11.31 2.90C11.62 2.85 12.68 2.84 13.05 2.89C14.02 3.02 14.63 3.24 15.32 3.71C16 4.17 16.55 5.17 16.77 6.34C16.83 6.63 16.85 7.52 16.8 7.86C16.79 7.96 16.76 8.14 16.75 8.26C16.74 8.39 16.71 8.54 16.7 8.60C16.61 9.03 16.58 9.15 16.49 9.44C16.42 9.66 16.35 9.81 16.28 9.92C16.2 10.05 16.18 10.11 16.18 10.19C16.18 10.31 16.11 10.83 16.06 11.14C16.04 11.26 16.02 11.42 16.01 11.50C16 11.58 15.99 11.68 15.98 11.72C15.96 11.77 15.94 11.89 15.92 11.97C15.73 13.03 14.96 14.6 14.28 15.29C13.52 16.06 12.48 16.46 11.59 16.31ZM11.18 15.51C11.18 15.46 10.91 15.11 10.81 15.03C10.79 15.01 10.73 14.93 10.68 14.86C10.64 14.79 10.55 14.68 10.5 14.61C10.34 14.42 10.21 14.14 10.09 13.75C10.02 13.55 9.92 13.25 9.87 13.09C9.7 12.55 9.71 12.36 9.95 12.12C10.15 11.92 10.49 11.75 10.94 11.64C11.28 11.56 12.78 11.56 13.09 11.65C13.58 11.78 13.9 11.95 14.11 12.18C14.32 12.41 14.31 12.58 14.01 13.47C13.75 14.27 13.67 14.44 13.37 14.80C13.33 14.85 13.24 14.96 13.17 15.05C13.1 15.13 12.99 15.26 12.93 15.33C12.81 15.48 12.8 15.53 12.88 15.53C13.08 15.53 13.88 14.92 14.09 14.62C14.14 14.55 14.25 14.38 14.34 14.25C14.51 13.99 14.89 13.26 15.02 12.94C15.13 12.64 15.23 12.31 15.36 11.81C15.4 11.64 15.46 11.28 15.5 10.95C15.51 10.82 15.54 10.57 15.56 10.40C15.58 10.23 15.6 10.05 15.6 10.00C15.6 9.95 15.62 9.83 15.64 9.72C15.77 9.15 15.62 7.98 15.39 7.74C15.2 7.56 14.53 7.31 13.99 7.23C13.33 7.13 13.09 7.11 12.01 7.11C10.93 7.11 10.78 7.12 10.03 7.23C9.81 7.26 9.37 7.37 9.11 7.47C8.68 7.63 8.47 8.07 8.4 8.95C8.35 9.58 8.34 9.68 8.37 9.77C8.39 9.82 8.41 10 8.42 10.16C8.45 10.43 8.48 10.75 8.55 11.29C8.56 11.39 8.58 11.52 8.6 11.57C8.61 11.62 8.64 11.75 8.66 11.86C8.85 12.76 9.28 13.7 9.86 14.54C10.14 14.93 10.89 15.52 11.12 15.52C11.15 15.52 11.18 15.52 11.18 15.51ZM12.52 12.89C12.87 12.83 13.01 12.71 12.88 12.59C12.65 12.38 11.33 12.39 11.12 12.60C11.08 12.63 11.07 12.66 11.08 12.71C11.11 12.82 11.28 12.87 11.84 12.94C11.95 12.95 12.29 12.93 12.52 12.89Z"/>',
-    // Preview transport on Add Recording (2026-08-28). Lucide 'skip-back' /
-    // 'skip-forward' — the SAME two glyphs the player bar draws inline in
-    // index.html, so the two transports cannot drift apart. Kept here as well
-    // because that bar predates this registry and never went through it.
+    // Preview transport on Add Recording. Lucide 'skip-back' / 'skip-forward'
+    // — the SAME two glyphs the player bar draws inline in index.html, so the
+    // two transports cannot drift apart. Kept here as well because that bar
+    // predates this registry and never went through it.
     'skip-back':    '<path d="M17.971 4.285A2 2 0 0 1 21 6v12a2 2 0 0 1-3.029 1.715l-9.997-5.998a2 2 0 0 1-.003-3.432z"/><path d="M3 20V4"/>',
     'skip-forward': '<path d="M21 4v16"/><path d="M6.029 4.285A2 2 0 0 0 3 6v12a2 2 0 0 0 3.029 1.715l9.997-5.998a2 2 0 0 0 .003-3.432z"/>',
-    // Failed-ingest marker on a triage row (2026-08-28). Lucide 'circle-alert'.
+    // Failed-ingest marker on a triage row. Lucide 'circle-alert'.
     'alert':        '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
     'folder-open':  '<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\"/>',
-    // Fingerprint verdict on the compact row (2026-08-28). Lucide 'fingerprint'.
+    // Fingerprint verdict on the compact row. Lucide 'fingerprint'.
     'fingerprint':  '<path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4"/><path d="M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2"/>',
     'map-pin':      '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
     'users':        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/>',
     'user':         '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
     'tag':          '<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>',
-    // Lucide 'calendar-days', for the Events dimension (2026-09-01). Copied out
-    // of the package verbatim, per CONTEXT.md — never draw one by hand.
+    // Lucide 'calendar-days', for the Events dimension. Copied out of the
+    // package verbatim — never draw one by hand.
     'calendar':     '<path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/><path d="M8 14h.01"/><path d="M12 14h.01"/><path d="M16 14h.01"/><path d="M8 18h.01"/><path d="M12 18h.01"/><path d="M16 18h.01"/>',
+    // Lucide 'arrow-up-down', on the count sort of the dimension indexes.
+    'arrow-up-down': '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
     'plus':         '<path d="M5 12h14"/><path d="M12 5v14"/>',
     'minus':        '<path d="M5 12h14"/>',
     'library':      '<path d="m16 6 4 14"/><path d="M12 6v14"/><path d="M8 8v12"/><path d="M4 4v16"/>',
     'search':       '<path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/>',
     'clock':        '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
-    // Left nav Albums entry (Studio Records spec v1, chunk 7). No 'album'
-    // glyph exists in the set actually vendored into this file; Lucide
-    // 'disc' is the closest match (a record) and reads at the same weight
-    // as the library/search/clock icons beside it -- copied verbatim.
+    // Left nav Albums entry. No 'album' glyph exists in the set actually
+    // vendored into this file; Lucide 'disc' is the closest match (a
+    // record) and reads at the same weight as the library/search/clock
+    // icons beside it -- copied verbatim.
     'disc':         '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/>',
     'arrow-left-right': '<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>',
     'rotate-cw':    '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
@@ -617,17 +593,18 @@ const App = (() => {
     'x':            '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     'check':        '<path d="M20 6 9 17l-5-5"/>',
     'arrow-left':   '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+    'arrow-up':     '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+    'arrow-down':   '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
     'chevron-left':  '<path d="m15 18-6-6 6-6"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
     'chevron-down':  '<path d="m6 9 6 6 6-6"/>',
-    // Archive Downloads (2026-10-01): the sidebar's Downloads
-    // link, and the drag handle on the queue's Up next rows. Lucide 'download'
-    // and 'grip-vertical', copied verbatim from lucide-static.
-    // 'reels' is Live Recordings' icon (Ryan, 2026-10-06): the tape-reel mark that
+    // Archive Downloads: the sidebar's Downloads link, and the drag handle on the
+    // queue's Up next rows. Lucide 'download' and 'grip-vertical', copied verbatim
+    // from lucide-static. 'reels' is Live Recordings' icon: the tape-reel mark that
     // was Lomax's until Lomax got its own. Two reels with hubs and feet on a baseline.
     'reels':        '<circle cx="7" cy="11" r="4"/><circle cx="17" cy="11" r="4"/><circle cx="7" cy="11" r="1"/><circle cx="17" cy="11" r="1"/><path d="M7 15l2 4"/><path d="M17 15l-2 4"/><path d="M3 19h18"/>',
     'landmark':     '<path d=\"M10 18v-7\"/><path d=\"M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z\"/><path d=\"M14 18v-7\"/><path d=\"M18 18v-7\"/><path d=\"M3 22h18\"/><path d=\"M6 18v-7\"/>',
-    // Reserved for the Bluegrass Archive entry (Ryan, 2026-10-01).
+    // Reserved for the Bluegrass Archive entry.
     'guitar':       '<path d=\"m11.9 12.1 4.514-4.514\"/><path d=\"M20.1 2.3a1 1 0 0 0-1.4 0l-1.114 1.114A2 2 0 0 0 17 4.828v1.344a2 2 0 0 1-.586 1.414A2 2 0 0 1 17.828 7h1.344a2 2 0 0 0 1.414-.586L21.7 5.3a1 1 0 0 0 0-1.4z\"/><path d=\"m6 16 2 2\"/><path d=\"M8.23 9.85A3 3 0 0 1 11 8a5 5 0 0 1 5 5 3 3 0 0 1-1.85 2.77l-.92.38A2 2 0 0 0 12 18a4 4 0 0 1-4 4 6 6 0 0 1-6-6 4 4 0 0 1 4-4 2 2 0 0 0 1.85-1.23z\"/>',
     'wrench':       '<path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"/>',
     'archive':      '<rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\"/><path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\"/><path d=\"M10 12h4\"/>',
@@ -648,11 +625,11 @@ const App = (() => {
            `aria-hidden="true">${d}</svg>`
   }
 
-  // The Details panel's tabs, in ONE order for View Recording and Add Recording
-  // (Ryan, 2026-10-04). `attr` is the data attribute each page's wiring reads
-  // (data-pane / data-ipane) and `prefix` the pane-id prefix ('' / 'isp-').
-  // Resolver exists only when the recording has resolver data; Lomax only
-  // where the user can run it.
+  // The Details panel's tabs, in ONE order for View Recording and Add
+  // Recording. `attr` is the data attribute each page's wiring reads (data-pane
+  // / data-ipane) and `prefix` the pane-id prefix ('' / 'isp-'). Resolver
+  // exists only when the recording has resolver data; Lomax only where the user
+  // can run it.
   const DETAILS_TABS = [
     ['info', 'Info File'], ['quality', 'Quality'], ['resolver', 'Resolver'],
     ['filetags', 'Tags'], ['checksums', 'Checksums'], ['mb', 'MusicBrainz'], ['ai', 'Lomax'],
@@ -678,23 +655,21 @@ const App = (() => {
   // .caret-ic--up/--down/--open — the same family as everything in ICONS.
   //
   // ⚠ Was a hand-drawn path in an 8-unit viewBox at stroke-width 1.7, which
-  // renders a ~2.1px stroke at this size against Lucide's ~0.9px. On
-  // 2026-08-28 the app briefly standardised on THAT one, purely because it had
-  // more call sites — and it is the heavy, clumsy glyph. Ryan: "the current one
-  // looks ridiculous, it is too large." Standardising on the thin one is also
-  // what [[icon-system]] already said to do: everything goes through Lucide.
+  // renders a ~2.1px stroke at this size against Lucide's ~0.9px. Standardising
+  // on the thin one is also what [[icon-system]] already said to do: everything
+  // goes through Lucide.
   //
   // 12px rather than the old 10px because a 0.9px stroke reads smaller than a
   // 2.1px one at the same box size; this lands on the weight the Move button
   // had, which is the one that was liked.
   //
-  // `size` (Ryan, 2026-08-31): the Review & Ingest row-expand caret — the
-  // main, farthest-right control on every row — asked to be bigger and more
-  // prominent than a tab-strip or menu chevron earns. Same glyph, same
-  // stroke-width in SVG units, just rendered larger; scaling the whole icon
-  // up scales its visual stroke weight with it; the box is what to size, not
-  // stroke-width from svg. Still the ONE chevron shape in the app — every
-  // call site but that one still gets the default 12px.
+  // `size`: the Review & Ingest row-expand caret — the main, farthest-right
+  // control on every row — asked to be bigger and more prominent than a
+  // tab-strip or menu chevron earns. Same glyph, same stroke-width in SVG
+  // units, just rendered larger; scaling the whole icon up scales its visual
+  // stroke weight with it; the box is what to size, not stroke-width from svg.
+  // Still the ONE chevron shape in the app — every call site but that one still
+  // gets the default 12px.
   function chevronIcon(cls, size = 12) {
     return `<svg class="caret-ic${cls ? ' ' + cls : ''}" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>`
   }
@@ -702,14 +677,14 @@ const App = (() => {
   // Canonical form for comparing filesystem paths client-side. macOS hands out
   // decomposed (NFD) filenames; the quality API's staging rows are always
   // NFC-normalised server-side (app/utils/quality_store.py), but batch-scan's
-  // item.path is a raw, un-normalised os.scandir() result — so a straight ===
-  // between the two can silently miss a match on any accented folder name
-  // (the "Guitar Trio" bug, 2026-07-28). Normalise both sides before comparing.
+  // item.path is a raw, un-normalised os.scandir result — so a straight ===
+  // between the two can silently miss a match on any accented folder name.
+  // Normalise both sides before comparing.
   const nfc = s => (s || '').normalize('NFC')
 
   // ── Who may edit, and are they asking to? ────────────────────────────────
   //
-  // Two separate questions, kept separate (Ryan, 2026-08-21):
+  // Two separate questions, kept separate:
   //
   //   hasEditRole()      Does this account have the authority at all?
   //   getViewMode()      Is this person currently asking to use it?
@@ -749,9 +724,33 @@ const App = (() => {
     return localStorage.getItem('trellisViewMode') === 'playback' ? 'playback' : 'admin'
   }
 
+  // Playback mode's defaults: entering it collapses the left sidebar and turns
+  // Skip Non-Music on; leaving it puts both back as they were when it was
+  // entered. The collapse is a class only -- localStorage is never written --
+  // so a reload in Playback still opens on the user's own saved sidebar state,
+  // and leaving restores what was captured here.
+  let _pbPrior = null
+  function applyPlaybackDefaults(on) {
+    const body = document.body
+    if (on) {
+      if (_pbPrior) return
+      _pbPrior = { sidebar: body.classList.contains('sidebar-collapsed'), skip: !!state.skipNonMusic }
+      body.classList.add('sidebar-collapsed')
+      setSkipFilter(true)
+    } else {
+      if (!_pbPrior) return
+      body.classList.toggle('sidebar-collapsed', _pbPrior.sidebar)
+      setSkipFilter(_pbPrior.skip)
+      _pbPrior = null
+    }
+    document.getElementById('nav-sidebar-toggle')
+      ?.setAttribute('aria-pressed', String(body.classList.contains('sidebar-collapsed')))
+  }
+
   function setViewMode(mode) {
     const next = mode === 'playback' ? 'playback' : 'admin'
     localStorage.setItem('trellisViewMode', next)
+    applyPlaybackDefaults(next === 'playback')
     document.documentElement.classList.toggle('playback-mode', next === 'playback')
     paintViewModeToggle()
     // Re-render both halves of the chrome: the sidebar drops its admin entries
@@ -779,6 +778,9 @@ const App = (() => {
 
   function initViewMode() {
     document.documentElement.classList.toggle('playback-mode', getViewMode() === 'playback')
+    // Only someone who could have chosen Admin gets the Playback defaults; a
+    // listener or a joined library is in Playback with no way out of it.
+    if (hasEditRole() && libraryState.activeId == null && getViewMode() === 'playback') applyPlaybackDefaults(true)
     paintViewModeToggle()
     const wrap = document.getElementById('view-mode-toggle')
     if (wrap && !wrap._wired) {
@@ -826,6 +828,16 @@ const App = (() => {
     return libraryState.activeId != null
       ? libraryState.favIds.has(rec.id)
       : !!rec.is_favorite
+  }
+
+  // The hover star on catalog rows. One builder for every row renderer so
+  // the title text, the pressed state and the wiring in wireFavStars cannot
+  // drift between pages.
+  function favStarTitle(on) { return on ? 'Favorited' : 'Mark as favorite' }
+  function rowStarHtml(r) {
+    const on = viewerHasFavorited(r)
+    return `<button type="button" class="rec-fav-star rec-fav-star--sm rec-fav-star--hover${on ? ' is-fav' : ''}" data-rec-id="${r.id}"
+                aria-pressed="${on ? 'true' : 'false'}" title="${favStarTitle(on)}">${icon('star', null, on)}</button>`
   }
 
   async function setViewerFavorite(recId, on) {
@@ -934,10 +946,10 @@ const App = (() => {
   // rewires events, the same rebuild-and-rewire pattern already used for
   // buildAiResultsHtml, rather than DOM-patching individual chips.
   //
-  // Members/Guests two-row redesign (2026-07-22), replacing one flat Musicians
-  // pill row + descriptive subtext: a small (+) button per row reveals an
-  // inline add-picker input on click. Removing a pill is a plain splice —
-  // this is still draft form state until Confirm, no server round-trip.
+  // Members/Guests two-row redesign, replacing one flat Musicians pill row +
+  // descriptive subtext: a small (+) button per row reveals an inline
+  // add-picker input on click. Removing a pill is a plain splice — this is
+  // still draft form state until Confirm, no server round-trip.
   function createMembersWidget(store, ids) {
     // Which role's input had focus when renderChips() was called, so the
     // rebuild can hand it back. Module-level to the widget, not the DOM: the
@@ -947,9 +959,7 @@ const App = (() => {
       <span class="member-chip ${role === 'guest' ? 'member-chip--guest' : ''}">
         ${esc(p.name)} <span class="member-chip-x" data-role="${role}" data-idx="${i}" title="Remove">${icon('x')}</span>
       </span>`
-    // The add control is ALWAYS an input — there is no show/hide any more
-    // (Ryan, 2026-09-01: "when clicking to add, the height of the element
-    // jumps").
+    // The add control is ALWAYS an input — there is no show/hide any more.
     //
     // The jump was structural, not a stray margin. `.mg-row` is a wrapping
     // flex row of chips; revealing a 150px input at the end of it pushes the
@@ -1049,10 +1059,10 @@ const App = (() => {
         try {
           const p = await API.artists.get(id)
           store.members = (p.members || []).map(m => ({ id: m.id, name: m.name }))
-          // The act's existing genre comes with it (Ryan, 2026-09-01). Only
-          // ids.genreInput surfaces it — this widget is shared with surfaces
-          // that have no genre field, and setting store.genre_* on those would
-          // put a value into a payload nothing on screen ever showed.
+          // The act's existing genre comes with it. Only ids.genreInput
+          // surfaces it — this widget is shared with surfaces that have no
+          // genre field, and setting store.genre_* on those would put a value
+          // into a payload nothing on screen ever showed.
           if (ids.genreInput) setGenreFromArtist(p.genre || null)
         }
         catch (_) { store.members = [] }
@@ -1091,10 +1101,10 @@ const App = (() => {
 
   // Splits a billed-act name into candidate individual-person names, for
   // matching against existing Musicians when the Artist itself doesn't
-  // exist yet (2026-07-22) — e.g. "Bela Fleck & Edgar Meyer" ->
-  // ["Bela Fleck", "Edgar Meyer"]. Conservative separators only; a missed
-  // split is harmless (that name just stays unmatched), which is why exact
-  // matching below matters more than aggressive splitting here.
+  // exist yet — e.g. "Bela Fleck & Edgar Meyer" -> ["Bela Fleck", "Edgar
+  // Meyer"]. Conservative separators only; a missed split is harmless
+  // (that name just stays unmatched), which is why exact matching below
+  // matters more than aggressive splitting here.
   const _NAME_SPLIT_RE = /\s*(?:&|,|\/|\+|\bwith\b|\bfeat\.?\b|\bfeaturing\b|\band\b)\s*/i
   function splitArtistNameCandidates(raw) {
     return (raw || '').split(_NAME_SPLIT_RE).map(s => s.trim()).filter(Boolean)
@@ -1113,15 +1123,13 @@ const App = (() => {
       .replace(/&/g, ' and ').replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim().replace(/^the /, '')
   }
 
-  // Add flow: preload Members if the scanned Artist (act) already exists
-  // in the DB — pulls its current roster. If the act itself is new (e.g. a
+  // Add flow: preload Members if the scanned Artist (act) already exists in
+  // the DB — pulls its current roster. If the act itself is new (e.g. a
   // one-off duo billing), fall back to splitting the act name into candidate
   // person names and matching each against existing Musicians — EXACT
   // (case-insensitive) name match only, never a fuzzy/substring hit, since a
-  // wrong auto-attached person is worse than an unmatched name Ryan fills in
-  // by hand. Ryan chose auto-fill over a click-to-confirm suggestion step
-  // for this (2026-07-22), weighing it against the AI-Assist auto-apply bug
-  // fixed earlier the same session.
+  // wrong auto-attached person is worse than an unmatched name the user
+  // fills in by hand.
   async function initAddArtistMembers(widget) {
     const f = ingest.form
     const name = (f.artist_name || '').trim()
@@ -1198,20 +1206,18 @@ const App = (() => {
 
   let _resizeCleanup = null
 
-  /**
-   * Make `sizedEl` draggable against `handleEl` inside `shellEl`.
-   *
-   * `side` says which side of the handle the sized element is on. It used to be
-   * hardwired to 'left'; Add Recording now sizes the RIGHT-hand details panel
-   * instead (2026-08-28), because that panel also has to animate open and shut,
-   * and only the element that owns an explicit width can be transitioned. With
-   * the panel sized and the form flexible, the form simply takes back whatever
-   * the panel gives up, frame by frame, and the drawer slides.
-   *
-   * While dragging, the sized element carries `.resizing` so its CSS can drop
-   * the transition — otherwise every mousemove would animate towards the
-   * cursor over 220ms and the divider would feel like it was on elastic.
-   */
+  /* Make `sizedEl` draggable against `handleEl` inside `shellEl`.
+
+     `side` says which side of the handle the sized element is on. It used to be
+     hardwired to 'left'; Add Recording now sizes the RIGHT-hand details panel
+     instead, because that panel also has to animate open and shut, and only the
+     element that owns an explicit width can be transitioned. With the panel
+     sized and the form flexible, the form simply takes back whatever the panel
+     gives up, frame by frame, and the drawer slides.
+
+     While dragging, the sized element carries `.resizing` so its CSS can drop
+     the transition — otherwise every mousemove would animate towards the
+     cursor over 220ms and the divider would feel like it was on elastic. */
   function wireResizablePanel(shellEl, sizedEl, handleEl, minSized = 200, minOther = 200, opts) {
     // Remove any previous listeners to avoid stacking on re-renders
     if (_resizeCleanup) { _resizeCleanup(); _resizeCleanup = null }
@@ -1277,7 +1283,7 @@ const App = (() => {
     state._activeNav = active
     const nav = document.getElementById('sidebar-nav')
     // The shelf heading shares data-nav="library" with Live Recordings but is
-    // a heading, not a page: it never lights up (Ryan, 2026-10-01).
+    // a heading, not a page: it never lights up.
     if (nav) nav.querySelectorAll('[data-nav]:not(.nav-shelf-head)').forEach(el =>
       el.classList.toggle('active', el.dataset.nav === active))
   }
@@ -1287,35 +1293,43 @@ const App = (() => {
       el.classList.toggle('active', parseInt(el.dataset.id) === id))
   }
 
-  // ── Sidebar nav (all top-level in small caps; dimensions expandable) ──────────
+  // ── Sidebar nav ───────────────────────────────────────────────────────────────
 
-  // Collections is expanded on arrival (Ryan, 2026-08-23). It is the shelf's
-  // point — a collapsed list of things you curated is a door with the light
-  // off. The four dimension indexes below stay shut; those are for re-finding
-  // something you already know exists.
-  // Collections is no longer an expandable dimension at all (Ryan,
-  // 2026-08-23) — its list is always shown and the disclosure lives on each
-  // individual collection instead. The four indexes below still expand.
+  // expandedDims is what invalidateDims and the dimension pages check before
+  // re-rendering a sidebar list.
   state.expandedDims = state.expandedDims || new Set()
   const _dimCache = {}
 
-  function _dimSection(dim, iconHtml, label, sub) {
-    const open = state.expandedDims.has(dim)
-    const singular = label.replace(/s$/, '')
+  // Collapsible nav sections: Favorites, Collections, Shared Libraries.
+  // Open by default; a closed section is remembered per machine.
+  const _navClosed = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem('trellisNavClosed') || '[]')) }
+    catch (_) { return new Set() }
+  })()
+
+  function _navSectionHtml(key, label, acts, body, hidden) {
+    const open = !_navClosed.has(key)
     return `
-      <div class="nav-section">
-        <div class="nav-item ${sub ? 'nav-sub' : 'nav-top'} nav-expand nav-dim" data-dim="${dim}">
-          ${iconHtml ? `<span class="nav-icon">${iconHtml}</span>` : ''}
-          <span class="nav-dim-label truncate">${label}</span>
-          <span class="nav-dim-actions">
-            ${canEditLibrary() ? `<span class="nav-action" data-act="new" data-admin
-                     title="Create new ${esc(singular)}">${icon('plus')}</span>` : ''}
-            <span class="nav-action" data-act="refresh" title="Refresh list">${icon('rotate-cw')}</span>
-          </span>
-          <span class="nav-caret nav-caret--sm ${open ? 'open' : ''}">${chevronIcon()}</span>
+      <div class="lnav-block lnav-section${open ? ' open' : ''}" id="nav-sec-${key}"${hidden ? ' hidden' : ''}>
+        <div class="lnav-head">
+          <button type="button" class="lnav-toggle" data-sec-toggle="${key}" aria-expanded="${open}">${label}${chevronIcon('lnav-chev')}</button>${acts}
         </div>
-        <div class="nav-records ${sub ? 'nav-records--sub' : ''}" id="nav-records-${dim}" style="display:${open ? '' : 'none'}"></div>
+        <div class="lnav-sub">${body}</div>
       </div>`
+  }
+
+  function _navActHtml(act, title, ic, adminOnly) {
+    return `<button type="button" class="lnav-act" data-nav-act="${act}"${adminOnly ? ' data-admin' : ''} title="${title}" aria-label="${title}">${icon(ic)}</button>`
+  }
+
+  function _toggleNavSection(key) {
+    const sec = document.getElementById(`nav-sec-${key}`)
+    if (!sec) return
+    const open = !sec.classList.contains('open')
+    sec.classList.toggle('open', open)
+    sec.querySelector('.lnav-toggle')?.setAttribute('aria-expanded', String(open))
+    if (open) _navClosed.delete(key); else _navClosed.add(key)
+    try { localStorage.setItem('trellisNavClosed', JSON.stringify([..._navClosed])) } catch (_) {}
   }
 
   // A system collection (Full Library) is a SHARING PRIMITIVE, not a curated
@@ -1341,10 +1355,10 @@ const App = (() => {
     return rows
   }
 
-  // Per-collection expand state (2026-08-23) — separate from state.expandedDims,
-  // which only tracks whether the COLLECTIONS list itself is open. This tracks
-  // which individual collections, inside that list, are themselves expanded to
-  // show their recordings — a second, independent level of disclosure.
+  // Per-collection expand state — separate from state.expandedDims, which only
+  // tracks whether the COLLECTIONS list itself is open. This tracks which
+  // individual collections, inside that list, are themselves expanded to show
+  // their recordings — a second, independent level of disclosure.
   const _colOpenIds = new Set()
   const _colRecCache = {}
 
@@ -1380,26 +1394,11 @@ const App = (() => {
         { window.location.hash = emptyIndex })
       return
     }
-    // Collections got its own row shape and click behaviour 2026-08-23: a
-    // collection name is now click-to-expand-in-place (showing the recordings
-    // it holds) rather than a navigation link, unindented to sit at the same
-    // level as the COLLECTIONS header itself, and without the recording-count
-    // badge every other dimension row carries ("out of context" — Ryan). Every
-    // other dimension (Venues, Artists, Musicians, Genres) is untouched.
     box.innerHTML = dim === 'collections'
       ? rows.map(c => {
           const open = _colOpenIds.has(c.id)
           return `
             <div class="nav-col-item">
-              <!-- TWO targets, two meanings (Ryan, 2026-09-03). The +/- box
-                   keeps the 2026-08-23 behaviour — expand the recordings in
-                   place, without leaving whatever you were looking at — and
-                   the NAME is now a link to the collection's own page, which
-                   is where you add, remove and delete.
-                   Splitting them rather than choosing: the in-place list is
-                   for a glance, the page is for work, and one row cannot mean
-                   both from a single click target. Same split the dimension
-                   sections already use for their caret. -->
               <div class="nav-record nav-record--flush" data-col-row="${c.id}">
                 <span class="nav-caret nav-caret--pm nav-pm-box ${open ? 'open' : ''}"
                       data-col-toggle="${c.id}" title="${open ? 'Hide' : 'Show'} this collection's recordings"
@@ -1442,11 +1441,10 @@ const App = (() => {
 
   // Expands one collection in place to show the recordings it holds — the
   // same information the collection's own page shows, just close enough to
-  // reach without leaving the shelf (Ryan, 2026-08-23). Reuses
-  // GET /api/collections/<id>, which already returns a `recordings` array
-  // (card=True rows) for the collection detail page — no new endpoint needed
-  // (checked API.collections and app/api/collections.py before building this;
-  // see get_collection()).
+  // reach without leaving the shelf. Reuses GET /api/collections/<id>, which
+  // already returns a `recordings` array (card=True rows) for the collection
+  // detail page — no new endpoint needed (checked API.collections and
+  // app/api/collections.py before building this; see get_collection).
   async function _toggleCollectionRow(id) {
     const row   = document.querySelector(`.nav-record--flush[data-col-row="${id}"]`)
     const box   = document.getElementById(`nav-col-recs-${id}`)
@@ -1479,24 +1477,7 @@ const App = (() => {
       el.addEventListener('click', e => { e.stopPropagation(); window.location.hash = `#/recording/${el.dataset.id}` }))
   }
 
-  function _toggleDim(dim, forceOpen) {
-    const row  = document.querySelector(`.nav-dim[data-dim="${dim}"]`)
-    const box  = document.getElementById(`nav-records-${dim}`)
-    const caret = row?.querySelector('.nav-caret')
-    const open = state.expandedDims.has(dim)
-    if (open && !forceOpen) {
-      state.expandedDims.delete(dim); if (box) box.style.display = 'none'; caret?.classList.remove('open')
-    } else {
-      state.expandedDims.add(dim); if (box) box.style.display = ''; caret?.classList.add('open')
-      _renderDimRecords(dim)
-    }
-  }
-
-  // Collections' own refresh. NOT _refreshDim: that one calls _toggleDim to
-  // ensure the section is open, and Collections stopped being a collapsible
-  // section on 2026-08-23 — it is always shown. Routing it through there would
-  // quietly add 'collections' to state.expandedDims, a flag for a control that
-  // no longer exists.
+  // Collections' refresh.
   //
   // Drops the per-collection recording caches as well as the list itself: a
   // refresh that re-read the names but served a stale expanded list from
@@ -1507,59 +1488,32 @@ const App = (() => {
     _renderDimRecords('collections')
   }
 
-  function _refreshDim(dim) {
-    _dimCache[dim] = null
-    if (dim === 'collections') { _colRecCache && Object.keys(_colRecCache).forEach(k => delete _colRecCache[k]) }
-    _toggleDim(dim, true)   // ensure open, then re-render from DB
-    _renderDimRecords(dim)
-  }
-
-  // Favorites (2026-08-23): no longer a collapsible dim-section — Ryan wants
-  // starred shows shown flush in the sidebar, at MY LIBRARY's own indentation,
-  // with no "Favorites" heading/caret at all ("we will simply display the
-  // favorited recordings"). So this renders straight into a plain mount div
-  // renderSidebar() leaves for it, always open, no expand/collapse state and
-  // no _dimCache entry (that cache exists to survive a section being
-  // collapsed and reopened — irrelevant here since there's nothing to
-  // collapse; renderSidebar() re-fetches on every render like the rest of the
-  // sidebar already does).
-  //
-  // card=True on GET /api/recordings/favorites (added alongside this) is what
-  // supplies `image_id` for the small artist thumbnail Ryan asked for.
-  // The FAVORITES header lives INSIDE the rendered block, not in the sidebar
-  // markup, so it disappears with the list. A standing header over nothing
-  // advertises an empty shelf; this way the section is absent until it has
-  // something to hold (which is why the flattened version had no header at
-  // all — Ryan asked for one back on 2026-08-23, with Collections' styling
-  // minus the chevron, since there is nothing here to expand or collapse).
-  // Single entry point for "the favourites shelf is stale". Called from every
-  // place a recording can be starred or unstarred — the Browse card button and
-  // the Recording view's toggle — so the two can never drift apart again.
-  // Deliberately fire-and-forget: a failed sidebar refresh must never surface
-  // as a failed favourite, because the favourite itself already saved.
+  // Favorites: the viewer's own starred shows, in the collapsible Favorites
+  // section. Single entry point for "the favourites shelf is stale". Called
+  // from every place a recording can be starred or unstarred — the Browse card
+  // button and the Recording view's toggle — so the two can never drift apart
+  // again. Deliberately fire-and-forget: a failed sidebar refresh must never
+  // surface as a failed favourite, because the favourite itself already saved.
   function refreshFavoritesNav() {
     try { _renderFavoritesFlat() } catch (_) {}
   }
 
-  // Shared by FAVORITES and by an expanded collection (Ryan, 2026-08-23:
-  // "the style of each recording in the collection should be the same style as
-  // the recording in Favorites"). Both payloads come back with card=True, so
-  // both carry image_id and the photo path works in both places.
+  // Shared by FAVORITES and by an expanded collection.
   function navRecRowHtml(r, extraCls) {
-    // Studio: lead with the title (falling back to the artist), artist
-    // second, year last -- never the venue this row would otherwise show.
+    // Studio: title leads, year in the date column. Live: the date as
+    // collectors write it (1977-05-04), then the artist.
     const id = recIdentity(r)
-    const full = esc((id.isStudio ? [id.lead, id.sub, id.dateText] : [r.artist, r.date, r.venue])
-      .filter(Boolean).join(' · '))
-    const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-      .map(w => w[0]).join('').toUpperCase()
-    const avatar = r.image_id
-      ? `<img class="nav-fav-avatar" src="${API.artists.imageUrl(r.image_id)}" alt="">`
-      : `<div class="nav-fav-avatar nav-fav-avatar--blank">${esc(initials)}</div>`
+    const p2 = n => String(n).padStart(2, '0')
+    const date = id.isStudio ? id.dateText
+      : [r.start_year, r.start_year && r.start_month && p2(r.start_month),
+         r.start_year && r.start_month && r.start_day && p2(r.start_day)].filter(Boolean).join('-')
+    // One line, spelled out: an album is "Artist - Title", a live recording
+    // "Artist - Date - Venue". A studio row with no title is just the artist,
+    // which is what recIdentity puts in `lead`.
+    const label = (id.isStudio ? [id.sub, id.lead] : [r.artist, date, r.venue]).filter(Boolean).join(' - ')
     return `
-      <div class="nav-fav-row${extraCls ? ' ' + extraCls : ''}" data-id="${r.id}" title="${full}">
-        ${avatar}
-        <span class="nav-fav-title truncate">${full}</span>
+      <div class="nav-fav-row${extraCls ? ' ' + extraCls : ''}" data-id="${r.id}" title="${esc(label)}">
+        <span class="nav-fav-title truncate">${esc(label)}</span>
       </div>`
   }
 
@@ -1572,9 +1526,12 @@ const App = (() => {
         ? await API.remoteFavorites.list(libraryState.activeId, true)
         : await API.recordings.favorites()
     } catch (_) {}
-    if (!rows.length) { box.innerHTML = ''; return }   // nothing to announce — see comment above
-    const head = '<div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">Favorites</div>'
-    box.innerHTML = head + rows.map(r => navRecRowHtml(r)).join('')
+    // The whole section hides while empty: a standing header over nothing
+    // advertises an empty shelf.
+    const sec = document.getElementById('nav-sec-favorites')
+    if (!rows.length) { box.innerHTML = ''; if (sec) sec.hidden = true; return }
+    box.innerHTML = rows.map(r => navRecRowHtml(r)).join('')
+    if (sec) sec.hidden = false
     box.querySelectorAll('.nav-fav-row[data-id]').forEach(el =>
       el.addEventListener('click', () => { window.location.hash = `#/recording/${el.dataset.id}` }))
   }
@@ -1590,13 +1547,10 @@ const App = (() => {
 
   // Header "+ Create new" action per dimension.
   function createInDim(dim) {
-    // Every dimension now goes to a real create FORM (2026-08-07). Venues used
-    // to land on the admin list — a view-and-edit screen, not a create flow —
-    // and artists/musicians used a window.prompt().
-    // Genres sent you to the INDEX rather than a create form, because until
-    // 2026-09-01 there wasn't one — the only way to make a genre was the admin
-    // list's inline form. There is a real form now, so it goes where the other
-    // four go.
+    // Every dimension now goes to a real create FORM. Venues used to land on
+    // the admin list — a view-and-edit screen, not a create flow — and
+    // artists/musicians used a window.prompt. There is a real form now, so it
+    // goes where the other four go.
     if (dim === 'collections')     window.location.hash = '#/collection/new'
     else if (dim === 'venues')     window.location.hash = '#/venue/new'
     else if (dim === 'genres')     window.location.hash = '#/genre/new'
@@ -1604,13 +1558,11 @@ const App = (() => {
     else if (dim === 'musicians')    window.location.hash = '#/musician/new'
     else if (dim === 'events')     window.location.hash = '#/event/new'
   }
-  // _promptCreate() removed 2026-08-07 — every dimension now opens a real
-  // create form (renderCreateForm) instead of a window.prompt().
   // ══ Library selector ═══════════════════════════════════════════════════════
   //
-  // Sits above "Add Recordings" (Ryan, 2026-08-08). Your own library is the
-  // default and always first; libraries shared WITH you appear beneath it once
-  // the outbound side exists.
+  // Sits above "Add Recordings". Your own library is the default and always
+  // first; libraries shared WITH you appear beneath it once the outbound side
+  // exists.
   //
   // Built now, before there is anything to select, on purpose: it is the frame
   // the peer theme hangs off, and it makes "which library am I in?" a question
@@ -1618,9 +1570,9 @@ const App = (() => {
   // With one entry it renders as a plain, non-interactive label — a dropdown
   // arrow that opens a menu of one is a lie about what the app can do.
   //
-  // `remotes` stays empty until `remote_node` lands (milestone 2); the selector
-  // reads it rather than checking a feature flag, so it starts working the day
-  // remotes exist with no change here.
+  // `remotes` stays empty until `remote_node` lands; the selector reads it
+  // rather than checking a feature flag, so it starts working the day remotes
+  // exist with no change here.
   const libraryState = {
     remotes: [],        // [{id, display_name, last_connected_at}]
     activeId: null,     // null = my own library
@@ -1758,12 +1710,6 @@ const App = (() => {
   }
 
   // ── Joining and leaving libraries ─────────────────────────────────────────
-  //
-  // The front door for the entire consumer side — and it did not exist until
-  // 2026-08-24. `API.remotes.enroll` and `API.remotes.leave` had been in
-  // api.js since the August milestone with NOTHING in the frontend calling
-  // either one: the dev rig enrolled by curl, so the gap was invisible during
-  // development and total for a real user.
 
   async function openJoinLibraryModal() {
     const wrap = document.createElement('div')
@@ -1842,7 +1788,7 @@ const App = (() => {
     try {
       await API.remotes.leave(id)
     } catch (e) {
-      alert('Could not leave: ' + e.message)
+      Notify.error('Could not leave: ' + e.message)
       return
     }
     // Leaving the library you are standing in has to move you somewhere real,
@@ -1867,13 +1813,12 @@ const App = (() => {
 
   // No longer a "theme" function despite the name (kept for call-site
   // stability — renaming ~1 call site wasn't worth the churn). The Cool
-  // Slate retint this used to drive is gone (2026-08-24, Ryan: "get rid of
-  // the third theme... have the host library show up the same as the user's
-  // preferences define") — a peer's library now just renders in whichever
-  // of the two real themes the viewer has chosen. `.peer-mode` on <html>
-  // still exists and still matters: it's the flag the non-colour peer rules
-  // in main.css key off (library-selector centre cluster hidden, the
-  // drive-offline banner hidden, the `[data-admin]` backstop).
+  // Slate retint this used to drive is gone — a peer's library now just
+  // renders in whichever of the two real themes the viewer has chosen.
+  // `.peer-mode` on <html> still exists and still matters: it's the flag
+  // the non-colour peer rules in main.css key off (library-selector centre
+  // cluster hidden, the drive-offline banner hidden, the `[data-admin]`
+  // backstop).
   function applyPeerTheme() {
     document.documentElement.classList.toggle('peer-mode', libraryState.activeId != null)
   }
@@ -1883,26 +1828,6 @@ const App = (() => {
   // flight -- a slow response landing after a later renderSidebar (or after
   // the active library changed) must not touch a sidebar it no longer owns.
   let _sidebarRenderSeq = 0
-
-  // OTHER ARCHIVES: the Live Music Archive (admin only) and one entry per
-  // library joined through an invite, which any role may browse. A peer entry
-  // switches library exactly as the header selector does (switchLibrary).
-  // Peer entries carry 'library', the icon Live Recordings had before it became reels.
-  function _otherArchivesHtml() {
-    const lma = _dlAllowed()
-      ? `<a class="nav-item" data-nav="archive-lma" href="#/archive/lma">${icon('landmark', 'nav-ic')}Live Music Archive</a>`
-      : ''
-    const peers = (libraryState.remotes || []).map(r =>
-      `<a class="nav-item${libraryState.activeId === r.id ? ' active' : ''}" href="#/" data-lib-switch="${r.id}">${icon('library', 'nav-ic')}<span class="truncate">${esc(r.display_name)}</span></a>`).join('')
-    // Two sections (Ryan, 2026-10-01): public archives, then libraries this
-    // user is a peer of. Each header shows only when it has entries.
-    const head = t => `<div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced">${t}</div>`
-    return (lma ? `
-        ${head('Archives')}
-        ${lma}` : '') + (peers ? `
-        ${head('Other Libraries')}
-        ${peers}` : '')
-  }
 
   async function renderSidebar() {
     const nav = document.getElementById('sidebar-nav')
@@ -1914,167 +1839,62 @@ const App = (() => {
     _dimCache.venues = _dimCache.artists = _dimCache.musicians =
       _dimCache.collections = _dimCache.genres = _dimCache.events = null
 
-    // A shared library offers a deliberately narrower sidebar. This is not
-    // squeamishness about peer mode — it is that api/share.py has no LIST
-    // endpoint for venues, artists or musicians, by design: a peer reaches
-    // those pages FROM a recording they were granted, never by browsing an
-    // index of everything the owner holds. Rendering sections that could only
-    // ever be empty would advertise a door that isn't there.
-    //
-    // Collections and Genres do have peer-facing lists (both scoped to the
-    // visible set), so both stay. Add Recordings and Sharing are local
-    // operations on my own library and are meaningless here.
-    // A shared library gets Library + Collections and nothing else (Ryan,
-    // 2026-08-08). The dimension indexes are dropped entirely rather than
-    // moved: a peer reaches an artist, venue or genre page FROM a recording
-    // they were granted, and an index listing three genres is noise pretending
-    // to be navigation. The pages themselves still exist and still work.
-    // Reworked 2026-08-22 (Ryan) along the lines of Spotify's left column: this
-    // is a shelf of things you chose to keep — starred shows, collections, and
-    // playlists once those exist — not a menu of the app's pages.
-    //
-    // What left, and where it went:
-    //   Recently Added    → it was already a module on the Library view. A nav
-    //                       link to a page that duplicates a module you scroll
-    //                       past on arrival is a second front door to one room.
-    //   Sharing           → Settings. Peer management is account configuration,
-    //                       not a place in the library.
-    //   Library selector  → the App Header, beside the mode toggle. Switching
-    //                       library is a whole-app context change; the sidebar
-    //                       is for moving around inside one.
-    //   Add Recordings    → was the bottom, moved back to the TOP 2026-08-22
-    //                       (Ryan) — it is the entry point into ingest, and he
-    //                       wants it as the first thing under the App Header,
-    //                       not below a shelf you have to scroll past first.
-    //
-    // Left Nav Refinement (Ryan, 2026-08-23) — the App Header's Home button is
-    // gone; "My Library" IS the link back to Library Home now, one control
-    // instead of two that did the same thing. Collections moved up to sit
-    // directly under it, unindented, at My Library's own font size — no longer
-    // a generic "sub" dimension. Favorites stopped being a dimension section
-    // at all: no heading, no caret, no collapse — the starred shows themselves
-    // just appear, flush, right under Collections (see _renderFavoritesFlat).
-    //
-    // The whole upper shelf (Add Recordings / My Library / Collections /
-    // Favorites) now lives in its own `.nav-scroll` wrapper so it can scroll
-    // independently, while `.nav-dims-foot` (Venues/Artists/Musicians/Genres
-    // — explicitly out of scope for this rework, Ryan's own words) sits
-    // OUTSIDE that wrapper as a sibling, so it stays pinned to the sidebar's
-    // bottom no matter how many favorites someone piles up. `.nav-spacer` is
-    // gone — it existed only to push the footer down when the scroll region
-    // was short, which `.nav-scroll{flex:1}` now does on its own even with
-    // nothing in it to scroll.
+    // ONE sidebar for both contexts: a listener in a shared library sees the
+    // owner's Playback nav. Nothing branches on `remote`; `canEditLibrary` is
+    // false there, so Add Recordings and every "+" drop out on their own. A
+    // second template is how the two drifted apart before.
     const remote = libraryState.activeId != null
-    const active = activeLibrary()
-
-    // ONE sidebar for both contexts (Ryan, 2026-08-24). A listener browsing a
-    // shared library gets exactly what the owner sees in Playback mode —
-    // Browse / Search / Recently Added, the curator's Collections, the
-    // curator's Favorites, and the dimension foot — because "see the full
-    // information system on the left" is the point of handing someone a
-    // library at all.
-    //
-    // This reverses the narrow peer sidebar of 2026-08-09, which existed
-    // because share.py had no LIST endpoints and rendering sections that could
-    // only ever be empty would advertise doors that were not there. Those
-    // endpoints now exist (venues, musicians, favorites, search, collections),
-    // so the reasoning has expired rather than been overruled.
-    //
-    // Nothing here branches on `remote` except the header LABEL. It does not
-    // need to: `canEditLibrary()` is false in a remote library, so Add
-    // Recordings and every "+" drop out on their own. A second template is how
-    // the two drift apart — which is exactly what happened last time.
-    const shelfTitle = remote
-      ? (active ? active.display_name : 'Shared Library')
-      : 'My Library'
-    // Bulk Ingest (spec 1.9/4, chunk 7c) — local only, never in a shared
-    // library (a peer's own machine has whatever bulkIngest status it has;
-    // nothing here is about MY library when I'm looking at theirs).
-    // The entry shows while ANY listed run exists (runs() lists only unfinished
-    // runs and Review First runs whose Queue still has ready/review items) and
-    // links to the most recent one. Add Recordings follows the same target.
+    // The entry shows while any listed run exists and links to the most recent
+    // one; local only, never in a shared library.
     const biHash = remote ? null : _biOpenRunHash()
-    // Rows waiting across the listed runs (ready + needs review); the Add
-    // Recordings button carries the count.
+    // Rows waiting across the listed runs (ready + needs review).
     const biWaiting = remote ? 0 : _biWaitingCount()
-    // Live Recordings always goes to the library, run or no run (Ryan,
-    // 2026-10-06): a link that sends you somewhere else is a broken link.
-    const homeHashUrl = '#/'
+    const dl = _dlAllowed()
+    const dims = [['artists', 'Artists'], ['musicians', 'Musicians'], ['venues', 'Venues'],
+                  ['events', 'Events'], ['genres', 'Genres']]
+    // Shared Libraries: the Live Music Archive (admin only) and every library
+    // joined through an invite. A peer entry switches library exactly as the
+    // header selector does (switchLibrary).
+    const shared = (dl ? '<a class="lnav-item" data-nav="archive-lma" href="#/archive/lma">Live Music Archive</a>' : '') +
+      (libraryState.remotes || []).map(r =>
+        `<a class="lnav-item${libraryState.activeId === r.id ? ' active' : ''}" href="#/" data-lib-switch="${r.id}">${esc(r.display_name)}</a>`).join('')
+    const colActs = (canEditLibrary() ? _navActHtml('col-new', 'Create new collection', 'plus', true) : '') +
+      _navActHtml('col-refresh', 'Refresh collections', 'rotate-cw')
     nav.innerHTML = `
-      <div class="nav-scroll">
-        ${canEditLibrary() ? `<a class="nav-add-btn" data-nav="ingest" href="${biHash || '#/ingest'}"><span class="nav-add-plus">${icon('plus')}</span> Add Recordings${biWaiting ? `<span class="nav-add-count">${biWaiting}</span>` : ''}</a>` : ''}
-        <a class="nav-item nav-top nav-shelf-head nav-shelf-head--static truncate" data-nav="library" href="${homeHashUrl}">${esc(shelfTitle)}</a>
-        <a class="nav-item" data-nav="library" href="${homeHashUrl}">${icon('reels', 'nav-ic')}Live Recordings</a>
-        <a class="nav-item" data-nav="search" href="#/search">${icon('search', 'nav-ic')}Search</a>
-        <a class="nav-item" data-nav="recent" href="#/recent">${icon('clock', 'nav-ic')}Recently Added</a>
-        ${_dlAllowed() ? `<a class="nav-item" data-nav="downloads" href="#/downloads">${icon('download', 'nav-ic')}Downloads<span class="nav-record-count nav-dl-count" data-dl-count>${DL.folderCount || ''}</span></a>` : ''}
-        ${_dlAllowed() && triageDests().includes('workshop') ? `<a class="nav-item" data-nav="workshop" href="#/workshop">${icon('wrench', 'nav-ic')}Workshop</a>` : ''}
-        ${_dlAllowed() && triageDests().includes('backlog') ? `<a class="nav-item" data-nav="backlog" href="#/backlog">${icon('archive', 'nav-ic')}Backlog</a>` : ''}
-        <!-- Collections was the ONE section with no actions on its header
-             (Ryan, 2026-09-03) — every dimension in .nav-dims-foot has had a
-             "+" and a refresh since the sidebar was built, and this one was
-             skipped because it is a static header rather than a _dimSection.
-             Same two controls, same order, same icons; the header itself
-             stays static (it does not expand, so it has no caret). -->
-        <div class="nav-item nav-top nav-shelf-head nav-shelf-head--static nav-shelf-head--spaced nav-shelf-head--acts">
-          <span class="nav-dim-label truncate">My Collections</span>
-          <span class="nav-dim-actions">
-            ${canEditLibrary() ? `<span class="nav-action" data-col-new data-admin
-                     title="Create new collection">${icon('plus')}</span>` : ''}
-            <span class="nav-action" data-col-refresh title="Refresh collections">${icon('rotate-cw')}</span>
-          </span>
+      <div class="nav-scroll lnav">
+        ${canEditLibrary() ? `<div class="lnav-block"><a class="lnav-item lnav-add" data-nav="ingest" href="${biHash || '#/ingest'}">Add Recordings${biWaiting ? ` <span class="lnav-count">(${biWaiting})</span>` : ''}</a></div>` : ''}
+        <div class="lnav-block">
+          <a class="lnav-item" data-nav="library" href="#/">Live Recordings</a>
+          <a class="lnav-item" data-nav="recent" href="#/recent">Recently Added</a>
+          ${dl ? `<a class="lnav-item" data-nav="downloads" href="#/downloads">Downloads <span class="lnav-count" data-dl-count>${DL.folderCount ? `(${DL.folderCount})` : ''}</span></a>` : ''}
+          ${dl && triageDests().includes('workshop') ? '<a class="lnav-item" data-nav="workshop" href="#/workshop">Workshop</a>' : ''}
+          ${dl && triageDests().includes('backlog') ? '<a class="lnav-item" data-nav="backlog" href="#/backlog">Backlog</a>' : ''}
         </div>
-        <div class="nav-records" id="nav-records-collections"></div>
-        <div class="nav-favorites" id="nav-favorites-flat"></div>
-        ${_otherArchivesHtml()}
-      </div>
-      <div class="nav-dims-foot">
-        ${_dimSection('venues', icon('map-pin'), 'Venues')}
-        ${_dimSection('artists', icon('users'), 'Artists')}
-        ${_dimSection('musicians', icon('user'), 'Musicians')}
-        ${_dimSection('events', icon('calendar'), 'Events')}
-        ${_dimSection('genres', icon('tag'), 'Genres')}
+        <div class="lnav-block">
+          ${dims.map(([d, label]) => `<a class="lnav-item" data-nav="${d}" href="#/${d}">${label}</a>`).join('')}
+        </div>
+        ${_navSectionHtml('favorites', 'Favorites', _navActHtml('fav-refresh', 'Refresh favorites', 'rotate-cw'), '<div id="nav-favorites-flat"></div>', true)}
+        ${_navSectionHtml('collections', 'Collections', colActs, '<div class="nav-records" id="nav-records-collections"></div>')}
+        ${shared ? _navSectionHtml('shared', 'Shared Libraries', '', shared) : ''}
       </div>`
 
-    // The library selector lives in the App Header now, but it is rendered from
+    // The library selector lives in the App Header, but it is rendered from
     // here: this function already runs at every moment the selector could need
     // to change (boot, after loadRemotes, on a mode switch, after a library
     // switch), and one render path is worth more than tidy ownership.
     renderLibrarySelector()
-    nav.querySelectorAll('.nav-expand').forEach(el => {
-      el.addEventListener('click', e => {
-        if (e.target.closest('.nav-action')) return
-        _toggleDim(el.dataset.dim)
-      })
-    })
-    nav.querySelectorAll('.nav-action').forEach(el => {
-      el.addEventListener('click', e => {
-        e.stopPropagation()
-        // ⚠ Collections' header carries .nav-action too now, but it is a
-        // static shelf head, not a .nav-dim — `closest` returns null there and
-        // reading .dataset off it is a TypeError that kills every listener
-        // this loop had not yet attached. Its two actions are wired
-        // separately, just below.
-        const dimEl = el.closest('.nav-dim')
-        if (!dimEl) return
-        if (el.dataset.act === 'refresh') _refreshDim(dimEl.dataset.dim)
-        else createInDim(dimEl.dataset.dim)
-      })
-    })
+    nav.querySelectorAll('[data-sec-toggle]').forEach(el =>
+      el.addEventListener('click', () => _toggleNavSection(el.dataset.secToggle)))
     nav.querySelectorAll('[data-lib-switch]').forEach(el =>
       el.addEventListener('click', e => {
         e.preventDefault()
         switchLibrary(Number(el.dataset.libSwitch))
       }))
-    nav.querySelector('[data-col-new]')?.addEventListener('click', e => {
-      e.stopPropagation(); createInDim('collections')
-    })
-    nav.querySelector('[data-col-refresh]')?.addEventListener('click', e => {
-      e.stopPropagation(); _refreshCollections()
-    })
-    state.expandedDims.forEach(dim => _renderDimRecords(dim))
-    _renderDimRecords('collections')   // always rendered — no longer a toggle
-    // Favorites is the VIEWER'S, in both worlds (Ryan, 2026-08-24).
+    nav.querySelector('[data-nav-act="col-new"]')?.addEventListener('click', () => createInDim('collections'))
+    nav.querySelector('[data-nav-act="col-refresh"]')?.addEventListener('click', () => _refreshCollections())
+    nav.querySelector('[data-nav-act="fav-refresh"]')?.addEventListener('click', () => refreshFavoritesNav())
+    _renderDimRecords('collections')
+    // Favorites is the VIEWER'S, in both worlds.
     //
     // The OWNER'S stars never travel. The star is deliberately not a quality
     // scale — "this one is special", one click, no deliberation — and it is
@@ -2091,22 +1911,22 @@ const App = (() => {
     setActiveNav(state._activeNav)
     _dlSidebarSync()
 
-    // Albums nav entry (Studio Records spec v1, chunk 7) — present only
-    // when the visible set holds at least one studio record (a peer's own
-    // visible set too: 'recordings' is REMOTE_CAPABLE). Fetched after the
-    // rest of the sidebar has already painted so a slow call never blocks
-    // it; inserted in place once it resolves, and re-fetched every time the
-    // sidebar itself refreshes since this whole function is that refresh.
+    // Albums nav entry — present only when the visible set holds at least
+    // one studio record (a peer's own visible set too: 'recordings' is
+    // REMOTE_CAPABLE). Fetched after the rest of the sidebar has already
+    // painted so a slow call never blocks it; inserted in place once it
+    // resolves, and re-fetched every time the sidebar itself refreshes
+    // since this whole function is that refresh.
     API.recordings.kindCounts().then(counts => {
       if (_mySidebarSeq !== _sidebarRenderSeq || libraryState.activeId !== _mySidebarLib) return
       if (!nav.isConnected || !counts || !counts.studio) return
       if (nav.querySelector('[data-nav="albums"]')) return
-      // Directly under Live Recordings (Ryan, 2026-10-01): Live Recordings,
-      // Albums, Search, Recently Added.
-      const liveLink = nav.querySelector('a.nav-item[data-nav="library"]:not(.nav-shelf-head)')
+      // Directly under Live Recordings: Live Recordings, Albums, Search,
+      // Recently Added.
+      const liveLink = nav.querySelector('a.lnav-item[data-nav="library"]')
       if (!liveLink) return
       liveLink.insertAdjacentHTML('afterend',
-        `<a class="nav-item" data-nav="albums" href="#/albums">${icon('disc', 'nav-ic')}Albums</a>`)
+        '<a class="lnav-item" data-nav="albums" href="#/albums">Albums</a>')
       setActiveNav(state._activeNav)
     }).catch(() => {})
   }
@@ -2114,7 +1934,7 @@ const App = (() => {
   // Back-compat alias — call sites still say loadArtistList().
   const loadArtistList = renderSidebar
 
-  // ── Recording image: one rule everywhere (Ryan, 2026-10-04) ──────────────────
+  // ── Recording image: one rule everywhere ──────────────────
   // The server resolves the chain (the recording's own image, else its
   // artist's -- see serialize._primary_recording_image_url) into `image_url`.
   // What is left for the client is the last link: no url means the artist's
@@ -2131,7 +1951,7 @@ const App = (() => {
     // Studio: date cell is the year (or blank), the venue cell carries the
     // title instead (falling back to the artist when there is no title),
     // and location/source/quality stay empty -- a studio release has none
-    // of those (Studio Records spec v1, chunk 5).
+    // of those.
     const date    = id.isStudio ? id.dateText : fmtDate(r.start_year, r.start_month, r.start_day)
     const loc     = id.isStudio ? '' : fmtLocation(r.city, r.state, r.country)
     const quality = id.isStudio ? '' : (r.quality || '')
@@ -2139,12 +1959,13 @@ const App = (() => {
     const runtime = fmtRuntime(r.duration_sec)
     const inc     = r.is_complete ? '' : '<span class="rec-inc" title="Incomplete recording">inc</span>'
     // Every row carries the image column: the recording's image, else the
-    // artist's, else the artist's initials (Ryan, 2026-10-04).
+    // artist's, else the artist's initials.
     const thumb   = r.image_url
       ? `<img class="rec-thumb-sm" src="${esc(r.image_url)}" alt="" loading="lazy">`
       : `<span class="rec-thumb-sm rec-thumb-sm--initials">${esc(recInitials(r))}</span>`
     return `
       <div class="rec-row rec-row--flat ${showArtist ? 'with-artist' : ''}" data-rec-id="${r.id}">
+        ${rowStarHtml(r)}
         ${thumb}
         ${showArtist ? `<span class="rec-artist-cell truncate">${esc(r.artist || '')}</span>` : ''}
         <span class="rec-date truncate">${esc(date)}</span>
@@ -2155,9 +1976,6 @@ const App = (() => {
         <span class="rec-runtime">${runtime}</span>
         <span class="rec-tracks">${r.track_count}t${inc ? ' ' + inc : ''}</span>
         <span class="rec-date-added">${esc(fmtDateAdded(r.created_at))}</span>
-        <button class="rec-fav-star rec-fav-star--sm${viewerHasFavorited(r) ? ' is-fav' : ''}" data-rec-id="${r.id}"
-                aria-pressed="${viewerHasFavorited(r) ? 'true' : 'false'}"
-                title="${viewerHasFavorited(r) ? 'Remove from favorites' : 'Mark as favorite'}">${icon('star', null, viewerHasFavorited(r))}</button>
         <button class="rec-play-btn" data-rec-id="${r.id}" title="Play">${icon('play')}</button>
       </div>`
   }
@@ -2170,14 +1988,9 @@ const App = (() => {
       <div class="rec-table-head ${showArtist ? 'with-artist' : ''}">
         <span></span>
         ${showArtist ? '<span></span>' : ''}
-        <!-- One blank cell per data column before "Added": date, venue, location,
-             source, quality, runtime, tracks. The rating column was removed
-             2026-08-18 — keep this count in step with flatRowHtml() and with the
-             grid-template-columns pair in main.css or the header shears off the
-             row it labels. -->
         <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
         <button class="rec-th-added" type="button" title="Sort by date added">Added <span class="rec-th-arrow"></span></button>
-        <span></span><span></span>
+        <span></span>
       </div>`
   }
 
@@ -2203,6 +2016,7 @@ const App = (() => {
   }
 
   function wireRecordingRows(container) {
+    wireFavStars(container)
     container.querySelectorAll('.rec-row').forEach(el => {
       el.addEventListener('click', e => {
         if (e.target.closest('.rec-play-btn') || e.target.closest('.rec-fav-star')) return
@@ -2213,11 +2027,11 @@ const App = (() => {
         openAddToCollectionMenu(parseInt(el.dataset.recId), e.clientX, e.clientY)
       })
     })
-    // Card surfaces get the SAME right-click menu (2026-08-07). Handbill and
-    // row cards are real anchors, so navigation already works without a click
-    // handler — but the add-to-collection menu was table-only, and cards are
-    // now the primary surface on Browse, Recently Added and Collections. That
-    // would have quietly removed the only way to file a recording.
+    // Card surfaces get the SAME right-click menu. Handbill and row cards are
+    // real anchors, so navigation already works without a click handler — but
+    // the add-to-collection menu was table-only, and cards are now the
+    // primary surface on Browse, Recently Added and Collections. That would
+    // have quietly removed the only way to file a recording.
     container.querySelectorAll('.rec-card[data-rec-id], .rec-rowcard[data-rec-id]').forEach(el => {
       el.addEventListener('contextmenu', e => {
         e.preventDefault()
@@ -2230,12 +2044,15 @@ const App = (() => {
         playRecording(parseInt(btn.dataset.recId), 0, null)
       })
     })
-    // Favorite star, table row (2026-08-09) — same optimistic-toggle pattern
-    // as the recording page's own button (see renderRecordingView), just
-    // scoped per-row and reusing the icon-only .rec-fav-star instead of the
-    // text button (no room for text in a compact grid column).
+  }
+
+  /** Wire every hover star under `container` (see rowStarHtml). Optimistic: the star
+   *  flips at once and flips back if the save fails. The same click handler serves
+   *  flat rows and the anchor-based brow rows, hence preventDefault. */
+  function wireFavStars(container) {
     container.querySelectorAll('.rec-fav-star--sm').forEach(btn => {
       btn.addEventListener('click', async e => {
+        e.preventDefault()
         e.stopPropagation()
         const id = parseInt(btn.dataset.recId)
         const on = btn.getAttribute('aria-pressed') !== 'true'
@@ -2243,7 +2060,7 @@ const App = (() => {
           btn.classList.toggle('is-fav', isFav)
           btn.innerHTML = icon('star', null, isFav)
           btn.setAttribute('aria-pressed', isFav ? 'true' : 'false')
-          btn.title = isFav ? 'Remove from favorites' : 'Mark as favorite'
+          btn.title = favStarTitle(isFav)
         }
         paint(on)
         btn.disabled = true
@@ -2252,7 +2069,7 @@ const App = (() => {
           refreshFavoritesNav()   // the card's star and the shelf are one control
         } catch (err) {
           paint(!on)
-          alert('Could not save favorite: ' + err.message)
+          Notify.error('Could not save favorite: ' + err.message)
         } finally { btn.disabled = false }
       })
     })
@@ -2280,7 +2097,7 @@ const App = (() => {
     const close = () => menu.remove()
     async function addTo(colId, name) {
       try { await API.collections.addRecording(colId, recId); onAdded && onAdded({ id: colId, name }) }
-      catch (e) { alert('Failed: ' + e.message) }
+      catch (e) { Notify.error('Failed: ' + e.message) }
       close()
     }
     menu.querySelectorAll('.col-menu-item[data-id]').forEach(el =>
@@ -2289,7 +2106,7 @@ const App = (() => {
       const name = prompt('New collection name:')
       if (!name || !name.trim()) { close(); return }
       try { const c = await API.collections.create({ name: name.trim() }); await addTo(c.id, name.trim()) }
-      catch (e) { alert('Failed: ' + e.message); close() }
+      catch (e) { Notify.error('Failed: ' + e.message); close() }
     })
     setTimeout(() => document.addEventListener('mousedown', function h(e) {
       if (!menu.contains(e.target)) { close(); document.removeEventListener('mousedown', h) }
@@ -2303,33 +2120,49 @@ const App = (() => {
   function wireCollectionTag(tagEl, recId) {
     tagEl.querySelector('.collection-tag-x')?.addEventListener('click', async () => {
       try { await API.collections.removeRecording(parseInt(tagEl.dataset.id), recId); tagEl.remove() }
-      catch (e) { alert('Failed: ' + e.message) }
+      catch (e) { Notify.error('Failed: ' + e.message) }
     })
   }
   function wireRecCollectionArea(recId) {
     const box = document.getElementById('rec-collections')
     if (!box) return
     box.querySelectorAll('.collection-tag').forEach(t => wireCollectionTag(t, recId))
-    document.getElementById('btn-add-collection')?.addEventListener('click', e => {
-      openAddToCollectionMenu(recId, e.clientX, e.clientY, ({ id, name }) => {
-        if (box.querySelector(`.collection-tag[data-id="${id}"]`)) return
-        const span = document.createElement('span')
-        span.className = 'collection-tag'; span.dataset.id = id
-        span.innerHTML = `${esc(name)}<span class="collection-tag-x" title="Remove from collection">${icon('x')}</span>`
-        box.insertBefore(span, document.getElementById('btn-add-collection'))
-        wireCollectionTag(span, recId)
-      })
-    })
+  }
+
+  // Adding is a choice in the Actions menu now: the menu's "Add to
+  // Collection" submenu fills lazily, and a pick lands here.
+  function addRecCollectionTag(recId, { id, name }) {
+    const box = document.getElementById('rec-collections')
+    if (!box || box.querySelector(`.collection-tag[data-id="${id}"]`)) return
+    const span = document.createElement('span')
+    span.className = 'collection-tag'; span.dataset.id = id
+    span.innerHTML = `${esc(name)}<span class="collection-tag-x" title="Remove from collection">${icon('x')}</span>`
+    box.appendChild(span)
+    wireCollectionTag(span, recId)
+  }
+
+  /** Fill the Add to Collection submenu: curated collections the recording is not
+   *  already in (system collections are queries and refuse a hand-add), then
+   *  Create. Same list and rules as openAddToCollectionMenu. */
+  async function fillCollectionSub(sub) {
+    let cols = []
+    try { cols = (await API.collections.list()).filter(isCuratedCollection) } catch (_) {}
+    const have = new Set([...document.querySelectorAll('#rec-collections .collection-tag')]
+      .map(t => parseInt(t.dataset.id)))
+    sub.innerHTML = cols.filter(c => !have.has(c.id)).map(c =>
+      `<button class="actions-item actions-item--indent" role="menuitem" data-act="coll-add"
+               data-id="${c.id}" data-name="${esc(c.name)}">${esc(c.name)}</button>`).join('')
+      + `<button class="actions-item actions-item--indent" role="menuitem" data-act="coll-new">+ Create collection…</button>`
   }
 
   // ── Collections views ────────────────────────────────────────────────────────
   // ══ Shared entity-page shell ═══════════════════════════════════════════════
   //
-  // Hero + tab strip + panes, used by Artist, Venue, Musician (person), Genre
-  // and Collection (Ryan, 2026-08-07). Extracted rather than copied five times:
-  // four copies is exactly the situation that produced today's three-copy
-  // analysis refactor and the .rec-row class collision, and a spacing or
-  // navigation fix should not need applying five times.
+  // Hero + tab strip + panes, used by Artist, Venue, Musician (person), Genre and
+  // Collection. Extracted rather than copied five times: four copies is exactly
+  // the situation that produced today's three-copy analysis refactor and the
+  // .rec-row class collision, and a spacing or navigation fix should not need
+  // applying five times.
   //
   // NAMING: the CSS keeps its `.pp-*` prefix. It reads as "artist page" and
   // now means "entity page" — renaming sixty-odd selectors and their JS
@@ -2354,16 +2187,11 @@ const App = (() => {
   // Wire a control that entityShellHtml() only renders for an editor.
   //
   // `actions` is dropped in Playback mode inside the shell — correctly, and
-  // deliberately, so a new entity page cannot forget. But every caller then
-  // wired its button with a bare getElementById(...).addEventListener, which
-  // is null for a listener. All six entity pages threw on load in Playback
-  // mode (found 2026-08-23 via the debug drawer, on the Musician page:
-  // "null is not an object … 'pn-delete'"). Inside an async render the throw
-  // surfaced as an unhandled rejection and nothing showed it, so it had been
-  // silently breaking every one of those pages.
-  //
-  // CONTEXT.md's rule is that gating belongs in the shared helper rather than
-  // at ~25 call sites. This is the wiring half of that same rule.
+  // deliberately, so a new entity page cannot forget. But every caller then wired
+  // its button with a bare getElementById(...).addEventListener, which is null
+  // for a listener. All six entity pages threw on load in Playback mode. Inside
+  // an async render the throw surfaced as an unhandled rejection and nothing
+  // showed it, so it had been silently breaking every one of those pages.
   //
   // Use this ONLY where absence is expected. Elsewhere a missing element is a
   // real bug and should keep throwing.
@@ -2372,27 +2200,38 @@ const App = (() => {
     if (el) el.addEventListener('click', handler)
   }
 
+  const heroImgHtml = url => `<img src="${esc(url)}" alt="">`
+  // Repaint the header photo in place (after the Photos tab adds, removes or re-picks the primary).
+  function setHeroImage(url) {
+    const hero = document.getElementById('pp-hero')
+    const box = hero && hero.querySelector('.b-img')
+    if (!box) return
+    hero.classList.toggle('noimg', !url)
+    box.innerHTML = url ? heroImgHtml(url) : ''
+  }
+
   function entityShellHtml(opts) {
     const tabs = (opts.tabs || []).filter(Boolean)
     const activeId = (tabs.find(t => t.active) || tabs[0] || {}).id
     const stats = opts.stats || []
+    const hero = opts.hero || null      // {imageUrl}: the header whose primary photo fades into the page (Artist, Venue, Musician, Event)
     // Playback mode: no editable title, and no hero actions — every page that
     // passes `actions` passes an admin verb there (Delete artist / venue /
     // genre / collection / musician, + Add peer). Enforced in the shell rather
     // than at each caller so a new entity page cannot forget.
     // `actionsPlayback` renders in BOTH modes, for a verb that is content
-    // rather than editing. "+ New collection" moved here 2026-08-22 (Ryan) —
-    // making a collection is something a listener does too; deleting one
-    // stays admin-only via `actions`.
+    // rather than editing.
     const shellEditable = canEditLibrary()
     const titleEditable = opts.titleEditable && shellEditable
-    const heroActions   = (shellEditable ? (opts.actions || '') : '') + (opts.actionsPlayback || '')
+    const heroActions   = (shellEditable && hero ? '<button type="button" class="btn btn-ghost btn-sm b-addphoto" data-hero-addphoto>Add Photo</button>' : '')
+                        + (shellEditable ? (opts.actions || '') : '') + (opts.actionsPlayback || '')
     return `
       <div class="artist-page${opts.pageClass ? ' ' + opts.pageClass : ''}">
 
-        <div class="pp-hero">
-          ${opts.portrait ? `<div class="pp-hero-portrait">${opts.portrait}</div>` : ''}
-          <div class="pp-hero-main">
+        <div class="pp-hero${hero ? ' b-hero' + (hero.imageUrl ? '' : ' noimg') : ''}"${hero ? ' id="pp-hero"' : ''}>
+          ${hero ? `<div class="b-img">${hero.imageUrl ? heroImgHtml(hero.imageUrl) : ''}</div>`
+                 : (opts.portrait ? `<div class="pp-hero-portrait">${opts.portrait}</div>` : '')}
+          <div class="pp-hero-main${hero ? ' b-text' : ''}">
             <h1 class="pp-name${titleEditable ? ' pp-editable' : ''}"
                 ${opts.titleId ? `id="${opts.titleId}"` : ''}
                 ${titleEditable ? 'title="Click to edit"' : ''}>${opts.title}</h1>
@@ -2419,10 +2258,9 @@ const App = (() => {
 
   // ══ Shared photo gallery ═══════════════════════════════════════════════════
   //
-  // The Photos tab for any entity with images — Artist and Venue today
-  // (Ryan, 2026-08-07). Parameterised by an API namespace rather than
-  // duplicated, so make-primary, delete-promotes-a-survivor, drag-and-drop and
-  // partial-upload reporting behave identically wherever photos appear.
+  // The Photos tab for any entity with images — Artist and Venue today. Parameterised by an
+  // API namespace rather than duplicated, so make-primary, delete-promotes-a-survivor,
+  // drag-and-drop and partial-upload reporting behave identically wherever photos appear.
   //
   // opts:
   //   mountId    string             — element the gallery renders into
@@ -2441,7 +2279,6 @@ const App = (() => {
   //                                    in the gallery, no licence is inspected
   //                                    — the human looks, saves, and drops the
   //                                    file on the drop zone beside them.
-  //                                    Ryan, 2026-09-01: an integrated lookup
   //                                    for four dimensions would need four
   //                                    licence bridges, and three of them do
   //                                    not exist. A link-out is honest about
@@ -2540,7 +2377,7 @@ const App = (() => {
         if (!btn) return
         e.preventDefault()
         if (btn.dataset.act === 'suggest') {
-          try { await sgList[Number(btn.closest('.pp-ph').dataset.suggest)].run(); await refresh() } catch (err) { alert('Failed: ' + err.message) }
+          try { await sgList[Number(btn.closest('.pp-ph').dataset.suggest)].run(); await refresh() } catch (err) { Notify.error('Failed: ' + err.message) }
           return
         }
         const id = Number(btn.closest('.pp-ph').dataset.imgId)
@@ -2551,16 +2388,12 @@ const App = (() => {
             await opts.api.removeImage(id)
           }
           await refresh()
-        } catch (err) { alert('Failed: ' + err.message) }
+        } catch (err) { Notify.error('Failed: ' + err.message) }
       })
 
       // ⚠ The drop zone is NOT rendered in Playback mode — a listener has
       // nowhere to put a file — so this element is legitimately absent and the
-      // wiring has to be conditional (found 2026-09-01). Unguarded, `drop` was
-      // null and this threw inside an async render, which surfaces as an
-      // unhandled rejection with nothing on screen: the Venue page's Photos tab
-      // has been silently dead in Playback mode since 2026-08-07, and putting
-      // this component on three more pages would have quadrupled that.
+      // wiring has to be conditional.
       //
       // Exactly the failure mode entityShellHtml's `actions` gate and
       // onAdminClick were introduced for — gate the RENDER in the shared
@@ -2616,8 +2449,8 @@ const App = (() => {
         await refresh()
         // Partial success is a 200 with an `errors` list — four of five photos
         // landing must not read as failure, but the rejected one has to say why.
-        if (res.errors && res.errors.length) alert('Some files were skipped:\n' + res.errors.join('\n'))
-      } catch (err) { alert('Upload failed: ' + err.message) }
+        if (res.errors && res.errors.length) Notify.notice('Some files were skipped:\n' + res.errors.join('\n'))
+      } catch (err) { Notify.error('Upload failed: ' + err.message) }
     }
 
     async function refresh() {
@@ -2633,17 +2466,12 @@ const App = (() => {
 
   // ══ The two photo-search link-outs every photographed entity gets ══════════
   //
-  // Standardised across Artist, Musician, Venue and Event (Ryan, 2026-09-01).
-  // Both open a search and stop there — no fetch, no automatic import.
+  // Standardised across Artist, Musician, Venue and Event. Both open a search
+  // and stop there — no fetch, no automatic import.
   //
-  // COMMONS, not "google it plus the words creative commons". Wikimedia Commons
-  // accepts freely-licensed files ONLY, so every result is safe to redistribute
-  // once peer sharing exposes the library; a web search for the phrase "creative
-  // commons license" returns pages that merely CONTAIN those words, which is not
-  // the same claim and is exactly the trap CONTEXT.md records for English
-  // Wikipedia's local fair-use uploads. Special:MediaSearch is Commons' own
-  // image search, so the licence guarantee comes from the destination rather
-  // than from a query string.
+  // COMMONS, not "google it plus the words creative commons".
+  // Special:MediaSearch is Commons' own image search, so the licence guarantee
+  // comes from the destination rather than from a query string.
   //
   // Google Images has no licence guarantee at all and is not pretending to —
   // it is the long tail Commons does not cover, for the acts and halls nobody
@@ -2668,29 +2496,15 @@ const App = (() => {
     ]
   }
 
-  // Round entity portrait for a hero. Falls back to INITIALS rather than a
-  // silhouette icon: with photos on a small minority of entities, the no-photo
-  // state is the normal appearance and should look intentional.
-  function heroPortraitHtml(name, imageUrl, ringColor) {
-    const ring = esc(ringColor || 'var(--bd-1)')
-    if (imageUrl) {
-      return `<img class="pp-portrait-img" style="--ring:${ring}" src="${imageUrl}" alt="${esc(name)}">`
-    }
-    const initials = String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-      .map(w => w[0]).join('').toUpperCase()
-    return `<div class="pp-portrait-blank" style="--ring:${ring}">${esc(initials)}</div>`
-  }
-
   // ══ Recording image modal ═════════════════════════════════════════════════
   //
-  // Opened from the square in the View Recording header (Ryan, 2026-10-04).
-  // Top: the current image, large, for a close look; click it to toggle
-  // between fit and actual size. Below, for an editor: the same photo gallery
-  // the Artist and Venue pages use (upload, make primary, delete, the Commons
-  // and Google link-outs), plus the artist's picture as a one-click choice --
-  // choosing it COPIES the file into the recording, so the recording keeps its
-  // image if the artist's is later replaced. A listener, or a peer, gets the
-  // zoomed image and nothing else.
+  // Opened from the square in the View Recording header. Top: the current image,
+  // large, for a close look; click it to toggle between fit and actual size. Below,
+  // for an editor: the same photo gallery the Artist and Venue pages use (upload,
+  // make primary, delete, the Commons and Google link-outs), plus the artist's
+  // picture as a one-click choice -- choosing it COPIES the file into the recording,
+  // so the recording keeps its image if the artist's is later replaced. A listener,
+  // or a peer, gets the zoomed image and nothing else.
   //
   // opts: { recordingId, rec, artistImageId, venueImageId, artistName, linkQualifier,
   //         onChange }   -- `rec` is the page's own object and is updated here.
@@ -2764,27 +2578,25 @@ const App = (() => {
 
   // ══ Shared "create entity" form ════════════════════════════════════════════
   //
-  // One simple form per dimension (Ryan, 2026-08-07). The + buttons previously
-  // did two different wrong things: Venues navigated to the ADMIN LIST — a
-  // view-and-edit screen inconsistent with everything else and not a create
-  // flow at all — while Artists and Musicians used a bare window.prompt().
+  // One simple form per dimension. The + buttons previously did two different
+  // wrong things: Venues navigated to the ADMIN LIST — a view-and-edit screen
+  // inconsistent with everything else and not a create flow at all — while
+  // Artists and Musicians used a bare window.prompt.
   //
   // Built on the entity shell so a create form looks like the page it will
   // become, and deliberately minimal: name plus whatever else is genuinely
   // required. Everything else is editable in place afterwards, which is the
   // established pattern for every object in this app.
   //
-  // Built out 2026-09-01 (Ryan, "build out the Add New pages a bit more"), but
-  // still deliberately short of the record's own page. The line is: a field
-  // belongs here if you would otherwise have to type it TWICE (a venue's city,
-  // an event's dates — things you already know while creating and would
-  // immediately go back in to add), or if leaving it blank creates a record
-  // that is hard to find again. Everything that is genuinely a later decision
-  // — an artist's members and genre, an event's linked venue — stays on the
-  // record, edited in place, which is this app's established pattern for every
-  // object. A create form that mirrors the whole page is a second edit surface,
-  // and the two-edit-surfaces mistake is exactly what the old Venues admin
-  // screen was.
+  // The line is: a field belongs here if you would otherwise have to type it
+  // TWICE (a venue's city, an event's dates — things you already know while
+  // creating and would immediately go back in to add), or if leaving it blank
+  // creates a record that is hard to find again. Everything that is genuinely a
+  // later decision — an artist's members and genre, an event's linked venue —
+  // stays on the record, edited in place, which is this app's established
+  // pattern for every object. A create form that mirrors the whole page is a
+  // second edit surface, and the two-edit-surfaces mistake is exactly what the
+  // old Venues admin screen was.
   //
   // opts: { title, backHash, fields: [...], intro, note,
   //         onSave(values) -> hash to navigate to, invalidate: dimName }
@@ -2794,7 +2606,6 @@ const App = (() => {
   //           so a placeholder can only repeat it or show an example, and an
   //           example value in a City box is one more thing to read and one
   //           more thing to mistake for a filled-in value. All five forms
-  //           carried one per field until 2026-09-18 (Ryan); they are gone,
   //           and a new one needs a reason the label cannot cover. A field
   //           with none gets no attribute at all, not an empty one.
   //   hint  — a line under the input. Use it for a FORMAT the user cannot
@@ -2802,7 +2613,7 @@ const App = (() => {
   //           restate the label.
   //   type  — 'color' pairs a native swatch with the text box, so a hex can be
   //           typed or picked. Genre is the only user of it; genre colour is
-  //           the most complete visual signal the library owns (CONTEXT.md),
+  //           the most complete visual signal the library owns,
   //           so it is worth setting at creation rather than later.
   function renderCreateForm(opts) {
     setNavCurrent(opts.title)
@@ -2828,7 +2639,7 @@ const App = (() => {
                   ? `<textarea id="cf-${f.id}"${ph(f)}></textarea>`
                   : f.type === 'color'
                     ? `<span class="cf-color">
-                         <input type="color" id="cf-${f.id}-swatch" value="${esc(f.value || '#7a8b99')}" />
+                         <input type="color" id="cf-${f.id}-swatch" value="${esc(f.value || '#7d7f88')}" />
                          <input type="text" id="cf-${f.id}"${ph(f, '#rrggbb')}
                                 value="${esc(f.value || '')}" autocomplete="off" spellcheck="false" />
                        </span>`
@@ -2879,8 +2690,8 @@ const App = (() => {
     // Colour fields: the swatch and the hex box are two views of one value, so
     // each writes the other. The TEXT box stays the source of truth for save()
     // — a native colour input has no empty state, so reading it would make
-    // "no colour" unrepresentable, and NULL colour is a supported state that
-    // renders neutral grey.
+    // "no colour chosen" unrepresentable; a blank box lets the server assign
+    // the default.
     fields.filter(f => f.type === 'color').forEach(f => {
       const box = document.getElementById('cf-' + f.id)
       const sw  = document.getElementById('cf-' + f.id + '-swatch')
@@ -2903,24 +2714,12 @@ const App = (() => {
 
   // ══ Peers — inbound sharing management ═════════════════════════════════════
   //
-  // A frontend for api/peers.py, which has existed since 2026-07-16 and was
-  // curl-only until now. NOTHING here is new server surface — every call maps
-  // to an endpoint that already works and is already tested.
-  //
-  // Sharing is COLLECTION-ONLY (Ryan, 2026-08-08). Artist-level, whole-library
-  // and per-recording grants were considered and dropped: collections are
-  // already the arbitrary-set-of-recordings primitive, and bulk tools for
-  // filling a collection make "share everything" a collection you build once
-  // rather than a second grant model to maintain. That decision is why this
-  // page needs no migration at all.
-  // Existing invites for one peer.
-  //
-  // Added 2026-08-25 because the ONLY control on this page was "Revoke access",
-  // and that means something else entirely (Ryan): revoking kills the person —
-  // every device they hold stops working and their library goes dark.
-  // Cancelling an invite stops ONE unused code from working and touches nobody
-  // who has already joined. Two very different blast radii, so they get
-  // different words and sit in different blocks.
+  // Sharing is COLLECTION-ONLY. Artist-level, whole-library and per-recording
+  // grants were considered and dropped: collections are already the
+  // arbitrary-set-of-recordings primitive, and bulk tools for filling a
+  // collection make "share everything" a collection you build once rather than a
+  // second grant model to maintain. That decision is why this page needs no
+  // migration at all. Existing invites for one peer.
   //
   // Three states, three treatments:
   //   Unused  — a live key to this library. The only one worth cancelling, and
@@ -2957,17 +2756,21 @@ const App = (() => {
     })
   }
 
-  /** Settings › Sharing (2026-10-06; replaces the #/peers page). Three parts:
-   *  the public address, the people this library is shared with, and the
-   *  libraries this install has joined. Sharing is implied: a peer always holds
-   *  the Full Library grant (server side, api/peers.py), so there is no switch.
-   *  One peer is open at a time; its detail is fetched when it opens. */
+  /* Settings › Sharing. Three parts: the public address, the people this
+     library is shared with, and the libraries this install has joined. Sharing
+     is implied: a peer always holds the Full Library grant (server side,
+     api/peers.py), so there is no switch. One peer is open at a time; its
+     detail is fetched when it opens. */
   async function _renderSharingPane(host) {
     let peers = [], openId = null
     try { peers = await API.peers.list() }
     catch (e) { host.innerHTML = `<p class="set-hint">${esc(e.message)}</p>`; return }
 
     host.innerHTML = `
+      <div class="set-field" id="sharing-guideline">
+        <span class="set-label">Sharing Guidelines</span>
+        <p class="set-hint">Library sharing is for ROIOs (Recordings of Independent Origin) by artists who permit taping and trading of their performances. Trellis does not share official releases, including any recording linked to a MusicBrainz release. You are responsible for what you share. Share recordings by taper-friendly artists only.</p>
+      </div>
       <div class="set-field">
         <label class="set-label" for="peer-share-url">Public Address</label>
         <div class="set-actions">
@@ -3263,13 +3066,6 @@ const App = (() => {
          + 'their page, or from the act’s Members list.',
     fields: [
       { id: 'name', label: 'Musician name', required: true },
-      // Sort name removed 2026-09-01 (Ryan). It asked, at the moment of
-      // creation, for a clerical restatement of the name that had just been
-      // typed — and the field is NULL for all 179 existing rows anyway, so
-      // nothing was consistent with it. Ordering already reads
-      // COALESCE(sort_name, name) on both the server and the client, so a blank
-      // one costs nothing; the column stays, and scripts/backfill_sort_names.py
-      // is still the way to populate it in bulk if that day comes.
       { id: 'bio', label: 'Bio', multiline: true },
     ],
     onSave: async v => `#/musician/${(await API.musicians.create(v)).id}`,
@@ -3281,11 +3077,7 @@ const App = (() => {
          + 'implicitly, so this form is the only door in.',
     fields: [
       { id: 'name',  label: 'Genre name', required: true },
-      // Colour is set here rather than later because it is not decoration: it
-      // tints every card, row and tile belonging to this genre's artists,
-      // and CONTEXT.md records it as the most complete visual signal the
-      // library owns — 566 of 580 recordings carry one, far more than photos.
-      { id: 'color', label: 'Colour', type: 'color', value: '#7a8b99',
+      { id: 'color', label: 'Colour', type: 'color', value: '',
         hint: 'Tints every recording card and browse row for artists in this genre.' },
       { id: 'description', label: 'Description', multiline: true },
     ],
@@ -3338,9 +3130,11 @@ const App = (() => {
         root.querySelector(`.pp-pane[data-pane="${btn.dataset.pane}"]`)?.classList.add('active')
       })
     })
-    // The #pp-back-row link was removed 2026-08-22 — the App Header's back
-    // arrow covers every view. `navBack` is still threaded through because the
-    // new-entity forms use it as their post-save/cancel destination.
+    root.querySelector('[data-hero-addphoto]')?.addEventListener('click', () => {
+      root.querySelector('.pp-tab[data-pane="photos"]')?.click()
+    })
+    // `navBack` is still threaded through because the new-entity forms use it
+    // as their post-save/cancel destination.
   }
 
   // A recordings pane using the flat catalog table — the shape Venue, Musician,
@@ -3361,10 +3155,9 @@ const App = (() => {
     try { cols = (await API.collections.list()).filter(isCuratedCollection) } catch (_) {}
 
     // Same tile component the Browse dashboard uses, so a collection looks
-    // like itself wherever you meet it (Ryan, 2026-08-07 — "playbill style
-    // across the board"). A collection has no date or venue, so a literal
-    // handbill would be mostly empty; the tile is the card language minus the
-    // fields collections don't have.
+    // like itself wherever you meet it. A collection has no date or venue, so
+    // a literal handbill would be mostly empty; the tile is the card language
+    // minus the fields collections don't have.
     setMainHTML(entityShellHtml({
       title: 'Collections',
       stats: [[cols.length, cols.length === 1 ? 'Collection' : 'Collections']],
@@ -3386,7 +3179,7 @@ const App = (() => {
         _dimCache.collections = null
         if (state.expandedDims.has('collections')) _renderDimRecords('collections')
         window.location.hash = `#/collection/${c.id}`
-      } catch (e) { alert('Failed: ' + e.message) }
+      } catch (e) { Notify.error('Failed: ' + e.message) }
     })
   }
 
@@ -3416,7 +3209,7 @@ const App = (() => {
     })
     document.getElementById('col-save').addEventListener('click', async () => {
       const name = document.getElementById('col-name').value.trim()
-      if (!name) { alert('Name is required'); return }
+      if (!name) { Notify.error('Name is required'); return }
       try {
         const c = await API.collections.create({
           name, description: document.getElementById('col-desc').value.trim() || null,
@@ -3424,7 +3217,7 @@ const App = (() => {
         _dimCache.collections = null
         if (state.expandedDims.has('collections')) _renderDimRecords('collections')
         window.location.hash = `#/collection/${c.id}`
-      } catch (e) { alert('Failed: ' + e.message) }
+      } catch (e) { Notify.error('Failed: ' + e.message) }
     })
   }
 
@@ -3467,7 +3260,7 @@ const App = (() => {
     // The add bar. A collection is the one surface whose whole job is putting
     // recordings INTO it, and until now the only way was to right-click a
     // recording somewhere else and pick this collection off a menu — which
-    // means knowing what you want before you arrive (Ryan, 2026-09-03).
+    // means knowing what you want before you arrive.
     const addBarHtml = !editable ? '' : `
       <div class="col-add">
         <div class="col-add-wrap">
@@ -3534,7 +3327,7 @@ const App = (() => {
             refreshSidebar()
           } catch (err) {
             btn.disabled = false
-            alert('Could not remove: ' + err.message)
+            Notify.error('Could not remove: ' + err.message)
           }
         })
       })
@@ -3547,7 +3340,7 @@ const App = (() => {
     }
     async function saveField(patch) {
       try { await API.collections.update(id, patch); refreshSidebar() }
-      catch (e) { alert('Save failed: ' + e.message) }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
     }
     if (editable) {
       makeInlineEditable(document.getElementById('col-name'), {
@@ -3573,14 +3366,14 @@ const App = (() => {
         repaintCards()
         refreshSidebar()
       } catch (e) {
-        alert('Refresh failed: ' + e.message)
+        Notify.error('Refresh failed: ' + e.message)
       } finally { btn.disabled = false }
     })
 
     onAdminClick('col-delete', async () => {
       if (!confirm(`Delete collection "${c.name}"? Recordings are not affected.`)) return
       try { await API.collections.remove(id); refreshSidebar(); window.location.hash = '#/collections' }
-      catch (e) { alert(e.message) }
+      catch (e) { Notify.error(e.message) }
     })
 
     // ── The add search ────────────────────────────────────────────────────
@@ -3712,75 +3505,32 @@ const App = (() => {
         API.artists.recordings(p.id).then(rs => ({ artist: p, performances: rs.filter(x => (x.recordings || []).length) }))))
     } catch (_) {}
 
-    const totalRecordings = perfRecs.reduce((n, g) => n + g.performances.reduce((m, p) => m + p.recordings.length, 0), 0)
-
-    // One <section> per artist (alpha), each with a header + flat recording rows.
-    const groupsHtml = perfRecs.map(g => {
-      const ordered = g.performances.slice().sort((x, y) => compareByDate(x, y, false))
-      const rowObjs = ordered.flatMap(p =>
-        p.recordings.map(r => ({
-          id: r.id, artist: p.artist_name,
-          start_year: p.start_year, start_month: p.start_month, start_day: p.start_day,
-          venue: p.venue_name, city: p.city, state: p.state, country: p.country,
-          source: r.source, quality: r.quality,
-          is_complete: r.is_complete,
-          track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
-          kind: r.kind, title: r.title,
-        })))
-      const rows = rowObjs.map(r => flatRowHtml(r, false)).join('')
-      if (!rows) return ''
-      return `<div class="pp-group">
-        <div class="pp-group-head"><a href="#/artist/${g.artist.id}">${esc(g.artist.name)}</a></div>
-        <div class="rec-table">${rows}</div>
-      </div>`
-    }).join('')
-
-    // Guest / sit-in appearances — performance_personnel rows on acts this
-    // person isn't formally a Membership of (2026-07-18 Per-Show Personnel,
-    // ripple item 3: "Béla's page would finally surface his All-Stars
-    // sit-ins"). Grouped by artist like the section above, but kept
-    // visually separate and tagged "guest" since it's not the same thing as
-    // full membership — this is a different act's recording that happens to
-    // include this person for one show.
-    const guestAppearances = a.guest_appearances || []
-    const guestByArtist = {}
-    guestAppearances.forEach(g => {
-      const key = g.artist_id
-      if (!guestByArtist[key]) guestByArtist[key] = { artist_id: g.artist_id, artist_name: g.artist_name, appearances: [] }
-      guestByArtist[key].appearances.push(g)
+    // One flat list of every recording this musician is on, whether through an
+    // act's roster or a show-level lineup entry. Member vs guest is not shown.
+    const seenRec = new Set()
+    const recRows = []
+    const pushRows = (artistName, d, recs) => (recs || []).forEach(r => {
+      if (seenRec.has(r.id)) return
+      seenRec.add(r.id)
+      recRows.push({
+        id: r.id, artist: artistName,
+        start_year: d.start_year, start_month: d.start_month, start_day: d.start_day,
+        venue: d.venue_name, city: d.city, state: d.state, country: d.country,
+        source: r.source, quality: r.quality,
+        is_complete: r.is_complete,
+        track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
+        image_url: r.image_url, kind: r.kind, title: r.title, is_favorite: r.is_favorite,
+      })
     })
-    const totalGuestRecordings = guestAppearances.reduce((n, g) => n + (g.recordings || []).length, 0)
+    perfRecs.forEach(g => g.performances.forEach(p => pushRows(p.artist_name, p, p.recordings)))
+    ;(a.guest_appearances || []).forEach(ap => pushRows(ap.artist_name, ap, ap.recordings))
+    recRows.sort((x, y) => compareByDate(x, y, false))
+    const totalRecordings = recRows.length
 
-    const guestGroupsHtml = Object.values(guestByArtist).map(g => {
-      const ordered = g.appearances.slice().sort((x, y) => compareByDate(x, y, false))
-      const rowObjs = ordered.flatMap(ap =>
-        (ap.recordings || []).map(r => ({
-          id: r.id, artist: g.artist_name,
-          start_year: ap.start_year, start_month: ap.start_month, start_day: ap.start_day,
-          venue: ap.venue_name, city: ap.city, state: ap.state, country: ap.country,
-          source: r.source, quality: r.quality,
-          is_complete: r.is_complete,
-          track_count: r.track_count, duration_sec: r.duration_sec, image_url: r.image_url,
-          kind: r.kind, title: r.title,
-        })))
-      const rows = rowObjs.map(r => flatRowHtml(r, false)).join('')
-      if (!rows) return ''
-      // "Guest" tag only when every appearance under this act name is
-      // actually is_guest=True (2026-07-23 fix — this section is really "not
-      // a formal roster member of this act," which the API named
-      // guest_appearances back when that always meant a sit-in. The
-      // Members/Guests two-row redesign (2026-07-22) added a real non-guest
-      // case here too: a full billed appearance under a one-off act name
-      // (e.g. a duo billing) that this person isn't formally on the roster
-      // of. Tagging that "guest" was Ryan's bug report — Bela Fleck & Bryan
-      // Sutton is a real Member appearance, not a sit-in. Each appearance
-      // carries its own is_guest; only tag the group when ALL of them agree.)
-      const allGuest = ordered.every(ap => ap.is_guest)
-      return `<div class="pp-group">
-        <div class="pp-group-head"><a href="#/artist/${g.artist_id}">${esc(g.artist_name)}</a>${allGuest ? ' <span class="pp-guest-tag">guest</span>' : ''}</div>
-        <div class="rec-table">${rows}</div>
-      </div>`
-    }).join('')
+    // Acts this person is on: the roster plus any show-level appearance.
+    const artistIds = new Set(artists.map(p => p.id))
+    ;(a.guest_appearances || []).forEach(ap => { if (ap.artist_id != null) artistIds.add(ap.artist_id) })
+    const artistCount = artistIds.size
 
     const descText = a.bio && a.bio.trim()
     const navBack = state.navBack
@@ -3789,33 +3539,25 @@ const App = (() => {
 
     setMainHTML(entityShellHtml({
       navBack,
-      portrait: '<div id="pn-portrait"></div>',
+      hero: { imageUrl: (a.images || [])[0] ? API.musicians.imageUrl(a.images[0].id) : null },
       title: esc(a.name),
       titleId: 'pn-name',
       titleEditable: true,
-      chips: `<span class="pp-hero-fact">${artists.length} artist${artists.length !== 1 ? 's' : ''}</span>`,
+      chips: artistCount ? `<span class="pp-hero-fact">Musician with ${artistCount} artist${artistCount !== 1 ? 's' : ''}</span>` : '',
       stats: [
         [totalRecordings, totalRecordings === 1 ? 'Recording' : 'Recordings'],
-        ...(totalGuestRecordings ? [[totalGuestRecordings, 'Guest']] : []),
       ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="pn-delete" title="Delete musician">Delete</button>`,
-      // Photos arrived here 2026-09-01, reversing the 2026-08-07 "photos are
-      // artist-level only" call — for this PAGE. The original reasoning
-      // stands where it was aimed: cards key off the act, so putting a person's
-      // likeness on them would still give a wall of identical tiles. What it
-      // was not aimed at is a person's own page, which is the one surface in
-      // this app where a portrait is obviously the right thing.
       tabs: [
-        { id: 'recordings', label: 'Recordings', active: true,
-          count: totalRecordings + totalGuestRecordings, html: `
-            ${groupsHtml || (guestGroupsHtml ? '' : '<div class="empty-state" style="min-height:160px"><div class="empty-title">No appearances yet</div></div>')}
-            ${guestGroupsHtml ? `<div class="pp-sec" style="margin-top:24px">Guest appearances</div>${guestGroupsHtml}` : ''}` },
-        { id: 'about', label: 'About', html: `
+        { id: 'recordings', label: 'Recordings', active: true, count: totalRecordings,
+          html: recordingsPaneHtml(recRows, { showArtist: true, mountId: 'rec-table-musician',
+                                              empty: 'No appearances yet' }) },
+        { id: 'about', label: 'About', html: aboutGridHtml(`
             <div class="pp-sec">Artists</div>
             <div class="pp-musicians" id="pn-artists"></div>
 
             <div class="pp-sec">Bio</div>
-            <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pn-desc" title="Click to edit">${descText ? esc(a.bio) : 'Add a bio\u2026'}</div>` },
+            <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pn-desc" title="Click to edit">${descText ? esc(a.bio) : 'Add a bio\u2026'}</div>`, 'pn-lx-col') },
         { id: 'photos', label: 'Photos', count: photoCount || null,
           html: '<div id="pn-photos"></div>' },
       ],
@@ -3823,6 +3565,7 @@ const App = (() => {
     wireEntityShell(mainContent, navBack)
 
     wireRecordingRows(mainContent)
+    if (recRows.length) wireDateAddedSort(document.getElementById('rec-table-musician'), recRows, true)
 
     // ── Photos ──────────────────────────────────────────────────────────────
     // Shared gallery, no automatic fetch tile: the Commons bridge runs through
@@ -3830,12 +3573,7 @@ const App = (() => {
     // reached through this page has no equivalent hook. The two search tiles
     // cover it — they open a search and import nothing, so they need no
     // licence bridge to be honest about what they are.
-    const pnPortrait = () => {
-      const el = document.getElementById('pn-portrait')
-      if (!el) return
-      const primary = (a.images || [])[0]      // server orders primary-first
-      el.innerHTML = heroPortraitHtml(a.name, primary ? API.musicians.imageUrl(primary.id) : null)
-    }
+    const pnPortrait = () => setHeroImage((a.images || [])[0] ? API.musicians.imageUrl(a.images[0].id) : null)
     createPhotoGallery({
       mountId: 'pn-photos', api: API.musicians, entityId: id, images: a.images || [],
       // "musician" disambiguates a person's name from the hundred other people
@@ -3852,7 +3590,7 @@ const App = (() => {
     const refreshSidebar = () => invalidateDims('musicians', 'artists')
     async function saveField(patch) {
       try { await API.musicians.update(id, patch); refreshSidebar() }
-      catch (e) { alert('Save failed: ' + e.message) }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
     }
     makeInlineEditable(document.getElementById('pn-name'), {
       get: () => a.name,
@@ -3863,6 +3601,26 @@ const App = (() => {
       get: () => a.bio || '',
       onSave: async v => { v = v.trim(); a.bio = v; await saveField({ bio: v || null }) },
     })
+
+    // ── Lomax: the chat column ───────────────────────────────────────────
+    // The biography is auto-applied by the server (Restore Previous undoes it). The acts this
+    // musician played with are written into it, never filed as records.
+    {
+      const paintBio = () => {
+        const el = document.getElementById('pn-desc')
+        if (!el || el.querySelector('textarea, input')) return
+        el.textContent = a.bio || (canEditLibrary() ? 'Add a bio…' : '')
+        el.classList.toggle('pp-empty', !a.bio)
+      }
+      lomaxMountAbout('pn-lx-col', {
+        skill: 'musician', subjectType: 'musician', subjectId: id,
+        afterRestore: run => { a.bio = (run.result && run.result.replaced && run.result.replaced.text) || ''; paintBio() },
+        onDone: run => {
+          const rep = run.result && run.result.replaced
+          if (rep && rep.written) { a.bio = rep.written; paintBio() }
+        },
+      }, { subject: 'musician', current: () => a.bio, cards: (run, c, o) => [lxTextCard('Biography', run, c, o)] })
+    }
 
     // ── Editable Artist associations ─────────────────────────────────────
     function renderArtists() {
@@ -3876,14 +3634,14 @@ const App = (() => {
       box.querySelectorAll('.member-chip-x').forEach(x =>
         x.addEventListener('click', async () => {
           const p = artists[parseInt(x.dataset.i)]
-          try { await API.musicians.removeArtist(id, p.id); invalidateDims('artists') } catch (e) { alert(e.message); return }
+          try { await API.musicians.removeArtist(id, p.id); invalidateDims('artists') } catch (e) { Notify.error(e.message); return }
           renderPersonView(id)   // reload so the grouped appearances update
         }))
       const input = box.querySelector('.pp-add-input')
       wirePickerDropdown(input, document.getElementById('pn-add-dd'), API.artists.search,
         async ({ id: pid, name }) => {
           try { await API.musicians.addArtist(id, pid ? { artist_id: pid } : { artist_name: name }); invalidateDims('artists') }
-          catch (e) { alert(e.message); return }
+          catch (e) { Notify.error(e.message); return }
           renderPersonView(id)
         }, 'Create new artist')
     }
@@ -3892,17 +3650,11 @@ const App = (() => {
     onAdminClick('pn-delete', async () => {
       if (!confirm(`Delete musician "${a.name}"? This can't be undone.`)) return
       try { await API.musicians.remove(id); refreshSidebar(); window.location.hash = '#/' }
-      catch (e) { alert(e.message) }
+      catch (e) { Notify.error(e.message) }
     })
   }
 
-  // ── Library Browse view (2026-08-02 design spec) ────────────────────────────
-  // Browse is now the ONLY presentation for Library and Recently Added — the
-  // Browse/List toggle and the flat-table "List" mode it switched to are gone
-  // (Ryan, 2026-08-24: "we don't need list anymore"). getLibraryViewMode /
-  // setLibraryViewMode / libToggleHtml / wireLibToggle and the
-  // fluxLibraryView localStorage key retired with it; a stale value left over
-  // from an old visit is simply never read again.
+  // ── Library Browse view ────────────────────────────
 
   // Source → CSS color token. Kept separate rather than parsing sourceBadge's
   // HTML back apart. Drives the card's accent rules and source chip.
@@ -3918,8 +3670,8 @@ const App = (() => {
     return mbid ? `https://musicbrainz.org/artist/${encodeURIComponent(mbid)}` : '#'
   }
 
-  // Release lookup (Studio Records spec v1, chunk 3) -- same musicbrainz.org
-  // link-out pattern as mbArtistUrl, one path segment down.
+  // Release lookup -- same musicbrainz.org link-out pattern as mbArtistUrl,
+  // one path segment down.
   function mbReleaseUrl(mbid) {
     return mbid ? `https://musicbrainz.org/release/${encodeURIComponent(mbid)}` : '#'
   }
@@ -3937,8 +3689,6 @@ const App = (() => {
       .trim()
   }
 
-  // Title case since 2026-08-23 (Ryan): the card date is a standard date
-  // line, "Apr 22, 1974", not a poster's shouted caps.
   const _BILL_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
@@ -3962,20 +3712,20 @@ const App = (() => {
 
   // Genre colour with the agreed fallback. 70 of 164 artists have no genre,
   // so NULL is the common case, not an error case — those cards get a neutral
-  // warm grey and read as quiet rather than broken (Ryan, 2026-08-07). The
-  // fallback lives HERE and nowhere else: the serializer deliberately sends
-  // null rather than substituting a default, so there is exactly one place
-  // that decides what "no genre" looks like.
+  // warm grey and read as quiet rather than broken. The fallback lives HERE
+  // and nowhere else: the serializer deliberately sends null rather than
+  // substituting a default, so there is exactly one place that decides what
+  // "no genre" looks like.
   function genreColor(r) {
     return (r && r.genre_color) ? r.genre_color : 'var(--t2)'
   }
 
   // Artist avatar for the cards — photo when there is one, INITIALS when
-  // there isn't (Ryan, 2026-08-07). It previously rendered nothing without a
-  // photo, which made cards for photographed and un-photographed acts two
-  // different shapes. Since most acts have no photo, the initials disc IS the
-  // normal appearance, and using the same one the Artist page hero uses
-  // makes every card and page agree.
+  // there isn't. It previously rendered nothing without a photo, which made
+  // cards for photographed and un-photographed acts two different shapes.
+  // Since most acts have no photo, the initials disc IS the normal
+  // appearance, and using the same one the Artist page hero uses makes every
+  // card and page agree.
   function perfPhotoHtml(r, cls) {
     if (!r) return ''
     if (r.image_id) {
@@ -4016,7 +3766,7 @@ const App = (() => {
     return foot
   }
 
-  // ── Handbill card — RECOMMENDED MODULE ONLY (Ryan, 2026-08-07) ─────────────
+  // ── Handbill card — RECOMMENDED MODULE ONLY ─────────────
   //
   // Replaced the waveform strip: waveform-led cards are what the Internet
   // Archive's Live Music Archive already does, so they read as derivative.
@@ -4031,11 +3781,9 @@ const App = (() => {
   //
   // Colour comes from the artist's GENRE, not the source — source is a
   // technical attribute and makes a poor identity, whereas genre groups the
-  // library the way a listener actually browses it.
-  // Studio variant: cover-led (Ryan, Studio Records spec v1 chunk 5 --
-  // "for an album the cover is what the date is for a show"). The cover
-  // photo takes the date line's spot when there is one; the title always
-  // takes the date line's strong typographic slot, artist below it, year
+  // library the way a listener actually browses it. Studio variant: cover-led.
+  // The cover photo takes the date line's spot when there is one; the title
+  // always takes the date line's strong typographic slot, artist below it, year
   // where the venue line was. Never a venue, location or source line.
   function _studioRecCardHtml(r, id) {
     const cover = r.image_url
@@ -4081,17 +3829,17 @@ const App = (() => {
 
   // ── Row card — RECENTLY ADDED MODULE ─────────────────────────────────────
   //
-  // Full-width row with list-like density but card styling (Ryan, 2026-08-07):
-  // a browsable middle ground between the handbill and the flat table. Carries
-  // more per-recording detail than the handbill precisely because a row has
-  // horizontal space a 3-up card doesn't.
+  // Full-width row with list-like density but card styling: a browsable middle
+  // ground between the handbill and the flat table. Carries more per-recording
+  // detail than the handbill precisely because a row has horizontal space a
+  // 3-up card doesn't.
   //
   // The ingest date is the point of this module — "what's new" is the question
   // being answered, and the show date (1969) says nothing about that. The
-  // server orders by created_at DESC; this does not re-sort.
-  // Recently Added row (2026-10-01): the Live Recordings / Albums row grid,
-  // one layout for both kinds. Image, Artist, Date, then venue + place or
-  // the album title, then source or release, tracks/length, date added.
+  // server orders by created_at DESC; this does not re-sort. Recently Added
+  // row: the Live Recordings / Albums row grid, one layout for both kinds.
+  // Image, Artist, Date, then venue + place or the album title, then source or
+  // release, tracks/length, date added.
   function _recentRowHtml(r) {
     const id = recIdentity(r)
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
@@ -4108,6 +3856,7 @@ const App = (() => {
       : `<span class="brow-srccell">${r.source ? `<span class="brow-src">${esc(r.source)}</span>` : ''}</span>`
     return `
       <a class="brow brow--recent" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(genreColor(r))}">
+        ${rowStarHtml(r)}
         ${av}
         <span class="brow-perf">${esc(r.artist || '')}</span>
         <span class="brow-date">${esc(dateText)}</span>
@@ -4164,7 +3913,7 @@ const App = (() => {
   // that same stable default, not wherever the reroll was left.
   let _libRecommendedReroll = 0
 
-  // ── The Top Shelf as a record bin (Ryan, 2026-09-02) ─────────────────────
+  // ── The Top Shelf as a record bin ─────────────────────
   //
   // It was six tiles and a scrollbar. It is now a bin you flip through: every
   // click of the right chevron pulls ONE more recording off the ordered
@@ -4186,9 +3935,8 @@ const App = (() => {
   // ── How many records the shelf holds is a function of the WINDOW ──────────
   //
   // It was six, always, and six 168px tiles leave a hand's width of dead space
-  // on an ordinary laptop and a chasm on anything wider (Ryan, 2026-09-03).
-  // A shelf that does not reach the end of its own shelf reads as broken
-  // furniture.
+  // on an ordinary laptop and a chasm on anything wider. A shelf that does not
+  // reach the end of its own shelf reads as broken furniture.
   //
   // So the count is measured, not chosen, and the tiles are then sized to fill
   // the track EXACTLY. Both halves are needed: picking a count alone still
@@ -4197,10 +3945,7 @@ const App = (() => {
   // bin is for.
   //
   // MIN is the smallest a tile may be before another one stops fitting; the
-  // real width lands between MIN and just under 2×MIN. Height tracks width so
-  // the art stays square — ⚠ it must be set explicitly and not by
-  // `aspect-ratio`, which collapsed these tiles to a 2px sliver in 2026-08-24
-  // because their only children are absolutely positioned.
+  // real width lands between MIN and just under 2×MIN.
   const TOPS_TILE_MIN = 168
   const TOPS_GAP      = 10
 
@@ -4378,12 +4123,12 @@ const App = (() => {
   // Left nav appears once there is anything to go back to; right nav lives
   // exactly as long as the bin has another record in it.
   //
-  // ⚠ Right used to be UNCONDITIONAL, and deliberately so (2026-08-24): the
-  // strip scrolled natively, all six tiles fit on a wide window, and a button
-  // that only appeared on overflow never appeared at all. That reasoning does
-  // not survive the rebuild — the button no longer scrolls, it DEALS, so
-  // "nothing left to deal" is a real state and hiding it is the honest answer
-  // rather than a no-op click.
+  // ⚠ Right used to be UNCONDITIONAL, and deliberately so: the strip scrolled
+  // natively, all six tiles fit on a wide window, and a button that only
+  // appeared on overflow never appeared at all. That reasoning does not
+  // survive the rebuild — the button no longer scrolls, it DEALS, so "nothing
+  // left to deal" is a real state and hiding it is the honest answer rather
+  // than a no-op click.
   function _updateTopsNav() {
     const grid = document.getElementById('tops-grid')
     const navL = document.getElementById('tops-nav-l')
@@ -4399,15 +4144,14 @@ const App = (() => {
 
   // Move the strip, and MAKE SURE IT MOVED.
   //
-  // ⚠ Found live, 2026-09-02: a smooth scroll is a silent no-op in some
-  // webviews. `scrollTo({behavior:'smooth'})` schedules an animation driven by
-  // animation frames, and in a pane that is not ticking them the animation
-  // never starts, never finishes, and never reports anything — scrollLeft
-  // simply stays where it was. `scroll-behavior: smooth` in CSS is worse,
-  // because it hijacks a plain `el.scrollLeft = n` assignment into the same
-  // dead animation, so even the obvious fallback fails. Verified all three
-  // combinations against the running app: CSS-smooth + JS-smooth, CSS-auto +
-  // JS-smooth, and CSS-auto + JS-instant. Only the last one moved.
+  // `scrollTo({behavior:'smooth'})` schedules an animation driven by animation
+  // frames, and in a pane that is not ticking them the animation never starts,
+  // never finishes, and never reports anything — scrollLeft simply stays where
+  // it was. `scroll-behavior: smooth` in CSS is worse, because it hijacks a
+  // plain `el.scrollLeft = n` assignment into the same dead animation, so even
+  // the obvious fallback fails. Verified all three combinations against the
+  // running app: CSS-smooth + JS-smooth, CSS-auto + JS-smooth, and CSS-auto +
+  // JS-instant. Only the last one moved.
   //
   // So: ask for the animation, then check. If nothing has moved a quarter of a
   // second later, put it where it belongs outright. The strip arriving without
@@ -4469,11 +4213,10 @@ const App = (() => {
   // Builds and mounts all five Browse modules into `mountEl`. Each module is
   // fetched independently and simply omitted if empty or its request fails —
   // "every module hides entirely when it has nothing to show" is what makes a
-  // fixed, un-configurable module set work on a sparse library (design spec).
-  // ── Browse (rebuilt 2026-08-23, "Direction A — The Shelf") ─────────────────
+  // fixed, un-configurable module set work on a sparse library.
   //
   // The linear list IS the page. Everything above it is a thin band that has to
-  // earn its height, and Collections moved BELOW the list (Ryan) — it is four
+  // earn its height, and Collections moved BELOW the list — it is four
   // collections, and putting it up top gave the sparsest section the best real
   // estate.
   //
@@ -4483,44 +4226,36 @@ const App = (() => {
   //                        random draw from the graded shows, and the name now
   //                        says so. 6 tiles at roughly 40% of the old handbill
   //                        height instead of 3 large ones.
-  //   "Show me three more" → a Shuffle control. Ryan: the literal phrasing was
+  //   "Show me three more" → a Shuffle control. the user: the literal phrasing was
   //                        the problem; a refresh should read as a refresh.
   //   Artists grid    → gone entirely ("unusable"). Collectors expect a
   //                        linear list of recordings, so that is what the page
   //                        is now, sortable and filterable.
   //   Genre pills        → folded into a real filter bar alongside quality and
-  //                        source (Ryan), so the three filters compose.
-  //
-  // 2026-08-24: "Random Top Shows" renamed again → "The Top Shelf" (Ryan). On
-  // This Day removed for now (Ryan: may come back later) — otdHtml and its
-  // fetch are gone, not just hidden; CSS for it is left in main.css since it
-  // costs nothing unused. The shelf itself no longer wraps to a second row at
-  // narrow widths — .tops-grid is a horizontal-scroll strip now, with
-  // explicit left/right nav buttons (_wireTopsNav / _updateTopsNav below).
+  //                        source, so the three filters compose.
   //
   // `rows` is the same flattened array the List view builds — no extra request.
   const BROWSE_TOP_N = 6
 
-  // The flat list's own endless scroll (2026-08-24, Ryan — was rendering all
-  // ~580 rows to the DOM on every Library load, which is what made it slow).
-  // This pages CLIENT-SIDE over the already-fetched, already-filtered/sorted
-  // `_browseRows` — no extra network round trip on scroll, unlike Recently
-  // Added's server-paged endless scroll (RECENT_INITIAL/RECENT_PAGE above).
-  // That's deliberate here: Browse's filters/sort need the FULL dataset in
-  // memory to compute correct counts and orderings (the "132 of 580
-  // recordings" subtitle, A–Z across the whole library, etc.) — paginating
-  // the fetch itself would mean re-deriving those from a partial set. The
-  // actual fetch was the slow part (see the N+1 fix on `all_recordings()`,
-  // api/artists.py — was ~2000+ per-request DB round trips, now ~7); this
-  // just keeps the DOM small on top of that.
+  // The flat list's own endless scroll. This pages CLIENT-SIDE over the
+  // already-fetched, already-filtered/sorted `_browseRows` — no extra
+  // network round trip on scroll, unlike Recently Added's server-paged
+  // endless scroll (RECENT_INITIAL/RECENT_PAGE above). That's deliberate
+  // here: Browse's filters/sort need the FULL dataset in memory to compute
+  // correct counts and orderings (the "132 of 580 recordings" subtitle, A–Z
+  // across the whole library, etc.) — paginating the fetch itself would mean
+  // re-deriving those from a partial set. The actual fetch was the slow part
+  // (see the N+1 fix on `all_recordings`, api/artists.py — was ~2000+
+  // per-request DB round trips, now ~7); this just keeps the DOM small on
+  // top of that.
   const BROWSE_LIST_INITIAL = 16   // first paint
   const BROWSE_LIST_PAGE    = 16   // each subsequent reveal, scrolled into view
 
   let _browseRows = []
   let _browseFilters = { quality: 'any', source: 'any', genre: 'any' }
-  // Recently added, not A–Z (Ryan, 2026-09-02). What a collector wants on
-  // opening a library they add to constantly is what arrived since last time;
-  // alphabetical is a lookup order, and lookup is what Search is for.
+  // Recently added, not A–Z. What a collector wants on opening a library they
+  // add to constantly is what arrived since last time; alphabetical is a
+  // lookup order, and lookup is what Search is for.
   let _browseSort = 'added'
   let _browseVisibleCount = 0
   let _browseListIO = null
@@ -4569,7 +4304,7 @@ const App = (() => {
     return out
   }
 
-  // "20 tracks · 72 min" -- one wording for every row list (2026-10-01).
+  // "20 tracks · 72 min" -- one wording for every row list.
   function _rowSizeText(r) {
     const n = r.track_count || 0
     const mins = r.duration_sec ? Math.round(r.duration_sec / 60) : 0
@@ -4582,26 +4317,25 @@ const App = (() => {
       .map(w => w[0]).join('').toUpperCase()
     const loc = fmtLocation(r.city, r.state, r.country)
     const c = r.genre_color || 'var(--t2)'
-    // The photo, where there is one (Ryan, 2026-09-02 — it had always drawn
-    // initials). 103 of 184 artists have one; the initials square is the
-    // NORMAL case for the rest, so it stays exactly as it was rather than
-    // becoming a broken-image placeholder. `image_id` rides on the artist
-    // in /api/artists/all-recordings, added the same day.
-    // Recording image first, then the artist photo, then initials
-    // (Ryan, 2026-10-01: the square is the recording's image).
+    // The photo, where there is one. 103 of 184 artists have one; the
+    // initials square is the NORMAL case for the rest, so it stays exactly
+    // as it was rather than becoming a broken-image placeholder. `image_id`
+    // rides on the artist in /api/artists/all-recordings, added the same
+    // day. Recording image first, then the artist photo, then initials.
     const av = r.image_url
       ? `<img class="brow-av brow-av--img" src="${esc(r.image_url)}" alt="" loading="lazy">`
       : `<span class="brow-av">${esc(initials)}</span>`
-    // Column order (Ryan, 2026-10-01): Image, Artist, Date, Venue, Location
-    // left; Rating, Source right. Genre spine removed. Source and rating
-    // are reserved cells, always emitted even when empty, so a graded row
-    // is never wider than an ungraded one (2026-09-02).
-    // Studio: the venue cell carries the title, location stays empty.
+    // Column order: Image, Artist, Date, Venue, Location left; Rating,
+    // Source right. Genre spine removed. Source and rating are reserved
+    // cells, always emitted even when empty, so a graded row is never wider
+    // than an ungraded one. Studio: the venue cell carries the title,
+    // location stays empty.
     const dateText  = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
     const venueText = id.isStudio ? id.lead : (r.venue || '(unknown venue)')
     const locText   = id.isStudio ? '' : loc
     return `
       <a class="brow" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
+        ${rowStarHtml(r)}
         ${av}
         <span class="brow-perf">${esc(r.artist || '')}</span>
         <span class="brow-date">${esc(dateText)}</span>
@@ -4688,27 +4422,22 @@ const App = (() => {
     // is painted. BROWSE_TOP_N is only the floor for a window so narrow that
     // the measurement is not worth trusting.
     const wantTops = Math.max(BROWSE_TOP_N, _topsFit(_topsTrackWidth()))
-    const [tops, collections] = await Promise.all([
-      API.recordings.recommended(wantTops, 0).catch(() => []),
-      API.collections.list().catch(() => []),
-    ])
+    const tops = await API.recordings.recommended(wantTops, 0).catch(() => [])
 
     const { common, rare, genres } = _browseFilterOptions(_browseRows)
     _browseRareSources = new Set(rare.map(([v]) => v))
     const graded = _browseRows.filter(r => r.quality).length
 
-    // Left nav starts hidden — .hidden comes off in _updateTopsNav() once
+    // Left nav starts hidden — .hidden comes off in _updateTopsNav once
     // scrolled. Right nav is unconditional (see _updateTopsNav's comment).
-    // Both use real Lucide glyphs from ICONS, not chevronIcon() — that's the
+    // Both use real Lucide glyphs from ICONS, not chevronIcon — that's the
     // separate small-caret helper used for dropdown/tree carets elsewhere in
-    // the app, and reads as a mismatched icon family next to the rest of
-    // this Lucide-built page (Ryan, 2026-08-24: "we do not need to use
-    // inconsistent chevrons that are not from our icon package").
-    // The bin starts here, not at zero — the first paint has already dealt
-    // `tops.length` records off the sequence. Length of the RESULT, not of the
-    // request: a pool with fewer records than the window has room for returns
-    // short, and counting the ask would leave the cursor past records never
-    // shown.
+    // the app, and reads as a mismatched icon family next to the rest of this
+    // Lucide-built page. The bin starts here, not at zero — the first paint
+    // has already dealt `tops.length` records off the sequence. Length of the
+    // RESULT, not of the request: a pool with fewer records than the window
+    // has room for returns short, and counting the ask would leave the cursor
+    // past records never shown.
     _topsShown = tops.length
     _topsNext  = null
 
@@ -4730,12 +4459,12 @@ const App = (() => {
     const opt = (v, label, n) =>
       `<option value="${esc(v)}">${esc(label)}${n != null ? ` (${n})` : ''}</option>`
 
-    // The shelf goes ABOVE the "Browse My Library" header (Ryan, 2026-09-02).
-    // It is the one part of this page you look AT rather than read past, so it
-    // gets the top of the window; the H1 becomes the label on the list below
-    // it, which is what it actually names. Its own mount point, because it now
-    // sits outside the module column entirely — renderLibraryView() lays out
-    // #lib-topshelf, then the header, then this.
+    // The shelf goes ABOVE the "Browse My Library" header. It is the one part
+    // of this page you look AT rather than read past, so it gets the top of
+    // the window; the H1 becomes the label on the list below it, which is what
+    // it actually names. Its own mount point, because it now sits outside the
+    // module column entirely — renderLibraryView lays out #lib-topshelf, then
+    // the header, then this.
     const topsMount = document.getElementById('lib-topshelf')
     if (topsMount) topsMount.innerHTML = topsHtml
 
@@ -4779,12 +4508,6 @@ const App = (() => {
         <div class="brows" id="browse-rows"></div>
         <div class="browse-more" id="browse-more"></div>
       </section>
-
-      ${collections.length ? `
-      <section class="lib-module" id="lib-mod-collections">
-        <div class="lib-module-head"><h2>Collections</h2></div>
-        <div class="col-strip">${collections.map(_colStripHtml).join('')}</div>
-      </section>` : ''}
     `
 
     _browseDrawList()
@@ -4815,14 +4538,14 @@ const App = (() => {
     })
   }
 
-  // Top Shelf tile (art squared up + overlay text, 2026-08-24, Ryan). The art
-  // area is a square (aspect-ratio 1:1 on .top-art) rather than the old 76px
-  // strip — tall enough to actually show traditional album cover art once
-  // that's supported, not just an artist headshot crop. Artist photo
-  // when there is one (312 of 580 shows have one), a genre-colour field with
-  // initials when there is not — the no-photo case is the NORMAL case for
-  // 46% of the library, so it has to look deliberate rather than like a
-  // failed image, hence the initials rather than a blank/broken square.
+  // Top Shelf tile. The art area is a square (aspect-ratio 1:1 on .top-art)
+  // rather than the old 76px strip — tall enough to actually show traditional
+  // album cover art once that's supported, not just an artist headshot crop.
+  // Artist photo when there is one (312 of 580 shows have one), a
+  // genre-colour field with initials when there is not — the no-photo case is
+  // the NORMAL case for 46% of the library, so it has to look deliberate
+  // rather than like a failed image, hence the initials rather than a
+  // blank/broken square.
   //
   // Text (artist, venue, date · grade) now lives in .top-overlay, a
   // gradient scrim over the BOTTOM of the art rather than a separate white
@@ -4849,10 +4572,9 @@ const App = (() => {
           ${(!id.isStudio && r.venue) ? `<span class="top-venue">${esc(r.venue)}</span>` : ''}
           <span class="top-meta">${[
             id.isStudio ? id.dateText : (handbillDate(r.start_year, r.start_month, r.start_day) || ''),
-            // Source between the date and the grade (Ryan, 2026-09-02). On a
-            // shelf of A/A+ shows the grade barely separates them; SBD vs AUD
-            // is the thing that actually decides whether you pull the record
-            // out of the bin.
+            // Source between the date and the grade. On a shelf of A/A+ shows
+            // the grade barely separates them; SBD vs AUD is the thing that
+            // actually decides whether you pull the record out of the bin.
             id.isStudio ? '' : (r.source || ''),
             id.isStudio ? '' : (r.quality || ''),
           ].filter(Boolean).map(esc).join(' · ')}</span>
@@ -4860,13 +4582,13 @@ const App = (() => {
       </a>`
   }
 
-  // Album tile (Studio Records spec v1, section 7) -- the Top Shelf's own
-  // art/overlay treatment reused for the Albums page grid and the Artist
-  // page's Albums strip (`.album-tile` in main.css sizes it for each of
-  // those two layouts; `.top-tile`/`.top-art`/`.top-overlay` do everything
-  // else, unchanged). Initials come from the TITLE, not the artist -- an
-  // album is named by its title everywhere (spec, principle 2) -- falling
-  // back to the artist's initials only when a studio record has no title.
+  // Album tile -- the Top Shelf's own art/overlay treatment reused for the
+  // Albums page grid and the Artist page's Albums strip (`.album-tile` in
+  // main.css sizes it for each of those two layouts;
+  // `.top-tile`/`.top-art`/`.top-overlay` do everything else, unchanged).
+  // Initials come from the TITLE, not the artist -- an album is named by
+  // its title everywhere (spec, principle 2) -- falling back to the
+  // artist's initials only when a studio record has no title.
   function _albumTileHtml(r) {
     const id = recIdentity(r)
     const initials = recInitials(r)
@@ -4885,22 +4607,12 @@ const App = (() => {
       </a>`
   }
 
-  // Collections carry the genre colours of what they hold, so a four-item
-  // section still reads as deliberate rather than sparse.
-  function _colStripHtml(c) {
-    return `
-      <a class="col-card" href="#/collection/${c.id}">
-        <span class="col-card-n">${esc(c.name)}</span>
-        <span class="col-card-c">${c.recording_count || 0} recording${c.recording_count === 1 ? '' : 's'}</span>
-      </a>`
-  }
-
   // Flatten /api/artists/all-recordings to one row per recording — shared by
   // Browse (live-only) and the Albums page (studio-only), so both read the
-  // exact same shape off the exact same fetch (Studio Records spec v1,
-  // section 9: "no new endpoint"). Already ordered by artist (backend) then
-  // chronologically old→new; genre/genre_color ride on the ARTIST (one genre
-  // per act) and colour the spine as well as driving the genre filters.
+  // exact same shape off the exact same fetch. Already ordered by artist
+  // (backend) then chronologically old→new; genre/genre_color ride on the
+  // ARTIST (one genre per act) and colour the spine as well as driving the
+  // genre filters.
   function _flattenLibraryRows(allArtists) {
     return allArtists.flatMap(artist =>
       artist.performances.flatMap(p =>
@@ -4913,7 +4625,7 @@ const App = (() => {
           source: r.source, quality: r.quality,
           is_complete: r.is_complete,
           track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
-          kind: r.kind, title: r.title, image_url: r.image_url,
+          kind: r.kind, title: r.title, image_url: r.image_url, is_favorite: r.is_favorite,
           mb_label: r.mb_label, mb_catalog_number: r.mb_catalog_number,
         }))
       )
@@ -4935,21 +4647,20 @@ const App = (() => {
       return
     }
 
-    // Browse is live-only (Studio Records spec v1, section 7): its filters,
-    // sorts and grade logic only make sense for a show. Studio rows still
-    // ride along in the fetch — they just never reach renderBrowseModules.
+    // Browse is live-only: its filters, sorts and grade logic only make
+    // sense for a show. Studio rows still ride along in the fetch — they
+    // just never reach renderBrowseModules.
     const allRows   = _flattenLibraryRows(allArtists)
     const rows      = allRows.filter(r => r.kind !== 'studio')
     const hasStudio = allRows.some(r => r.kind === 'studio')
 
-    // Zero recordings: two lines and nothing else (Ryan, testing feedback).
-    // Hidden the instant a recording exists, and never shown while a Bulk
-    // Ingest run is in flight -- that has its own page at #/bulk-ingest, and
-    // showing this underneath it would read as two contradictory states.
-    // A library with albums but no live recordings routes to Albums instead
-    // (Studio Records spec v1, section 7) — Browse's own message is about
-    // importing music, which would be wrong for a collector whose ingest
-    // already worked.
+    // Zero recordings: two lines and nothing else. Hidden the instant a
+    // recording exists, and never shown while a Bulk Ingest run is in flight
+    // -- that has its own page at #/bulk-ingest, and showing this underneath
+    // it would read as two contradictory states. A library with albums but
+    // no live recordings routes to Albums instead — Browse's own message is
+    // about importing music, which would be wrong for a collector whose
+    // ingest already worked.
     const bulkIngestInFlight = state.bulkIngest
       && (state.bulkIngest.status === 'running' || state.bulkIngest.status === 'paused')
     if (!rows.length && !bulkIngestInFlight) {
@@ -4962,8 +4673,8 @@ const App = (() => {
         window.location.hash = '#/albums'
         return
       }
-      // Welcome copy is Ryan's (2026-10-02). Top-aligned, not centred: it is
-      // the first thing a new library shows, so it reads as a greeting.
+      // Welcome copy is the user's. Top-aligned, not centred: it is the
+      // first thing a new library shows, so it reads as a greeting.
       setMainHTML(`
         <div class="welcome-empty">
           <h1 class="welcome-empty-title">Welcome to Trellis!</h1>
@@ -4976,13 +4687,12 @@ const App = (() => {
     }
 
     // The "Library" H1 and the "580 recordings · 184 artists" subtitle were
-    // gone for a while (Ryan, 2026-08-23: "it's not important enough") because
-    // the header was just the Browse/List toggle. The toggle is retired
-    // (2026-08-24), so the page gets an H1 back — "Browse My Library".
+    // gone for a while because the header was just the Browse/List toggle. The
+    // toggle is retired, so the page gets an H1 back — "Browse My Library".
     const headerHtml = `
       <div class="artist-header">
         <div class="artist-header-row">
-          <h1>Browse Live Recordings</h1>
+          <h1>Live Recordings</h1>
         </div>
       </div>`
 
@@ -4995,7 +4705,7 @@ const App = (() => {
    *  Not a collection; just a live query, always exactly correct. */
   // Recently Added page size. 20 is about a screenful of row cards; the full
   // 50 is one click away and already in memory.
-  const RECENT_INITIAL = 25   // first page (Ryan, 2026-08-23)
+  const RECENT_INITIAL = 25
   const RECENT_PAGE    = 25   // each subsequent page, fetched on scroll
 
   async function renderRecentView() {
@@ -5023,22 +4733,22 @@ const App = (() => {
         </div>
       </div>`
 
-    // This is a full version of the Browse page's Recently Added module
-    // (Ryan, 2026-08-07) — NOT a call to renderBrowseModules(), which is the
-    // entire global dashboard and would make "Recently Added" show everything
-    // except a longer list of recently added recordings. Same class of bug as
-    // the Collection view's.
+    // This is a full version of the Browse page's Recently Added module — NOT
+    // a call to renderBrowseModules, which is the entire global dashboard and
+    // would make "Recently Added" show everything except a longer list of
+    // recently added recordings. Same class of bug as the Collection view's.
     setMainHTML(`${headerHtml}
       <div class="brows" id="recent-rowcards"></div>
       <div class="recent-more" id="recent-more"></div>`)
 
-    // Endless scroll (Ryan, 2026-08-23) — was a hardcoded 50 with a
-    // "Show all" button. A sentinel below the list fetches the next page
-    // when it comes into view; the observer disconnects when the server
-    // returns a short page, which is how we know we have reached the end.
+    // Endless scroll — was a hardcoded 50 with a "Show all" button. A
+    // sentinel below the list fetches the next page when it comes into
+    // view; the observer disconnects when the server returns a short
+    // page, which is how we know we have reached the end.
     const listEl = document.getElementById('recent-rowcards')
     const moreEl = document.getElementById('recent-more')
     listEl.innerHTML = rows.map(_recentRowHtml).join('')
+    wireFavStars(listEl)
     // Right-click to file into a collection, as the old row cards had.
     listEl.addEventListener('contextmenu', e => {
       const el = e.target.closest('[data-rec-id]')
@@ -5062,7 +4772,10 @@ const App = (() => {
         loading = false
         return
       }
-      listEl.insertAdjacentHTML('beforeend', next.map(_recentRowHtml).join(''))
+      const pageEl = document.createElement('div')
+      pageEl.innerHTML = next.map(_recentRowHtml).join('')
+      wireFavStars(pageEl)
+      while (pageEl.firstChild) listEl.appendChild(pageEl.firstChild)
       // A short page means the end. Checking the RETURNED count rather than
       // a total avoids a second endpoint and cannot disagree with it.
       done = next.length < RECENT_PAGE
@@ -5086,10 +4799,10 @@ const App = (() => {
     observe()
   }
 
-  /** Albums page (Studio Records spec v1, section 7) — a grid of studio
-   *  recordings, reached from the nav only when at least one exists. Built
-   *  client-side off the same /api/artists/all-recordings fetch Browse uses
-   *  (no new endpoint) — _flattenLibraryRows() is the shared shape. */
+  /* Albums page — a grid of studio recordings, reached from the nav only
+     when at least one exists. Built client-side off the same
+     /api/artists/all-recordings fetch Browse uses (no new endpoint) —
+     _flattenLibraryRows is the shared shape. */
   async function renderAlbumsView() {
     setActiveNav('albums')
     setActiveArtist(null)
@@ -5117,10 +4830,30 @@ const App = (() => {
     const { genres } = _browseFilterOptions(rows)
     const opt = (v, label) => `<option value="${esc(v)}">${esc(label)}</option>`
 
-    // Same bar and row grid as Live Recordings, minus Quality and Source
-    // (Ryan, 2026-10-01). A-Z is artist then year: the discography order the
-    // backend already returns, so it needs no re-sort.
-    setMainHTML(`${headerHtml}
+    // Cover carousel: a quick click-through of album covers. One cover at a time,
+    // in the Artist-header fade, so it reads differently from the Live Recordings
+    // tile shelf; the arrows are the shelf's own .tops-nav.
+    const covers = rows.filter(r => r.image_url)
+      .map(r => [Math.random(), r]).sort((x, y) => x[0] - y[0]).slice(0, 12).map(x => x[1])
+    const coverHtml = c => `<a class="alb-hero-slide" href="#/recording/${c.id}">
+        <div class="alb-hero-img"><img src="${esc(c.image_url)}" alt=""></div>
+        <div class="alb-hero-text">
+          <div class="alb-hero-title">${esc(c.title || c.artist || '')}</div>
+          ${c.title && c.artist ? `<div class="alb-hero-artist">${esc(c.artist)}</div>` : ''}
+        </div>
+      </a>`
+    const heroBlock = covers.length ? `
+      <div class="alb-hero" id="albums-hero">
+        <div id="albums-hero-slide">${coverHtml(covers[0])}</div>
+        ${covers.length > 1 ? `
+        <button type="button" class="tops-nav tops-nav-l" id="albums-hero-prev" aria-label="Previous">${icon('chevron-left', 'tops-nav-ic')}</button>
+        <button type="button" class="tops-nav tops-nav-r" id="albums-hero-next" aria-label="Next">${icon('chevron-right', 'tops-nav-ic')}</button>` : ''}
+      </div>` : ''
+
+    // Same bar and row grid as Live Recordings, minus Quality and Source.
+    // A-Z is artist then year: the discography order the backend already
+    // returns, so it needs no re-sort.
+    setMainHTML(`${headerHtml}${heroBlock}
       <div class="browse-bar">
         <div class="browse-sorts" id="albums-sorts">
           <button class="sortb on" data-sort="az">A–Z</button>
@@ -5141,6 +4874,15 @@ const App = (() => {
       </div>
       <div class="brows" id="albums-rows"></div>`)
 
+    let heroAt = 0
+    const heroGo = d => {
+      heroAt = (heroAt + d + covers.length) % covers.length
+      const slot = document.getElementById('albums-hero-slide')
+      if (slot) slot.innerHTML = coverHtml(covers[heroAt])
+    }
+    document.getElementById('albums-hero-prev')?.addEventListener('click', () => heroGo(-1))
+    document.getElementById('albums-hero-next')?.addEventListener('click', () => heroGo(1))
+
     let sort = 'az', genreFilter = 'any'
     function draw() {
       let out = rows.filter(r => genreFilter === 'any' || r.genre === genreFilter)
@@ -5153,6 +4895,7 @@ const App = (() => {
       list.innerHTML = out.length
         ? out.map(_albumRowHtml).join('')
         : `<div class="empty-state" style="min-height:120px"><div class="empty-title">Nothing matches these filters</div></div>`
+      wireFavStars(list)
     }
     draw()
 
@@ -5171,9 +4914,9 @@ const App = (() => {
     })
   }
 
-  // Album row (2026-10-01): the Live Recordings grid with album facts in the
-  // live slots. Image, Artist, Year, Title, then "N tracks · N min", then the
-  // release (label · catalog number) when MusicBrainz knows it.
+  // Album row: the Live Recordings grid with album facts in the live slots.
+  // Image, Artist, Year, Title, then "N tracks · N min", then the release
+  // (label · catalog number) when MusicBrainz knows it.
   function _albumRowHtml(r) {
     const id = recIdentity(r)
     const initials = recInitials(r)
@@ -5185,6 +4928,7 @@ const App = (() => {
     const release = [r.mb_label, r.mb_catalog_number].filter(Boolean).join(' · ')
     return `
       <a class="brow brow--album" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
+        ${rowStarHtml(r)}
         ${av}
         <span class="brow-perf">${esc(r.artist || '')}</span>
         <span class="brow-date">${esc(id.dateText || '—')}</span>
@@ -5214,12 +4958,12 @@ const App = (() => {
       return
     }
     setNavCurrent(artist.name)
-    // Whatever page brought us here (2026-07-23 generic mechanism — see
-    // state.navBack) — shown as a "← Back" breadcrumb below, replacing the
-    // old one-shot recFrom that only covered arriving via a Recording's ↗
-    // nav-link icon. Read directly, not consumed/cleared: route() already
-    // refreshes it on every real navigation, and a same-page reload (e.g.
-    // after an inline edit) never touches it.
+    // Whatever page brought us here — shown as a "← Back" breadcrumb
+    // below, replacing the old one-shot recFrom that only covered arriving
+    // via a Recording's ↗ nav-link icon. Read directly, not
+    // consumed/cleared: route already refreshes it on every real
+    // navigation, and a same-page reload (e.g. after an inline edit) never
+    // touches it.
     const navBack = state.navBack
 
     state.selectedArtist = artist
@@ -5244,15 +4988,15 @@ const App = (() => {
         source: r.source, quality: r.quality,
         is_complete: r.is_complete,
         track_count: r.track_count, duration_sec: r.duration_sec, created_at: r.created_at,
-        kind: r.kind, title: r.title, image_url: r.image_url,
+        kind: r.kind, title: r.title, image_url: r.image_url, is_favorite: r.is_favorite,
         genre: artist.genre ? artist.genre.name : null,
         genre_color: artist.genre ? artist.genre.color : null,
       }))
     )
     const rowsHtml = perfRows.map(r => flatRowHtml(r, false)).join('')
 
-    // Live vs studio (Studio Records spec v1, section 7): the Recordings tab
-    // stays live-only; the hero stat and the Albums strip read the split.
+    // Live vs studio: the Recordings tab stays live-only; the hero stat and
+    // the Albums strip read the split.
     const liveRows        = perfRows.filter(r => r.kind !== 'studio')
     const studioRows      = perfRows.filter(r => r.kind === 'studio')
     const totalRecordings = liveRows.length
@@ -5262,21 +5006,20 @@ const App = (() => {
 
     const mbf = artist.musicbrainz || {}
 
-    // ── Hero stat: recordings only (Ryan, 2026-08-07) ────────────────────────
+    // ── Hero stat: recordings only ────────────────────────
     // Venue count and total runtime were cut as uninteresting. Span was cut as
     // potentially INCONSISTENT with our own data — it was derived from whatever
     // dates happen to be filled in, so an act with one undated show would
     // advertise a range that contradicts the recordings listed right below it.
     // The derivations for all three are gone rather than left computed-unused.
-    // Album count joins it (Studio Records spec v1, section 7) only when the
-    // act has any — most acts don't, and a stat that always read "0 Albums"
-    // would be worse than not being there.
-    // An albums-only act (no live recordings at all) shows only the Albums
-    // stat -- a "0 Recordings" reading next to it would misdescribe a
-    // library that in fact has music, just none of it live.
+    // Album count joins it only when the act has any — most acts don't, and a
+    // stat that always read "0 Albums" would be worse than not being there. An
+    // albums-only act (no live recordings at all) shows only the Albums stat --
+    // a "0 Recordings" reading next to it would misdescribe a library that in
+    // fact has music, just none of it live.
     const stats = (totalRecordings === 0 && studioCount)
       ? []
-      : [[totalRecordings, totalRecordings === 1 ? 'Recording' : 'Recordings']]
+      : [[totalRecordings, totalRecordings === 1 ? 'Live Recording' : 'Live Recordings']]
     if (studioCount) stats.push([studioCount, studioCount === 1 ? 'Album' : 'Albums'])
 
     // MusicBrainz one-liner: type · origin · active years, whichever exist.
@@ -5290,7 +5033,7 @@ const App = (() => {
 
     setMainHTML(entityShellHtml({
       navBack,
-      portrait: '<div id="pp-hero-portrait"></div>',
+      hero: { imageUrl: (artist.images || [])[0] ? API.artists.imageUrl(artist.images[0].id) : null },
       title: esc(artist.name),
       titleId: 'pp-name',
       titleEditable: true,
@@ -5298,49 +5041,37 @@ const App = (() => {
       // alongside it (as first built) showed the same value twice and only one
       // of them responded to a click.
       chips: `<span class="pp-editable pp-genre-field" id="pp-genre"
-                    style="--genre-fg:${esc((artist.genre && artist.genre.color) || 'var(--t2)')}"
                     title="Click to edit"></span>`
            + (mbBits ? `<span class="pp-hero-fact">${mbBits}</span>` : ''),
       stats,
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="pp-delete" title="Delete artist">Delete</button>`,
-      // Recordings first and default across all five dimension pages (Ryan,
-      // 2026-09-01). On an artist that is emphatically what you came for;
-      // Overview led with Members and a Description that is empty on most acts.
+      // Recordings first and default across all five dimension pages. On an
+      // artist that is emphatically what you came for; Overview led with
+      // Members and a Description that is empty on most acts.
       tabs: [
         { id: 'recordings', label: 'Recordings', count: totalRecordings, active: true,
-          // Albums strip above the live list (Studio Records spec v1,
-          // section 7) — release order (year ascending, nulls last), only
-          // when the act has any. When an act has ONLY albums the live list
-          // is skipped entirely rather than printing its own empty state
-          // (spec, section 7: "no empty-state text for the live list").
+          // Albums strip above the live list — release order (year
+          // ascending, nulls last), only when the act has any. When an act
+          // has ONLY albums the live list is skipped entirely rather than
+          // printing its own empty state (spec, section 7: "no empty-state
+          // text for the live list").
           html: (studioCount ? `
             <div class="pp-sec">Albums</div>
             <div class="albums-strip">${studioRows.slice().sort((a, b) => compareByDate(a, b, false)).map(_albumTileHtml).join('')}</div>` : '')
             + (liveRows.length || !studioCount
-                ? recordingsPaneHtml(liveRows, { mountId: 'rec-table-artist' })
+                ? (liveRows.length ? '<div class="pp-sec">Live Recordings</div>' : '') + recordingsPaneHtml(liveRows, { mountId: 'rec-table-artist' })
                 : '') },
-        { id: 'about',      label: 'About', html: `
-            <!-- Members first (Ryan, 2026-08-07): who the act IS comes before
-                 prose about it, and Description is empty on most artists so
-                 leading with it opened the page on a placeholder. -->
+        { id: 'about',      label: 'About', html: aboutGridHtml(`
             <div class="pp-sec">Members</div>
             <div class="pp-musicians" id="pp-musicians"></div>
             <div class="pp-stint-editor" id="pp-stint-editor" style="display:none"></div>
-            <div class="lx-slot" id="pp-lx-members"></div>
 
-            <!-- Abbreviation feeds the {artist_abbr} naming token (falls back
-                 to lowercase initials when empty) — see app/utils/ingest.py -->
             <div class="pp-sec-row">
               <div class="pp-sec">Abbreviation</div>
             </div>
             <div class="pp-editable ${artist.abbreviation ? '' : 'pp-empty'}" id="pp-abbr" title="Click to edit">${artist.abbreviation ? esc(artist.abbreviation) : 'Add an abbreviation…'}</div>
 
-            <!-- Biography. Lomax writes it (and Restore previous undoes that); it is
-                 still click-to-edit. The Restore link is painted by the Lomax view. -->
-            <div class="pp-sec-row">
-              <div class="pp-sec">Biography</div>
-              <span id="pp-lx-bio"></span>
-            </div>
+            <div class="pp-sec">Biography</div>
             <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pp-desc" title="Click to edit">${descText ? esc(artist.bio) : 'Add a description\u2026'}</div>
 
             <div class="pp-block">
@@ -5349,20 +5080,11 @@ const App = (() => {
               <div id="pp-mb"></div>
             </div>
 
-            <!-- Reframed from "Resources" to sources the ENRICHMENT JOBS should
-                 trust. Trellis already knows to consult Wikipedia and setlist.fm;
-                 what it can't know is the act-specific archive a collector
-                 knows about. Ordered last because it's what you fill in AFTER
-                 seeing what the automated passes missed. -->
             <div class="pp-block">
               <h2 class="pp-block-title">Trusted sources</h2>
               <div class="pp-block-hint">Sites worth trusting for this act specifically: a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and import jobs.</div>
               <div class="pp-resources" id="pp-resources"></div>
-              <div class="lx-slot" id="pp-lx-resources"></div>
-            </div>
-
-            <!-- Questions and the ask bar close the page (not pinned). -->
-            <div class="lx-page" id="pp-lx"></div>` },
+            </div>`, 'pp-lx-col') },
         { id: 'photos',     label: 'Photos', count: photoCount || null,
           html: '<div id="pp-photos"></div>' },
       ],
@@ -5377,7 +5099,7 @@ const App = (() => {
     // ── Inline-editable name / description ──────────────────────────────────
     async function saveField(patch) {
       try { await API.artists.update(artistId, patch); refreshSidebar() }
-      catch (e) { alert('Save failed: ' + e.message) }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
     }
     makeInlineEditable(document.getElementById('pp-name'), {
       get: () => artist.name,
@@ -5405,24 +5127,24 @@ const App = (() => {
     })
 
     // ── Genre → picker (existing genres only) ─────────────────────────────────
-    // Click-to-edit inline, exactly like the venue picker on the Recording
-    // page (a custom click handler + wirePickerDropdown, not makeInlineEditable
-    // — the field needs a dropdown, not a plain text input). Unlike venue/event,
-    // there is no "+ Create" row: creating a genre is an explicit admin action
-    // on #/genres, never a side effect of typing here (Genre design spec,
-    // 2026-08-02 — the FK is the whole point, nothing may write to it implicitly).
+    // Click-to-edit inline, exactly like the venue picker on the Recording page (a
+    // custom click handler + wirePickerDropdown, not makeInlineEditable — the
+    // field needs a dropdown, not a plain text input). Unlike venue/event, there
+    // is no "+ Create" row: creating a genre is an explicit admin action on
+    // #/genres, never a side effect of typing here.
     const genreEl = document.getElementById('pp-genre')
     function showGenre() {
       const hasGenre = !!artist.genre
       genreEl.innerHTML = hasGenre
-        ? `<span class="genre-pill">${esc(artist.genre.name)}</span>`
+        ? esc(artist.genre.name)
         : `<span class="pp-empty">Add genre…</span>`
     }
     showGenre()
     genreEl?.addEventListener('click', () => {
+      if (!canEditLibrary()) return
       if (genreEl.querySelector('input')) return
       genreEl.innerHTML = `<span class="artist-picker-wrap" style="display:inline-block; min-width:160px">
-        <input type="text" class="pp-inline-input" id="pp-genre-input" value="${esc(artist.genre?.name || '')}" autocomplete="off" />
+        <input type="text" class="pp-genre-input" id="pp-genre-input" value="${esc(artist.genre?.name || '')}" autocomplete="off" />
         <div class="artist-dropdown" id="pp-genre-dd" style="display:none"></div></span>`
       const input = document.getElementById('pp-genre-input')
       const dd    = document.getElementById('pp-genre-dd')
@@ -5433,7 +5155,7 @@ const App = (() => {
         try {
           await API.artists.update(artistId, { genre_id: id || null })
           artist.genre = id ? { id, name } : null
-        } catch (e) { alert('Failed: ' + e.message) }
+        } catch (e) { Notify.error('Failed: ' + e.message) }
         showGenre()
       }
       wirePickerDropdown(input, dd, API.genres.list, commitGenre)   // no createLabel → no create row
@@ -5445,10 +5167,9 @@ const App = (() => {
     })
 
     // ── Editable Musicians (members) + per-person stint dates ──────────────────
-    // A member usually has one unbounded stint ("always a member" — zero UI
-    // tax, matches every pre-2026-07-18 row). Click a chip's name to expand
-    // an inline drawer for real tenure dates (era lineups, second stints like
-    // Mickey Hart) — see Per-Show Personnel design doc §7.6.
+    // A member usually has one unbounded stint. Click a chip's name to expand an
+    // inline drawer for real tenure dates (era lineups, second stints like Mickey
+    // Hart).
     async function persistMembers() { await saveField({ members: members.map(m => m.name) }) }
 
     async function refreshRoster() {
@@ -5464,9 +5185,9 @@ const App = (() => {
     }
 
     // Members row uses the same (+) button + inline picker style as the
-    // recording page's Members/Guests rows (2026-07-22) — no Guests row here,
-    // guests are a per-show concept and don't apply to the act itself.
-    // One member per ROW, not a run of chips (Ryan, 2026-08-07).
+    // recording page's Members/Guests rows — no Guests row here, guests are a
+    // per-show concept and don't apply to the act itself. One member per ROW,
+    // not a run of chips.
     //
     // The old chip row hid the entire stint feature: tenure dates only appeared
     // if you happened to click a name, and nothing suggested a name was
@@ -5502,8 +5223,8 @@ const App = (() => {
             <span class="member-chip-x pp-member-x" data-i="${i}" title="Remove member">${icon('x')}</span>
           </div>`
         }).join('') +
-        // No "no members recorded" message — an empty list is self-evident
-        // (Ryan, 2026-08-07), and the Add control below already says what to do.
+        // No "no members recorded" message — an empty list is self-evident, and
+        // the Add control below already says what to do.
         `<div class="pp-member-add">
            <button type="button" class="mg-add-btn" id="pp-add-btn" title="Add Member Name">+</button>
            <span class="pp-member-add-lbl">Add member</span>
@@ -5529,10 +5250,6 @@ const App = (() => {
           if (expandedMemberId === removedId) expandedMemberId = null
           await persistMembers(); renderMusicians(); renderStintEditor()
         }))
-      // (The old `.member-chip-name` handler lived here. Removed 2026-08-07:
-      // the row markup keeps that class for styling, so it was binding a
-      // SECOND toggle to the same element — two toggles per click cancel out
-      // and the editor never opened.)
       const openPicker = () => {
         const picker = document.getElementById('pp-add-picker')
         const showing = picker.style.display !== 'none'
@@ -5597,12 +5314,12 @@ const App = (() => {
         row.querySelectorAll('.pp-stint-input').forEach(inp =>
           inp.addEventListener('blur', async () => {
             try { await API.artists.updateStint(stintId, read()); await refreshRoster(); renderMusicians(); renderStintEditor() }
-            catch (e) { alert('Failed to save stint: ' + e.message) }
+            catch (e) { Notify.error('Failed to save stint: ' + e.message) }
           }))
         const del = row.querySelector('.pp-stint-del')
         if (del) del.addEventListener('click', async () => {
           try { await API.artists.removeStint(stintId); await refreshRoster(); renderMusicians(); renderStintEditor() }
-          catch (e) { alert('Failed to remove stint: ' + e.message) }
+          catch (e) { Notify.error('Failed to remove stint: ' + e.message) }
         })
       })
 
@@ -5610,31 +5327,30 @@ const App = (() => {
         try {
           await API.artists.addStint(artistId, member.id, {})   // unbounded until edited
           await refreshRoster(); renderMusicians(); renderStintEditor()
-        } catch (e) { alert('Failed to add stint: ' + e.message) }
+        } catch (e) { Notify.error('Failed to add stint: ' + e.message) }
       })
     }
 
     renderMusicians()
     renderStintEditor()
 
-    // Artist.default_personnel_mode is still a real field (new
-    // performances of this act still start in whatever mode it's set to,
-    // and the case-5 auto-flip still fires per-show) — it just has no
-    // manual UI control on this page anymore, per the 2026-07-22 Members/
-    // Guests redesign. `defaultPersonnelMode` is kept around unused here
-    // only because refreshRoster() still reads it off a fresh fetch; nothing
-    // reads the local variable itself now.
+    // `defaultPersonnelMode` is kept around unused here only because
+    // refreshRoster still reads it off a fresh fetch; nothing reads the
+    // local variable itself now.
 
     // ── Editable reference Resources (external DBs / discographies) ──────────
     let resources = (artist.resources || []).map(r => ({ label: r.label, url: r.url }))
     const persistResources = () => saveField({ resources })
+    // A Lomax link proposal lands in the add-source entry as an editable suggestion
+    // (the way the biography lands in its field), and is saved only by Enter.
+    let resSuggest = null, resSuggestion = null
     function renderResources() {
       const box = document.getElementById('pp-resources')
       if (!box) return
-      // Styled to match the Members list (Ryan, 2026-08-07): rows, then a
-      // single "+ Add source" control. Two always-visible input boxes made an
-      // empty list look like an unfilled form — most acts have no extra
-      // sources, so the resting state should be quiet.
+      // Styled to match the Members list: rows, then a single "+ Add source"
+      // control. Two always-visible input boxes made an empty list look like
+      // an unfilled form — most acts have no extra sources, so the resting
+      // state should be quiet.
       box.innerHTML =
         resources.map((r, i) => `
           <div class="pp-resource-row" data-i="${i}">
@@ -5668,6 +5384,7 @@ const App = (() => {
 
       const reset = () => {
         pendingUrl = null
+        resSuggestion = null
         input.value = ''
         input.placeholder = 'https://…'
         hint.textContent = 'Enter to continue · Esc to cancel'
@@ -5678,6 +5395,12 @@ const App = (() => {
       const open = () => {
         entry.style.display = 'inline-flex'
         input.focus()
+      }
+      resSuggest = sug => {
+        if (entry.style.display !== 'none' || !document.getElementById('pp-res-input')) return
+        resSuggestion = sug
+        input.value = sug.url
+        entry.style.display = 'inline-flex'
       }
       document.getElementById('pp-res-add-btn').addEventListener('click', open)
       document.getElementById('pp-res-add-lbl').addEventListener('click', open)
@@ -5691,50 +5414,42 @@ const App = (() => {
         if (pendingUrl === null) {
           if (!val) return
           pendingUrl = /^https?:\/\//i.test(val) ? val : 'https://' + val
-          input.value = ''
+          input.value = (resSuggestion && resSuggestion.url === pendingUrl && resSuggestion.label) || ''
           input.placeholder = 'Label (optional). Enter to save'
           hint.textContent = pendingUrl
           return
         }
         // Second Enter saves, with or without a label.
         resources.push({ label: val || null, url: pendingUrl })
+        const sug = resSuggestion
         await persistResources()
+        // Record the decision only when the URL is the one Lomax proposed, so the
+        // server's apply finds it already on the record.
+        if (sug && sug.id && sug.url === pendingUrl) { try { await API.lomax.decide(sug.id, 'accepted') } catch (_) { /* the link is saved either way */ } }
         renderResources()
       })
     }
     renderResources()
 
-    // ── Profile pictures (2026-07-22; MULTI-IMAGE 2026-08-07) ───────────────
-    //
-    // Now the SHARED gallery (2026-09-01). This page carried its own ~180-line
-    // copy of a component Venue was already using — same grid, same drop zone,
-    // same delegated click handler, same dragenter depth counter — and the two
-    // had already drifted: only this one had the Google Images tile, only that
-    // one honoured Playback mode. CONTEXT.md's rule for exactly this situation
-    // is that when two surfaces drift the fix is to DELETE the divergence, not
-    // to re-style one of them. So the copy is gone and the differences that
+    // Now the SHARED gallery. This page carried its own ~180-line copy of a
+    // component Venue was already using — same grid, same drop zone, same
+    // delegated click handler, same dragenter depth counter — and the two had
+    // already drifted: only this one had the Google Images tile, only that one
+    // honoured Playback mode. So the copy is gone and the differences that
     // were worth keeping became parameters: `fetchTile` for the Commons lookup
-    // (still artist-only — the Wikidata bridge runs through MusicBrainz and
-    // no other dimension has one), `linkTiles` for the two search link-outs
-    // that every photographed entity now gets.
+    // (still artist-only — the Wikidata bridge runs through MusicBrainz and no
+    // other dimension has one), `linkTiles` for the two search link-outs that
+    // every photographed entity now gets.
     //
     // fetchTile is passed as a FUNCTION on purpose: `artist` is REASSIGNED
     // when a MusicBrainz match lands, and the tile's enabled state reads
-    // artist.musicbrainz.mbid. Evaluated per render, it follows along; read
-    // once at construction it would keep saying "match this act first" after a
-    // successful match, which is the bug this page already had in 2026-08.
+    // artist.musicbrainz.mbid.
     let ppImages = artist.images || []
 
-    // Small round portrait in the hero. Read-only — all management lives in the
-    // Photos tab, so the hero never grows buttons and stays a header.
+    // The header photo is the primary image (the server orders primary-first). Read-only:
+    // all management lives in the Photos tab.
     function renderHeroPortrait() {
-      const box = document.getElementById('pp-hero-portrait')
-      if (!box) return
-      const primary = ppImages[0] || null    // server orders primary-first
-      const ring = artist.genre && artist.genre.color
-        ? artist.genre.color : 'var(--bd-1)'
-      box.innerHTML = heroPortraitHtml(
-        artist.name, primary ? API.artists.imageUrl(primary.id) : null, ring)
+      setHeroImage(ppImages[0] ? API.artists.imageUrl(ppImages[0].id) : null)
     }
 
     const ppGallery = createPhotoGallery({
@@ -5779,21 +5494,19 @@ const App = (() => {
       const box = document.getElementById('pp-mb')
       if (!box) return
       const mb = artist.musicbrainz || {}
-      // 'matched' = the confidence gate chose it, no human involved.
-      // 'linked'  = a human picked it from the candidate list.
-      // Saying "Matched automatically" for the second is a small lie that makes
-      // every other automatic claim in the app less believable (Ryan,
-      // 2026-08-07).
+      // 'matched' = the confidence gate chose it, no human involved. 'linked'
+      // = a human picked it from the candidate list. Saying "Matched
+      // automatically" for the second is a small lie that makes every other
+      // automatic claim in the app less believable.
       if (mb.status === 'matched' || mb.status === 'linked') {
         const how = mb.status === 'matched' ? 'Matched automatically' : 'Linked by you'
-        // WHAT we linked to, and just enough to confirm it's the right act
-        // (Ryan, 2026-08-07). This panel is a CONNECTION, not a data display:
-        // the link list it used to show is still fetched and stored — future
-        // ingest and enrichment jobs need to know where to look — but nobody
-        // needs to read it, so it isn't rendered.
-        // Active years sit right beside the type — the single most useful
-        // check that a match is the right act, since two same-named bands
-        // almost always differ by era (Ryan, 2026-08-07).
+        // WHAT we linked to, and just enough to confirm it's the right act.
+        // This panel is a CONNECTION, not a data display: the link list it
+        // used to show is still fetched and stored — future ingest and
+        // enrichment jobs need to know where to look — but nobody needs to
+        // read it, so it isn't rendered. Active years sit right beside the
+        // type — the single most useful check that a match is the right act,
+        // since two same-named bands almost always differ by era.
         //
         // When MusicBrainz has no dates, SAY SO rather than omitting the
         // field: silence reads as "we didn't bother", where "no dates" is
@@ -5821,11 +5534,11 @@ const App = (() => {
           : mb.status === 'none'
             ? 'Nothing found for this name.'
             : 'Not looked up yet.'
-        // Editable search term (Ryan, 2026-08-08): a billing variant like
-        // "Aaron Parks Trio" is the act's real name but often not what
-        // MusicBrainz indexed it under, so the string actually sent to the API
-        // needs to be adjustable without renaming the Artist. Pre-filled
-        // with the Artist's name; edits here are one-shot — nothing saved.
+        // Editable search term: a billing variant like "Aaron Parks Trio" is
+        // the act's real name but often not what MusicBrainz indexed it under,
+        // so the string actually sent to the API needs to be adjustable
+        // without renaming the Artist. Pre-filled with the Artist's name;
+        // edits here are one-shot — nothing saved.
         box.innerHTML = `
           <div class="pp-mb-empty">${msg}</div>
           <div class="pp-mb-searchrow">
@@ -5853,10 +5566,10 @@ const App = (() => {
       return v || artist.name
     }
 
-    // Look up, and LINK IT IF THE ANSWER IS OBVIOUS (Ryan, 2026-08-07).
-    // Clicking through a candidate list to confirm a single 100-scoring result
-    // is busywork. The server applies the same confidence gate the creation-time
-    // pass uses; only a genuinely unclear result comes back as candidates.
+    // Look up, and LINK IT IF THE ANSWER IS OBVIOUS. Clicking through a
+    // candidate list to confirm a single 100-scoring result is busywork. The
+    // server applies the same confidence gate the creation-time pass uses; only
+    // a genuinely unclear result comes back as candidates.
     async function runMbLookup() {
       const box = document.getElementById('pp-mb')
       const term = currentMbTerm()
@@ -5882,8 +5595,8 @@ const App = (() => {
     }
 
     // Candidate picker. Deliberately a manual step: automatic matching either
-    // wins outright or defers to a human — it never guesses (Ryan, 2026-08-07),
-    // because a wrong entity attaches wrong facts to a page nobody re-checks.
+    // wins outright or defers to a human — it never guesses, because a wrong
+    // entity attaches wrong facts to a page nobody re-checks.
     async function openMbPicker() {
       const box = document.getElementById('pp-mb')
       const term = currentMbTerm()
@@ -5919,15 +5632,8 @@ const App = (() => {
         return
       }
       box.innerHTML = `
-        <!-- Explicit instruction (Ryan, 2026-08-07): the list looked like
-             results to read, not a choice to make, so people didn't realise a
-             click was required to actually link the act. -->
         <div class="pp-mb-prompt">Click the right act to link it${
           cands.length === 1 ? '' : ' (more than one goes by this name)'}.</div>
-        <!-- Same editable term as the empty state (Ryan, 2026-08-08) — if none
-             of these candidates are right, revise and re-search without
-             leaving the panel. "Search" only re-lists candidates (no
-             auto-link); "Look up" is the gated path that can commit outright. -->
         <div class="pp-mb-searchrow pp-mb-searchrow-sm">
           <input type="text" class="pp-mb-input" id="pp-mb-term"
                  value="${esc(query || artist.name)}" placeholder="Search term"
@@ -5944,9 +5650,6 @@ const App = (() => {
                 c.disambiguation,
               ].filter(Boolean).map(esc).join(' · ')}</span>
               <span class="pp-mb-cand-score" title="MusicBrainz match score">${c.score ?? ''}</span>
-              <!-- Verify BEFORE committing. For a vague name like "Acoustic
-                   All-Stars" the summary line rarely settles it, and the real
-                   entry (with its releases and relationships) usually does. -->
               <a class="pp-mb-cand-view" href="${esc(mbArtistUrl(c.mbid))}"
                  target="_blank" rel="noopener"
                  title="Open on musicbrainz.org">View ↗</a>
@@ -5970,7 +5673,7 @@ const App = (() => {
             renderMusicBrainz()
             ppGallery.refresh()      // see note in runMbLookup
           } catch (e) {
-            alert('Failed: ' + e.message); renderMusicBrainz()
+            Notify.error('Failed: ' + e.message); renderMusicBrainz()
           }
         })
         // The row is a div (a <button> can't legally contain the View link),
@@ -5990,21 +5693,15 @@ const App = (() => {
           artist = await API.artists.get(artistId)
           renderMusicBrainz()
           ppGallery.refresh()        // clearing a match disables the lookup again
-        } catch (e) { alert('Failed: ' + e.message) }
+        } catch (e) { Notify.error('Failed: ' + e.message) }
       })
     }
     renderMusicBrainz()
 
-    // ── Lomax: biography, members, resources, questions ───────────────────────
-    // The biography is auto-applied by the server (with Restore previous);
-    // members and resources are suggestions to accept. Questions and the ask bar
-    // close the About tab. Every control is edit-only (lomaxActions / lomaxAskBar).
+    // ── Lomax: the chat column ────────────────────────────────────────────────
+    // The biography is auto-applied by the server (Restore Previous undoes it); members and
+    // links are suggestions to accept. Every control is edit-only (lomaxActions / lomaxAskBar).
     {
-      const lxBio = document.getElementById('pp-lx-bio')
-      const lxMem = document.getElementById('pp-lx-members')
-      const lxRes = document.getElementById('pp-lx-resources')
-      const lxAsk = document.getElementById('pp-lx')
-      const alive = () => document.body.contains(lxAsk)
       const dateParts = str => {
         const p = String(str || '').trim().split('-')
         const n = i => (p[i] && /^\d+$/.test(p[i]) ? parseInt(p[i], 10) : null)
@@ -6017,16 +5714,33 @@ const App = (() => {
         return (member.stints || []).some(st => st.start_year === sy && st.start_month === sm && st.start_day === sd &&
           st.end_year === ey && st.end_month === em && st.end_day === ed)
       }
-      const parsed = p => { try { return JSON.parse(p.proposed) || {} } catch (_) { return {} } }
       const paintBio = () => {
         const el = document.getElementById('pp-desc')
         if (!el || el.querySelector('textarea, input')) return
         el.textContent = artist.bio || (canEditLibrary() ? 'Add a description…' : '')
         el.classList.toggle('pp-empty', !artist.bio)
       }
-
-      const c = lomaxController({
-        skill: 'artist', subjectType: 'artist', subjectId: artistId, alive,
+      const cards = (run, c, o) => {
+        const edit = canEditLibrary()
+        const mem = edit ? lxProps(run).filter(p => p.field === 'member' && lxShown(p)) : []
+        const have = new Set(resources.map(r => r.url))
+        const res = edit ? lxProps(run).filter(p => p.field === 'resource' && lxShown(p) && (p.decision === 'accepted' || o.readonly || !have.has(lxJson(p).url))) : []
+        return [
+          lxTextCard('Biography', run, c, o),
+          mem.length ? lxCardHtml('Members', `<table class="lx-tbl"><tbody>${mem.map(p => {
+            const m = lxJson(p), roster = p.decision === 'accepted' || onRoster(m), cls = roster ? 'lx-same' : 'lx-val'
+            return `<tr><td><span class="${cls}">${esc(m.name || '')}</span></td><td><span class="${cls}">${esc(m.instrument || '')}</span></td>` +
+              `<td><span class="${cls}">${esc(lxYears(m.start, m.end))}</span></td><td class="lx-act-td">${roster ? '' : lxAct(p, o)}</td></tr>`
+          }).join('')}</tbody></table>`, mem.filter(p => lxOpen(p) && !onRoster(lxJson(p))), o) : '',
+          res.length ? lxCardHtml('Trusted sources', `<table class="lx-tbl"><tbody>${res.map(p => {
+            const r = lxJson(p)
+            return `<tr><td><a class="lx-val" href="${esc(r.url || '#')}" target="_blank" rel="noopener">${esc(r.label || r.url || '')}</a></td>` +
+              `<td class="lx-act-td">${lxAct(p, o)}</td></tr>`
+          }).join('')}</tbody></table>`, res.filter(p => lxOpen(p)), o) : '',
+        ]
+      }
+      lomaxMountAbout('pp-lx-col', {
+        skill: 'artist', subjectType: 'artist', subjectId: artistId,
         // The server has already written the accepted value; bring this page's copy in line.
         afterAccept: async props => {
           if (props.some(p => p.field === 'member')) { await refreshRoster(); renderMusicians(); renderStintEditor() }
@@ -6044,70 +5758,25 @@ const App = (() => {
         onDone: run => {
           const rep = run.result && run.result.replaced
           if (rep && rep.written) { artist.bio = rep.written; paintBio() }
+          const have = new Set(resources.map(r => r.url))
+          const p = canEditLibrary() && lxProps(run).find(x => x.field === 'resource' && !x.decision && lxJson(x).url && !have.has(lxJson(x).url))
+          if (p && resSuggest) resSuggest({ id: p.id, url: lxJson(p).url, label: lxJson(p).label || '' })
         },
-      })
-      c.addView(ctl => {
-        if (!alive()) return false
-        // Restore previous, on the newest run that replaced the biography.
-        const rep = ctl.runs.slice().reverse().find(r => r.status === 'done' && r.result && r.result.replaced)
-        lxRepaint(lxBio, rep ? lomaxRestoreLink(ctl, rep, artist.bio) : '')
-
-        const run = ctl.latest()
-        const members_ = canEditLibrary() ? lxProps(run).filter(p => p.field === 'member' && lxShown(p)) : []
-        const open = members_.filter(p => lxOpen(p) && !onRoster(parsed(p)))
-        lxRepaint(lxMem, members_.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Member</th><th>Dates</th>` +
-          `<th class="lx-act-td">${open.length ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Add all</button>` : ''}</th></tr></thead><tbody>${
-            members_.map(p => {
-              const m = parsed(p), roster = p.decision === 'accepted' || onRoster(m)
-              const dates = (m.start || m.end) ? `${m.start || '?'} – ${m.end || 'present'}` : ''
-              return `<tr><td><span class="${roster ? 'lx-same' : 'lx-val'}">${esc(m.name || '')}</span>` +
-                `${m.instrument ? ` <span class="${roster ? 'lx-same' : 'lx-val'} lx-inst">${esc(m.instrument)}</span>` : ''}</td>` +
-                `<td><span class="${roster ? 'lx-same' : 'lx-val'}">${esc(dates)}</span></td>` +
-                `<td class="lx-act-td">${roster ? '<span class="lx-roster">On the roster</span>' : lomaxActions(p, { accept: 'Add' })}</td></tr>`
-            }).join('')}</tbody></table>` : '')
-
-        const have = new Set(resources.map(r => r.url))
-        const res_ = canEditLibrary() ? lxProps(run).filter(p => p.field === 'resource' && lxShown(p) && (p.decision === 'accepted' || !have.has(parsed(p).url))) : []
-        lxRepaint(lxRes, res_.length ? `<table class="lx-tbl lx-sugg"><tbody>${res_.map(p => {
-          const r = parsed(p)
-          return `<tr><td><a class="lx-val" href="${esc(r.url || '#')}" target="_blank" rel="noopener">${esc(r.label || r.url || '')}</a></td>` +
-            `<td><span class="lx-val lx-inst">${esc(r.url || '')}</span></td><td class="lx-act-td">${lomaxActions(p, { accept: 'Add' })}</td></tr>`
-        }).join('')}</tbody></table>` : '')
-
-        // Every question asked of this artist, oldest first, with its answer.
-        const asked = ctl.runs.filter(r => r.question && r.status === 'done' && r.result && String(r.result.answer || '').trim())
-        const err = ctl.lastError()
-        const bar = lomaxAskBar({ placeholder: 'Anything else you want to learn? (optional)',
-          note: "Lomax researches this artist's biography, members over the years, and useful links. Add anything else below.",
-          last: run, busy: !!ctl.pending })
-        lxRepaint(lxAsk, !(asked.length || ctl.pending || err || bar) ? '' : `<div class="lx-ask-wrap">
-          ${asked.length ? `<div class="pp-sec">Questions</div><div class="lx-qs">${asked.map(r =>
-            `<div class="lx-qa"><div class="lx-qa-q">${esc(r.question)}</div><div class="lx-answer">${esc(stripCitations(r.result.answer))}</div>` +
-            `<div class="lx-qa-d">${esc(lxDay(r.created_at))}</div></div>`).join('')}</div>` : ''}
-          ${ctl.pending ? lomaxRunState(ctl.pending) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')}
-          ${bar}
-        </div>`)
-        return true
-      })
-      for (const el of [lxBio, lxMem, lxRes, lxAsk]) if (el) el.setAttribute('data-lx-ctl', c.id)
-      c.refresh()
-      c.load()
+      }, { subject: 'artist', current: () => artist.bio, cards })
     }
 
     onAdminClick('pp-delete', async () => {
       if (!confirm(`Delete artist "${artist.name}"? This can't be undone.`)) return
       try { await API.artists.remove(artistId); refreshSidebar(); window.location.hash = '#/' }
-      catch (e) { alert(e.message) }
+      catch (e) { Notify.error(e.message) }
     })
   }
 
   // Turn an element into a click-to-edit field. opts: {get, onSave, multiline, placeholder}.
-  // Every click-to-edit field in the app goes through here — recording notes,
-  // artist and venue and genre and collection and musician names and
-  // descriptions, venue City/State/Country. That makes it the one place
-  // Playback mode has to be honoured, rather than gating ~25 call sites and
-  // missing one (which is exactly how the Venue page's City/State/Country
-  // stayed editable in Playback — Ryan, 2026-08-22).
+  // Every click-to-edit field in the app goes through here — recording notes, artist and
+  // venue and genre and collection and musician names and descriptions, venue
+  // City/State/Country. That makes it the one place Playback mode has to be honoured, rather
+  // than gating ~25 call sites and missing one.
   //
   // It strips the affordance as well as the behaviour: a span that still looks
   // clickable and highlights on hover but does nothing is worse than a plain
@@ -6176,11 +5845,11 @@ const App = (() => {
         else if (e.key === 'Enter' && !opts.multiline) { e.preventDefault(); field.blur() }
         else if (e.key === 'Enter' && e.metaKey) { e.preventDefault(); field.blur() }
         else if (e.key === 'Tab' && opts.tabTo) {
-          // TAB ADVANCES TO THE NEXT FIELD (Ryan, 2026-08-07). Without this,
-          // Tab left the browser to pick a focus target — usually nothing
-          // useful, since the neighbouring "fields" are spans that only become
-          // inputs on click. Editing a venue's City/State/Country meant three
-          // separate mouse trips.
+          // TAB ADVANCES TO THE NEXT FIELD. Without this, Tab left the browser
+          // to pick a focus target — usually nothing useful, since the
+          // neighbouring "fields" are spans that only become inputs on click.
+          // Editing a venue's City/State/Country meant three separate mouse
+          // trips.
           //
           // `tabTo` names the next element's id; committing first, then
           // clicking it, reuses the exact same open-editor path a real click
@@ -6232,10 +5901,10 @@ const App = (() => {
     return `${summary}<div class="cksum-rows">${rows}</div>${st5Note}`
   }
 
-  // Add Recording's Checksums pane (Ryan, 2026-10-06): the FFP is checked
-  // against the source folder now, before import, because this is when it is
-  // reviewed. Header reads only, so it is quick. MD5 lists are not shown: only
-  // a failed FFP matters. Same rows and summary as View Recording's pane.
+  // Add Recording's Checksums pane: the FFP is checked against the source
+  // folder now, before import, because this is when it is reviewed. Header
+  // reads only, so it is quick. MD5 lists are not shown: only a failed FFP
+  // matters. Same rows and summary as View Recording's pane.
   function buildChecksumsPreviewHtml(fingerprints) {
     if (!(fingerprints || []).length) {
       return `<div class="info-panel-empty">No checksum/fingerprint files (.ffp / .md5 / .st5) found in this folder.</div>`
@@ -6275,8 +5944,8 @@ const App = (() => {
 
 
   // ── Lomax ─────────────────────────────────────────────────────────────────
-  // Every Lomax surface is built from the helpers in this section, so a new
-  // screen mounts Lomax with one controller and a few calls:
+  // Every Lomax surface is built from the helpers in this section, so a new screen mounts Lomax
+  // with one controller and a few calls:
   //   lomaxController(cfg)      a run list, the one poller, accept/dismiss/restore
   //   lomaxAskBar(o)            question box, level toggle with (i), Ask Lomax
   //   lomaxSuggestionCell(p)    the blue value (quiet when Lomax agrees)
@@ -6288,8 +5957,7 @@ const App = (() => {
   // handler (lxOnClick, bottom of this section) serves them all. Every control
   // is edit-only: canEditLibrary() false renders none of them, and Playback
   // mode also hides .lx-edit in CSS.
-  const LX_LEVEL_LABEL = { off: 'Off', study: 'Study', research: 'Research' }
-  // Study was removed (Ryan, 2026-10-05): every run is Research. Add Recordings is Off / On, the ask
+  // Study was removed: every run is Research. Add Recordings is Off / On, the ask
   // bars have no level control. LX_LEVEL_LABEL keeps 'study' so older runs still label correctly.
   const LX_IMPORT_KEY = 'trellisLomaxLevel'      // Off / On on Add Recordings ('research' means On)
   const LX_PAUSED_KEY = 'trellisLomaxPausedRun'  // the import run whose Lomax queue the person paused
@@ -6321,12 +5989,14 @@ const App = (() => {
     if (!s) return NaN
     return Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(s) ? s : s + 'Z')
   }
-  function lxDay(s) {
+  // "Today, 2:14 PM" for a run made today, else "Oct 7, 2026, 2:14 PM".
+  function lxStamp(s) {
     const t = lxTs(s)
     if (isNaN(t)) return ''
     const d = new Date(t), now = new Date()
     const same = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
-    return same ? 'Today' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    return `${same ? 'Today' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}, ${time}`
   }
   function lxClock(sec) {
     sec = Math.max(0, Math.floor(sec))
@@ -6358,8 +6028,41 @@ const App = (() => {
   }
   // What a person can still act on: has an id (a migrated legacy row has none),
   // is not Lomax agreeing with Trellis, and nobody has decided it.
-  const lxOpen = p => !!(p && p.id && !p.agrees && !p.decision)
-  const lxSuggestions = run => lxProps(run).filter(p => !p.agrees)
+  // o (optional): {value(field), tracks, saved}. An accepted proposal is applied only while the form
+  // or track still holds the proposed value; accepted but not held, it is open again (a reopened
+  // folder, a field typed over). A saved recording writes on accept, so it is always applied.
+  const lxSameVal = (a, b) => String(a == null ? '' : a).trim() === String(b == null ? '' : b).trim()
+  // Lomax's "agrees" was worked out against the value at run time. It still counts only while the live
+  // value (the form's field, or the track's) equals the proposed one; otherwise the row is an open proposal.
+  function lxAgrees(p, o) {
+    if (!p || !p.agrees) return false
+    if (!o || o.saved || !o.value) return true
+    const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(String(p.field))
+    if (m) {
+      const list = typeof o.tracks === 'function' ? o.tracks() : o.tracks
+      if (!Array.isArray(list)) return true
+      const t = list.find(x => String(x.track_number) === m[1])
+      return !t || lxSameVal(t[m[2] === 'note' ? 'notes' : m[2]], p.proposed)
+    }
+    if (!LX_FIELDS.some(([k]) => k === p.field)) return true
+    return lxSameVal(o.value(p.field), p.proposed)
+  }
+  function lxApplied(p, o) {
+    if (!p || p.decision !== 'accepted') return false
+    if (!o || o.saved || !o.value) return true
+    const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(String(p.field))
+    if (m) {
+      const list = typeof o.tracks === 'function' ? o.tracks() : o.tracks
+      if (!Array.isArray(list)) return true
+      const t = list.find(x => String(x.track_number) === m[1])
+      return !t || lxSameVal(t[m[2] === 'note' ? 'notes' : m[2]], p.proposed)
+    }
+    if (p.field === 'genre') return !!String(o.value('genre') || '').trim()    // a genre already set is never replaced
+    if (!LX_FIELDS.some(([k]) => k === p.field)) return true
+    return lxSameVal(o.value(p.field), p.proposed)
+  }
+  const lxOpen = (p, o) => !!(p && p.id && !lxAgrees(p, o) && (!p.decision || (p.decision === 'accepted' && !lxApplied(p, o))))
+  const lxSuggestions = (run, o) => lxProps(run).filter(p => !lxAgrees(p, o))
   // The stored decision is the truth. Every accepted proposal (oldest run first, the newest one per
   // field winning) whose value differs from what the form holds now; the caller writes them back
   // into the form as human-set. read(field) is the form's current value for a field.
@@ -6393,16 +6096,15 @@ const App = (() => {
       `<span class="lx-pop lx-pop--tip" role="tooltip" hidden>${esc(LX_IMPORT_TIP)}</span></span></span>`
   }
 
-  // o: {level, placeholder, note, last (run), rows, pin}. The controller is found
-  // from the screen root, so the bar needs no id of its own.
+  // o: {placeholder, prompts (suggested prompts, shown above the box before a subject's first run), busy}.
+  // The controller is found from the screen root, so the bar needs no id of its own.
   function lomaxAskBar(o = {}) {
     if (!canEditLibrary()) return ''
-    const last = o.last && o.last.finished_at
-      ? `<div class="lx-ask-last">Last run: ${esc(lxDay(o.last.finished_at))} · ${esc(LX_LEVEL_LABEL[o.last.level] || '')}</div>` : ''
-    return `<div class="lx-ask lx-edit${o.pin ? ' lx-ask--pin' : ''}" data-lx-ask>
-      ${o.note ? `<div class="lx-ask-note">${esc(o.note)}</div>` : ''}
-      ${last}
-      <textarea class="lx-q" rows="${o.rows || 2}" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.placeholder || 'Question')}"></textarea>
+    const sugs = (o.prompts || []).map(t => `<button type="button" class="lx-sug" data-lx-suggest><span>${esc(t)}</span>` +
+      `<span class="go">${icon('arrow-up')}</span></button>`).join('')
+    return `<div class="lx-ask lx-edit" data-lx-ask>
+      ${sugs ? `<div class="lx-sugs">${sugs}</div>` : ''}
+      <textarea class="lx-q" rows="2" placeholder="${esc(o.placeholder || '')}" aria-label="${esc(o.placeholder || 'Question')}"></textarea>
       <div class="lx-ask-row">
         <button type="button" class="btn lx-go lx-go--ask" data-lx-act="ask"${o.busy ? ' disabled' : ''}>Ask Lomax</button>
       </div>
@@ -6415,7 +6117,7 @@ const App = (() => {
     if (!prop || prop.decision === 'rejected') return ''
     const text = opts.text != null ? opts.text : prop.proposed
     if (text == null || text === '') return ''
-    const quiet = prop.agrees || prop.decision === 'accepted'
+    const quiet = lxAgrees(prop, opts.o) || (prop.decision === 'accepted' && lxApplied(prop, opts.o))
     return `<span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(text)}</span>`
   }
 
@@ -6425,14 +6127,15 @@ const App = (() => {
     if (!canEditLibrary()) return ''
     const list = (Array.isArray(props) ? props : [props]).filter(Boolean)
     if (!list.length) return ''
-    const open = list.filter(lxOpen)
+    const open = list.filter(p => lxOpen(p, opts.o))
     if (open.length) {
       const ids = open.map(p => p.id).join(',')
       return `<span class="lx-acts lx-edit">` +
         `<button type="button" class="lx-ic lx-ok" data-lx-act="accept" data-lx-ids="${ids}" aria-label="${opts.accept || 'Accept'}" title="${opts.accept || 'Accept'}">${icon('check')}</button>` +
         `<button type="button" class="lx-ic lx-no" data-lx-act="dismiss" data-lx-ids="${ids}" aria-label="Dismiss" title="Dismiss">${icon('x')}</button></span>`
     }
-    return list.some(p => p.decision === 'accepted') ? '<span class="lx-done">Accepted</span>' : ''
+    if (list.some(p => p.decision === 'accepted' && lxApplied(p, opts.o))) return '<span class="lx-done">Accepted</span>'
+    return list.some(p => lxAgrees(p, opts.o)) ? '<span class="lx-done">OK</span>' : ''
   }
 
   // (i) beside a Trellis value. src is resolved.sources_plain[field]:
@@ -6453,17 +6156,14 @@ const App = (() => {
   function lomaxMark() { return `<span class="lx-mark">${icon('lomax')}Lomax</span>` }
   function lomaxAvatar() { return `<span class="lx-av" aria-hidden="true">${icon('lomax-full')}</span>` }
 
-  // Working (with the time it has taken, counted from the server's own start
+  // Researching (with the time it has taken, counted from the server's own start
   // time so it survives a reload) or the error. A finished run returns ''.
-  // o: {leave: show the leave-the-page line, avatar}
-  function lomaxRunState(run, o = {}) {
+  function lomaxRunState(run) {
     if (!run) return ''
     if (run.status === 'queued' || run.status === 'running') {
-      const since = lxTs(run.created_at)
-      return `<div class="lx-state">${o.avatar ? lomaxAvatar() : ''}<div>
-        <div class="lx-working"><b>Working</b><span class="lx-elapsed" data-lx-since="${isNaN(since) ? Date.now() : since}" data-lx-lvl="${esc(LX_LEVEL_LABEL[run.level] || '')}">${lxClock((Date.now() - (isNaN(since) ? Date.now() : since)) / 1000)} · ${esc(LX_LEVEL_LABEL[run.level] || '')}</span></div>
-        ${o.leave ? '<div class="lx-leave">You can leave this page. The result is saved to this recording.</div>' : ''}
-      </div></div>`
+      const since = lxTs(run.created_at), from = isNaN(since) ? Date.now() : since
+      return `<div class="lx-state"><div class="lx-working"><b>Researching</b>` +
+        `<span class="lx-elapsed" data-lx-since="${from}">${lxClock((Date.now() - from) / 1000)}</span></div></div>`
     }
     if (run.status === 'error') {
       return `<div class="lx-error" role="alert">${esc(lxErrText({ message: run.error }))}</div>`
@@ -6477,7 +6177,6 @@ const App = (() => {
     const srcs = (r.sources || []).filter(s => s && s.url)
     const parts = []
     if (srcs.length) parts.push(`<a href="#" class="lx-srclink" data-lx-act="sources">${lxPlural(srcs.length, 'source')}</a>`)
-    if (LX_LEVEL_LABEL[run.level]) parts.push(esc(LX_LEVEL_LABEL[run.level]))
     if (u) {
       const total = u.total_tokens ?? ((u.input_tokens || 0) + (u.output_tokens || 0))
       parts.push(`${lxTokens(total)} tokens`)
@@ -6530,7 +6229,7 @@ const App = (() => {
     const els = document.querySelectorAll('[data-lx-since]')
     if (!els.length) { clearInterval(_lxTickTimer); _lxTickTimer = null; return }
     const now = Date.now()
-    els.forEach(el => { el.textContent = `${lxClock((now - Number(el.dataset.lxSince)) / 1000)} · ${el.dataset.lxLvl}` })
+    els.forEach(el => { el.textContent = lxClock((now - Number(el.dataset.lxSince)) / 1000) })
   }
   function lxTickStart() { if (!_lxTickTimer) _lxTickTimer = setInterval(lxTick, 1000) }
 
@@ -6638,13 +6337,13 @@ const App = (() => {
   }
   const lxAttr = c => `data-lx-ctl="${c.id}"`
 
-  // A Restore previous link: only while the run's auto-applied text is still
+  // A Restore Previous link: only while the run's auto-applied text is still
   // what is on the page (the server refuses once it has been edited).
   function lomaxRestoreLink(c, run, currentText) {
     const rep = run && run.result && run.result.replaced
     if (!rep || run.result.restored_at || c.blocked[run.id] || !canEditLibrary()) return ''
     if (currentText != null && String(currentText) !== String(rep.written)) return ''
-    return `<button type="button" class="lx-link lx-edit" data-lx-act="restore" data-lx-run="${run.id}">Restore previous</button>`
+    return `<button type="button" class="lx-link lx-edit" data-lx-act="restore" data-lx-run="${run.id}">Restore Previous</button>`
   }
 
   // ── The one click handler ───────────────────────────────────────────────────
@@ -6715,7 +6414,8 @@ const App = (() => {
       if (c.pending) return
       const bar = btn.closest('[data-lx-ask]')
       const q = bar && bar.querySelector('.lx-q')
-      const question = q ? q.value.trim() : ''
+      // An empty box asks the subject's first suggested prompt.
+      const question = (q ? q.value.trim() : '') || lxFirstPrompt(c)
       if (q) q.value = ''
       c.ask({ question, level: 'research' })
     } else if (act === 'accept' || act === 'dismiss' || act === 'accept-all') {
@@ -6729,15 +6429,12 @@ const App = (() => {
     }
   }
   document.addEventListener('click', lxOnClick)
-  // A suggested prompt sends itself, as if typed into the ask bar below it.
+  // A suggested prompt sends itself.
   document.addEventListener('click', ev => {
     const chip = ev.target.closest && ev.target.closest('[data-lx-suggest]')
-    if (!chip) return
-    const pane = chip.closest('.slide-pane')
-    const q = pane && pane.querySelector('.lx-q')
-    if (!q) return
-    q.value = chip.textContent.trim()
-    pane.querySelector('.lx-go')?.click()
+    const root = chip && chip.closest('[data-lx-ctl]')
+    const c = root && _lxCtls.get(Number(root.dataset.lxCtl))
+    if (c && !c.pending) c.ask({ question: chip.querySelector('span').textContent.trim(), level: 'research' })
   })
   document.addEventListener('scroll', ev => {
     if (!(ev.target && ev.target.closest && ev.target.closest('.lx-pop'))) lxClosePops()
@@ -6766,43 +6463,61 @@ const App = (() => {
 
   // The Lomax cell of a track row: title, then "Songwriter: X" and "Note: Y",
   // all blue. opts.onlyNew drops the pieces Lomax merely agrees with.
+  // opts.o: the state for lxApplied; opts.title: the title on disk, shown quietly when Lomax has no title proposal.
   function lxTrackPiecesHtml(tp, opts = {}) {
-    const ok = p => lxShown(p) && !(opts.onlyNew && p.agrees && p !== tp.title)
+    const o = opts.o
     const out = []
-    if (ok(tp.title)) out.push(`<div>${lomaxSuggestionCell(tp.title)}</div>`)
-    if (ok(tp.songwriter)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.songwriter, { text: 'Songwriter: ' + tp.songwriter.proposed })}</div>`)
-    if (ok(tp.note)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.note, { text: 'Note: ' + tp.note.proposed })}</div>`)
+    if (lxShown(tp.title)) out.push(`<div>${lomaxSuggestionCell(tp.title, { o })}</div>`)
+    else if (!tp.title && opts.title) out.push(`<div><span class="lx-same">${esc(opts.title)}</span></div>`)
+    if (lxShown(tp.songwriter)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.songwriter, { text: 'Songwriter: ' + tp.songwriter.proposed, o })}</div>`)
+    if (lxShown(tp.note)) out.push(`<div class="lx-sub">${lomaxSuggestionCell(tp.note, { text: 'Note: ' + tp.note.proposed, o })}</div>`)
     return out.join('')
   }
   const lxTrackPieces = tp => ['title', 'songwriter', 'note'].map(k => tp[k]).filter(Boolean)
 
   function lxFieldCardHtml(run, o) {
     const fp = lxFieldProps(run)
-    const rows = LX_FIELDS.concat(LX_ALBUM_FIELDS, [['genre', 'Genre']]).filter(([k]) => fp[k] && !fp[k].agrees && lxShown(fp[k]))
+    const rows = LX_FIELDS.concat(LX_ALBUM_FIELDS, [['genre', 'Genre']]).filter(([k]) => fp[k] && lxShown(fp[k]))
     if (!rows.length) return ''
-    return `<div class="lx-card"><table class="lx-tbl"><tbody>${rows.map(([k, label]) => {
+    const open = rows.map(([k]) => fp[k]).filter(p => lxOpen(p, o) && !(p.field === 'genre' && o.value && o.value('genre')))
+    const head = !o.readonly && open.length > 1 && canEditLibrary()
+      ? `<div class="lx-card-h"><span class="lx-card-s"></span>` +
+        `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Accept all</button></div>` : ''
+    return `<div class="lx-card">${head}<table class="lx-tbl"><tbody>${rows.map(([k, label]) => {
       const p = fp[k]
-      return `<tr><th scope="row">${label}</th><td>${p.current ? `<div class="lx-was">${esc(p.current)}</div>` : ''}${lomaxSuggestionCell(p)}</td>` +
-        `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(p)}</td></tr>`
+      return `<tr><th scope="row">${label}</th><td>${p.current && !lxAgrees(p, o) ? `<div class="lx-was">${esc(p.current)}</div>` : ''}${lomaxSuggestionCell(p, { o })}</td>` +
+        `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(p, { o })}</td></tr>`
     }).join('')}</tbody></table></div>`
   }
 
   function lxTrackCardHtml(run, o) {
     const tp = lxTrackProps(run)
-    const rows = Object.keys(tp).map(Number).sort((a, b) => a - b)
-      .map(n => ({ n, pieces: lxTrackPieces(tp[n]).filter(p => !p.agrees && lxShown(p)), tp: tp[n] }))
-      .filter(r => r.pieces.length)
-    if (!rows.length) return ''
-    const all = rows.flatMap(r => r.pieces)
-    const open = all.filter(lxOpen)
+    // Every track on disk, in order, with whatever Lomax said about it; a track Lomax did not touch
+    // still lists (number and title), so the list is complete.
+    const disk = (typeof o.tracks === 'function' ? o.tracks() : o.tracks) || []
+    const nums = disk.length ? disk.map(t => Number(t.track_number)) : Object.keys(tp).map(Number).sort((a, b) => a - b)
+    const rows = nums.map(n => ({ n, pieces: lxTrackPieces(tp[n] || {}).filter(lxShown), tp: tp[n] || {},
+      title: (disk.find(t => Number(t.track_number) === n) || {}).title }))
+    if (!rows.some(r => r.pieces.length)) return ''
+    const all = rows.flatMap(r => r.pieces).filter(p => !lxAgrees(p, o))
+    const open = all.filter(p => lxOpen(p, o))
     const SHOW = 3
     return `<div class="lx-card"><div class="lx-card-h"><span class="lx-card-t">Tracks</span>` +
       `<span class="lx-card-s">${esc(lxTrackSummary(all))}</span>` +
       (!o.readonly && open.length && canEditLibrary()
         ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Accept all</button>` : '') +
-      `</div><table class="lx-tbl"><tbody>${rows.map((r, i) =>
-        `<tr${i >= SHOW ? ' class="lx-more-row"' : ''}><td class="lx-n">${lxPad2(r.n)}</td><td>${lxTrackPiecesHtml(r.tp, { onlyNew: true })}</td>` +
-        `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(r.pieces)}</td></tr>`).join('')}</tbody></table>` +
+      `</div><table class="lx-tbl"><tbody>${rows.map((r, i) => {
+        // One line per piece, each with its own action cell, so a check/X always says what it applies to.
+        const lines = []
+        if (lxShown(r.tp.title)) lines.push([lomaxSuggestionCell(r.tp.title, { o }), r.tp.title])
+        else if (!r.tp.title && r.title) lines.push([`<span class="lx-same">${esc(r.title)}</span>`, null])
+        if (lxShown(r.tp.songwriter)) lines.push([lomaxSuggestionCell(r.tp.songwriter, { text: 'Songwriter: ' + r.tp.songwriter.proposed, o }), r.tp.songwriter])
+        if (lxShown(r.tp.note)) lines.push([lomaxSuggestionCell(r.tp.note, { text: 'Note: ' + r.tp.note.proposed, o }), r.tp.note])
+        if (!lines.length) lines.push(['', null])
+        return lines.map(([cell, prop], j) =>
+          `<tr class="${i >= SHOW ? 'lx-more-row' : ''}${j ? ' lx-sub-row' : ''}">${j ? '' : `<td class="lx-n" rowspan="${lines.length}">${lxPad2(r.n)}</td>`}<td>${cell}</td>` +
+          `<td class="lx-act-td">${o.readonly || !prop ? '' : lomaxActions([prop], { o })}</td></tr>`).join('')
+      }).join('')}</tbody></table>` +
       (rows.length > SHOW ? `<button type="button" class="lx-link lx-showall" data-lx-act="show">Show all ${rows.length}</button>` : '') +
       `</div>`
   }
@@ -6824,29 +6539,61 @@ const App = (() => {
     return a && String(a).trim() ? `<div class="lx-answer">${esc(stripCitations(a))}</div>` : ''
   }
 
+  // o.cards(run, c, o) is how a subject lays its own results out (the About pages);
+  // without it a run is the recording's field, track, ear and notes cards.
   function lxResultParts(run, c, o) {
-    return [lxAnswerHtml(run), lxFieldCardHtml(run, o), lxTrackCardHtml(run, o), lxEarHtml(run), lxKeepHtml(run, c, o)].filter(Boolean)
+    return [lxAnswerHtml(run)].concat(o.cards ? o.cards(run, c, o) : [lxFieldCardHtml(run, o), lxTrackCardHtml(run, o), lxEarHtml(run), lxKeepHtml(run, c, o)]).filter(Boolean)
   }
 
+  // The chat is ONE component. Each subject brings its suggested prompts and, for an
+  // About page, its empty-state sentence and its own result cards.
+  const LX_ACKS = ["Hi. I'll check on that.", 'Sure. Let me look into it.', 'Hey there. Give me a minute to dig around.',
+    "Okay. I'll see what I can find.", "Hi. Let me see what's out there.", "Alright. I'll start digging."]
+  const LX_FOLLOWS = ['Let me know if you need anything else.', 'Ask me if you want anything else looked into.',
+    "If there's more you want to know about this one, ask below.", 'Anything else on this show, just ask.',
+    'I can dig further if you have more questions.']
+  const LX_SUBJECTS = {
+    recording: { prompts: ['Find out more info about this live recording.'] },
+    album: { prompts: ['Confirm all the details of this album'] },
+    artist: { noun: 'artist',
+      prompts: ['Tell me the history of this artist', 'Who were the members over the years?', 'Which of their shows are most highly regarded by collectors?'],
+      empty: "Lomax researches this artist's biography, members over the years, and useful links." },
+    venue: { noun: 'venue',
+      prompts: ['Tell me the history of this venue', 'Did this venue go by other names?', 'Who were some notable acts that played here?'],
+      empty: "Lomax researches this venue's history, former names and location." },
+    musician: { noun: 'musician',
+      prompts: ['Tell me about this musician', 'Which bands has this musician played in?', 'Who did they record with most often?'],
+      empty: "Lomax researches this musician's biography and the artists they played with." },
+    event: { noun: 'event',
+      prompts: ['Tell me the history of this event', 'Who else played this event?', 'Where was this event held?'],
+      empty: "Lomax researches this event's history, dates, location and lineup." },
+  }
+  // o.subject ('artist', 'venue', ...) or, on a recording page, the record's kind.
+  const lxSubjectKey = o => o.subject || (o.kind && o.kind() === 'studio' ? 'album' : 'recording')
+  const lxSubject = o => LX_SUBJECTS[lxSubjectKey(o)]
+  const lxFirstPrompt = c => (c.chatOpts ? lxSubject(c.chatOpts).prompts[0] : '') || ''
+  const lxPick = (list, run) => list[(run && run.id ? run.id : 0) % list.length]
+  const lxGhost = '<span class="lx-av lx-av--ghost" aria-hidden="true"></span>'
+  const lxSayMsg = (text, first = true) => `<div class="lx-msg">${first ? lomaxAvatar() : lxGhost}<div class="lx-say">${esc(text)}</div></div>`
+
   function lxOldMessage(run, c, o) {
-    const sug = lxSuggestions(run), acc = sug.filter(p => p.decision === 'accepted')
+    const sug = lxSuggestions(run, o), acc = sug.filter(p => p.decision === 'accepted')
     const titles = acc.filter(p => /\.title$/.test(p.field)).length
     const parts = lxResultParts(run, c, Object.assign({}, o, { readonly: true }))
     const line = sug.length
       ? `${lxPlural(sug.length, 'suggestion')}, ${acc.length} accepted` + (titles ? ` · ${lxPlural(titles, 'title')} used` : '')
-      : 'Nothing to add'
-    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub lx-card lx-old"><div class="lx-old-h"><span>${esc(line)}</span>` +
+      : (parts.length ? 'Updated' : 'Nothing to add')
+    return `<div class="lx-msg">${o.lead ? lxGhost : lomaxAvatar()}<div class="lx-bub lx-card lx-old"><div class="lx-old-h"><span>${esc(line)}</span>` +
       (parts.length ? `<button type="button" class="lx-link" data-lx-act="show">Show</button>` : '') + `</div>` +
       lomaxUsageLine(run) + `<div class="lx-old-body">${parts.join('')}</div></div></div>`
   }
 
   function lxResultMessage(run, c, o) {
     const parts = lxResultParts(run, c, Object.assign({}, o, { readonly: false }))
-    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub">${parts.join('') || '<div class="lx-none">Nothing to add</div>'}${lomaxUsageLine(run)}</div></div>`
+    return `<div class="lx-msg">${o.lead ? lxGhost : lomaxAvatar()}<div class="lx-bub">${parts.join('') || '<div class="lx-none">Nothing to add</div>'}${lomaxUsageLine(run)}</div></div>`
   }
 
-  // Lomax opens every chat with a greeting (Ryan, 2026-10-06). Which one is
-  // fixed per chat (by its first run), so a repaint never swaps it.
+  // A run made during import (no question) opens with one of these.
   const LX_INTROS = [
     { t: (u) => `How's it going ${u}? Here is what I found for this show.` },
     { t: (u, a) => `What's up? I dug around for info about this ${a} recording, here's what I've got.`, artist: true },
@@ -6855,40 +6602,64 @@ const App = (() => {
     { t: (u, a) => `Alright ${u}, I took a pass at this ${a} recording. Here's what I came up with.`, artist: true },
     { t: (u) => `Hi ${u}. I read the info file and asked around about this one. Here's the rundown.` },
   ]
-  function lxIntroHtml(c, o) {
-    const first = c.runs[0]
+  function lxIntroHtml(run, o) {
     const user = String((state.user && (state.user.display_name || state.user.username)) || 'there').trim().split(/\s+/)[0]
     const artist = String((o.artist && o.artist()) || '').trim()
     const pool = artist ? LX_INTROS : LX_INTROS.filter(v => !v.artist)
-    const line = pool[(first && first.id ? first.id : 0) % pool.length].t(user, artist)
-    return `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub lx-intro">${esc(line)}</div></div>`
+    return lxSayMsg(lxPick(pool, run).t(user, artist))
   }
 
-  // o: {leave (show the leave-the-page line), addNotes (async fn(text), or null), artist (fn)}
+  // The time a finished run took, m:ss.
+  function lxTook(run) {
+    const a = lxTs(run.created_at), b = lxTs(run.finished_at)
+    return isNaN(a) || isNaN(b) ? '' : lxClock((b - a) / 1000)
+  }
+
+  // Per run: its timestamp, then either the question (a bubble), Lomax's acknowledgment, how long it
+  // researched and its reply, or, for a run made during import with no question, a greeting; then the
+  // results (the newest run's actionable, older ones collapsed) and, for the import case, a follow-on.
+  // o: {subject | kind, artist (fn), cards, current, ...}
   function lomaxChatHtml(c, o = {}) {
     if (!c.loaded) return '<div class="lx-empty">Loading…</div>'
     const latest = c.latest()
-    let html = c.runs.length ? lxIntroHtml(c, o) : '', day = null
+    const imports = lxSubjectKey(o) === 'recording'      // only a recording is researched during import
+    let html = ''
     for (const run of c.runs) {
-      const d = lxDay(run.created_at)
-      if (d && d !== day) { day = d; html += `<div class="lx-day">${esc(d)}</div>` }
-      if (run.question) html += `<div class="lx-me"><div class="lx-me-b">${esc(run.question)}</div></div>`
-      if (run.status === 'done') html += run === latest ? lxResultMessage(run, c, o) : lxOldMessage(run, c, o)
-      else if (run.status === 'error') html += `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub">${lomaxRunState(run)}</div></div>`
-      else html += `<div class="lx-msg">${lomaxRunState(run, { avatar: true, leave: o.leave })}</div>`
+      const stamp = lxStamp(run.created_at)
+      if (stamp) html += `<div class="lx-day">${esc(stamp)}</div>`
+      const asked = !!run.question, greeted = !asked && imports && run.status === 'done'
+      const lead = asked || greeted
+      if (asked) html += `<div class="lx-me"><div class="lx-me-b">${esc(run.question)}</div></div>` + lxSayMsg(run.ack_text || lxPick(LX_ACKS, run))
+      else if (greeted) html += lxIntroHtml(run, o)
+      const ro = Object.assign({}, o, { lead })
+      if (run.status === 'done') {
+        if (asked) {
+          const took = lxTook(run)
+          if (took) html += `<div class="lx-msg">${lxGhost}<div class="lx-took">Researched for ${took}</div></div>`
+          const reply = run.result && String(run.result.reply || '').trim()
+          if (reply) html += lxSayMsg(reply)
+        }
+        html += run === latest ? lxResultMessage(run, c, ro) : lxOldMessage(run, c, ro)
+        if (greeted && run === latest) html += lxSayMsg(lxPick(LX_FOLLOWS, run))
+      } else if (run.status === 'error') html += `<div class="lx-msg">${lead ? lxGhost : lomaxAvatar()}<div class="lx-bub">${lomaxRunState(run)}</div></div>`
+      else html += `<div class="lx-msg">${asked ? lxGhost : lomaxAvatar()}<div class="lx-bub">${lomaxRunState(run)}</div></div>`
     }
     if (c.error) html += `<div class="lx-msg">${lomaxAvatar()}<div class="lx-bub"><div class="lx-error" role="alert">${esc(c.error)}</div></div></div>`
     if (!c.runs.length && !c.error && !c.pending) {
-      // Nothing asked yet: a suggested prompt to click (Ryan, 2026-10-06).
-      const text = o.kind && o.kind() === 'studio'
-        ? 'Confirm all the details of this album' : 'Find out more info about this live recording.'
-      html = `<div class="lx-suggest"><button type="button" class="lx-chip lx-edit" data-lx-suggest>${esc(text)}</button></div>`
+      const sentence = lxSubject(o).empty
+      html = sentence ? `<div class="lx-empty">${lomaxAvatar()}<div>${esc(sentence)}</div></div>` : ''
     }
     return html
   }
 
-  // Mount the chat into a .slide-pane that holds
-  //   <div class="slide-pane-scroll lx-scroll"></div><div class="lx-bar-slot"></div>
+  const lxPlaceholder = (c, o) => {
+    const noun = lxSubject(o).noun
+    return noun && !c.runs.length ? `What do you want to know about this ${noun}?` : 'Anything else you want Lomax to research?'
+  }
+
+  // Mount the chat into a pane that holds
+  //   <div class="lx-scroll"></div><div class="lx-bar-slot"></div>
+  // (the recording side panels and the Lomax column of an About page).
   // c is an existing controller (Add Recording shares one with its Resolver
   // tab) or null to make one from ctlCfg. Returns the controller.
   function lomaxMountChat(pane, ctlCfg, o = {}, c = null) {
@@ -6897,13 +6668,15 @@ const App = (() => {
     const view = ctl => {
       if (!document.body.contains(pane)) return false
       lxRepaint(body, lomaxChatHtml(ctl, o), { stick: true })
-      lxRepaint(bar, lomaxAskBar({ placeholder: 'Anything else you want Lomax to research?', busy: !!ctl.pending }))
+      lxRepaint(bar, lomaxAskBar({ placeholder: lxPlaceholder(ctl, o), busy: !!ctl.pending,
+        prompts: ctl.runs.length || ctl.pending ? [] : lxSubject(o).prompts }))
       return true
     }
     const own = !c
     if (own) {
       c = lomaxController(Object.assign({ alive: () => document.body.contains(pane) }, ctlCfg))
     }
+    c.chatOpts = o
     pane.setAttribute('data-lx-ctl', c.id)
     if (o.addNotes) {
       const prev = c.cfg.onAct
@@ -6922,6 +6695,73 @@ const App = (() => {
     c.addView(view)
     if (own) c.load(); else view(c)
     return c
+  }
+
+  // ── Lomax on the About pages ────────────────────────────────────────────────
+  // The same chat as the recording side panel, in a column beside the About content. Only an own
+  // library has one (the peer door has no Lomax), and a viewer who cannot edit sees it only once
+  // there is a run to read.
+  function aboutGridHtml(left, colId) {
+    if (libraryState.activeId != null) return left
+    return `<div class="about-grid"><div class="about-main">${left}</div>` +
+      `<aside class="lx-col" id="${colId}"${canEditLibrary() ? '' : ' hidden'}><div class="lx-panel">` +
+      `<div class="lx-head">${lomaxMark()}</div><div class="lx-scroll"></div><div class="lx-bar-slot"></div></div></aside></div>`
+  }
+  function lomaxMountAbout(colId, ctlCfg, o) {
+    const col = document.getElementById(colId)
+    if (!col) return null
+    const c = lomaxMountChat(col.querySelector('.lx-panel'), ctlCfg, o)
+    c.addView(ctl => {
+      if (!document.body.contains(col)) return false
+      col.hidden = !(canEditLibrary() || ctl.runs.length)
+      return true
+    })
+    return c
+  }
+
+  const lxJson = p => { try { return JSON.parse(p.proposed) || {} } catch (_) { return {} } }
+  const lxYears = (a, b) => a && b ? (a === b ? a : `${a} to ${b}`) : (a ? `${a} to present` : (b ? `to ${b}` : ''))
+  const lxAcceptAll = open => open.length > 1 && canEditLibrary()
+    ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Accept all</button>` : ''
+  // A result card. title may be empty; open is the list of proposals still to decide.
+  function lxCardHtml(title, body, open, o) {
+    const all = o.readonly ? '' : lxAcceptAll(open || [])
+    const head = title || all ? `<div class="lx-card-h"><span class="lx-card-t">${title}</span><span class="lx-card-s"></span>${all}</div>` : ''
+    return `<div class="lx-card">${head}${body}</div>`
+  }
+  const lxAct = (p, o) => o.readonly ? '' : lomaxActions(p)
+
+  // Text Lomax wrote into the page (a biography or a history): "Updated" and, while it still
+  // stands, Restore Previous. o.current() is the text the page holds now.
+  function lxTextCard(title, run, c, o) {
+    const rep = run.result && run.result.replaced
+    if (!rep || !String(rep.written || '').trim()) return ''
+    const restored = !!run.result.restored_at
+    const link = o.readonly || restored ? '' : lomaxRestoreLink(c, run, o.current ? o.current() : null)
+    return `<div class="lx-card"><div class="lx-card-h"><span class="lx-card-t">${title}</span>` +
+      `<span class="lx-card-s">${restored ? '' : 'Updated'}</span>${link}</div>` +
+      `<div class="lx-card-b">${esc(stripCitations(rep.written))}</div></div>`
+  }
+
+  // Trellis | Lomax rows for plain fields. fields: [[field, label]]; o.value(field) is what the page holds.
+  function lxFieldsCard(title, run, o, fields) {
+    if (!canEditLibrary()) return ''
+    const fp = lxFieldProps(run)
+    const rows = fields.filter(([k]) => fp[k] && lxShown(fp[k]))
+    if (!rows.length) return ''
+    return lxCardHtml(title, `<table class="lx-tbl"><thead><tr><th></th><th>Trellis</th><th>Lomax</th><th></th></tr></thead><tbody>${rows.map(([k, label]) => {
+      const p = fp[k], now = o.value(k) || ''
+      return `<tr><th scope="row">${label}</th><td class="tv${now ? '' : ' lx-dim'}">${esc(now)}</td><td>${lomaxSuggestionCell(p)}</td>` +
+        `<td class="lx-act-td">${lxAct(p, o)}</td></tr>`
+    }).join('')}</tbody></table>`, rows.map(([k]) => fp[k]).filter(p => lxOpen(p, o)), o)
+  }
+
+  // An event's lineup: reference only, nothing to accept.
+  function lxLineupCard(run) {
+    const names = (run.result && run.result.lineup) || []
+    if (!names.length) return ''
+    return `<div class="lx-card"><div class="lx-card-h"><span class="lx-card-t">Lineup</span></div><table class="lx-tbl"><tbody>${names.map(n =>
+      `<tr><td>${esc(n.name)}${n.in_library ? '<span class="lx-tag">In Your Library</span>' : ''}</td></tr>`).join('')}</tbody></table></div>`
   }
 
   // Bring the Trellis column up to date with the form, in place. Not a repaint:
@@ -6948,7 +6788,7 @@ const App = (() => {
   // ask bar is pinned to the bottom of the panel (sticky, solid ground) and
   // looks the same before and after a run. The Trellis column is read live from
   // the form (o.value), so an edit shows without a new run.
-  // o: {resolved, value(field), tracks, leave, genreRow, mbGenre}
+  // o: {resolved, value(field), tracks, genreRow, mbGenre}
   // Tracks: each of Title, Songwriter and Notes is its own row with its own Trellis cell, Lomax cell
   // and accept / dismiss, so Title and Songwriter can be accepted and Notes dismissed. Accept all
   // takes titles and songwriters only; a note is always decided by itself.
@@ -6960,7 +6800,7 @@ const App = (() => {
   function lxGenreRowHtml(fp, o) {
     const p = fp.genre, mb = o.mbGenre
     let cell = '', acts = ''
-    if (lxShown(p)) { cell = lomaxSuggestionCell(p); acts = lomaxActions(p) }
+    if (lxShown(p)) { cell = lomaxSuggestionCell(p, { o }); acts = lomaxActions(p, { o }) }
     else if (mb && mb.name && mb.state !== 'dismissed') {
       const done = mb.state === 'accepted'
       cell = `<span class="${done ? 'lx-same' : 'lx-mb'}">${esc(mb.name)}</span>`
@@ -6971,7 +6811,7 @@ const App = (() => {
       `<td>${cell}</td><td class="lx-act-td" data-lx-genre-acts>${acts}</td></tr>`
   }
 
-  function lxTrackRowsHtml(tracks, tp) {
+  function lxTrackRowsHtml(tracks, tp, o) {
     return tracks.map(t => {
       const n = t.track_number, props = tp[n] || {}
       const out = []
@@ -6983,7 +6823,7 @@ const App = (() => {
         out.push(`<tr${first ? ' class="lx-trk"' : ''}>${first ? `<td class="lx-n" rowspan="@@">${lxPad2(n)}</td>` : ''}` +
           `<th scope="row" class="lx-pk">${label}</th>` +
           `<td data-lx-tp="${n}:${tk}"${dim ? ' class="lx-dim"' : ''}>${esc(now)}</td>` +
-          `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`)
+          `<td>${lomaxSuggestionCell(p, { o })}</td><td class="lx-act-td">${lomaxActions(p, { o })}</td></tr>`)
       }
       return out.join('').replace('rowspan="@@"', `rowspan="${out.length}"`)
     }).join('')
@@ -6999,24 +6839,28 @@ const App = (() => {
       const p = fp[k]
       return `<tr><th scope="row">${label}</th>` +
         `<td><span class="lx-tv" data-lx-tv="${k}">${esc(o.value(k) || '')}</span>\u2060${tentative}${lomaxSourcesPopover(plain[k], k)}</td>` +
-        `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`
+        `<td>${lomaxSuggestionCell(p, { o })}</td><td class="lx-act-td">${lomaxActions(p, { o })}</td></tr>`
     }).join('')
     if (o.genreRow || lxShown(fp.genre)) rows += lxGenreRowHtml(fp, o)
 
+    const openFields = LX_FIELDS.map(([k]) => fp[k]).concat(o.genreRow || lxShown(fp.genre) ? [fp.genre] : [])
+      .filter(p => lxOpen(p, o) && !(p.field === 'genre' && o.value('genre')))
+    const fieldsAll = openFields.length > 1 && canEditLibrary()
+      ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${openFields.map(p => p.id).join(',')}">Accept all</button>` : ''
     const tracks = o.tracks || []
     const bulk = []
-    for (const n of Object.keys(tp)) for (const k of ['title', 'songwriter']) if (lxOpen(tp[n][k])) bulk.push(tp[n][k].id)
+    for (const n of Object.keys(tp)) for (const k of ['title', 'songwriter']) if (lxOpen(tp[n][k], o)) bulk.push(tp[n][k].id)
     const acceptAll = bulk.length && canEditLibrary()
       ? `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${bulk.join(',')}">Accept all</button>` : ''
 
     const err = c.lastError()
     const q = run && run.question ? `<div class="lx-h">You asked: ${esc(run.question)}</div>` : ''
     const answer = lxAnswerHtml(run)
-    const state = c.pending ? lomaxRunState(c.pending, { leave: o.leave }) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')
+    const state = c.pending ? lomaxRunState(c.pending) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')
     return `<div class="lx-res-body">
       ${state}
-      <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>${lomaxMark()}</th><th></th></tr></thead><tbody>${rows}</tbody></table>
-      ${tracks.length ? `<div class="lx-sec"><div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Trellis</th><th>${lomaxMark()}</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${lxTrackRowsHtml(tracks, tp)}</tbody></table></div>` : ''}
+      <table class="lx-tbl lx-fields"><thead><tr><th>Field</th><th>Trellis</th><th>${lomaxMark()}</th><th class="lx-act-td">${fieldsAll}</th></tr></thead><tbody>${rows}</tbody></table>
+      ${tracks.length ? `<div class="lx-sec"><div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks"><thead><tr><th>#</th><th>Track</th><th>Trellis</th><th>${lomaxMark()}</th><th class="lx-act-td">${acceptAll}</th></tr></thead><tbody>${lxTrackRowsHtml(tracks, tp, o)}</tbody></table></div>` : ''}
       ${answer ? `<div class="lx-sec">${q}${answer}</div>` : ''}
       ${lxEarHtml(run || {})}
     </div>`
@@ -7036,8 +6880,8 @@ const App = (() => {
       resolved: rec.resolver_json || {},
       value: k => (vals[k] == null ? '' : String(vals[k])),
       tracks: rec.tracks || [],
+      saved: true,
       genreRow: !p.artist_genre,
-      leave: true,
     }
   }
 
@@ -7051,8 +6895,8 @@ const App = (() => {
     try {
       rec = await API.recordings.get(recordingId)
       state._lastTrackCount = rec.tracks?.length ?? null
-      // A studio record lives under Albums, not Live Recordings (2026-10-01).
-      // Set after the fetch so the wrong item never flashes while loading.
+      // A studio record lives under Albums, not Live Recordings. Set after
+      // the fetch so the wrong item never flashes while loading.
       setActiveNav(rec.kind === 'studio' ? 'albums' : 'library')
     } catch (e) {
       setMainHTML(`<div class="empty-state"><div class="empty-title">Recording not found</div></div>`)
@@ -7060,16 +6904,13 @@ const App = (() => {
     }
 
     // "← Back" points at whatever page immediately preceded this one — the
-    // generic navBack mechanism (route()), not the old state.selectedArtist
-    // hack that only worked if you'd arrived via an Artist page (Ryan's
-    // 2026-07-23 bug report: Recently Added → Recording → Back landed on
-    // Library, since selectedArtist was never set by Recently Added).
-    // The visible "← Library" link is gone (Ryan, 2026-08-22) — the App
-    // Header's back arrow does this job for every view at once. state.navBack
-    // survives because it is still the right destination after a delete or a
-    // move: those actions destroy the page you are on, so "go back" is more
-    // useful than "go to the previous entry in the history stack", which would
-    // be this same dead recording.
+    // generic navBack mechanism (route), not the old state.selectedArtist hack
+    // that only worked if you'd arrived via an Artist page. The visible "←
+    // Library" link is gone — the App Header's back arrow does this job for
+    // every view at once. state.navBack survives because it is still the right
+    // destination after a delete or a move: those actions destroy the page you
+    // are on, so "go back" is more useful than "go to the previous entry in
+    // the history stack", which would be this same dead recording.
     const backHash  = state.navBack ? state.navBack.hash : '#/'
 
     // We need performance info to show the date/venue
@@ -7086,11 +6927,11 @@ const App = (() => {
     const stageStr   = perf?.stage || ''
     setNavCurrent(dateStr || perfName || 'Recording')
 
-    // Small "go to its own page" nav icons (2026-07-23) — same treatment for
-    // Artist and Venue, shown regardless of edit permission since it's
-    // navigation, not editing. Plain hash links — the generic navBack
-    // mechanism (route()) picks up the "came from a recording" reference
-    // automatically, no per-link wiring needed.
+    // Small "go to its own page" nav icons — same treatment for Artist and
+    // Venue, shown regardless of edit permission since it's navigation, not
+    // editing. Plain hash links — the generic navBack mechanism (route)
+    // picks up the "came from a recording" reference automatically, no
+    // per-link wiring needed.
     const perfNavLink = perfId
       ? `<a class="rec-nav-link" href="#/artist/${perfId}" title="Go to ${esc(perfName)}'s page">↗</a>` : ''
     const venueNavLink = venueId
@@ -7132,19 +6973,21 @@ const App = (() => {
     // set_number (spec section 6.4, mockup panel 4e); flat otherwise --
     // same row markup either way. Note/Songwriter/Set are click-to-edit
     // directly in the row; right-click is Flags (+ Official) only --
-    // matches Add Recording's track table treatment (Ryan, 2026-07-15).
-    // Grouping is markup only: it never touches Player or playback order,
-    // which follows the continuous track_number as it always has.
+    // matches Add Recording's track table treatment. Grouping is markup
+    // only: it never touches Player or playback order, which follows the
+    // continuous track_number as it always has.
     const canEdit  = canEditLibrary()
     // The Resolver tab is the Lomax table. Lomax calls are not proxied to a peer, so a joined
     // library (which also sends no resolver_json) has none.
     const showResolver = libraryState.activeId == null
     const editHint = canEdit ? ' title="Click title to rename · right-click for flags"' : ''
     // Set no longer has a cell: it is edited from the track's right-click menu.
-    // The set group headers in the list still show it.
-    // No disc-track cell (Ryan, 2026-10-04), even when the metadata has discs.
+    // The set group headers in the list still show it. No disc-track cell, even
+    // when the metadata has discs.
     function trackRowHtml(t) {
-      const isPlaying  = t.id === state.playingTrackId
+      // Loaded AND actually playing: a paused track must render the play icon on a
+      // fresh render (navigating back), same rule syncPlayButtons applies live.
+      const isPlaying  = t.id === Player.currentId() && Player.isPlaying()
       const playingCls = isPlaying ? ' playing' : ''
       const playIcon   = icon(isPlaying ? 'pause' : 'play')
       return `
@@ -7159,9 +7002,9 @@ const App = (() => {
           <span class="track-dur">${fmtDuration(t.duration)}</span>
         </div>`
     }
-    // Column headers for everything after the title (Ryan, 2026-10-04): same
-    // grid as .track-row so they sit over their cells. Play, number and title
-    // need none. The disc cell is blank on a single-disc recording.
+    // Column headers for everything after the title: same grid as .track-row
+    // so they sit over their cells. Play, number and title need none. The
+    // disc cell is blank on a single-disc recording.
     function trackHeadHtml() {
       if (!(rec.tracks || []).length) return ''
       return `
@@ -7193,13 +7036,13 @@ const App = (() => {
     }
     let trackRows = buildTrackListHtml()
 
-    // Info File is READ-ONLY until asked otherwise (Ryan, 2026-08-21). It used
-    // to be a live textarea that autosaved on blur, matching Add Recording —
-    // but Add Recording is a form you came to in order to type, and a recording
-    // page is a page you came to in order to listen. An always-hot textarea on
-    // the listening surface means a stray click plus a keystroke silently
-    // rewrites the taper's own words. Admins get an explicit "Edit File" link;
-    // everyone else never sees an editable control at all.
+    // Info File is READ-ONLY until asked otherwise. It used to be a live
+    // textarea that autosaved on blur, matching Add Recording — but Add
+    // Recording is a form you came to in order to type, and a recording page is
+    // a page you came to in order to listen. An always-hot textarea on the
+    // listening surface means a stray click plus a keystroke silently rewrites
+    // the taper's own words. Admins get an explicit "Edit File" link; everyone
+    // else never sees an editable control at all.
     //
     // Still a <textarea> rather than a <pre>-swapped-for-a-textarea, so that
     // unlocking preserves scroll position and needs no re-render: the lock is
@@ -7227,12 +7070,10 @@ const App = (() => {
     // the top-right box — raw librosa readings (RMS, Dyn Range, cutoff) in one
     // vocabulary, while the Listening Quality engine described the same property
     // in another vocabulary elsewhere on the same page. Two systems, one
-    // property. Unified 2026-08-18 (IO-61): the engine is now the single quality
-    // surface and it lives in the Side Panel, which has the room for its three
-    // meters and the metrics underneath them. Everything the old Fidelity tab
-    // showed is still on the page — format, cutoff, dynamics and the
-    // spectrogram all come out of the same feature dict the engine scores from,
-    // so nothing was dropped, it was de-duplicated.
+    // property. Everything the old Fidelity tab showed is still on the page —
+    // format, cutoff, dynamics and the spectrogram all come out of the same
+    // feature dict the engine scores from, so nothing was dropped, it was
+    // de-duplicated.
     //
     // The top-right box is therefore no longer a tabbed element at all. It is a
     // plain borderless block of the three things a human typed.
@@ -7246,30 +7087,23 @@ const App = (() => {
     const qc  = qEditable ? ' hm-val--editable' : ''
     const qa  = f => qEditable ? ` data-qedit="${f}" title="Click to edit"` : ''
     // Source and Quality render with the SAME chips the Library rows, cards and
-    // search results use (Ryan, 2026-08-21) — a coloured source badge and the
-    // graded quality colour — rather than the flat grey text they used to carry.
-    // They are the two fastest reads on a recording, and a listener scanning a
-    // list then opening a show should not have to re-learn what "SBD" looks
-    // like on the way in. Editability is unchanged wherever they land: the chip
-    // sits INSIDE the .hm-val cell rather than replacing it, so the quick-edit
-    // handler still finds .hm-val--editable[data-qedit] and swaps its innerHTML.
-    //
-    // Rating (the Quality letter grade) was promoted to the action row alone
-    // 2026-08-21, then moved back down 2026-08-27 (Ryan) to sit left of Source
-    // — Rating, Source and Lineage read as one row of "the tape's paperwork
-    // plus the verdict on it" rather than Rating living apart from the two
-    // facts it's a judgement about.
+    // search results use — a coloured source badge and the graded quality colour
+    // — rather than the flat grey text they used to carry. They are the two
+    // fastest reads on a recording, and a listener scanning a list then opening
+    // a show should not have to re-learn what "SBD" looks like on the way in.
+    // Editability is unchanged wherever they land: the chip sits INSIDE the
+    // .hm-val cell rather than replacing it, so the quick-edit handler still
+    // finds .hm-val--editable[data-qedit] and swaps its innerHTML.
     //
     // Aligned with the Members/Guests rows above it — same .mg-row-label type
     // treatment and the same left edge, because it is the same kind of content.
     //
-    // Studio kind (Ryan, 2026-09-27): a studio release carries none of the
-    // tape paperwork above (no Source/Source tag/shnid/Lineage — those
-    // describe a taper's transfer chain, which a studio release doesn't
-    // have). It gets Rating plus a Release item instead, holding the same
-    // #rec-release mount renderReleaseBlock() already targets — moved up
-    // from the standalone pp-block below the header into this row so
-    // Release reads as one more fact in the row rather than its own box.
+    // Studio kind: a studio release carries none of the tape paperwork above (no
+    // Source/Source tag/shnid/Lineage — those describe a taper's transfer chain,
+    // which a studio release doesn't have). It gets Rating plus a Release item
+    // instead, holding the same #rec-release mount renderReleaseBlock already
+    // targets — moved up from the standalone pp-block below the header into this
+    // row so Release reads as one more fact in the row rather than its own box.
     const isStudioKind = rec.kind === 'studio'
     const releaseIsLinked = rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked'
     // Admin-in-Admin-mode gets the interactive block (renderReleaseBlock, wired
@@ -7292,8 +7126,9 @@ const App = (() => {
           <span class="mg-row-label">Discs</span>
           <span class="hm-val">${esc(String(rec.disc_count))}</span>
         </div>` : ''
-    // Rating (the letter-grade chip) is a live-show judgement — Ryan does not
-    // grade studio releases, so it never appears in a studio Provenance Row.
+    // Rating (the letter-grade chip) is a live-show judgement — the user does
+    // not grade studio releases, so it never appears in a studio Provenance
+    // Row.
     const rowIsEmpty = isStudioKind
       ? (!showReleaseBlock)
       : (!qEditable && !rec.source && !rec.lineage && !rec.quality
@@ -7325,9 +7160,9 @@ const App = (() => {
       </div>`
 
     // Analyze Audio lives in the Side Panel's tab strip with every other pane
-    // action (2026-08-21) — see the .pane-acts block below. POST /reprocess runs
-    // the whole audio pass (score, signals, librosa) for any recording, so the
-    // button and the quality verdict beside it can no longer disagree.
+    // action — see the .pane-acts block below. POST /reprocess runs the whole
+    // audio pass (score, signals, librosa) for any recording, so the button and
+    // the quality verdict beside it can no longer disagree.
 
     // Which track to show by default: currently playing (if in this rec) else first track
     const firstTrack    = rec.tracks?.[0] ?? null
@@ -7335,45 +7170,33 @@ const App = (() => {
       ? state.playingTrackId
       : (firstTrack?.id ?? null)
 
-    // Collections moved out of the box, up to the top row alongside the back
-    // link (Ryan, 2026-07-15).
+    // Collections moved out of the box, up to the top row alongside the back link.
+    // Right-hand column of the header. Top to bottom: the Actions menu (Add to
+    // Collection is an item in it now), the collections the recording is already
+    // in as a quiet stack beneath it, and the status line. The status line is
+    // Official Release when the recording is one, else where it currently sits
+    // when it is out of the library. Collections and Actions are editing surfaces,
+    // so Playback mode does not render them at all; the status line is a fact
+    // about the recording and stays.
+    const statusNoteHtml = () => (rec.is_official && rec.kind !== 'studio')
+      ? `<span class="rec-status-note" title="Contains officially released material">Official Release</span>`
+      : (rec.is_published === false
+        ? `<span class="rec-status-note" title="This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact; playback will not work until it comes back.">Out of Library</span>`
+        : '')
     const collectionArea = `
-      <div class="rec-collections" id="rec-collections">
-        ${(rec.collections || []).map(collectionTagHtml).join('')}
-        ${libraryState.activeId == null ? `
-        <button class="collection-add-btn" id="btn-add-collection">+ Add to Collection</button>` : ''}
-        <!-- Favorite toggle (moved here 2026-08-09 — was a star icon beside
-             the title). Sits next to Add to Collection since both are "mark
-             this recording" actions: one files it into a set, the other is a
-             single personal flag. Text-led rather than icon-only, per Ryan —
-             visible to everyone including listeners, since a highlight is a
-             personal reaction, not a library edit. -->
-        <button class="fav-toggle-btn${viewerHasFavorited(rec) ? ' is-fav' : ''}" id="btn-favorite"
-                aria-pressed="${viewerHasFavorited(rec) ? 'true' : 'false'}">${
-          viewerHasFavorited(rec) ? 'Favorited' : 'Mark as Favorite'}</button>
-        <!-- Actions menu (Ryan, 2026-08-21). Replaces the .rec-bottom-actions
-             row that used to sit under the track list: four admin buttons at
-             the far end of a page whose main content scrolls, so reaching
-             Delete meant scrolling past every track. These are per-recording
-             admin verbs, they belong with the other per-recording controls,
-             and a menu keeps them from competing with Play All for attention
-             on a listening surface. Write Tags is NOT here — it moved into
-             the File Tags pane, beside the tags it writes. -->
-        ${canEdit ? `
+      ${canEdit ? `
         <div class="rec-actions-wrap">
           <button class="actions-btn" id="btn-rec-actions" aria-expanded="false"
                   aria-haspopup="true">Actions ${chevronIcon('caret-ic--down')}</button>
           <div class="actions-menu" id="rec-actions-menu" hidden role="menu">
             <button class="actions-item" role="menuitem" data-act="reveal">Open in Containing Folder</button>
-            <button class="actions-item" role="menuitem" data-act="official">${
-              rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>
+            ${rec.kind === 'studio' ? '' : `<button class="actions-item" role="menuitem" data-act="official">${
+              rec.is_official ? 'Official Release' : 'Mark as Official Release'}</button>`}
             <button class="actions-item" role="menuitem" data-act="kind">${
               rec.kind === 'studio' ? 'Classify as Live Recording' : 'Classify as Album'}</button>
-            <!-- Move to — same two destinations as the triage queue's Move,
-                 deliberately: Workshop and Backlog are the two real folders a
-                 show goes back to, and having a different vocabulary before
-                 and after ingest would be the kind of small inconsistency
-                 that makes people hesitate. -->
+            ${libraryState.activeId == null ? `
+            <button class="actions-item actions-item--lead" role="menuitem" data-act="coll-toggle" aria-expanded="false">Add to Collection ${chevronIcon()}</button>
+            <div class="actions-submenu" id="rec-coll-sub" hidden></div>` : ''}
             ${rec.is_published === false ? `
             <div class="actions-note">Out of the library, in Workshop or Backlog</div>` : `
             ${triageDests().length ? `
@@ -7384,29 +7207,32 @@ const App = (() => {
             <div class="actions-sep"></div>
             <button class="actions-item actions-item--danger" role="menuitem" data-act="delete">Delete Recording</button>
           </div>
+        </div>
+        <div class="rec-collections" id="rec-collections">
+          ${(rec.collections || []).map(collectionTagHtml).join('')}
         </div>` : ''}
-      </div>`
+      <div class="rec-status" id="rec-status">${statusNoteHtml()}</div>`
 
-    // The recording's ONE square (Ryan, 2026-10-04). It used to be two -- the
-    // artist's avatar and a separate cover slot -- and is now the recording's
-    // image by the chain the server resolves into rec.image_url: its own image,
-    // else the artist's, else the artist's initials. Clicking it opens the image
-    // modal (zoom, and for an editor the gallery). Genre-colour ring, as the
-    // artist avatar it replaces had. Not a button when there is nothing to open:
-    // initials only, and no edit rights.
+    // The recording's ONE square. It used to be two -- the artist's avatar and a
+    // separate cover slot -- and is now the recording's image by the chain the
+    // server resolves into rec.image_url: its own image, else the artist's, else
+    // the artist's initials. Clicking it opens the image modal (zoom, and for an
+    // editor the gallery). Genre-colour ring, as the artist avatar it replaces
+    // had. Not a button when there is nothing to open: initials only, and no
+    // edit rights.
     const imageClickable = !!(rec.image_url || canEdit)
     const coverBlockHtml = `
       <div class="rec-header-avatar${imageClickable ? ' rec-header-avatar--btn' : ''}" id="rec-cover"
            style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}"${imageClickable ? ' role="button" tabindex="0"' : ''}></div>`
 
-    // Studio heading + sub-line (Ryan, 2026-09-27 — owner-approved design).
-    // The album title takes the h2 that a live recording gives the artist;
-    // the artist name drops down into the sub-line that a live recording
-    // spends on date/venue/location/event, none of which a studio release
-    // has. If the ALBUM tag never gave us a title, the heading falls back to
-    // exactly what a live recording shows (artist name, same id/wiring) —
-    // the sub-line still carries artist/year/track-count/length below it,
-    // since that information does not depend on having a title to put above it.
+    // Studio heading + sub-line. The album title takes the h2 that a live
+    // recording gives the artist; the artist name drops down into the sub-line
+    // that a live recording spends on date/venue/location/event, none of which
+    // a studio release has. If the ALBUM tag never gave us a title, the heading
+    // falls back to exactly what a live recording shows (artist name, same
+    // id/wiring) — the sub-line still carries artist/year/track-count/length
+    // below it, since that information does not depend on having a title to put
+    // above it.
     const studioTitleHtml = rec.title ? `
           <div class="rec-name-row">
             <h2 class="rec-perf-name rec-perf-name--album${canEdit ? ' pp-editable' : ''}" id="rec-title"${canEdit ? ' title="Click to edit"' : ''}>${esc(rec.title)}</h2>
@@ -7426,36 +7252,29 @@ const App = (() => {
       : null
     const studioSubParts = [studioArtistHtml, studioYearStr ? esc(studioYearStr) : null,
       studioTrackCountStr ? esc(studioTrackCountStr) : null, studioLengthStr ? esc(studioLengthStr) : null].filter(Boolean)
+    // The favorite star sits just left of the date: an icon that toggles, for live
+    // shows and albums alike. Not an edit, so it renders in every mode, and in a
+    // joined library it writes remote_favorite (setViewerFavorite).
+    const favOn = viewerHasFavorited(rec)
+    const headerStarHtml = `<button type="button" class="rec-fav-star rec-hdr-star${favOn ? ' is-fav' : ''}" id="btn-favorite"
+              aria-pressed="${favOn ? 'true' : 'false'}" title="${favStarTitle(favOn)}">${icon('star', null, favOn)}</button>`
     const studioSubLineHtml = `
           <div class="rec-date-line" id="rec-date-line">
-            ${studioSubParts.join('<span class="rec-dot">·</span>')}
+            ${headerStarHtml}${studioSubParts.join('<span class="rec-dot">·</span>')}
           </div>`
 
+    // Playback is !canEdit, which also covers a listener and a joined library.
+    const pbMode = !canEdit
+
     setMainHTML(`
-      <div class="rec-view-shell">
+      <div class="rec-view-shell${pbMode ? ' rec-view-shell--pb' : ''}">
       ${hasAnalysis ? `
-      <!-- Waveform banner — spans full width above everything, incl. the back
-           link (Ryan, 2026-07-15: "placed at the top of the screen, above
-           everything"). Hidden entirely until analysis exists. Rendered with
-           wavesurfer.js (vendored locally under /js/vendor/ — no CDN, this
-           app runs offline) — adopted officially 2026-07-15 after a spike;
-           replaces the old hand-rolled canvas renderer. -->
       <div class="rec-waveform-wrap" id="rec-waveform-wrap">
         <div id="rec-waveform-ws" class="rec-waveform-ws"></div>
       </div>` : ''}
       <div class="rec-detail-header">
-        <!-- Two rows since 2026-08-21: the identity row (avatar + lines +
-             then Notes spanning the full width beneath it. Notes used to sit
-             inside .rec-header-lines, which capped it at the left column's
-             width and at 480px on top of that — a paragraph of taper notes
-             wrapped into a narrow ribbon with half the header empty beside it.
-             The right-hand meta block that emptiness belonged to is gone as of
-             2026-08-21; see the sourceLineageRow comment (Rating rejoined
-             it 2026-08-27). -->
         <div class="rec-header-main">
         <div class="rec-header-left">
-          <!-- Recording image (see coverBlockHtml) — to the left of the name
-               and date lines, spanning both. -->
           ${coverBlockHtml}
           <div class="rec-header-lines">
           ${isStudioKind ? studioTitleHtml : `
@@ -7465,7 +7284,7 @@ const App = (() => {
           </div>`}
           ${isStudioKind ? studioSubLineHtml : `
           <div class="rec-date-line" id="rec-date-line">
-            <span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>
+            ${headerStarHtml}<span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>
             <span class="rec-dot">·</span>
             ${canEdit
               ? `<span class="rec-f rec-f-venue pp-editable" id="rec-f-venue">${venueStr ? esc(venueStr) : '<span class="pp-empty">Add venue</span>'}</span>${venueNavLink}`
@@ -7480,33 +7299,20 @@ const App = (() => {
           </div>`}
           <div class="rec-musicians-row" id="rec-musicians"></div>
           ${sourceLineageRow}
-          ${(rec.is_official || rec.is_published === false) ? `<div class="badge-row">
-            ${rec.is_published === false ? `<span class="badge-unpublished" title="This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact; playback will not work until it comes back.">Out of Library</span>` : ''}
-            ${rec.is_official ? `<span class="badge-official" title="Contains officially released material">© Official</span>` : ''}
-          </div>` : ''}
           <div class="rec-header-notes${canEdit ? ' pp-editable' : ''}${rec.notes ? '' : ' pp-empty'}" id="rec-notes"${canEdit ? ' title="Click to edit notes"' : ''}>${rec.notes ? esc(rec.notes) : (canEdit ? 'Add notes…' : '')}</div>
           </div>
         </div>
-        <!-- Action cluster (collections, favorite, Actions menu) — sibling of
-             .rec-header-left inside .rec-header-main as of 2026-08-27, not its
-             own row above the header. It used to be a full row of its own
-             (originally aligned with a back link removed 2026-08-22), which
-             left it floating above the Artist Name with a big dead gap
-             between them. Pulled level with the top of the avatar/name block
-             instead (Ryan). -->
         <div class="rec-header-actions">
           ${collectionArea}
         </div>
         </div>
       </div>
       <div class="action-bar">
-        <!-- Playback actions only — editing/admin actions live at the bottom -->
-        <button class="btn btn-ghost btn-sm" id="btn-play-all">Play All</button>
-        ${!isStudioKind ? `<label class="skip-toggle skip-toggle--action" title="Skip announcements, banter &amp; tuning from queue">
+        <button class="btn btn-primary btn-sm btn-play-all" id="btn-play-all">${icon('play', 'pa-ic', true)}Play All</button>
+        <label class="skip-toggle skip-toggle--action" title="Skip announcements, banter &amp; tuning from queue">
           <input type="checkbox" class="skip-filter-cb" id="skip-filter-action" ${state.skipNonMusic ? 'checked' : ''} />
-          <span class="skip-toggle-track"></span>
           <span class="skip-toggle-label">Skip Non-Music</span>
-        </label>` : ''}
+        </label>
         ${canEdit ? panelToggleHtml('slide-rail') : ''}
       </div>
       <div class="detail-panels" id="detail-panels">
@@ -7514,29 +7320,10 @@ const App = (() => {
           ${trackHeadHtml()}${trackRows || '<div class="info-panel-empty">No tracks</div>'}
         </div>
 
-        <!-- The Details pane is an ADMIN surface and is not rendered at all in
-             Playback mode (Ryan, 2026-08-21) — not hidden with CSS, absent.
-             Info file, quality metrics, Vorbis comments and checksums are an
-             archivist's working set; a listener opening a show wants the tracks
-             and the transport. Removing it also gives the track list the full
-             width, which is the point of the mode. -->
         ${canEdit ? `
-        <!-- Slide-in right panel: the Details pane. Tabs are an index column at
-             its right edge (detailsTabsHtml, shared with Add Recording); the
-             show/hide toggle is in the action bar above, outside the panel, so
-             it stays put while the panel slides (Ryan, 2026-10-04). -->
         <div class="slide-panel slide-panel--htabs slide-panel--index" id="slide-panel">
           <div class="slide-panel-main">
 
-          <!-- Actions for the active pane (and the staged-edits note), one pane's
-               controls at a time. Tabs live in the index column at the right
-               (Ryan, 2026-10-04), so this row has the panel's full width and the
-               longest cluster (the note plus Write Tags and Rename) fits on one
-               line. Every action for every pane is rendered once here and shown
-               by data-for as the pane changes, so ids stay stable and existing
-               wiring (markStaged's #btn-write-tags, wireReanalyze) keeps
-               working with no lookup churn. The row hides itself when the active
-               pane has nothing to offer. -->
           <div class="pane-acts" id="pane-acts">
               <span class="pane-title" id="pane-title"></span>
               ${canEdit ? `
@@ -7558,54 +7345,38 @@ const App = (() => {
 
           <div class="slide-panel-body" id="slide-panel-body">
 
-            <!-- Info File pane. Locked until "Edit File" is clicked; see the
-                 infoContent comment above for why. Save stays disabled until
-                 the text actually changes — "changes have been staged" is a
-                 real precondition here, not decoration: the button writes to
-                 the collector's disk. -->
             <div class="slide-pane" id="sp-info">
               <div class="slide-pane-scroll"><div class="rev-raw-section">${infoContent}</div></div>
             </div>
 
-            <!-- Listening Quality pane — the single quality surface (IO-61,
-                 2026-08-18). Verdict band + the three group meters up top,
-                 each group's advanced metrics folded underneath it behind a
-                 caret. Loaded lazily on first open: it is a second request and
-                 most visits to a recording are to play it, not to audit it. -->
             <div class="slide-pane" id="sp-quality">
               <div class="slide-pane-scroll" id="sp-quality-body">
                 <div class="info-panel-empty">Loading…</div>
               </div>
             </div>
 
-            <!-- File Tags pane — actual on-disk Vorbis comments -->
             <div class="slide-pane" id="sp-filetags">
               <div class="slide-pane-scroll" id="sp-filetags-body">
                 <div class="info-panel-empty">Loading…</div>
               </div>
             </div>
 
-            <!-- Checksums pane — .ffp/.md5/.st5 fingerprint verification -->
             <div class="slide-pane" id="sp-checksums">
               <div class="slide-pane-scroll" id="sp-checksums-body">${buildChecksumsPaneHtml(rec.tracks)}</div>
             </div>
 
             ${isStudioKind ? `
-            <!-- MusicBrainz: the same tab as Add Recording's Album layout (2026-10-06). -->
             <div class="slide-pane" id="sp-mb">
               <div class="slide-pane-scroll"><div class="rev-raw-section"><div id="rec-release">${releaseStaticHtml}</div>
                 <div id="rec-release-detail"></div></div></div>
             </div>` : ''}
 
             ${showResolver && !isStudioKind ? `
-            <!-- Resolver pane: the same Lomax table as Add Recording -->
             <div class="slide-pane" id="sp-resolver">
               <div class="slide-pane-scroll lx-col"><div class="lx-res" id="lx-res-root"></div></div>
             </div>` : ''}
 
             ${canEdit ? `
-            <!-- Lomax pane: a chat. Messages scroll; the ask bar is its own
-                 flex row at the bottom (lomaxMountChat fills both). -->
             <div class="slide-pane" id="sp-ai">
               <div class="slide-pane-scroll lx-scroll"></div>
               <div class="lx-bar-slot"></div>
@@ -7645,18 +7416,16 @@ const App = (() => {
     })
 
     // Track row clicks — skip grayed-out rows; use track ID to find correct queue index.
-    // Clicking the row for the track that's already loaded toggles play/pause
-    // in place; clicking any other row starts that track fresh (Ryan,
-    // 2026-08-27 — previously every click restarted playback from 0, so the
-    // "pause" icon could never actually get back to "play"). Named so a Set
-    // edit's re-render (below) can re-wire the rebuilt rows the same way —
-    // grouping is markup only and must never touch how playback finds a row.
+    // Clicking the row for the track that's already loaded toggles play/pause in place;
+    // clicking any other row starts that track fresh. Named so a Set edit's re-render
+    // (below) can re-wire the rebuilt rows the same way — grouping is markup only and
+    // must never touch how playback finds a row.
     function wirePlaybackTrackRowClicks() {
       mainContent.querySelectorAll('.track-row[data-track-id]').forEach(row => {
         row.addEventListener('click', e => {
           // Only the play button, the number and the title start or pause a
-          // track (Ryan, 2026-10-04). Notes, Songwriter, Set and the gaps
-          // between cells do nothing, so editing a cell never plays the row.
+          // track. Notes, Songwriter, Set and the gaps between cells do
+          // nothing, so editing a cell never plays the row.
           if (!e.target.closest('.track-play, .track-num, .track-title-wrap')) return
           if (row.classList.contains('track-row--skipped')) return
           const tid = parseInt(row.dataset.trackId)
@@ -7673,10 +7442,9 @@ const App = (() => {
 
     // ── Quick edit: recording metadata (Source/Lineage/Quality) ──────────────
     // Click an editable value → inline input → Enter saves, Esc cancels.
-    // Rating dropped 2026-08-18 — see app/models/recording.py.
     // Redisplay after a quick edit must rebuild the SAME chip markup the
-    // initial render emitted (2026-08-21) — otherwise editing Source once
-    // silently downgrades it from a coloured badge to grey text until reload.
+    // initial render emitted — otherwise editing Source once silently
+    // downgrades it from a coloured badge to grey text until reload.
     function metaCellDisplay(field) {
       if (field === 'source')  return sourceBadge(rec.source) || '—'
       if (field === 'source_tag') return esc(rec.source_tag || '—')
@@ -7721,7 +7489,7 @@ const App = (() => {
     // Who played the show is CONTENT, not an editing surface — a listener wants
     // it as much as an archivist does. It went missing in Playback mode because
     // the whole personnel block sat inside `if (canEdit && perf)`, wiring and
-    // rendering together (Ryan, 2026-08-22).
+    // rendering together.
     //
     // The markup lives here, once, and both paths call it: renderRecMusicians()
     // inside the editing block, and the read-only render below. Duplicating it
@@ -7729,9 +7497,9 @@ const App = (() => {
     function recPersonnelHtml(personnel, editable) {
       const members = (personnel || []).filter(p => !p.is_guest)
       const guests  = (personnel || []).filter(p =>  p.is_guest)
-      // The name is a link to that person's Musician page, in BOTH modes
-      // (Ryan, 2026-08-22). It used to open an inline instrument/note editor —
-      // see renderPersonnelDetail, removed with it. Every other name in the app
+      // The name is a link to that person's Musician page, in BOTH modes. It
+      // used to open an inline instrument/note editor — see
+      // renderPersonnelDetail, removed with it. Every other name in the app
       // navigates when clicked; this one alone opened a form, which is exactly
       // the kind of inconsistency that makes people stop clicking things.
       //
@@ -7773,7 +7541,6 @@ const App = (() => {
       if (box) box.innerHTML = recPersonnelHtml(perf.personnel || [], false)
     }
 
-    // ── Recording image (Ryan, 2026-10-04) ───────────────────────────────
     // Outside the canEdit block on purpose: Playback mode and peers must see the
     // image too (it was absent there). The modal itself gates editing.
     // Draws rec.image_url -- already the resolved chain (own image, else the
@@ -7836,9 +7603,9 @@ const App = (() => {
       if (on) autoWriteStagedTags()
     }
     function markStaged() { setTagsStaged(true) }
-    // "Write changes to file tags immediately upon update" (Ryan, 2026-10-06):
-    // with the setting on, a staged change is written straight away. Debounced
-    // so a burst of edits becomes one write.
+    // "Write changes to file tags immediately upon update": with the setting
+    // on, a staged change is written straight away. Debounced so a burst of
+    // edits becomes one write.
     let _autoWriteTimer = null
     function autoWriteStagedTags() {
       clearTimeout(_autoWriteTimer)
@@ -7847,6 +7614,16 @@ const App = (() => {
         try { fh = await fileHandling() } catch (_) { return }
         if (fh && fh.write_tags_default && document.getElementById('btn-write-tags')) _doWriteTags()
       }, 600)
+    }
+    // Performance-level edits (artist, date, venue, event, stage, personnel) log
+    // no recording event, so the staged-edit path above never sees them. They
+    // call this directly after a successful save; it writes at once when the
+    // setting is on and is a no-op otherwise.
+    async function autoWriteNow() {
+      let fh = null
+      try { fh = await fileHandling() } catch (_) { return }
+      if (!fh || !fh.write_tags_default) return
+      try { await API.recordings.writeTags(recordingId) } catch (_) { /* stays staged; the button is still there */ }
     }
     function refreshTrackRow(t) {
       const row = mainContent.querySelector(`.track-row[data-track-id="${t.id}"]`)
@@ -7907,13 +7684,13 @@ const App = (() => {
         })
         // Right-click anywhere on the row → flags (+ Official) popup. Note
         // and Songwriter used to live here too; they're click-to-edit cells
-        // directly in the row now, matching Add Recording (Ryan, 2026-07-15).
+        // directly in the row now, matching Add Recording.
         row.addEventListener('contextmenu', ev => {
           ev.preventDefault()
           openTrackMenu(track, ev.clientX, ev.clientY, {
             flagsOnly: true,
-            showOfficial: true,
-            showSet: true,
+            showOfficial: !isStudioKind,
+            showSet: !isStudioKind,
             onChange: async (t) => {
               try { await API.tracks.update(t.id, { flags: t.flags, is_official: t.is_official }); markStaged() }
               catch (e) { console.error(e) }
@@ -7922,10 +7699,10 @@ const App = (() => {
             // Saving a Set never touches disk, tags or track_number (spec
             // section 6.4) and re-renders the WHOLE list, since grouping and
             // every set's derived position can change from one edit. No
-            // markStaged(): write_flac_tags writes no set tag (N6, 2026-09-25).
+            // markStaged: write_flac_tags writes no set tag.
             onSet: async (t) => {
               try { await API.tracks.update(t.id, { set_number: t.set_number }) }
-              catch (e) { alert('Failed: ' + e.message) }
+              catch (e) { Notify.error('Failed: ' + e.message) }
               renderTrackList()
             },
           })
@@ -7940,7 +7717,7 @@ const App = (() => {
             v = v.trim() || null
             track.notes = v
             try { await API.tracks.update(track.id, { notes: v }); markStaged() }
-            catch (e) { alert('Failed: ' + e.message) }
+            catch (e) { Notify.error('Failed: ' + e.message) }
             refreshTrackRow(track)
           },
         })
@@ -7951,7 +7728,7 @@ const App = (() => {
             v = v.trim() || null
             track.songwriter = v
             try { await API.tracks.update(track.id, { songwriter: v }); markStaged() }
-            catch (e) { alert('Failed: ' + e.message) }
+            catch (e) { Notify.error('Failed: ' + e.message) }
             refreshTrackRow(track)
           },
         })
@@ -7992,8 +7769,8 @@ const App = (() => {
           if (committed) return; committed = true
           name = (name || '').trim()
           if (name && name.toLowerCase() !== (perf.artist || '').toLowerCase()) {
-            try { await API.performances.update(perf.id, { artist_name: name }); invalidateDims('artists', 'musicians') }
-            catch (e) { alert('Failed: ' + e.message) }
+            try { await API.performances.update(perf.id, { artist_name: name }); invalidateDims('artists', 'musicians'); await autoWriteNow() }
+            catch (e) { Notify.error('Failed: ' + e.message) }
           }
           reload()
         }
@@ -8006,9 +7783,7 @@ const App = (() => {
         })
       })
 
-      // Date → inline Year / Month / Day, with an optional End Date (same
-      // +/- toggle pattern as the ingest form's "+ End date", 2026-07-23 —
-      // for multi-day stands, e.g. the Danny Gatton Cellar Door shows).
+      // Date → inline Year / Month / Day, with an optional End Date.
       // Clearing the end fields and committing removes the end date.
       const dateEl = document.getElementById('rec-f-date')
       dateEl?.addEventListener('click', () => {
@@ -8040,7 +7815,8 @@ const App = (() => {
               start_year: y, start_month: m, start_day: d,
               end_year: ey, end_month: em, end_day: ed,
             })
-          } catch (e) { alert('Failed: ' + e.message) }
+            await autoWriteNow()
+          } catch (e) { Notify.error('Failed: ' + e.message) }
           reload()
         }
         document.getElementById('rec-toggle-end-date').addEventListener('click', e => {
@@ -8092,8 +7868,8 @@ const App = (() => {
           try {
             let venueId = id
             if (!venueId && name) { const c = await API.venues.create({ name }); venueId = c.id; invalidateDims('venues') }
-            if (venueId) await API.performances.update(perf.id, { venue_id: venueId })
-          } catch (e) { alert('Failed: ' + e.message) }
+            if (venueId) { await API.performances.update(perf.id, { venue_id: venueId }); await autoWriteNow() }
+          } catch (e) { Notify.error('Failed: ' + e.message) }
           reload()
         }
         wireVenuePickerDropdown(input, document.getElementById('rec-venue-dd'), commitVenue)
@@ -8120,7 +7896,8 @@ const App = (() => {
             let eventId = id
             if (!eventId && name) { const c = await API.events.create({ name }); eventId = c.id }
             await API.performances.update(perf.id, { event_id: eventId || null })
-          } catch (e) { alert('Failed: ' + e.message) }
+            await autoWriteNow()
+          } catch (e) { Notify.error('Failed: ' + e.message) }
           reload()
         }
         wirePickerDropdown(input, document.getElementById('rec-event-dd'), API.events.search,
@@ -8138,8 +7915,8 @@ const App = (() => {
         get: () => perf.stage || '',
         onSave: async v => {
           v = v.trim()
-          try { await API.performances.update(perf.id, { stage: v || null }); perf.stage = v || null }
-          catch (e) { alert('Failed: ' + e.message) }
+          try { await API.performances.update(perf.id, { stage: v || null }); perf.stage = v || null; await autoWriteNow() }
+          catch (e) { Notify.error('Failed: ' + e.message) }
         },
       })
 
@@ -8150,37 +7927,36 @@ const App = (() => {
         onSave: async v => {
           v = v.trim(); rec.notes = v
           try { await API.recordings.update(recordingId, { notes: v || null, change_note: 'Quick edit' }); markStaged() }
-          catch (e) { alert('Failed: ' + e.message) }
+          catch (e) { Notify.error('Failed: ' + e.message) }
         },
       })
 
-      // Album title (studio kind, Ryan, 2026-09-27) — no-ops when #rec-title
-      // isn't on the page (live, or a studio recording with no title yet).
-      // Reloads on save rather than patching in place: clearing the title
-      // out swaps the whole heading/sub-line back to the live-style fallback,
-      // which is a different element (id and all), not a text swap.
+      // Album title — no-ops when #rec-title isn't on the page (live, or a
+      // studio recording with no title yet). Reloads on save rather than
+      // patching in place: clearing the title out swaps the whole
+      // heading/sub-line back to the live-style fallback, which is a
+      // different element (id and all), not a text swap.
       makeInlineEditable(document.getElementById('rec-title'), {
         get: () => rec.title || '',
         onSave: async v => {
           v = v.trim()
           try { await API.recordings.update(recordingId, { title: v, change_note: 'Quick edit' }) }
-          catch (e) { alert('Failed: ' + e.message) }
+          catch (e) { Notify.error('Failed: ' + e.message) }
           rec.title = v
           renderRecordingView(recordingId)
         },
       })
 
-      // ── Release block (Studio Records spec v1, chunk 3) ─────────────────
       // Same .pp-mb-* styling and state machine as the Artist page's
       // MusicBrainz block: matched (confidence gate chose it, no human
       // involved), linked (a human picked it), ambiguous/none/null (nothing
       // to show yet). "Matched automatically" / "Linked by you" are the
       // exact strings that block already renders — reused verbatim (S2/S3).
       function releaseFactsLine() {
-        // Label, catalog number, country only (Ryan, 2026-09-27) — title and
-        // year are the header's job now, one row up, so this stopped
-        // repeating them. Falls back to the title only when none of the
-        // three release-specific facts are known.
+        // Label, catalog number, country only — title and year are the
+        // header's job now, one row up, so this stopped repeating them.
+        // Falls back to the title only when none of the three
+        // release-specific facts are known.
         const facts = [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean)
         return facts.length ? facts.join(' · ') : (rec.title || '')
       }
@@ -8252,7 +8028,7 @@ const App = (() => {
             rec.mb_catalog_number    = null
             rec.mb_release_country   = null
             renderReleaseBlock()
-          } catch (e) { alert('Failed: ' + e.message) }
+          } catch (e) { Notify.error('Failed: ' + e.message) }
         })
         document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
       }
@@ -8313,7 +8089,7 @@ const App = (() => {
               rec.mb_catalog_number   = res.mb_catalog_number
               rec.mb_release_country  = res.mb_release_country
               renderReleaseBlock()
-            } catch (e) { alert('Failed: ' + e.message); renderReleaseBlock() }
+            } catch (e) { Notify.error('Failed: ' + e.message); renderReleaseBlock() }
           })
           btn.addEventListener('keydown', e => {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click() }
@@ -8400,25 +8176,18 @@ const App = (() => {
         })
       }
 
-      // Members/Guests two-row personnel widget (2026-07-22, replacing the
-      // single Musicians pill row + Inherit/Explicit mode selector). Pills
-      // split purely on perf.personnel[].is_guest — Members = roster/explicit
-      // non-guest rows, Guests = is_guest rows — same split used by the Add
-      // Recording form's createMembersWidget, matched visually here (mg-row/
-      // mg-add-picker markup) so both surfaces look identical. ⚠ They share
-      // markup AND CSS, so a change to one is a change to both — the
-      // 2026-09-01 always-present-input rework had to be applied here in the
-      // same pass for exactly that reason.
-      // The Inherit/Explicit mode is still a real field on Performance (case
-      // 5 — dropping a roster member for this one show — still auto-flips it
-      // under the hood), it just no longer has a manual UI control; nothing
-      // in this Phase needed one, since editing the rows already covers
-      // every case the toggle used to require picking by hand.
+      // Members/Guests two-row personnel widget. The Inherit/Explicit mode is
+      // still a real field on Performance (case 5 — dropping a roster member
+      // for this one show — still auto-flips it under the hood), it just no
+      // longer has a manual UI control; nothing in this Phase needed one,
+      // since editing the rows already covers every case the toggle used to
+      // require picking by hand.
       const persistPersonnelLists = async (memberNames, guestNames) => {
         try {
           await API.performances.update(perf.id, { members: memberNames, guests: guestNames })
           invalidateDims('musicians')
-        } catch (e) { alert('Failed: ' + e.message) }
+          await autoWriteNow()
+        } catch (e) { Notify.error('Failed: ' + e.message) }
         reload()
       }
 
@@ -8442,10 +8211,10 @@ const App = (() => {
             await persistPersonnelLists(newMembers, newGuests)
           }))
 
-        // The "+" button is gone (2026-09-01) — the input is permanent, so
-        // there is nothing left to reveal. See createMembersWidget's comment
-        // for why the reveal itself was the height jump; this surface shares
-        // the markup and the CSS, so it has to share the fix or the two drift.
+        // The "+" button is gone — the input is permanent, so there is nothing
+        // left to reveal. See createMembersWidget's comment for why the reveal
+        // itself was the height jump; this surface shares the markup and the
+        // CSS, so it has to share the fix or the two drift.
         box.querySelectorAll('.mg-role-input').forEach(input => {
           const role = input.dataset.role
           const dd   = box.querySelector(`.mg-role-dd[data-role="${role}"]`)
@@ -8460,11 +8229,6 @@ const App = (() => {
         })
       }
 
-      // renderPersonnelDetail() REMOVED 2026-08-22 (Ryan) — the inline
-      // instrument/note editor is out of V1. Clicking a name now opens that
-      // person's Musician page instead, which is what every other name in the app
-      // does.
-      //
       // The DATA and its API survive untouched: PerformancePersonnel still
       // carries `instrument` and `note`, resolve_performance_personnel still
       // returns them, and PATCH /api/performances/<id>/personnel/<row_id>
@@ -8483,7 +8247,7 @@ const App = (() => {
       const lxc = (resRoot || albumLx) ? lomaxController({
         skill: isStudioKind ? 'album' : 'recording', subjectType: 'recording', subjectId: recordingId,
         alive: () => document.body.contains(resRoot || document.getElementById('sp-ai')),
-        afterAccept: () => renderRecordingView(recordingId),
+        afterAccept: async () => { await autoWriteNow(); renderRecordingView(recordingId) },
       }) : null
       if (lxc) {
         if (resRoot) {
@@ -8496,9 +8260,9 @@ const App = (() => {
         }
         if (canEdit) {
           lomaxMountChat(document.getElementById('sp-ai'), null, {
-            leave: true,
             artist: () => perf && perf.artist,
             kind: () => rec.kind,
+            saved: true, tracks: () => rec.tracks || [],
             addNotes: async text => {
               const cur = String(rec.notes || '').trim()
               const next = cur ? `${cur}\n${text}` : text
@@ -8527,7 +8291,7 @@ const App = (() => {
       try {
         const result = await API.recordings.reprocess(recordingId)
         // The score is the part this button is for: if it failed, say so and
-        // why, rather than "Done" over a pane that stays empty (2026-10-06).
+        // why, rather than "Done" over a pane that stays empty.
         if (result.score === 'failed') {
           setAll('Analyze Audio', false)
           const why = (result.errors || []).find(e => /^score:/.test(e)) || 'unknown error'
@@ -8559,7 +8323,7 @@ const App = (() => {
       btn.disabled = true
       btn.textContent = '…'
       try { await API.recordings.verifyChecksums(recordingId) }
-      catch (err) { alert('Re-validate failed: ' + err.message) }
+      catch (err) { Notify.error('Re-validate failed: ' + err.message) }
       renderRecordingView(recordingId)
     })
 
@@ -8570,18 +8334,18 @@ const App = (() => {
     // Apply filter to current view immediately (in case state was already on)
     applySkipFilter()
 
-    // Open in Containing Folder (2026-08-09). File paths never reach the
-    // frontend (see the module's File obfuscation note) — the path is
-    // resolved server-side and Finder is opened from there, since this is a
+    // Open in Containing Folder. File paths never reach the frontend (see
+    // the module's File obfuscation note) — the path is resolved
+    // server-side and Finder is opened from there, since this is a
     // single-machine PyWebView desktop app and Flask is already running on
-    // Ryan's own Mac. Fails soft: no folder on disk (a Move-ingested show
-    // whose staging row outlived it, same story as the Triage list) just
-    // shows an alert rather than anything blocking.
+    // the user's own Mac. Fails soft: no folder on disk (a Move-ingested
+    // show whose staging row outlived it, same story as the Triage list)
+    // just shows an alert rather than anything blocking.
     async function actRevealFolder() {
       try {
         await API.recordings.revealFolder(recordingId)
       } catch (e) {
-        alert('Could not open folder: ' + e.message)
+        Notify.error('Could not open folder: ' + e.message)
       }
     }
 
@@ -8595,7 +8359,7 @@ const App = (() => {
         btn.textContent = 'Writing…'
         const result = await API.recordings.writeTags(recordingId)
         if (result.errors?.length) {
-          alert(`Tags written to ${result.written} file(s).\n\nWarnings:\n${result.errors.map(([f, e]) => `${f}: ${e}`).join('\n')}`)
+          Notify.notice(`Tags written to ${result.written} file(s).\n\nWarnings:\n${result.errors.map(([f, e]) => `${f}: ${e}`).join('\n')}`)
         }
         // Update in place (no full reload) so the side panel stays open and the
         // user sees the result instantly. Clear the staged indicator on the
@@ -8608,7 +8372,7 @@ const App = (() => {
           loadFileTags(recordingId)
         }
       } catch (e) {
-        alert('Error writing tags: ' + e.message)
+        Notify.error('Error writing tags: ' + e.message)
         if (btn) { btn.disabled = false; btn.textContent = 'Write Tags to Files' }
       }
     }
@@ -8663,7 +8427,7 @@ const App = (() => {
     async function actRenameFiles() {
       let fh
       try { fh = await API.system.getFileHandling() }
-      catch (e) { alert('Could not load file handling settings: ' + e.message); return }
+      catch (e) { Notify.error('Could not load file handling settings: ' + e.message); return }
 
       const wrap = document.createElement('div')
       wrap.className = 'modal-overlay'
@@ -8735,11 +8499,11 @@ const App = (() => {
           })
           close()
           if (result.errors?.length) {
-            alert(`Renamed ${result.renamed} file(s).\n\nWarnings:\n${result.errors.map(([f, e]) => `${f}: ${e}`).join('\n')}`)
+            Notify.notice(`Renamed ${result.renamed} file(s).\n\nWarnings:\n${result.errors.map(([f, e]) => `${f}: ${e}`).join('\n')}`)
           }
           renderRecordingView(recordingId)
         } catch (e) {
-          alert('Rename failed: ' + e.message)
+          Notify.error('Rename failed: ' + e.message)
           confirmBtn.disabled = false
           confirmBtn.textContent = 'Rename'
         }
@@ -8755,8 +8519,10 @@ const App = (() => {
         await API.recordings.update(recordingId, { is_official: next, change_note: 'Official flag' })
         rec.is_official = next
         item.textContent = next ? 'Official Release' : 'Mark as Official Release'
+        const st = document.getElementById('rec-status')
+        if (st) st.innerHTML = statusNoteHtml()
         markStaged()
-      } catch (e) { alert('Failed: ' + e.message) }
+      } catch (e) { Notify.error('Failed: ' + e.message) }
       finally { item.disabled = false }
     }
 
@@ -8769,7 +8535,8 @@ const App = (() => {
       const next = !viewerHasFavorited(rec)
       const paint = (on) => {
         btn.classList.toggle('is-fav', on)
-        btn.textContent = on ? 'Favorited' : 'Mark as Favorite'
+        btn.innerHTML = icon('star', null, on)
+        btn.title = favStarTitle(on)
         btn.setAttribute('aria-pressed', on ? 'true' : 'false')
       }
       // Optimistic on BOTH stores: setViewerFavorite updates favIds itself on
@@ -8787,12 +8554,12 @@ const App = (() => {
       } catch (e) {
         if (libraryState.activeId == null) rec.is_favorite = !next
         paint(!next)
-        alert('Could not save favorite: ' + e.message)
+        Notify.error('Could not save favorite: ' + e.message)
       } finally { btn.disabled = false }
     })
 
-    // Delete — a real dialog rather than confirm(), because there is a choice
-    // to make inside it and confirm() cannot carry one (Ryan, 2026-08-21).
+    // Delete — a real dialog rather than confirm, because there is a choice to
+    // make inside it and confirm cannot carry one.
     //
     // The files checkbox is UNCHECKED by default and stays that way: for a ROIO
     // collector the tape is the irreplaceable thing and the database row is
@@ -8846,7 +8613,7 @@ const App = (() => {
           // says so rather than failing the whole delete, so surface that here
           // instead of letting the user assume the disk is clean.
           if (cb.checked && !res?.files_deleted) {
-            alert('The library record was deleted, but the files were not: ' +
+            Notify.error('The library record was deleted, but the files were not: ' +
                   (res?.files_error || 'unknown reason'))
           }
           // Deleting a recording can prune its artist / venue / musicians.
@@ -8858,7 +8625,7 @@ const App = (() => {
         } catch (err) {
           confirmBtn.disabled = false
           confirmBtn.textContent = cb.checked ? 'Delete record and files' : 'Delete record'
-          alert('Delete failed: ' + err.message)
+          Notify.error('Delete failed: ' + err.message)
         }
       })
     }
@@ -8882,12 +8649,12 @@ const App = (() => {
         rec.is_published = false
         // A move can empty an artist or venue of everything visible.
         invalidateDims('artists', 'venues', 'musicians')
-        alert(`Moved to ${label} as "${res.moved_to_name}".`)
+        Notify.info(`Moved to ${label} as "${res.moved_to_name}".`)
         renderRecordingView(recordingId)
       } catch (e) {
         item.disabled = false
         item.textContent = original
-        alert('Move failed: ' + e.message)
+        Notify.error('Move failed: ' + e.message)
       }
     }
 
@@ -8948,11 +8715,37 @@ const App = (() => {
           setOpen(false)
           const nextKind = rec.kind === 'studio' ? 'live' : 'studio'
           try { await API.recordings.update(recordingId, { kind: nextKind, change_note: 'Quick edit' }) }
-          catch (e) { alert('Failed: ' + e.message) }
+          catch (e) { Notify.error('Failed: ' + e.message) }
           // The Albums nav entry and its kind-counts depend on this -- refresh
           // the sidebar the same way other kind-affecting actions do.
           loadArtistList()
           return renderRecordingView(recordingId)
+        }
+        if (act === 'coll-toggle') {
+          const sub = document.getElementById('rec-coll-sub')
+          if (!sub) return
+          sub.hidden = !sub.hidden
+          item.setAttribute('aria-expanded', sub.hidden ? 'false' : 'true')
+          if (!sub.hidden) await fillCollectionSub(sub)
+          return
+        }
+        if (act === 'coll-add' || act === 'coll-new') {
+          setOpen(false)
+          try {
+            let col
+            if (act === 'coll-add') {
+              col = { id: parseInt(item.dataset.id), name: item.dataset.name }
+              await API.collections.addRecording(col.id, recordingId)
+            } else {
+              const name = prompt('New collection name:')
+              if (!name || !name.trim()) return
+              const made = await API.collections.create({ name: name.trim() })
+              col = { id: made.id, name: name.trim() }
+              await API.collections.addRecording(col.id, recordingId)
+            }
+            addRecCollectionTag(recordingId, col)
+          } catch (e) { Notify.error('Failed: ' + e.message) }
+          return
         }
         if (act === 'move-toggle') {
           const sub = document.getElementById('rec-move-sub')
@@ -8969,10 +8762,10 @@ const App = (() => {
     })()
 
     // ── Slide panel tab wiring ───────────────────────────────────────────────
-    // Declared HERE, before the IIFE below: its last line calls openPane(), which
-    // calls loadQualityPane() when Quality was the last pane open, and that reads
-    // this flag. Declared further down it was still in its temporal dead zone,
-    // so the pane sat on "Loading..." with a ReferenceError (Ryan, 2026-10-04).
+    // Declared HERE, before the IIFE below: its last line calls openPane, which
+    // calls loadQualityPane when Quality was the last pane open, and that reads
+    // this flag. Declared further down it was still in its temporal dead zone, so
+    // the pane sat on "Loading..." with a ReferenceError.
     let _qualityLoaded = false
     ;(function () {
       const panel = document.getElementById('slide-panel')
@@ -9010,20 +8803,20 @@ const App = (() => {
       function closePanel() {
         state.recPanelOpen = false
         panel.classList.remove('open')
-        // The pane and tab keep their .active class through the close (Ryan,
-        // 2026-08-28). Stripping it emptied the panel on the first frame, so
-        // the last 220ms of the slide was a blank rectangle narrowing — the
-        // content has to still be there for there to be anything to slide out.
-        // The collapsed panel is clipped to 28px and goes visibility:hidden
-        // once the transition ends, so nothing selected is left on screen, and
-        // openPane re-asserts both classes on the way back in anyway.
+        // The pane and tab keep their .active class through the close.
+        // Stripping it emptied the panel on the first frame, so the last 220ms
+        // of the slide was a blank rectangle narrowing — the content has to
+        // still be there for there to be anything to slide out. The collapsed
+        // panel is clipped to 28px and goes visibility:hidden once the
+        // transition ends, so nothing selected is left on screen, and openPane
+        // re-asserts both classes on the way back in anyway.
         activePane = null
         rail?.setAttribute('aria-expanded', 'false')
       }
 
-      // The rail is always on screen now (2026-08-21) and is the panel's
-      // show/hide control in both directions — the single obvious way to get
-      // the track list back to full width.
+      // The rail is always on screen now and is the panel's show/hide
+      // control in both directions — the single obvious way to get the track
+      // list back to full width.
       rail?.addEventListener('click', () => {
         if (panel.classList.contains('open')) closePanel()
         else openPane(pickPane(state.recLastPane))
@@ -9041,8 +8834,7 @@ const App = (() => {
 
       // Default: whichever pane was open before the last reload (e.g. an AI
       // Assist Apply), falling back to Info File on a fresh visit. 'spectrogram'
-      // is stale from before the spectrogram moved (2026-07-15, then again
-      // 2026-08-18 into the Quality pane) — treat it as no saved pane.
+      // is stale from before the spectrogram moved — treat it as no saved pane.
       // recPanelOpen persists a deliberate collapse across recordings: someone
       // who put Details away is listening, not auditing, and should not have to
       // dismiss it again on every show. Undefined (first visit) means open.
@@ -9053,9 +8845,9 @@ const App = (() => {
 
     // ── Listening Quality pane ──────────────────────────────────────────────
     // Renders the SAME report the triage card renders, from the same endpoint
-    // and the same interpret_full() output — see app/api/quality.py. Anything
+    // and the same interpret_full output — see app/api/quality.py. Anything
     // that changes in the engine's vocabulary changes in both places at once,
-    // which is the whole point of unifying them (IO-61).
+    // which is the whole point of unifying them.
     //
     // Differences from the triage card, all deliberate: no sampled-track
     // players (the real player is right there), no triage actions (the
@@ -9109,14 +8901,11 @@ const App = (() => {
       if (btn && !btn._wired) { btn._wired = true; btn.addEventListener('click', onAnalyzeAudio) }
     }
 
-    // ── Waveform (wavesurfer.js) — official renderer, fully wired to the
-    // persistent player, adopted 2026-07-15 ─────────────────────────────────
-    // Was a spike, then briefly its own separate audio channel; Ryan: "We
-    // definitely want the thing fully wired into the persistent player. It
-    // should not be separate." Renders from precomputed peaks (no network
-    // fetch), and its OWN internal audio element is never played — see the
-    // big comment above `_waveformMap` for why. All real playback control
-    // routes through the shared #audio-el via Player.
+    // Was a spike, then briefly its own separate audio channel;  Renders from
+    // precomputed peaks (no network fetch), and its OWN internal audio
+    // element is never played — see the big comment above `_waveformMap` for
+    // why. All real playback control routes through the shared #audio-el via
+    // Player.
     ;(function () {
       const wrap  = document.getElementById('rec-waveform-wrap')
       if (!wrap || !defaultTrackId) return
@@ -9138,8 +8927,6 @@ const App = (() => {
         cursorWidth: 1,
       })
       _wsTrackId = defaultTrackId
-      // Zoom plugin removed 2026-08-27 (Ryan) — wheel-zoom, pinch-zoom and the
-      // top-right slider all came from this one registerPlugin call.
 
       // Click/drag → seek the REAL shared player, not wavesurfer's own
       // silent internal audio. If this recording isn't already the one
@@ -9162,7 +8949,7 @@ const App = (() => {
 
     // If nothing is currently loaded in the player, pressing the persistent
     // bar's play button while viewing this page should start this
-    // recording's first track (Ryan, 2026-07-15) instead of no-op'ing.
+    // recording's first track instead of no-op'ing.
     if ((rec.tracks || []).length) {
       Player.setFallbackPlay(() => playRecording(recordingId, 0, rec.tracks))
     }
@@ -9190,7 +8977,10 @@ const App = (() => {
           obj[key] = t.error ? { error: t.error } : (t.tags || {})
         })
         // Staged edits: Current/After. Nothing staged: the plain on-disk view.
-        const diff = fileTagsDiffHtml(data.tracks || [])
+        // With "write changes immediately" on there is nothing staged to preview.
+        let autoWrite = false
+        try { autoWrite = !!(await fileHandling()).write_tags_default } catch (_) {}
+        const diff = autoWrite ? '' : fileTagsDiffHtml(data.tracks || [])
         body.innerHTML = diff
           ? `<div class="ft-wrap">${diff}</div>`
           : `<pre class="filetags-json">${esc(JSON.stringify(obj, null, 2))}</pre>`
@@ -9205,8 +8995,8 @@ const App = (() => {
         const tid   = parseInt(row.dataset.trackId)
         const title = row.querySelector('.track-title')?.textContent || ''
         // Only when the Quality pane is on screen — the spectrogram lives
-        // inside it now (2026-08-18), so redrawing it while another pane is
-        // showing costs a render for a picture nobody can see.
+        // inside it now, so redrawing it while another pane is showing
+        // costs a render for a picture nobody can see.
         const qualityPaneEl = document.getElementById('sp-quality')
         if (tid && _waveformMap[tid] && qualityPaneEl?.classList.contains('active')) {
           loadSpectrogram(tid, title)
@@ -9215,13 +9005,13 @@ const App = (() => {
     })
   }
 
-  // Tags pane, Current/After (Ryan, 2026-10-04). `tracks` is the tags endpoint's
-  // list: per track, `tags` (on disk) and `staged` (what Write Tags to Files would
-  // write). A full outer join per track, so every tag on disk and every tag that
-  // would be written appears. A tag that would be removed keeps its current value
-  // (struck through) with an empty After; a new tag has an empty Current. Rows
-  // identical on every track form one "All tracks" block instead of repeating.
-  // Returns '' when nothing differs, so the caller keeps the plain on-disk view.
+  // Tags pane, Current/After. `tracks` is the tags endpoint's list: per track,
+  // `tags` (on disk) and `staged` (what Write Tags to Files would write). A full
+  // outer join per track, so every tag on disk and every tag that would be written
+  // appears. A tag that would be removed keeps its current value (struck through)
+  // with an empty After; a new tag has an empty Current. Rows identical on every
+  // track form one "All tracks" block instead of repeating. Returns '' when
+  // nothing differs, so the caller keeps the plain on-disk view.
   function fileTagsDiffHtml(tracks) {
     const show = v => v == null ? '' : (Array.isArray(v) ? v.join('; ') : String(v))
     const label = t => `${String(t.track_number || '').padStart(2, '0')} · ${t.title || ''}`
@@ -9269,7 +9059,7 @@ const App = (() => {
 
   // Step indicators — pass optional steps array; defaults to 3-step wizard
   function stepDots(current, steps) {
-    steps = steps || ['folder', 'review']  // Confirm step removed 2026-07-15
+    steps = steps || ['folder', 'review']
     const idx = steps.indexOf(current)
     return `<div class="step-indicator">
       ${steps.map((s, i) => {
@@ -9292,7 +9082,7 @@ const App = (() => {
   // only other `prefs` in this file is a local inside renderSettingsPage().
   let appPrefs = null
 
-  // ── Triage destinations: offer only what this install HAS (2026-09-17) ────
+  // ── Triage destinations: offer only what this install HAS ────
   //
   // A library Trellis laid out itself has Backlog and Workshop. A library the
   // user imported may have neither: those folders are optional and Trellis
@@ -9380,11 +9170,8 @@ const App = (() => {
     paintNavButtons()
   }
 
-  // ALWAYS OFFER A WAY OUT (2026-08-07). This used to render a bare red
-  // message with no action, which is how Ryan got stranded: he ingested the
-  // last recording of an act, the source folder was removed by the Move +
-  // empty-parent cleanup, and returning to Add Recording tried to re-open that
-  // now-missing folder. The error was correct; having no button was the bug.
+  // ALWAYS OFFER A WAY OUT. The error was correct; having no button was the
+  // bug.
   function _ingestRenderFailed(e) {
     console.error('[ingest] render failed', e)
     setMainHTML(`
@@ -9418,21 +9205,20 @@ const App = (() => {
     ingest.kindFolder = null
   }
 
-  /** Header Back, while standing inside the Add Recordings wizard.
-   *
-   *  Source picker, triage queue and metadata review all live at '#/ingest',
-   *  so browser history holds ONE entry for the whole wizard: Back used to
-   *  jump clean out of it to whatever preceded it, normally the library
-   *  (Ryan, 2026-08-28 — "it should have gone back to the add recording
-   *  queue"). This steps backwards THROUGH the wizard first.
-   *
-   *  Only the steps that have a step behind them are claimed. From the queue
-   *  or the picker, Back still leaves the wizard, which is what it should do
-   *  at the front of a flow — and it keeps Back from stranding a run in
-   *  flight behind a picker screen.
-   *
-   *  `probe` asks "would you handle a Back press?" without performing it, so
-   *  paintNavButtons can light the button without duplicating these rules. */
+  /* Header Back, while standing inside the Add Recordings wizard.
+
+     Source picker, triage queue and metadata review all live at '#/ingest',
+     so browser history holds ONE entry for the whole wizard: Back used to
+     jump clean out of it to whatever preceded it, normally the library. This
+     steps backwards THROUGH the wizard first.
+
+      Only the steps that have a step behind them are claimed. From the queue
+      or the picker, Back still leaves the wizard, which is what it should do
+      at the front of a flow — and it keeps Back from stranding a run in
+      flight behind a picker screen.
+
+      `probe` asks "would you handle a Back press?" without performing it, so
+      paintNavButtons can light the button without duplicating these rules. */
   function ingestStepBack(probe) {
     if ((window.location.hash || '').split('?')[0] !== '#/ingest') return false
     switch (ingest.step) {
@@ -9458,9 +9244,9 @@ const App = (() => {
 
   // ── Stage 1: Source ────────────────────────────────────────────────────────
   // The empty Add Recordings page: the import page's own header, tab strip,
-  // button row and table header with nothing in it (Ryan, 2026-10-02). The
-  // folder navigator, Up button and listing table are gone; Browse opens the
-  // native folder dialog and the two mode buttons start a run on the path.
+  // button row and table header with nothing in it. The folder navigator, Up
+  // button and listing table are gone; Browse opens the native folder dialog
+  // and the two mode buttons start a run on the path.
   async function renderIngestSource() {
     setActiveNav('ingest')
     setNavCurrent('Add Recordings')
@@ -9486,7 +9272,6 @@ const App = (() => {
         </div>
         <div id="bi-scan" class="bi-scan">${_biScanControlsHtml({ run: null, mode })}</div>
         <div id="lq-msg"></div>
-        <!-- No Queue tab or table header until a scan exists (Ryan, 2026-10-03). -->
       </div>`)
 
     const msgEl  = document.getElementById('lq-msg')
@@ -9584,8 +9369,8 @@ const App = (() => {
     v == null ? 'n/a' : `${Number(v).toFixed(dp == null ? 1 : dp)}${unit || ''}`
 
   // Group weights, shown per meter as "35% of score". Mirrors GROUP_WEIGHTS in
-  // app/utils/quality/quality_scoring.py — update both together.
-  // Three-band verdict replaces the 1-decimal 0-100 headline (2026-07-31).
+  // app/utils/quality/quality_scoring.py — update both together. Three-band
+  // verdict replaces the 1-decimal 0-100 headline.
   //
   // Validated against 113 graded recordings the engine reaches r = 0.55 with a
   // mean absolute error near 7 grade points. A decimal on a number routinely 7
@@ -9596,15 +9381,15 @@ const App = (() => {
   // tools/quality/ is where the quantitative score continues to be developed.
   // This is a presentation restriction in the app, not a capability removed.
   //
-  // Labels are deliberately NEUTRAL (Ryan, 2026-08-02). "Worth ingesting" /
-  // "Probably skip" asserted a decision the engine has no standing to make —
-  // every recording in this queue is worth ingesting to the right person, and
-  // the band is a DETECTION of measured audio character, not a recommendation.
-  // Mirrors BAND_LABEL in app/utils/quality/quality_scoring.py.
+  // Labels are deliberately NEUTRAL. "Worth ingesting" / "Probably skip"
+  // asserted a decision the engine has no standing to make — every recording in
+  // this queue is worth ingesting to the right person, and the band is a
+  // DETECTION of measured audio character, not a recommendation. Mirrors
+  // BAND_LABEL in app/utils/quality/quality_scoring.py.
   const _LQ_BAND_TEXT = { green: 'High', yellow: 'Medium', red: 'Low' }
 
   /* The Listening Quality report, rendered from one builder for every surface
-     that shows it (2026-08-28). Lives at the top level rather than inside
+     that shows it. Lives at the top level rather than inside
      renderRecordingView because Add Recording's Quality tab renders the same
      report from the triage pass's numbers — see loadIngestQualityPane. Takes
      the payload shape both /api/quality/recording/<id> and
@@ -9633,10 +9418,10 @@ const App = (() => {
     imgEl.src = url
   }
 
-  // The Quality pane before any analysis, on both panels (Ryan, 2026-10-06):
-  // the line and the button sit centred in the pane.
-  // No FLAC (MP3 and the like): nothing is offered, since the analysis cannot
-  // read it (Ryan, 2026-10-06). A failure shows beside the button, never a popup.
+  // The Quality pane before any analysis, on both panels: the line and the button
+  // sit centred in the pane. No FLAC (MP3 and the like): nothing is offered,
+  // since the analysis cannot read it. A failure shows beside the button, never a
+  // popup.
   function qualityEmptyHtml(btnId, scorable = true) {
     if (!scorable) return `<div class="rq-empty-wrap"><div class="rq-empty">Quality analysis works on FLAC files only.</div></div>`
     return `<div class="rq-empty-wrap"><div class="rq-empty">Click below to generate a quick audio quality analysis.</div>
@@ -9661,12 +9446,10 @@ const App = (() => {
     //
     // The raw composite used to sit beside it, on the argument that an
     // archivist ranking two shows needs to break a tie the band cannot.
-    // Removed 2026-08-21 (Ryan — a second time; it had been taken out once
-    // before and came back with the IO-61 unification, because this pane now
-    // renders from the same builder as the triage card). Validated fit is
-    // r 0.55 / MAE ~7 grade points: the number reads as precision the model
-    // does not have, and this is the listener's surface, not the harness.
-    // The dev surface in tools/ still shows the full decimal.
+    // Validated fit is r 0.55 / MAE ~7 grade points: the number reads as
+    // precision the model does not have, and this is the listener's surface,
+    // not the harness. The dev surface in tools/ still shows the full
+    // decimal.
     const head = `
       <div class="rq-head">
         <span class="rq-band iq-band iq-band--${esc(band)}">${_LQ_BAND_TEXT[band] || ''}</span>
@@ -9742,8 +9525,8 @@ const App = (() => {
          </div>`
       : `<div class="rq-clean">No technical issues detected.</div>`
 
-    // Both panels show it (2026-10-06): Add Recording draws it from the file
-    // not yet imported. { spectrogram: false } leaves it out.
+    // Both panels show it: Add Recording draws it from the file not yet
+    // imported. { spectrogram: false } leaves it out.
     const spectro = (opts && opts.spectrogram === false) ? '' : `
       <div class="rq-spectrogram">
         <div class="rq-section-label">Spectrogram <span class="spectrogram-track-name" id="spectrogram-track-name"></span></div>
@@ -9757,18 +9540,16 @@ const App = (() => {
 
     return `<div class="rq-wrap">${head}${quick}${groups}${other}${issues}${spectro}</div>`
   }
-  // Metadata Completeness reads as a WORD now, not 0-100 (Ryan, 2026-08-28:
-  // "I don't like the numerical score for metadata"). The number was a count
-  // of populated fields over expected fields, so 79 vs 82 never meant anything
-  // anyone acted on — the three bands were the whole signal. Server-side
-  // `health.rating` is the source of truth (utils/health.py RATING); the band
-  // fallback covers a payload from an older build.
+  // Metadata Completeness reads as a WORD now, not 0-100. The number was a
+  // count of populated fields over expected fields, so 79 vs 82 never meant
+  // anything anyone acted on — the three bands were the whole signal.
+  // Server-side `health.rating` is the source of truth (utils/health.py
+  // RATING); the band fallback covers a payload from an older build.
   const _metaRating = h =>
     (h && (h.rating || _LQ_BAND_TEXT[h.band])) || '—'
 
-  // The per-group "15% of score" caption was removed 2026-08-28 (Ryan). It
-  // invited exactly the arithmetic nobody should be doing by eye — and did it
-  // badly, because the group meters combine GEOMETRICALLY (_geo in
+  // It invited exactly the arithmetic nobody should be doing by eye — and did
+  // it badly, because the group meters combine GEOMETRICALLY (_geo in
   // quality_scoring.py), so the three percentages never did add up the way the
   // caption implied. The weights live in GROUP_WEIGHTS and nowhere else now.
 
@@ -9777,7 +9558,7 @@ const App = (() => {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
   }
 
-  // ── Compact row — Direction A, "The Belt" (Ryan, 2026-08-28) ──────────────
+  // ── Compact row — Direction A, "The Belt" ──────────────
   //
   // One grid row per recording: coloured spine, name, a mono facts line, the
   // band pill, the score, and the SAME action buttons as the card. Reusing
@@ -9799,12 +9580,8 @@ const App = (() => {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  // ── Shared ingest queue table ("The Belt", unified 2026-09-27) ───────────
-  // ONE table component for every batch-style ingest surface (Bulk Ingest). Each caller normalizes its
-  // own rows into the shape below and calls ingestQueueTable(); the caret,
-  // the column layout, the base expand panel and the default action group
-  // are shared, so a change to any of them cannot drift between the three
-  // surfaces the way the pre-2026-09-27 forks did.
+  // ── Shared ingest queue table ───────────
+  // ONE table component for every batch-style ingest surface (Bulk Ingest).
   //
   // Row shape: { id, name, meta, format, kind, sound_band, meta_band,
   //   needs_review, review_reason, status ('pending'|'ingesting'|'ingested'|
@@ -9818,12 +9595,12 @@ const App = (() => {
   // ════════════════════════════════════════════════════════════════════════
 
   // ── Resolver reason codes -> short review labels ───────────────────────────
-  // Ingest Field Resolver spec v1, chunk 6: verdict() (app/utils/resolve.py)
-  // can return several reason codes for one folder at once, so every surface
-  // that shows them -- Batch Import's extracted.reasons, Bulk Ingest's
-  // BulkIngestItem.reason (a single comma-joined column, split back apart
-  // the same way app/api/quality.py's _bulk_ingest_review_reasons does) --
-  // reads this one map rather than keeping its own copy of these strings.
+  // The verdict (app/utils/resolve.py) can
+  // return several reason codes for one folder at once, so every surface that
+  // shows them -- Batch Import's extracted.reasons, Bulk Ingest's
+  // BulkIngestItem.reason (a single comma-joined column, split back apart the
+  // same way app/api/quality.py's _bulk_ingest_review_reasons does) -- reads
+  // this one map rather than keeping its own copy of these strings.
   const _INGEST_FIELD_LABEL = {
     date: 'date', artist: 'artist', venue: 'venue', city: 'city',
     state: 'state', country: 'country', source: 'source', lineage: 'lineage',
@@ -9837,9 +9614,9 @@ const App = (() => {
     unsupported_format:  'Unsupported format',
     unreadable:          'Could not be read',
     no_audio:            'No audio files',
-    // Shortest plain phrasing (Ryan should confirm wording): every track's
-    // fingerprint already belongs to one recording in the library -- this
-    // folder was never ingested a second time (spec section 9).
+    // Shortest plain phrasing: every track's fingerprint already belongs
+    // to one recording in the library -- this folder was never ingested a
+    // second time (spec section 9).
     duplicate_content:   'Duplicate recording',
   }
   function _ingestReasonLabel(code) {
@@ -9862,7 +9639,7 @@ const App = (() => {
     return list.map(_ingestReasonLabel).filter(Boolean)
   }
 
-  // Quality and Metadata as coloured text, no pill (Ryan, 2026-10-06).
+  // Quality and Metadata as coloured text, no pill.
   function _iqBandPill(band) {
     if (!band) return ''
     return `<span class="iq-band iq-band--${band}">${esc(_LQ_BAND_TEXT[band] || band)}</span>`
@@ -9908,7 +9685,7 @@ const App = (() => {
   // never instead of it, and never a fingerprint row or tab anywhere here.
   function _iqExpandHtml(row, opts) {
     const d = row.detail || {}
-    // An Album shows the Album fields (Ryan, 2026-10-06), as the Album form does.
+    // An Album shows the Album fields, as the Album form does.
     const baseRows = row.kind === 'studio' ? [
       ['Artist', d.artist], ['Album Title', d.title], ['Year', d.date],
       ['Format', row.format], ['Type', 'Album'], ['Tracks', d.tracksText],
@@ -9942,12 +9719,11 @@ const App = (() => {
     return base + sq
   }
 
-  // Row status (Ryan, 2026-10-02): "Ready" or the review issues get their own
-  // column instead of riding in the grey title line, where they read as part
-  // of the recording's name. The alert glyph stays because the Queue's note
-  // line tells the person to check it.
-  // "Needs Review" with the issues on hover; "Ready" with a check, so the two
-  // line up (Ryan, 2026-10-06).
+  // Row status: "Ready" or the review issues get their own column instead of
+  // riding in the grey title line, where they read as part of the recording's
+  // name. The alert glyph stays because the Queue's note line tells the
+  // person to check it. "Needs Review" with the issues on hover; "Ready" with
+  // a check, so the two line up.
   function _iqStatusCell(row) {
     if (row.needs_review) {
       const issues = (row.review_issues && row.review_issues.length)
@@ -9970,7 +9746,7 @@ const App = (() => {
 
     const actions = opts.actionsHtml ? opts.actionsHtml(row) : _iqDefaultActions(row, opts)
     // A skipped row (an exact duplicate) is out of the work: greyed, nothing
-    // to open, no format or scores (Ryan, 2026-10-06).
+    // to open, no format or scores.
     const skipped = row.status === 'skipped'
     const canExpand = row.status !== 'pending' && row.status !== 'ingesting' && !skipped
 
@@ -9978,7 +9754,7 @@ const App = (() => {
       <div class="lq-brow ${cls}${row.status === 'pending' ? ' lq-brow--pending' : ''}${
            row.status === 'ingesting' ? ' lq-brow--running iq-now-row' : ''}${
            row.needs_review ? ' iq-brow--issue' : ''}${skipped ? ' iq-brow--skipped' : ''}">
-        ${canExpand /* first column (Ryan, 2026-10-06) */
+        ${canExpand
           ? `<button type="button" class="lq-brow-caret" data-expand="${esc(row.id)}"
                 title="${open ? 'Hide the detail' : 'Show the detail for this recording'}"
                 aria-expanded="${!!open}">${chevronIcon(open ? 'caret-ic--up' : 'caret-ic--down', 20)}</button>`
@@ -10016,8 +9792,8 @@ const App = (() => {
   // Was `_lqCard` — a whole alternative rendering of the recording, head and
   // action buttons included. Expanding therefore swapped one component for
   // another, and the Ingest / Review / Move buttons and the caret itself
-  // JUMPED to different positions (Ryan, 2026-08-28). The row now never
-  // changes: this is only what appears underneath it, so nothing above moves.
+  // JUMPED to different positions. The row now never changes: this is only
+  // what appears underneath it, so nothing above moves.
   //
   // `open` is which pane is showing: 'lq' | 'meta' | 'fp'.
   function _lqSoundQualityPane(row) {
@@ -10026,46 +9802,44 @@ const App = (() => {
     const lqs = row.listening_quality
     const health = row.health
 
-    // Metrics now sit UNDER the group they belong to (Ryan, 2026-08-02) rather
-    // than in one flat "Advanced Metrics" list of eleven readings with no
-    // stated relationship to the three meters above them. Grouping comes from
-    // METRIC_GROUP in quality_interpret.py, which is derived from what
+    // Metrics now sit UNDER the group they belong to rather than in one flat
+    // "Advanced Metrics" list of eleven readings with no stated relationship to
+    // the three meters above them. Grouping comes from METRIC_GROUP in
+    // quality_interpret.py, which is derived from what
     // score_tone/score_noise/score_dynamics actually consume — so the panel
     // cannot drift from the scoring.
     //
     // Each row is also marked scored vs measured-only. Five of the eleven carry
     // ZERO weight (presence balance, midrange scoop, hum, nonstationarity,
     // clarity) — showing them at equal visual standing implied they all move
-    // the number, which is how the 07-30 Gatton confusion started.
-    // Scored metrics first within each group, then the measured-only ones
-    // (Ryan, 2026-08-02). METRICS order is authoring order, which interleaved
-    // them — so the first thing under a meter could be a reading that does not
-    // move it. Stable sort keeps the authored order inside each half.
-    // No scored/unscored partition any more: the triage endpoint sends
-    // `scored_only` rows (api/quality.py), so everything here moves its meter
-    // by construction. View Recording still receives the full set and still
-    // marks the zero-weight ones.
+    // the number, which is how the 07-30 Gatton confusion started. Scored
+    // metrics first within each group, then the measured-only ones. METRICS
+    // order is authoring order, which interleaved them — so the first thing
+    // under a meter could be a reading that does not move it. Stable sort keeps
+    // the authored order inside each half. No scored/unscored partition any
+    // more: the triage endpoint sends `scored_only` rows (api/quality.py), so
+    // everything here moves its meter by construction. View Recording still
+    // receives the full set and still marks the zero-weight ones.
     const byGroup = {}
     for (const m of (it.metrics || [])) (byGroup[m.group] ||= []).push(m)
 
     const q = it.quick || {}, cut = it.cutoff || {}
-    // Track count leads the strip (2026-08-02). It is the plainest fact about
-    // the recording and the one most likely to be checked against the source
-    // info file, so it sits before the technical readings rather than after.
+    // Track count leads the strip. It is the plainest fact about the
+    // recording and the one most likely to be checked against the source info
+    // file, so it sits before the technical readings rather than after.
     // Counts AUDIO files only — `extracted.track_count` is len(audio_files)
     // from the same scan payload the completeness score is computed from, so
     // art and text files never inflate it.
     const nTracks = row.extracted?.track_count
     // Collapsed from a four-cell boxed strip to ONE pipe-separated line on the
-    // card's own background, sitting directly under the title (Ryan,
-    // 2026-08-02). These are plain facts about the file, not readings that
-    // need a meter — the box gave them more visual weight than they earn, and
-    // it was occupying the top-right corner where the actions belong.
-    // Cutoff folded in as a plain fact (2026-08-27, Ryan) — it used to be
-    // singled out with its own colour + hover tooltip (.lq-qcut), which read
-    // as more alarming than the reading warrants for a strip of otherwise
-    // plain facts. Matches the read-only Fidelity pane's version above,
-    // which never had the highlight to begin with.
+    // card's own background, sitting directly under the title. These are plain
+    // facts about the file, not readings that need a meter — the box gave them
+    // more visual weight than they earn, and it was occupying the top-right
+    // corner where the actions belong. Cutoff folded in as a plain fact — it
+    // used to be singled out with its own colour + hover tooltip (.lq-qcut),
+    // which read as more alarming than the reading warrants for a strip of
+    // otherwise plain facts. Matches the read-only Fidelity pane's version
+    // above, which never had the highlight to begin with.
     const bits = [
       nTracks != null ? `${nTracks} track${nTracks === 1 ? '' : 's'}` : null,
       [q.format, q.bit_depth ? `${q.bit_depth}-bit` : null,
@@ -10093,9 +9867,9 @@ const App = (() => {
         return `<div class="rg${s.text === m.verdict ? ' on' : ''}">
           <span>${esc(s.text)}</span><span class="b">${esc(range)}</span></div>`
       }).join('') : ''
-      // The (i) leads the row and carries the state colour the dot used to
-      // (Ryan, 2026-08-02) — one glyph doing both jobs rather than a dot that
-      // only coloured and a button that only informed, at opposite ends.
+      // The (i) leads the row and carries the state colour the dot used to —
+      // one glyph doing both jobs rather than a dot that only coloured and a
+      // button that only informed, at opposite ends.
       return `
       <div class="lq-mrow${m.scored ? '' : ' lq-mrow--unscored'}">
         <span class="lq-minfo lq-tip" style="${hasScale
@@ -10125,11 +9899,11 @@ const App = (() => {
           ? `<div class="lq-adv">${byGroup[g.key].map(metricRow).join('')}</div>` : ''}
       </div>`).join('')
 
-    // Every metric now belongs to one of the three groups (Ryan, 2026-08-02),
-    // so "other" should be empty. Kept as a catch-all rather than dropped: a
-    // metric added to METRICS without a METRIC_GROUP entry would otherwise
-    // vanish from the UI silently. A test pins the mapping, but a silent
-    // disappearance is the worst failure mode for a panel like this.
+    // Every metric now belongs to one of the three groups, so "other" should
+    // be empty. Kept as a catch-all rather than dropped: a metric added to
+    // METRICS without a METRIC_GROUP entry would otherwise vanish from the UI
+    // silently. A test pins the mapping, but a silent disappearance is the
+    // worst failure mode for a panel like this.
     const otherMetrics = (byGroup.other || []).length ? `
       <div class="lq-grp lq-grp--other">
         <div class="lq-grp-head"><span class="lq-grp-name">Ungrouped</span></div>
@@ -10143,13 +9917,12 @@ const App = (() => {
       </div>` : `<div class="lq-clean"><span class="lq-dot"></span>No technical issues detected.</div>`
 
     // Each sampled track gets its own row with an inline player slot directly
-    // beneath it (2026-08-02). Playback used to hand off to the global player
-    // bar at the bottom of the window — visually miles from the timestamp that
-    // was clicked, so it read as "nothing happened, and something unrelated
+    // beneath it. Playback used to hand off to the global player bar at the
+    // bottom of the window — visually miles from the timestamp that was
+    // clicked, so it read as "nothing happened, and something unrelated
     // started". The audio element now appears in place, under the track it
-    // belongs to.
-    // One player per CARD, living in the block header (Ryan, 2026-08-02) — not
-    // one slot per track. A slot under each track pushed the row it belonged to
+    // belongs to. One player per CARD, living in the block header — not one
+    // slot per track. A slot under each track pushed the row it belonged to
     // apart from its neighbours every time it opened, so the list jumped around
     // as you sampled it. A fixed position in the header holds still; the
     // playing row is highlighted instead.
@@ -10180,11 +9953,6 @@ const App = (() => {
         <div class="lq-samp lq-samp--lead">
           <div class="lq-samp-head">
             <h4>Track Preview</h4>
-            <!-- Two hints said the same thing (Ryan, 2026-09-02). This one
-                 ("Timestamps mark where each sample was taken") is gone; the
-                 surviving line is .lq-trk-player's own ::before placeholder,
-                 "Play a track, or click a timestamp to hear the analyzed
-                 moment", which says it AND names the two ways to start. -->
             <div class="lq-trk-player" data-slot-for="${esc(row.folder_path)}"></div>
           </div>
           ${tracks}
@@ -10197,8 +9965,8 @@ const App = (() => {
     </div>`
   }
 
-  // "Converting 4 of 17". The filename was dropped (Ryan, 2026-10-02): it made
-  // the row far too wide.
+  // "Converting 4 of 17". The filename was dropped: it made the row far too
+  // wide.
   function _lqConvertText(cv) {
     return `Converting${cv.total ? ` ${Math.min(cv.done + 1, cv.total)} of ${cv.total}` : ''}`
   }
@@ -10208,8 +9976,8 @@ const App = (() => {
   // The message used to be printed in full inside the actions area: it wrapped
   // to three lines, pushed the row's height around, and left room for Retry
   // ONLY — so the message's own advice ("use Review to fill it in") pointed at
-  // a button it had just removed (Ryan, 2026-08-28). The text moves into a
-  // hover; the buttons come back.
+  // a button it had just removed. The text moves into a hover; the buttons
+  // come back.
   function _lqErrorChip(message, heading) {
     return `<span class="lq-errchip lq-tip" role="img"
                   aria-label="${esc(heading)}: ${esc(message)}">
@@ -10236,14 +10004,14 @@ const App = (() => {
     // How many queue-level values are actually set. Only shown when the block
     // is COLLAPSED and holds something: the old rule was that the block could
     // not be closed once it held a value, so a set value could never be
-    // invisible. The +/- toggle (Ryan, 2026-09-02) makes that unenforceable —
-    // the user can now close it whenever they like — so the invariant is kept
-    // by saying so on the header instead of by refusing the click.
+    // invisible. The +/- toggle makes that unenforceable — the user can now
+    // close it whenever they like — so the invariant is kept by saying so on
+    // the header instead of by refusing the click.
     const aaTyped = cx.typed
     const aaCount = _aaCount(aaTyped)
     const aaState = cx.state
-    // cx.tabbed (import page, 2026-10-05): the form is its own tab, so it is always open, has no
-    // +/- or title, opens with one line, and its Apply / Clear row sits under the fields (CSS order).
+    // cx.tabbed: the form is its own tab, so it is always open, has no +/- or title, opens with one
+    // line, and its Apply / Clear row sits under the fields (CSS order).
     const tabbed = !!cx.tabbed
     const aaOpen = tabbed || cx.open
     return `<div class="lq-applyall${aaOpen ? '' : ' is-closed'}${tabbed ? ' lq-applyall--tab' : ''}">
@@ -10256,20 +10024,6 @@ const App = (() => {
              <span class="lq-applyall-h">Apply values to every recording below</span>`}
              ${!aaOpen && aaCount ? `<span class="lq-applyall-n">${aaCount} value${
                  aaCount === 1 ? '' : 's'} set</span>` : ''}
-             <!-- Apply Values (Ryan, 2026-09-03). The blanket values do
-                  NOTHING until this is pressed — not on the Review form, not
-                  on auto-Ingest — and once pressed they OVERWRITE whatever the
-                  scan inferred. Both halves are deliberate: overwriting is
-                  what the box promises, and a deliberate press is what earns
-                  the right to overwrite.
-                  Three states, because "typed" and "staged" are different
-                  facts and the difference is the whole feature.
-                  ⚠ No number in this label. It said "Applied to all 4",
-                  meaning four VALUES, and it read as four RECORDINGS (Ryan,
-                  2026-09-03) — the one number a reader expects beside "applied
-                  to all" is how many recordings it hit. The value count is
-                  already on the collapsed header, where "4 values set" says
-                  what it counts. -->
              ${aaState === 'empty' ? '' : aaState === 'applied'
                ? `<span class="lq-applyall-ok" title="These values overwrite the inferred metadata on every recording in this queue.">
                     ${icon('check', 'lq-applyall-ic')} Applied to all recordings</span>`
@@ -10281,9 +10035,6 @@ const App = (() => {
                                ${cx.busy ? 'disabled' : ''}>Clear All</button>` : ''}
            </div>
            ${!aaOpen ? '' : `<div class="lq-applyall-grid">
-             <!-- Same rows and field classes as the Add Recording form
-                  (ingest-row-act / ingest-row-src), so the inputs come out at
-                  the same widths. -->
              <div class="ingest-field-grid ingest-row-act">
                <div class="ingest-field">
                  <label>Artist</label>
@@ -10507,9 +10258,9 @@ const App = (() => {
   }
 
   // Paula's purple-border threshold — a starting point, meant to be tuned
-  // once this has run against more real folders (Ryan, 2026-07-16: "let's
-  // give it a try and see how it plays out"). The raw per-field subscore is
-  // always visible in the debug panel regardless of where this line sits.
+  // once this has run against more real folders. The raw per-field subscore
+  // is always visible in the debug panel regardless of where this line
+  // sits.
   const PAULA_THRESHOLD = 0.70
   function paulaCls(attrName) {
     const sub = ingest.scan?.paula?.attributes?.[attrName]?.subscore
@@ -10575,16 +10326,16 @@ const App = (() => {
     return `<a class="pp-mb-name" href="${esc(mbReleaseUrl(p.mbid))}" target="_blank" rel="noopener">${esc(facts)} ↗</a>`
   }
 
-  // Before a release is linked, on both MusicBrainz tabs (Ryan, 2026-10-06): a
-  // line saying what MusicBrainz is, then a normal-size Find release button.
+  // Before a release is linked, on both MusicBrainz tabs: a line saying what
+  // MusicBrainz is, then a normal-size Find release button.
   function mbFindHtml(btnId, label = 'Find release', msg = '') {
     return `<p class="mb-intro">MusicBrainz is an open music encyclopedia kept up by its community. Linking this album to its release there brings in the label, catalog number, release date and track list.</p>
       ${msg ? `<div class="pp-mb-empty">${msg}</div>` : ''}
       <div class="mb-find-row"><button type="button" class="btn btn-ghost" id="${btnId}">${esc(label)}</button></div>`
   }
 
-  // What MusicBrainz knows about a picked release, as a short fact table
-  // (Ryan, 2026-10-06): enough to show the release was found and is the right one.
+  // What MusicBrainz knows about a picked release, as a short fact table: enough
+  // to show the release was found and is the right one.
   function mbReleaseDetailsHtml(d) {
     if (!d) return ''
     const rows = [
@@ -10634,10 +10385,8 @@ const App = (() => {
       case 'state':   set('f-state', value);       ingest.form.state       = value; break
       case 'country': set('f-country', value);     ingest.form.country     = value; break
       case 'event':   set('f-event-name', value);  ingest.form.event_name  = value; break
-      // Source is free text now (2026-08-08 — was a fixed SBD/AUD/MTX/FM/
-      // DVB-S/Other <select>, same as every other field it lives beside), so
-      // it no longer needs the old "only accept a value that's one of the
-      // <select>'s options" guard.
+      // Source is free text now, so it no longer needs the old "only accept
+      // a value that's one of the <select>'s options" guard.
       case 'source':  set('f-source', value);      ingest.form.source      = value; break
       case 'stage':   set('f-stage', value);       ingest.form.stage       = value; break
       case 'lineage': set('f-lineage', value);     ingest.form.lineage     = value; break
@@ -10701,16 +10450,15 @@ const App = (() => {
     _closeTrackMenu()
     const onChange = opts.onChange || (() => {})
     // flagsOnly: Add Recording's table now has Note/Songwriter as click-to-edit
-    // cells directly (Ryan, 2026-07-15), so its right-click popup is Flags
-    // (+ Official, if showOfficial) only. View Recording still gets the full
+    // cells directly, so its right-click popup is Flags (+ Official, if
+    // showOfficial) only. View Recording still gets the full
     // Note/Songwriter/Flags/Official grid — it doesn't pass this option.
     const flagsOnly = !!opts.flagsOnly
     const menu = document.createElement('div')
     menu.className = 'track-qmenu'
     menu.id = 'track-qmenu'
-    // Alphabetical, because TRACK_FLAGS itself is (2026-09-01) — no sort here,
-    // so the popup and every other consumer read one ordering from one place.
-    const flagPills = TRACK_FLAGS.map(f => {
+    // Two sections, Issues then Content, in TRACK_FLAGS order.
+    const pillsFor = group => TRACK_FLAGS.filter(f => f.group === group).map(f => {
       const active = (track.flags || []).includes(f.key)
       return `<button class="flag-pill ${active ? 'active' : ''}" data-flag="${f.key}" type="button"
                       aria-pressed="${active}">${f.label}</button>`
@@ -10719,15 +10467,13 @@ const App = (() => {
     // manages that per-track flag elsewhere; Add Recording has no other place
     // for it once the expand row goes away, so it lives here for that caller.
     //
-    // Its own footer row below a rule, not another `.et-detail-field`
-    // (Ryan, 2026-09-01: "colocated next to its checkbox and no line break").
-    // The old markup borrowed the expand-row's field wrapper, whose
-    // `label { display: block }` puts a label ABOVE its control — the exact
-    // opposite of what a checkbox wants — and only a second, more specific
-    // `.check-inline` rule pulled it back onto one line. Two rules fighting
-    // over one element is how the break got in; a purpose-built class with
-    // `white-space: nowrap` on the text cannot break at all, whatever the
-    // menu width.
+    // Its own footer row below a rule, not another `.et-detail-field`. The old
+    // markup borrowed the expand-row's field wrapper, whose `label { display:
+    // block }` puts a label ABOVE its control — the exact opposite of what a
+    // checkbox wants — and only a second, more specific `.check-inline` rule
+    // pulled it back onto one line. Two rules fighting over one element is how
+    // the break got in; a purpose-built class with `white-space: nowrap` on the
+    // text cannot break at all, whatever the menu width.
     //
     // It is also NOT a flag. Flags describe what is on the tape; official
     // release is a rights fact about the recording. Same popup, separated by a
@@ -10761,8 +10507,12 @@ const App = (() => {
       ${detailGrid}
       ${setRow}
       <div class="track-qmenu-field">
-        <span class="track-qmenu-label">Flags</span>
-        <div class="flag-pill-row track-qmenu-flags">${flagPills}</div>
+        <span class="track-qmenu-label">Issues</span>
+        <div class="flag-pill-row track-qmenu-flags">${pillsFor('issues')}</div>
+      </div>
+      <div class="track-qmenu-field">
+        <span class="track-qmenu-label">Content</span>
+        <div class="flag-pill-row track-qmenu-flags">${pillsFor('content')}</div>
       </div>
       ${officialRow}`
     document.body.appendChild(menu)
@@ -10848,7 +10598,7 @@ const App = (() => {
     'end_year', 'end_month', 'end_day', 'venue_name', 'city', 'state',
     'country', 'source', 'quality', 'lineage', 'notes', 'event_name', 'stage',
   ]
-  // Queue-level values → this form (Ryan, 2026-09-02).
+  // Queue-level values → this form.
   //
   // "Apply values to every recording below" already reached the server on BOTH
   // ingest paths — the confirm payload falls back to it field by field — but
@@ -10866,9 +10616,6 @@ const App = (() => {
   // Returns how many fields it filled, so the caller can say so.
   // ── Blanket values: staged, and they WIN ──────────────────────────────────
   //
-  // Reversed 2026-09-03 (Ryan), and the reversal is the whole point, so read
-  // this before touching any of it.
-  //
   // These used to fill only fields the inference had left EMPTY, on the
   // reasoning that the form is the more specific statement. That is wrong for
   // what the control is actually for: a queue of twenty shows from one festival
@@ -10881,9 +10628,9 @@ const App = (() => {
   // does not happen on its own: nothing propagates until **Apply Values** is
   // pressed. `lq.applyAll` is what is typed; `lq.applied` is what was pressed.
   // Only `lq.applied` is ever read by the ingest paths — typing alone changes
-  // nothing, anywhere, including auto-Ingest (Ryan's call: "Apply is the only
-  // path"). That is a deliberate trade of convenience for the guarantee that
-  // nothing overwrites a parsed value without a deliberate press.
+  // nothing, anywhere, including auto-Ingest. That is a deliberate trade of
+  // convenience for the guarantee that nothing overwrites a parsed value
+  // without a deliberate press.
   //
   // Empty blanket fields are NOT staged. "Apply" means "use the values I
   // typed", never "blank out the eight fields I left alone".
@@ -11044,16 +10791,15 @@ const App = (() => {
     try {
       const h = await API.ingest.health(clone)
       ingest.scan.health = h
-      // Only the VALUE is rewritten now (2026-09-01) — the label is static
-      // markup. Rewriting the whole element's innerHTML, as this used to, is
-      // what made it easy to lose the label wording on an edit; there is now
-      // one place the words "Metadata Completeness" appear at all.
+      // Only the VALUE is rewritten now — the label is static markup.
+      // Rewriting the whole element's innerHTML, as this used to, is what
+      // made it easy to lose the label wording on an edit; there is now one
+      // place the words "Metadata Completeness" appear at all.
       const valEl = document.querySelector('#iq-score .meta-readout-value')
       if (valEl) {
-        // The RATING word, not the raw number (Ryan, 2026-08-13 — Low/Medium/
-        // High replaced the numeric score everywhere). This once wrote
-        // `h.score`, so it rendered "High" on first paint and silently became
-        // "82" on the first field edit.
+        // The RATING word, not the raw number. This once wrote `h.score`, so
+        // it rendered "High" on first paint and silently became "82" on the
+        // first field edit.
         valEl.textContent = _metaRating(h)
         valEl.className = 'meta-readout-value meta-readout-value--' + h.band
       }
@@ -11107,9 +10853,6 @@ const App = (() => {
     if (paneId === 'isp-quality') loadIngestQualityPane()
   }
 
-  /** The shared action row, shown by data-for — the same rule View Recording
-   *  adopted on 2026-08-21. The row hides itself entirely when the active pane
-   *  has no action to offer, rather than sitting there as an empty bar. */
   function syncIngestPaneActs(paneId) {
     const row = document.getElementById('ingest-pane-acts')
     if (!row) return
@@ -11121,7 +10864,7 @@ const App = (() => {
       // .act-suppressed is a SECOND, separate reason a control stays hidden —
       // Save to File is suppressed while the info file is locked. Without this
       // term the pane switcher un-hid it again on every tab change, so a
-      // locked file showed a Save button (2026-08-28).
+      // locked file showed a Save button.
       el.hidden = el.dataset.for !== paneId || el.classList.contains('act-suppressed')
       // Status text and notes are not actions and must not hold the row open.
       const isAction = !el.classList.contains('pane-act-status') &&
@@ -11166,17 +10909,16 @@ const App = (() => {
     panel.classList.toggle('open', !!open)
   }
 
-  /** The Quality tab: the TRIAGE pass's numbers, because nothing on this page
-   *  has been ingested yet and so has no permanent score (Ryan, 2026-08-28:
-   *  "show the triage pass's partial numbers if that's all that exists").
-   *
-   *  /api/quality/staging/features is keyed by folder path, not by how the
-   *  reviewer got here, so it works the same from the triage queue, from bulk
-   *  import and from a single add. 404 is the ordinary "this folder was never
-   *  analyzed" answer, not a failure worth a red box: Quick Add skips the
-   *  analysis pass by design, so most folders reaching this page legitimately
-   *  have nothing to show. Rendered by the same builder View Recording uses,
-   *  minus the spectrogram. */
+  /* The Quality tab: the TRIAGE pass's numbers, because nothing on this page
+     has been ingested yet and so has no permanent score.
+
+      /api/quality/staging/features is keyed by folder path, not by how the
+      reviewer got here, so it works the same from the triage queue, from bulk
+      import and from a single add. 404 is the ordinary "this folder was never
+      analyzed" answer, not a failure worth a red box: Quick Add skips the
+      analysis pass by design, so most folders reaching this page legitimately
+      have nothing to show. Rendered by the same builder View Recording uses,
+      minus the spectrogram. */
   let _ingestQualityLoaded = false
   async function loadIngestQualityPane() {
     if (_ingestQualityLoaded) return
@@ -11322,7 +11064,7 @@ const App = (() => {
       f.genre_name      = document.getElementById('f-genre').classList.contains('is-new-genre')
                           ? document.getElementById('f-genre').value.trim()
                           : ''
-      f.is_official     = document.getElementById('f-is-official').checked
+      f.is_official     = document.getElementById('f-is-official')?.checked ?? f.is_official
       f.source          = document.getElementById('f-source').value
       f.quality         = document.getElementById('f-quality').value.trim()
       f.lineage         = document.getElementById('f-lineage').value.trim()
@@ -11354,20 +11096,21 @@ const App = (() => {
     // paths ingest from, so the wizard shows exactly what an unattended
     // ingest would have produced.
     if (!ingest.tracks.length) {
-      // Resolver-built (spec chunk 6) -- title-cased, flagged, scan-index
-      // numbered. The human can still edit this list before it posts.
+      // Resolver-built -- title-cased, flagged, scan-index numbered. The
+      // human can still edit this list before it posts.
       ingest.tracks = ingest.scan?.resolved?.tracks || []
+      if (ingest.tracks.length && ingest.lxReapplyWait) ingest.lxReapplyWait()
     }
 
     // Pre-fill metadata form on first load
     const f = ingest.form
     if (!f._filled) {
-      // Resolver-built (Ingest Field Resolver spec v1, chunk 6): every field
-      // below reads scan.resolved.<field>.value -- tags-vs-info precedence,
-      // date precision, and the tag/info-file merge (including its own
-      // ad hoc concert_date parsing) all used to be re-derived here in JS;
-      // that logic is deleted and this just reads the resolver's answer,
-      // same one the wizard's prefill, batch_scan and auto_confirm all use.
+      // Resolver-built: every field below reads scan.resolved.<field>.value
+      // -- tags-vs-info precedence, date precision, and the tag/info-file
+      // merge (including its own ad hoc concert_date parsing) all used to be
+      // re-derived here in JS; that logic is deleted and this just reads the
+      // resolver's answer, same one the wizard's prefill, batch_scan and
+      // auto_confirm all use.
       const r = ingest.scan.resolved || {}
       const rv = key => r[key]?.value ?? null
       const date = r.date?.value || {}
@@ -11445,13 +11188,13 @@ const App = (() => {
 
     // Right panel: parsed info file — arrows on LEFT of label
     //
-    // Reads the resolver's own candidates (Ingest Field Resolver spec v1,
-    // chunk 6) rather than the raw info-file suggestions: resolved.<field>
-    // .candidates.info is the SAME value build_scan_payload's resolve() call
-    // already filtered (an implausible venue line -- a clock time, "Two
-    // Shows: Show 1..." -- is rejected there and never becomes a candidate
-    // at all), so this panel cannot offer an apply arrow onto a value the
-    // resolver itself would not have trusted.
+    // Reads the resolver's own candidates rather than the raw info-file
+    // suggestions: resolved.<field> .candidates.info is the SAME value
+    // build_scan_payload's resolve call already filtered (an implausible
+    // venue line -- a clock time, "Two Shows: Show 1..." -- is rejected
+    // there and never becomes a candidate at all), so this panel cannot
+    // offer an apply arrow onto a value the resolver itself would not have
+    // trusted.
     //
     // resolved.<field>.conflict (true when tags and the info file disagree)
     // is available here but not rendered -- no existing style in this file
@@ -11525,15 +11268,14 @@ const App = (() => {
     // "Save to file" writes it to disk independent of Confirm, so a re-run of
     // AI Assist picks up the correction — Confirm still sends whatever's in
     // memory either way, saving to disk is just for round-tripping with AI.
-    // Save to File lives in the panel's shared action row now (2026-08-28),
-    // not at the bottom of this pane. Same rule View Recording adopted on
-    // 08-21: every pane's action in one place, shown by data-for.
-    // READ-ONLY until asked otherwise, matching View Recording (Ryan,
-    // 2026-08-28). It was a live textarea here and a locked one there, which
-    // is the divergence: a stray click plus a keystroke silently rewrote the
-    // taper's own words, and on THIS page that is worse than on View
-    // Recording, because the text goes straight into what Confirm sends
-    // rather than waiting for a save.
+    // Save to File lives in the panel's shared action row now, not at the
+    // bottom of this pane. Same rule View Recording adopted on 08-21: every
+    // pane's action in one place, shown by data-for. READ-ONLY until asked
+    // otherwise, matching View Recording. It was a live textarea here and a
+    // locked one there, which is the divergence: a stray click plus a
+    // keystroke silently rewrote the taper's own words, and on THIS page that
+    // is worse than on View Recording, because the text goes straight into
+    // what Confirm sends rather than waiting for a save.
     //
     // The one exception is an empty folder. With no info file there is nothing
     // to protect and typing one in from scratch is the documented purpose of
@@ -11556,32 +11298,26 @@ const App = (() => {
     // Track table rows — play preview, title, and the same flag-chip layout
     // as View Recording. Note/Songwriter are click-to-edit cells right in the
     // table (staged into ingest.tracks in memory — no API call; Confirm sends
-    // it all at once). Right-click a row for Flags only (openTrackMenu with
-    // flagsOnly — Ryan, 2026-07-15: Note/Songwriter moved out of that popup
-    // now that they're editable inline).
-    // A track's chip row: the FIRST chip (official badge, then flags in
-    // order) stays under the title as before; if there's more than one, the
-    // rest get their own full-width row right underneath, laid out
-    // horizontally — they used to all stack vertically inside the narrow
-    // title-cell and push the title text up (Ryan, 2026-07-15).
+    // it all at once). Right-click a row for Flags only. A track's chip row:
+    // the FIRST chip (official badge, then flags in order) stays under the
+    // title as before; if there's more than one, the rest get their own
+    // full-width row right underneath, laid out horizontally — they used to
+    // all stack vertically inside the narrow title-cell and push the title
+    // text up.
     function _trackChipExpandRowHtml(i, chips) {
       // chips[0] is already rendered separately under the title (see
       // trackRows below / refreshIngestTrackRow) — this row is only for the
-      // REST. Bug fixed 2026-07-23 (Ryan: "Banter" showing twice on tracks
-      // titled e.g. "Banter & Tuning"): this used to join the FULL chips
-      // array here, so the first chip was shown once under the title AND
-      // again in this row every time a track had 2+ chips. Not a data bug —
-      // t.flags itself was always clean (detect_track_flags in
-      // app/utils/ingest.py builds off a Set, which can't hold a duplicate
-      // key) — purely a rendering double-count.
+      // REST. Not a data bug — t.flags itself was always clean
+      // (detect_track_flags in app/utils/ingest.py builds off a Set, which
+      // can't hold a duplicate key) — purely a rendering double-count.
       return `<tr class="track-review-chiprow" data-idx="${i}">
           <td colspan="7"><div class="track-chip-expand-row">${chips.slice(1).join('')}</div></td>
         </tr>`
     }
 
-    // Official-release mark for the dedicated column (Ryan, 2026-08-09) —
-    // separate from trackChipsArray's badge, which Add Recording hides
-    // (hideOfficial) to keep it out of the title cell/chip row entirely.
+    // Official-release mark for the dedicated column — separate from
+    // trackChipsArray's badge, which Add Recording hides (hideOfficial)
+    // to keep it out of the title cell/chip row entirely.
     function _officialBadgeHtml(t) {
       return t.is_official
         ? `<span class="track-official-badge" title="Officially released">©</span>` : ''
@@ -11614,40 +11350,17 @@ const App = (() => {
           ingest.returnTo ? 'Back to Add Recordings' : 'Back'}</a>
         <div class="ingest-topbar-line">
           <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}</span></h2>
-          <!-- Metadata Completeness — a labelled readout, not a pill (Ryan,
-               2026-09-01). A pill is a badge: a small, coloured, rounded thing
-               the eye reads as a STATUS on the object beside it, which is why
-               this one kept reading as a property of the folder name it sat
-               next to. This is a measurement of the form below, so it is
-               written as one — its name spelled out in full, the value beside
-               it, and the colour carried by the value alone rather than by a
-               tinted capsule. Same three bands, same id reScore() writes to. -->
           <div class="meta-readout" id="iq-score"
                title="How much of the metadata this form has filled in">
             <span class="meta-readout-label">Metadata Completeness</span>
             <span class="meta-readout-value meta-readout-value--${studioHealth ? studioHealth.band : (ingest.scan.health?.band || 'yellow')}"
                   >${esc(studioHealth ? studioHealth.rating : _metaRating(ingest.scan.health))}</span>
           </div>
-          <!-- Rescan (Ryan, 2026-09-01). The Details panel lets a reviewer fix
-               the info file in place; until now nothing re-read it, so a
-               corrected tracklist or date sat there doing nothing and the only
-               way to act on it was to leave the page and come back. -->
           <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-rescan"
                   title="Re-run the inference over the info file, including any edits you have made to it">
             ${icon('rotate-cw', 'lq-browse-ic')} Rescan</button>
           <button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-classify-kind">${
             studio ? 'Classify as Live Recording' : 'Classify as Album'}</button>
-          <!-- Re-apply the queue's applied values (2026-09-02, precedence
-               reversed 2026-09-03). They are already written over the
-               inference when this form opens, so in the ordinary case this has
-               nothing to do. It is here for the cases where it does: you
-               pressed Apply Values AFTER opening this show, or you Rescanned
-               and want the blanket values back over the freshly parsed ones.
-               It overwrites, like the prefill — the point of a blanket value
-               is that it wins.
-               Shown only when values are actually STAGED. Typed-but-unapplied
-               values do nothing anywhere, so offering to apply them here would
-               be offering a no-op. -->
           ${_queueValuesCount() ? `<button class="btn btn-ghost btn-sm ingest-rescan-btn" id="btn-apply-queue"
                   title="Overwrite this form's Artist, Venue, Event and the rest with the values applied to the whole queue">
             ${icon('plus', 'lq-browse-ic')} Apply Queue Values</button>` : ''}
@@ -11656,17 +11369,9 @@ const App = (() => {
       </div>
       <div class="ingest-review-shell">
 
-        <!-- Left: metadata form + track list -->
         <div class="ingest-review-form">
           <div class="ingest-review-form-body">
 
-            <!-- Artist + Genre on one row (Ryan, 2026-09-01).
-                 The parenthetical "(the act, from the FLAC ARTIST tag)" is
-                 gone: it put a second font treatment inside a 10px label to
-                 explain a word the app uses everywhere, and where the value
-                 came from is what the Details panel's FLAC Tags pane is for.
-                 Genre belongs beside the act because it IS a property of the
-                 act — see the genre picker's wiring below. -->
             <div class="ingest-field-grid ingest-row-act">
               <div class="ingest-field">
                 <label for="f-artist">Artist</label>
@@ -11685,18 +11390,10 @@ const App = (() => {
               </div>
             </div>
 
-            <!-- Members/Guests two-row personnel widget — filled in by
-                 createMembersWidget().renderChips(), see app.js. -->
             <div class="ingest-field" style="margin-top:6px">
               <div class="members-field" id="f-members-field"></div>
             </div>
 
-            <!-- Date, Venue and Event on ONE row (Ryan, 2026-08-28, from the
-                 redesign sheet). They were three separate rows of part-width
-                 controls, which is what made the form read as a column of
-                 boxes rather than a record. End date keeps its own disclosure:
-                 a multi-day show is the rare case and should not cost three
-                 permanent inputs. -->
             <div class="ingest-field-grid ingest-row-ident${studio ? ' ingest-row-album' : ''}" style="margin-top:6px">
               ${studio ? `<div class="ingest-field"><label for="f-album-title">Album Title</label><input type="text" id="f-album-title" value="${esc(f.album_title || '')}" autocomplete="off" /></div>` : ''}
               <div class="ingest-field"><label>Year</label><input type="number" id="f-year" class="${paulaCls('date')}" value="${esc(f.start_year)}" min="1900" max="2099" /></div>
@@ -11732,25 +11429,17 @@ const App = (() => {
               <div class="ingest-field"><label>Day</label><input type="number" id="f-end-day" value="${esc(f.end_day)}" min="1" max="31" /></div>
             </div>
 
-            <!-- Non-blocking: already-in-library warning for this artist+date
-                 (checked once both are known — see wireDupCheck). Multiple
-                 recordings per show are legitimate, so this never blocks Confirm. -->
             <div class="dup-warn" id="dup-warn" style="display:none">
               <div class="dup-warn-title">Already in your library</div>
               <div class="dup-warn-body" id="dup-warn-body"></div>
             </div>
 
-            <!-- City / State / Country — state is narrow -->
             <div class="ingest-field-grid" style="grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr); gap:10px; margin-top:6px${studio ? '; display:none' : ''}" id="f-location-row">
               <div class="ingest-field"><label>City</label><input type="text" id="f-city" class="${paulaCls('city')}" value="${esc(f.city)}" /></div>
               <div class="ingest-field"><label>State</label><input type="text" id="f-state" class="${paulaCls('state')}" value="${esc(f.state)}" maxlength="6" /></div>
               <div class="ingest-field"><label>Country</label><input type="text" id="f-country" class="${paulaCls('country')}" value="${esc(f.country)}" /></div>
             </div>
 
-            <!-- Quality, Source, Lineage — that order (Ryan, 2026-08-28).
-                 Source carries no placeholder: "SBD, AUD, MTX…" read as a
-                 value at a glance in a form whose other boxes are pre-filled,
-                 and the field is not free text anyway. -->
             <div class="ingest-field-grid ingest-row-src" style="margin-top:6px${studio ? '; display:none' : ''}">
               <div class="ingest-field">
                 <label>Quality</label>
@@ -11766,9 +11455,6 @@ const App = (() => {
               </div>
             </div>
 
-            <!-- Source tag, shnid -- spec section 5: folder-name detection
-                 only, never written without this form. Same labels as the
-                 View Recording Source block. -->
             <div class="ingest-field-grid ingest-row-src" style="margin-top:6px${studio ? '; display:none' : ''}">
               <div class="ingest-field">
                 <label>Source Tag</label>
@@ -11780,27 +11466,11 @@ const App = (() => {
               </div>
             </div>
 
-            <!-- Track table -->
-            <!-- Preview player moved into this header row (Ryan, 2026-08-08),
-                 right-aligned opposite the "Tracks (N)" title — same idea as
-                 the Bulk Update preview layout, rather than pinned to the
-                 bottom action bar where it competed with Add & Return/View. -->
             <div class="rev-tracks-header" style="margin-top:16px; padding-top:12px; border-top:1px solid var(--bd-1)">
               <div class="rev-section-title" style="margin-bottom:0">
                 Tracks <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--t2)">(${ingest.tracks.length})</span>
                 <span style="font-weight:400; text-transform:none; letter-spacing:0; color:var(--t3); font-size:10px">right-click a track to add flags</span>
               </div>
-              <!-- Preview transport (Ryan, 2026-08-28: option P1). Was
-                   <audio controls>, the one control in the app the OS drew
-                   itself, at its own weight, radius and palette — and on the
-                   packaged WKWebView build it read as a piece of Safari
-                   sitting inside Trellis. This is the player bar's own
-                   vocabulary at two thirds scale: same accent circle, same
-                   Lucide transport glyphs, same input[type=range].progress-bar
-                   with its accent gradient fill, same tabular-nums times.
-                   Prev/Next step through the track table, which the native
-                   widget could not do at all. The <audio> element stays, now
-                   with no controls attribute: it is the engine, not the UI. -->
               <div id="ingest-audio-bar" class="ingest-xport">
                 <button class="ingest-xport-btn" id="ixp-prev" type="button" title="Previous track">${icon('skip-back')}</button>
                 <button class="ingest-xport-btn ingest-xport-play" id="ixp-play" type="button" title="Play / pause">${icon('play')}</button>
@@ -11823,10 +11493,6 @@ const App = (() => {
                     <th style="width:22%">Notes</th>
                     <th style="width:18%">Songwriter</th>
                     <th style="width:44px">Time</th>
-                    <!-- Official-release mark — otherwise-blank column, far
-                         right (Ryan, 2026-08-09). Reinstated the © badge but
-                         out of the title cell, where it risked wrapping the
-                         row; a dedicated fixed-width column can't. -->
                     <th style="width:20px"></th>
                   </tr>
                 </thead>
@@ -11839,23 +11505,14 @@ const App = (() => {
               <textarea id="f-notes" style="min-height:80px">${esc(f.notes)}</textarea>
             </div>
 
-            <label style="display:flex; align-items:center; gap:8px; color:var(--t3); font-size:11px; margin-top:8px; cursor:pointer">
+            ${studio ? '' : `            <label style="display:flex; align-items:center; gap:8px; color:var(--t3); font-size:11px; margin-top:8px; cursor:pointer">
               <input type="checkbox" id="f-is-official" ${f.is_official ? 'checked' : ''} />
               <span>Official Release</span>
               <span style="color:var(--t3); font-style:italic">marks the recording and all tracks as officially released</span>
-            </label>
+            </label>`}
 
           </div>
           <div class="ingest-actions">
-            <!-- Audio preview player moved up into the Tracks header row
-                 (Ryan, 2026-08-08) — this bar is action-only now: both exits,
-                 right-aligned. Two exits because a reviewer working a queue
-                 and a reviewer adding one show want opposite things.
-                 "Add & Return" is primary: mid-queue is the common case, and
-                 it goes straight back to the ingest list with this row marked
-                 done. "Add & View" (farthest right) opens the finished record
-                 instead — a lighter fill than the primary button so the pair
-                 doesn't read as primary+disabled-looking-ghost. -->
             <div class="ingest-actions-left" id="ingest-fh-strip"></div>
             <div class="ingest-actions-right">
               <button class="btn btn-ingest-secondary" id="btn-confirm"
@@ -11864,8 +11521,6 @@ const App = (() => {
                       data-after="view" title="Add to library and open the finished record">Add &amp; View →</button>
             </div>
           </div>
-          <!-- Reserved before it is needed (Ryan, 2026-10-02): the bar used to be
-               inserted on click and pushed the page up. Hidden, not absent. -->
           <div id="confirm-progress" class="confirm-progress" style="visibility:hidden">
             <div class="confirm-progress-bar"><div class="confirm-progress-fill" id="confirm-progress-fill"></div></div>
             <div class="confirm-progress-label" id="confirm-progress-label">Preparing…</div>
@@ -11873,27 +11528,10 @@ const App = (() => {
           <div id="review-submit-error" class="review-submit-error" style="display:none"></div>
         </div>
 
-        <!-- Resize handle -->
         <div class="rev-resize-handle" id="rev-divider"></div>
 
-        <!-- Right: the Details panel — the SAME component View Recording uses
-             (Ryan, 2026-08-28: "ship A"). Horizontal tab strip, no per-pane
-             headers repeating the tab above them, one .pane-acts row shown by
-             data-for, and a permanent rail that toggles the whole panel.
-
-             The rail sits AFTER .slide-panel-main, against the window's right
-             edge, and View Recording was moved to match. Leading, it rode the
-             panel's inner edge and travelled the panel's full width on every
-             click — a toggle that jumps out from under the cursor.
-
-             The old quality bar is gone: it was 34px of chrome for one rating
-             and one button. The rating is a chip in the topbar, the button is
-             a pane action. -->
         <div class="ingest-review-raw slide-panel--htabs slide-panel--index open" id="ingest-slide-panel">
           <div class="slide-panel-main">
-            <!-- Same three info-file controls, in the same order, as View
-                 Recording (Ryan, 2026-08-28). Save leads and is suppressed
-                 while the file is locked; the status sits between them. -->
             <div class="pane-acts" id="ingest-pane-acts">
               <span class="pane-title" id="ingest-pane-title"></span>
               <span class="pane-act-status" id="info-file-save-status" data-for="isp-info"></span>
@@ -11905,10 +11543,6 @@ const App = (() => {
                 ${textSwitcher}
                 <div class="slide-pane-scroll"><div class="rev-raw-section">${infoText}</div></div>
               </div>
-              <!-- Quality: the triage pass's numbers, fetched lazily. Nothing
-                   here has been ingested, so there is no permanent score yet —
-                   see loadIngestQualityPane for what happens when the folder
-                   was never analyzed either. -->
               <div class="slide-pane" id="isp-quality">
                 <div class="slide-pane-scroll" id="isp-quality-body">
                   <div class="info-panel-empty">Loading…</div>
@@ -11926,8 +11560,6 @@ const App = (() => {
               ${studio ? `<div class="slide-pane" id="isp-mb">
                 <div class="slide-pane-scroll"><div class="rev-raw-section" id="ingest-mb-root"></div></div>
               </div>` : ''}
-              <!-- Permanent, so the tab always advertises Lomax. The chat and
-                   the Resolver tab share one controller (see lomaxController). -->
               <div class="slide-pane" id="isp-ai">
                 <div class="slide-pane-scroll lx-scroll"></div>
                 <div class="lx-bar-slot"></div>
@@ -11943,11 +11575,8 @@ const App = (() => {
       </div>`)
 
     // Health score — recompute on any committed field change, not just AI
-    // Assist actions (Ryan, 2026-07-16: the badge must never sit stale
-    // relative to what's actually on screen — this is what let a scan
-    // showing "9 of 23 tracks have a title" still show a 100/"Looks
-    // complete" badge). Delegated on the review container itself, which is
-    // torn down by the next setMainHTML() call, so this doesn't accumulate.
+    // Assist actions. Delegated on the review container itself, which is torn
+    // down by the next setMainHTML call, so this doesn't accumulate.
     // `focusout` (unlike `blur`) bubbles, so one listener covers every field.
     mainContent.querySelector('.ingest-review-outer')?.addEventListener('focusout', e => {
       if (e.target.matches('input, textarea, select')) {
@@ -11998,9 +11627,8 @@ const App = (() => {
           setTimeout(() => { btn.innerHTML = icon('arrow-left') }, 800)
 
           // These buttons set field values programmatically (no real focus
-          // change), so the usual focusout-triggered reScore() below never
-          // fires for them — recompute explicitly (Ryan, 2026-07-16: the
-          // health score must never sit stale against what's on screen).
+          // change), so the usual focusout-triggered reScore below never
+          // fires for them — recompute explicitly.
           reScore()
         })
       })
@@ -12008,7 +11636,7 @@ const App = (() => {
 
     // Ingest track preview — play/pause individual audio files. Shown by
     // default (previewing the first track, paused) rather than only
-    // appearing after a play click (Ryan, 2026-07-15).
+    // appearing after a play click.
     ;(function () {
       const audioEl  = document.getElementById('ingest-preview-audio')
       if (!audioEl) return
@@ -12139,10 +11767,10 @@ const App = (() => {
             return
           }
 
-          // Pausing the main player bar so the two don't talk over each other
-          // (Ryan, 2026-07-15). `window.Player` is always undefined — a
-          // top-level const doesn't attach to window — so this guard was
-          // dead and the two players could run at once (Ryan, 2026-08-27).
+          // Pausing the main player bar so the two don't talk over each
+          // other. `window.Player` is always undefined — a top-level const
+          // doesn't attach to window — so this guard was dead and the two
+          // players could run at once.
           if (typeof Player !== 'undefined' && Player.isPlaying()) Player.pause()
 
           loadTrack(btn, filename, true)
@@ -12196,9 +11824,9 @@ const App = (() => {
         swEl.textContent = t.songwriter || '—'; swEl.title = t.songwriter || 'Click to add a songwriter'
         swEl.classList.toggle('pp-empty', !t.songwriter)
       }
-      // Official mark — its own column (Ryan, 2026-08-09), covers both the
-      // master checkbox's cascade and a per-track right-click toggle, since
-      // both funnel through this one function.
+      // Official mark — its own column, covers both the master checkbox's
+      // cascade and a per-track right-click toggle, since both funnel
+      // through this one function.
       const offEl = document.getElementById(`t-off-${i}`)
       if (offEl) offEl.innerHTML = _officialBadgeHtml(t)
     }
@@ -12209,16 +11837,15 @@ const App = (() => {
         const t = ingest.tracks[idx]
         if (!t) return
         openTrackMenu(t, ev.clientX, ev.clientY, {
-          showOfficial: true,
+          showOfficial: !studio,
           flagsOnly: true,
           onChange: () => refreshIngestTrackRow(idx),
         })
       })
     })
 
-    // Note/Songwriter — click-to-edit directly in the table (Ryan, 2026-07-15:
-    // moved out of the right-click menu, which is Flags-only here now). Staged
-    // into ingest.tracks in memory, same as every other field on this form —
+    // Note/Songwriter — click-to-edit directly in the table. Staged into
+    // ingest.tracks in memory, same as every other field on this form —
     // nothing hits the API until Confirm.
     ingest.tracks.forEach((t, i) => {
       const noteEl = document.getElementById(`t-note-${i}`)
@@ -12270,7 +11897,7 @@ const App = (() => {
 
           // Switching candidates replaces the text and re-renders, so an
           // unsaved edit would vanish silently — while Cancel, two pixels
-          // away, prompts. Same question, same words (2026-08-28).
+          // away, prompts. Same question, same words.
           const editing = document.getElementById('rev-info-edit')
           if (editing && !editing.readOnly &&
               editing.value !== (ingest._infoBaseline || '') &&
@@ -12417,13 +12044,11 @@ const App = (() => {
       _applyQueueValuesToLiveForm()
       const errEl = document.getElementById('review-submit-error')
       if (!errEl) return
-      // Ryan cut the "no values applied" message (2026-10-02); the button only
-      // shows when values are staged, so an empty apply is near-unreachable.
+      // message; the button only shows when values are staged, so an empty
+      // apply is near-unreachable.
       errEl.style.display = 'none'
     })
 
-    // ── Rescan (Ryan, 2026-09-01) ──────────────────────────────────────────
-    //
     // Re-runs the same inference the folder was first scanned with, over the
     // info file AS IT NOW STANDS in the Details panel — edits included, saved
     // or not. The edited text rides on the request; nothing is written to the
@@ -12497,9 +12122,9 @@ const App = (() => {
     // note/songwriter/official all live on ingest.tracks now; right-click a
     // row — via openTrackMenu — to edit an individual track).
     document.getElementById('f-is-official')?.addEventListener('change', function () {
-      // Cascades both ways (Ryan, 2026-08-09) — it used to only ever set
-      // tracks TO official; unchecking left every track stuck official with
-      // no way back short of clearing each one individually by hand.
+      // Cascades both ways — it used to only ever set tracks TO official;
+      // unchecking left every track stuck official with no way back short
+      // of clearing each one individually by hand.
       const official = this.checked
       ingest.tracks.forEach((t, i) => { t.is_official = official; refreshIngestTrackRow(i) })
     })
@@ -12529,19 +12154,10 @@ const App = (() => {
     addMembersWidget.mount()
     const membersReady = initAddArtistMembers(addMembersWidget)
 
-    // ── Genre (Ryan, 2026-09-01) ────────────────────────────────────────────
-    //
     // Genre is a property of the ARTIST, not of the recording — there is no
     // genre column on Recording and there should not be, since an act's genre
     // is the same on every night it played. So this field says what the act's
     // genre is, and Confirm writes it to the Artist row.
-    //
-    // ⚠ This softens a standing rule, deliberately and on Ryan's instruction.
-    // The Genre design spec (2026-08-02) says nothing may create a genre
-    // implicitly and that creating one is an explicit action on the Genres
-    // page. What that rule was protecting against is a typo in a hurried
-    // ingest quietly minting "Blugrass" alongside "Bluegrass" — the placeholder
-    // -venue contamination story in another costume.
     //
     // The protection is kept where it matters: creation here is still EXPLICIT.
     // Typing a name that does not exist creates nothing. The dropdown offers a
@@ -12645,10 +12261,10 @@ const App = (() => {
       })
     })()
 
-    // Duplicate-in-library check — fires once artist + year are both
-    // known. Non-blocking: a second source for the same show (SBD + AUD) is
+    // Duplicate-in-library check — fires once artist + year are both known.
+    // Non-blocking: a second source for the same show (SBD + AUD) is
     // legitimate, so this only informs, never prevents Confirm. Debounced so
-    // it doesn't hammer the API on every keystroke. (Ryan, 2026-07-14.)
+    // it doesn't hammer the API on every keystroke.
     ;(function () {
       const artistEl = document.getElementById('f-artist')
       const yearEl   = document.getElementById('f-year')
@@ -12716,7 +12332,6 @@ const App = (() => {
         // canonical place — their stored city/state/country is leftover from
         // whichever other show wrote there last, not this show's location.
         // Don't lock/prefill from it; leave the tag/info guess editable.
-        // (Ryan, 2026-07-15 — see app/utils/venues.py for the full story.)
         if (isPlaceholderVenue(venue?.name)) return
         cityEl.value  = venue.city    || ''
         stateEl.value = venue.state   || ''
@@ -12739,7 +12354,7 @@ const App = (() => {
       // stored values rather than the tag/info guess, which may be stale or
       // just less precise (e.g. "Ottawa, ON" in tags vs. the venue's actual
       // "Gatineau, QC"). A genuinely new venue name is left as the tag/info
-      // prefill, editable. (Ryan, 2026-07-14.)
+      // prefill, editable.
       if (ingest.form.venue_id) {
         API.venues.get(ingest.form.venue_id).then(v => lockLocation(v)).catch(() => {})
       } else if (nameEl.value.trim().length >= 2) {
@@ -12887,7 +12502,7 @@ const App = (() => {
 
     // Standardized back link (top of page). Both this and the header Back
     // button call the one function below, so they cannot disagree about
-    // where "back" is (Ryan, 2026-08-28).
+    // where "back" is.
     document.getElementById('ingest-back-link').addEventListener('click', e => {
       e.preventDefault()
       ingestBackFromReview()
@@ -12962,6 +12577,10 @@ const App = (() => {
         return t ? (t[m[2] === 'note' ? 'notes' : m[2]] || '') : ''
       }
       const reapplyAccepted = async ctl => {
+        // The track list is built by the review render; if the stored runs arrive first, wait: the
+        // render calls ingest.lxReapplyWait right after it builds the list (once per load).
+        if (!ingest.tracks.length && alive()) { ingest.lxReapplyWait = () => { ingest.lxReapplyWait = null; reapplyAccepted(ctl).then(() => ctl.refresh()) }; return }
+        ingest.lxReapplyWait = null
         const done = ingest.form._lxApplied || {}, dirty = ingest.form._dirty || {}
         const todo = lxAcceptedToReapply(ctl.runs, formValue, p => done[p.id] || dirty[p.field], lxFingerprint(ingest.scan))
         if (todo.length) await applyLocal(todo)
@@ -13044,6 +12663,7 @@ const App = (() => {
       lomaxMountChat(chatPane, null, {
         artist: () => getFormField('artist'),
         kind: () => ingest.kind,
+        value: getFormField, tracks: () => ingest.tracks,
         addNotes: async text => {
           const el = document.getElementById('f-notes')
           if (!el) return
@@ -13188,10 +12808,10 @@ const App = (() => {
         else switchIngestPane(panel.querySelector(`.slide-tab[data-ipane="${state.ingestLastPane}"]`) ? state.ingestLastPane
           : (panel.querySelector('.slide-tab')?.dataset.ipane || 'isp-info'))
       })
-      // Default open on the Resolver when adding a recording (Ryan, 2026-10-03:
-      // it is the first tab here), else Info File. A deliberate collapse
-      // survives moving between recordings, same rule as recPanelOpen on
-      // View Recording. switchIngestPane sets the active tab and pane.
+      // Default open on the Resolver when adding a recording, else Info File. A
+      // deliberate collapse survives moving between recordings, same rule as
+      // recPanelOpen on View Recording. switchIngestPane sets the active tab
+      // and pane.
       _ingestQualityLoaded = false
       // An album has no Info File or Resolver tab, so a remembered pane that has no tab falls back.
       const _hasTab = id => !!panel.querySelector(`.slide-tab[data-ipane="${id}"]`)
@@ -13212,32 +12832,30 @@ const App = (() => {
       const f = ingest.form
       _syncIngestFormFromDom()
 
-      if (!f.artist_name) { alert('Artist name is required.'); return }
+      if (!f.artist_name) { Notify.error('Artist name is required.'); return }
 
       // Track titles were collected by _syncIngestFormFromDom. Notes,
       // songwriter, flags, and official are already staged directly on
       // ingest.tracks by openTrackMenu's onChange (right-click popup).
 
       // Submit directly — the old "Confirm & Add to Library" review screen
-      // is gone (Ryan, 2026-07-15: "never very useful, nothing is ever
-      // something i need to change"). File-behavior (copy/move) is no longer
-      // a per-add choice either — it's a standing preference (Settings ⚙,
-      // right next to the Anthropic key), read silently here.
+      // is gone. File-behavior (copy/move) is no longer a per-add choice
+      // either — it's a standing preference (Settings ⚙, right next to the
+      // Anthropic key), read silently here.
       const btn = ev.currentTarget
       const otherBtn = document.getElementById(
         btn.id === 'btn-confirm' ? 'btn-confirm-view' : 'btn-confirm')
       const errEl = document.getElementById('review-submit-error')
       btn.disabled = true
       if (otherBtn) otherBtn.disabled = true
-      // The LABEL DOES NOT CHANGE (Ryan, 2026-09-01). It used to become
-      // "Adding to library…", a wider string, so the button grew at the exact
-      // moment it was clicked and pushed the pair sideways — and with the
-      // Files select unable to shrink, the row wrapped and the buttons
-      // dropped onto a second line. Busy is now a CSS spinner in front of an
-      // unchanged label, which cannot change the button's width, and the
-      // detail ("Preparing…", "Copying files… 41%") goes to the progress bar
-      // below, which has room for a sentence and moves nothing when it
-      // changes.
+      // The LABEL DOES NOT CHANGE. It used to become "Adding to library…", a
+      // wider string, so the button grew at the exact moment it was clicked
+      // and pushed the pair sideways — and with the Files select unable to
+      // shrink, the row wrapped and the buttons dropped onto a second line.
+      // Busy is now a CSS spinner in front of an unchanged label, which
+      // cannot change the button's width, and the detail ("Preparing…",
+      // "Copying files… 41%") goes to the progress bar below, which has room
+      // for a sentence and moves nothing when it changes.
       btn.classList.add('is-busy')
       errEl.style.display = 'none'
 
@@ -13276,7 +12894,7 @@ const App = (() => {
           source_tag: '', etree_shnid: '',
         })
       }
-      // ⚠ NO blanket-value fallback here any more (2026-09-03).
+      // ⚠ NO blanket-value fallback here any more.
       //
       // This used to re-apply `lq.applyAll` field by field to anything the
       // payload had left empty — a safety net from when the values were
@@ -13312,7 +12930,7 @@ const App = (() => {
         ingest._lastResult = result
         if (result.recording_id) {
           if (result.checksum_mismatches > 0) {
-            alert(`${result.checksum_mismatches} track checksum${result.checksum_mismatches === 1 ? '' : 's'} did not match the fingerprint file for this show. Check the Checksums pane before trusting this copy.`)
+            Notify.error(`${result.checksum_mismatches} track checksum${result.checksum_mismatches === 1 ? '' : 's'} did not match the fingerprint file for this show. Check the Checksums pane before trusting this copy.`)
           }
           await loadArtistList()   // new artist/venue/musician may exist
 
@@ -13363,12 +12981,6 @@ const App = (() => {
     return `${m}:${String(sec).padStart(2,'0')}`
   }
 
-  // Step 4 ("Confirm & Add to Library") removed 2026-07-15 — Ryan: "never
-  // very useful, nothing is ever something i need to change... doesn't look
-  // great." The review step's "Add Recording →" button now submits directly
-  // (see its click handler above) instead of navigating to a separate
-  // summary-then-confirm screen. File behavior (copy/move) moved from a
-  // per-add choice to a standing preference (Settings ⚙).
 
   // ── Step 5: Success ────────────────────────────────────────────────────────
 
@@ -13473,12 +13085,12 @@ const App = (() => {
     Player.loadQueue(queue, queueStart, opts)
   }
 
-  /** Sync every play/pause icon to REAL Player state — both "is this the
-   * loaded track" AND "is it actually playing", not just the former. Called
-   * on track load (via onTrackChange) and on every play/pause of a track
-   * that was already loaded (via Player's audio listeners calling this
-   * directly) — a row that only asked "is this the loaded track" stayed
-   * stuck on the pause icon forever once paused (Ryan, 2026-08-27). */
+  /* Sync every play/pause icon to REAL Player state — both "is this the
+     loaded track" AND "is it actually playing", not just the former. Called
+     on track load (via onTrackChange) and on every play/pause of a track
+     that was already loaded (via Player's audio listeners calling this
+     directly) — a row that only asked "is this the loaded track" stayed
+     stuck on the pause icon forever once paused. */
   function syncPlayButtons() {
     const activeId = Player.currentId()
     const playing  = activeId != null && Player.isPlaying()
@@ -13541,7 +13153,7 @@ const App = (() => {
     setMainHTML(entityShellHtml({
       navBack,
       pageClass: 'venue-page',      // square portrait + square gallery tiles
-      portrait: '<div id="vn-portrait"></div>',
+      hero: { imageUrl: (v.images || [])[0] ? API.venues.imageUrl(v.images[0].id) : null },
       title: esc(v.name),
       titleId: 'vn-name',
       titleEditable: true,
@@ -13551,12 +13163,12 @@ const App = (() => {
         [v.performance_count || 0, (v.performance_count === 1) ? 'Show' : 'Shows'],
       ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="vn-delete" title="Delete venue">Delete</button>`,
-      // TAB ORDER, all five dimension pages (Ryan, 2026-09-01): Recordings
-      // first and default, then About, then Photos. What you came for is the
-      // shows; "Overview" opened every page on a form and, on most records,
-      // on an empty one — the Venue page's Notes field is blank for nearly
-      // every hall in the library. Renamed About because the pane is prose
-      // and facts ABOUT the record, not an overview of it.
+      // TAB ORDER, all five dimension pages: Recordings first and default,
+      // then About, then Photos. What you came for is the shows; "Overview"
+      // opened every page on a form and, on most records, on an empty one —
+      // the Venue page's Notes field is blank for nearly every hall in the
+      // library. Renamed About because the pane is prose and facts ABOUT the
+      // record, not an overview of it.
       tabs: [
         { id: 'recordings', label: 'Recordings', count: venueRows.length, active: true,
           // showArtist: true — a venue hosts many different acts, so the row
@@ -13564,11 +13176,8 @@ const App = (() => {
           // reason.
           html: recordingsPaneHtml(venueRows, { showArtist: true, mountId: 'rec-table-venue',
                                                 empty: 'No recordings from this venue yet' }) },
-        { id: 'about', label: 'About', html: `
-            <div class="pp-sec-row">
-              <div class="pp-sec">History</div>
-              <span id="vn-lx-hist"></span>
-            </div>
+        { id: 'about', label: 'About', html: aboutGridHtml(`
+            <div class="pp-sec">History</div>
             <div class="pp-desc pp-editable ${v.history && v.history.trim() ? '' : 'pp-empty'}" id="vn-history" title="Click to edit">${v.history && v.history.trim() ? esc(v.history) : 'Add history\u2026'}</div>
 
             <div class="pp-sec">Location</div>
@@ -13578,14 +13187,11 @@ const App = (() => {
               <span class="vn-field"><label>Country</label><span class="pp-editable vn-val ${v.country ? '' : 'pp-empty'}" id="vn-country">${v.country ? esc(v.country) : '\u2014'}</span></span>
             </div>
 
-            <div class="lx-slot" id="vn-lx-loc"></div>
-            <div class="lx-slot" id="vn-lx-names"></div>
 
             <div class="pp-sec">Notes</div>
             <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="vn-bio" title="Click to edit">${descText ? esc(v.bio) : 'Add notes\u2026'}</div>
 
-            <!-- Questions and the ask bar close the page (not pinned). -->
-            <div class="lx-page" id="vn-lx"></div>` },
+`, 'vn-lx-col') },
         { id: 'photos', label: 'Photos', count: photoCount || null,
           html: '<div id="vn-photos"></div>' },
       ],
@@ -13597,14 +13203,9 @@ const App = (() => {
     // Photos — the shared gallery. No automatic fetch tile: the Wikidata bridge
     // runs through the Artist's MusicBrainz match and a venue has no
     // equivalent. It does get the two SEARCH tiles every photographed entity
-    // now carries (2026-09-01) — they open a search rather than importing
-    // anything, so they need no licence bridge to be honest.
-    const vnPortrait = () => {
-      const el = document.getElementById('vn-portrait')
-      if (!el) return
-      const primary = (v.images || [])[0]
-      el.innerHTML = heroPortraitHtml(v.name, primary ? API.venues.imageUrl(primary.id) : null)
-    }
+    // now carries — they open a search rather than importing anything, so they
+    // need no licence bridge to be honest.
+    const vnPortrait = () => setHeroImage((v.images || [])[0] ? API.venues.imageUrl(v.images[0].id) : null)
     createPhotoGallery({
       mountId: 'vn-photos', api: API.venues, entityId: id, images: v.images || [],
       // Location as the qualifier: "Fillmore" alone is a San Francisco
@@ -13621,7 +13222,7 @@ const App = (() => {
     const refreshSidebar = () => invalidateDims('venues')
     async function saveField(patch) {
       try { await API.venues.update(id, patch); refreshSidebar() }
-      catch (e) { alert('Save failed: ' + e.message) }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
     }
     makeInlineEditable(document.getElementById('vn-name'), {
       tabTo: shift => shift ? null : 'vn-city',
@@ -13645,16 +13246,11 @@ const App = (() => {
       onSave: async val => { val = val.trim(); v.bio = val; await saveField({ bio: val || null }) },
     })
 
-    // ── Lomax: history, location, former names, questions ─────────────────────
-    // History is auto-applied by the server (Restore previous undoes it);
+    // ── Lomax: the chat column ────────────────────────────────────────────────
+    // History is auto-applied by the server (Restore Previous undoes it);
     // location corrections and former names are suggestions to accept.
     {
-      const lxHist = document.getElementById('vn-lx-hist')
-      const lxLoc = document.getElementById('vn-lx-loc')
-      const lxNames = document.getElementById('vn-lx-names')
-      const lxAsk = document.getElementById('vn-lx')
-      const alive = () => document.body.contains(lxAsk)
-      const LOC = [['city', 'City'], ['state', 'State / Region'], ['country', 'Country']]
+      const LOC = [['city', 'City'], ['state', 'State'], ['country', 'Country']]
       const paintLoc = () => {
         for (const [f] of LOC) {
           const el = document.getElementById('vn-' + f)
@@ -13669,9 +13265,20 @@ const App = (() => {
         el.textContent = v.history || (canEditLibrary() ? 'Add history…' : '')
         el.classList.toggle('pp-empty', !v.history)
       }
-      const parsed = p => { try { return JSON.parse(p.proposed) || {} } catch (_) { return {} } }
-      const c = lomaxController({
-        skill: 'venue', subjectType: 'venue', subjectId: id, alive,
+      const cards = (run, c, o) => {
+        const names = canEditLibrary() ? lxProps(run).filter(p => p.field === 'former_name' && lxShown(p)) : []
+        return [
+          lxTextCard('History', run, c, o),
+          lxFieldsCard('Location', run, Object.assign({}, o, { value: f => v[f] }), LOC),
+          names.length ? lxCardHtml('', `<table class="lx-tbl"><tbody>${names.map(p => {
+            const n = lxJson(p), cls = p.decision === 'accepted' ? 'lx-same' : 'lx-val'
+            return `<tr><td><span class="${cls}">${esc(n.name || '')}</span></td>` +
+              `<td><span class="${cls}">${esc(lxYears(n.from, n.to))}</span></td><td class="lx-act-td">${lxAct(p, o)}</td></tr>`
+          }).join('')}</tbody></table>`, names.filter(p => lxOpen(p)), o) : '',
+        ]
+      }
+      lomaxMountAbout('vn-lx-col', {
+        skill: 'venue', subjectType: 'venue', subjectId: id,
         afterAccept: async props => {
           if (props.some(p => LOC.some(([f]) => f === p.field))) {
             const fresh = await API.venues.get(id)
@@ -13684,47 +13291,7 @@ const App = (() => {
           const rep = run.result && run.result.replaced
           if (rep && rep.written) { v.history = rep.written; paintHist() }
         },
-      })
-      c.addView(ctl => {
-        if (!alive()) return false
-        const rep = ctl.runs.slice().reverse().find(r => r.status === 'done' && r.result && r.result.replaced)
-        lxRepaint(lxHist, rep ? lomaxRestoreLink(ctl, rep, v.history) : '')
-
-        const run = ctl.latest()
-        const edit = canEditLibrary()
-        const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
-        const locProps = edit ? lxProps(run).filter(p => LOC.some(([f]) => f === p.field) && !p.agrees && lxShown(p) &&
-          (p.decision === 'accepted' || !same(v[p.field], p.proposed))) : []
-        lxRepaint(lxLoc, locProps.length ? `<table class="lx-tbl lx-sugg"><thead><tr><th>Field</th><th>Now</th><th>${lomaxMark()}</th><th></th></tr></thead><tbody>${
-          locProps.map(p => `<tr><th scope="row">${esc(LOC.find(([f]) => f === p.field)[1])}</th><td><span class="lx-tv">${esc(v[p.field] || '')}</span></td>` +
-            `<td>${lomaxSuggestionCell(p)}</td><td class="lx-act-td">${lomaxActions(p)}</td></tr>`).join('')}</tbody></table>` : '')
-
-        const names = edit ? lxProps(run).filter(p => p.field === 'former_name' && lxShown(p)) : []
-        lxRepaint(lxNames, names.length ? `<div class="pp-sec">Former names</div><table class="lx-tbl lx-sugg"><tbody>${names.map(p => {
-          const n = parsed(p), quiet = p.decision === 'accepted'
-          const years = (n.from || n.to) ? `${n.from || '?'} – ${n.to || '?'}` : ''
-          return `<tr><td><span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(n.name || '')}</span></td>` +
-            `<td><span class="${quiet ? 'lx-same' : 'lx-val'}">${esc(years)}</span></td>` +
-            `<td class="lx-act-td">${lomaxActions(p, { accept: 'Add as alias' })}</td></tr>`
-        }).join('')}</tbody></table>` : '')
-
-        const asked = ctl.runs.filter(r => r.question && r.status === 'done' && r.result && String(r.result.answer || '').trim())
-        const err = ctl.lastError()
-        const bar = lomaxAskBar({ placeholder: 'Anything else you want to learn? (optional)',
-          note: "Lomax researches this venue's history, former names and location. Add anything else below.",
-          last: run, busy: !!ctl.pending })
-        lxRepaint(lxAsk, !(asked.length || ctl.pending || err || bar) ? '' : `<div class="lx-ask-wrap">
-          ${asked.length ? `<div class="pp-sec">Questions</div><div class="lx-qs">${asked.map(r =>
-            `<div class="lx-qa"><div class="lx-qa-q">${esc(r.question)}</div><div class="lx-answer">${esc(stripCitations(r.result.answer))}</div>` +
-            `<div class="lx-qa-d">${esc(lxDay(r.created_at))}</div></div>`).join('')}</div>` : ''}
-          ${ctl.pending ? lomaxRunState(ctl.pending) : (err ? `<div class="lx-error" role="alert">${esc(err)}</div>` : '')}
-          ${bar}
-        </div>`)
-        return true
-      })
-      for (const el of [lxHist, lxLoc, lxNames, lxAsk]) if (el) el.setAttribute('data-lx-ctl', c.id)
-      c.refresh()
-      c.load()
+      }, { subject: 'venue', current: () => v.history, cards })
     }
 
     makeInlineEditable(document.getElementById('vn-history'), {
@@ -13736,18 +13303,18 @@ const App = (() => {
     onAdminClick('vn-delete', async () => {
       if (!confirm(`Delete venue "${v.name}"? This can't be undone.`)) return
       try { await API.venues.remove(id); refreshSidebar(); window.location.hash = '#/venues' }
-      catch (e) { alert(e.message) }
+      catch (e) { Notify.error(e.message) }
     })
   }
 
   // ══ Event page ═════════════════════════════════════════════════════════════
   //
-  // The fifth dimension page (Ryan, 2026-09-01). Event has been in the schema
-  // since the beginning and reachable from nowhere: the ingest form's
-  // autocomplete could CREATE one, and after that it existed only as a foreign
-  // key. `GET /api/events/<id>` raised AttributeError the moment a performance
-  // was attached to it and nobody noticed for months, because nothing ever
-  // called it.
+  // The fifth dimension page. Event has been in the schema since the beginning
+  // and reachable from nowhere: the ingest form's autocomplete could CREATE
+  // one, and after that it existed only as a foreign key. `GET
+  // /api/events/<id>` raised AttributeError the moment a performance was
+  // attached to it and nobody noticed for months, because nothing ever called
+  // it.
   //
   // Built on the same shell, the same tabs and the same editing helpers as
   // Venue — an event is very nearly a venue with dates, and every difference
@@ -13788,7 +13355,7 @@ const App = (() => {
       navBack,
       pageClass: 'venue-page',    // square portrait + square gallery tiles — an
                                   // event is a poster or a gate shot, not a face
-      portrait: '<div id="ev-portrait"></div>',
+      hero: { imageUrl: (e.images || [])[0] ? API.events.imageUrl(e.images[0].id) : null },
       title: esc(e.name),
       titleId: 'ev-name',
       titleEditable: true,
@@ -13806,7 +13373,10 @@ const App = (() => {
           // venue, so the row has to name who played.
           html: recordingsPaneHtml(rows, { showArtist: true, mountId: 'rec-table-event',
                                            empty: 'No recordings from this event yet' }) },
-        { id: 'about', label: 'About', html: `
+        { id: 'about', label: 'About', html: aboutGridHtml(`
+            <div class="pp-sec">History</div>
+            <div class="pp-desc pp-editable ${e.history && e.history.trim() ? '' : 'pp-empty'}" id="ev-history" title="Click to edit">${e.history && e.history.trim() ? esc(e.history) : 'Add history\u2026'}</div>
+
             <div class="pp-sec">Dates</div>
             <div class="vn-loc">
               <span class="vn-field"><label>Start</label><span class="pp-editable vn-val ${e.start_year ? '' : 'pp-empty'}" id="ev-start">${
@@ -13829,7 +13399,7 @@ const App = (() => {
             ${perfRowsHtml || '<div class="pp-empty">No performances linked to this event yet.</div>'}
 
             <div class="pp-sec">Notes</div>
-            <div class="pp-desc pp-editable ${notesText ? '' : 'pp-empty'}" id="ev-notes" title="Click to edit">${notesText ? esc(e.notes) : 'Add notes…'}</div>` },
+            <div class="pp-desc pp-editable ${notesText ? '' : 'pp-empty'}" id="ev-notes" title="Click to edit">${notesText ? esc(e.notes) : 'Add notes…'}</div>`, 'ev-lx-col') },
         { id: 'photos', label: 'Photos', count: photoCount || null,
           html: '<div id="ev-photos"></div>' },
       ],
@@ -13838,12 +13408,7 @@ const App = (() => {
     wireRecordingRows(mainContent)
     if (rows.length) wireDateAddedSort(document.getElementById('rec-table-event'), rows, true)
 
-    const evPortrait = () => {
-      const el = document.getElementById('ev-portrait')
-      if (!el) return
-      const primary = (e.images || [])[0]
-      el.innerHTML = heroPortraitHtml(e.name, primary ? API.events.imageUrl(primary.id) : null)
-    }
+    const evPortrait = () => setHeroImage((e.images || [])[0] ? API.events.imageUrl(e.images[0].id) : null)
     createPhotoGallery({
       mountId: 'ev-photos', api: API.events, entityId: id, images: e.images || [],
       // "festival" reads better than the year for a search: the year is usually
@@ -13860,7 +13425,7 @@ const App = (() => {
     const refreshSidebar = () => invalidateDims('events')
     async function saveField(patch) {
       try { await API.events.update(id, patch); refreshSidebar() }
-      catch (err) { alert('Save failed: ' + err.message) }
+      catch (err) { Notify.error('Save failed: ' + err.message) }
     }
 
     makeInlineEditable(document.getElementById('ev-name'), {
@@ -13883,7 +13448,7 @@ const App = (() => {
         tabTo: shift => shift ? (i ? 'ev-start' : 'ev-name') : (i ? 'ev-city' : 'ev-end'),
         onSave: async val => {
           const parsed = _parsePartialDate(val)
-          if (parsed === undefined) { alert(`Couldn't read "${val}" as a date. Use 1989, 1989-06 or 1989-06-11.`); return }
+          if (parsed === undefined) { Notify.error(`Couldn't read "${val}" as a date. Use 1989, 1989-06 or 1989-06-11.`); return }
           const [y, m, d] = parsed
           e[which + '_year'] = y; e[which + '_month'] = m; e[which + '_day'] = d
           await saveField({ [which + '_year']: y, [which + '_month']: m, [which + '_day']: d })
@@ -13906,6 +13471,58 @@ const App = (() => {
       get: () => e.notes || '',
       onSave: async val => { val = val.trim(); e.notes = val; await saveField({ notes: val || null }) },
     })
+
+    makeInlineEditable(document.getElementById('ev-history'), {
+      multiline: true, placeholder: 'Add history…',
+      get: () => e.history || '',
+      onSave: async val => { val = val.trim(); e.history = val; await saveField({ history: val || null }) },
+    })
+
+    // ── Lomax: the chat column ───────────────────────────────────────────────
+    // History is auto-applied by the server (Restore Previous undoes it); dates and location are
+    // suggestions to accept. The lineup is reference only: it creates nothing.
+    {
+      const FIELDS = [['start_date', 'Start Date'], ['end_date', 'End Date']]
+      const LOC = [['city', 'City'], ['state', 'State'], ['country', 'Country']]
+      const value = f => f === 'start_date' ? _evDateStr(e, 'start') : f === 'end_date' ? _evDateStr(e, 'end') : (e[f] || '')
+      const paint = () => {
+        for (const which of ['start', 'end']) {
+          const el = document.getElementById('ev-' + which)
+          if (!el || el.querySelector('input')) continue
+          el.textContent = _evDateStr(e, which) || '—'
+          el.classList.toggle('pp-empty', !e[which + '_year'])
+        }
+        for (const [f] of LOC) {
+          const el = document.getElementById('ev-' + f)
+          if (!el || el.querySelector('input')) continue
+          el.textContent = e[f] || '—'
+          el.classList.toggle('pp-empty', !e[f])
+        }
+      }
+      const paintHist = () => {
+        const el = document.getElementById('ev-history')
+        if (!el || el.querySelector('textarea, input')) return
+        el.textContent = e.history || (canEditLibrary() ? 'Add history…' : '')
+        el.classList.toggle('pp-empty', !e.history)
+      }
+      lomaxMountAbout('ev-lx-col', {
+        skill: 'event', subjectType: 'event', subjectId: id,
+        afterAccept: async () => {
+          const fresh = await API.events.get(id)
+          for (const k of ['start_year', 'start_month', 'start_day', 'end_year', 'end_month', 'end_day', 'city', 'state', 'country']) e[k] = fresh[k]
+          paint()
+        },
+        afterRestore: run => { e.history = (run.result && run.result.replaced && run.result.replaced.text) || ''; paintHist() },
+        onDone: run => {
+          const rep = run.result && run.result.replaced
+          if (rep && rep.written) { e.history = rep.written; paintHist() }
+        },
+      }, { subject: 'event', current: () => e.history, cards: (run, c, o) => {
+        const ro = Object.assign({}, o, { value })
+        return [lxTextCard('History', run, c, o), lxFieldsCard('Dates', run, ro, FIELDS),
+                lxFieldsCard('Location', run, ro, LOC), lxLineupCard(run)]
+      } })
+    }
 
     // ── Venue link — an existing-venues-only picker ──────────────────────────
     // Same shape as the Artist page's Genre field: a click-to-edit dropdown,
@@ -13934,7 +13551,7 @@ const App = (() => {
           await API.events.update(id, { venue_id: vid || null })
           e.venue_id = vid || null
           e.venue_name = vid ? name : null
-        } catch (err) { alert('Failed: ' + err.message) }
+        } catch (err) { Notify.error('Failed: ' + err.message) }
         showVenue()
       }
       wirePickerDropdown(input, dd, q => API.venues.list(q), commit)   // no createLabel → no create row
@@ -13954,7 +13571,7 @@ const App = (() => {
       try { await API.events.remove(id); refreshSidebar(); window.location.hash = '#/events' }
       // A 409 here is the guard doing its job — performances still point at
       // this event — and its message names the fix, so show it as-is.
-      catch (err) { alert(err.message) }
+      catch (err) { Notify.error(err.message) }
     })
   }
 
@@ -13984,16 +13601,10 @@ const App = (() => {
     return [year, month, day]
   }
 
-  // ── Genre (2026-08-02) ───────────────────────────────────────────────────────
-  // A proper dimension — its own table, one FK from Artist — see the Genre
-  // design spec in Context Library. Three surfaces: the #/genre/<id> page
-  // (mirrors the Venue page, but a genre's "recordings" are reached through
-  // its artists, one extra hop the Venue page doesn't need), the #/genres
-  // INDEX (renderDimIndexPage, shared with the other four dimensions since
-  // 2026-09-01 — it was a copy of #/venues' split list/detail admin screen
-  // until then), and the bulk assignment screen (the actual population
-  // mechanism — see the design spec's coverage math on why
-  // sort-by-recording-count matters).
+  // A proper dimension — its own table, one FK from Artist. Three surfaces: the
+  // #/genre/<id> page (mirrors the Venue page, but a genre's "recordings" are
+  // reached through its artists, one extra hop the Venue page doesn't need), the
+  // #/genres INDEX, and the bulk assignment screen.
 
   async function renderGenreView(id) {
     setActiveNav('genres'); setActiveArtist(null); setLoading()
@@ -14025,17 +13636,18 @@ const App = (() => {
       // Colour swatch instead of a portrait — a genre has no likeness, but it
       // does have the colour that tints every card of its artists, so
       // showing it here is both the identity and a live preview of the picker.
-      portrait: `<div class="gn-swatch" style="--genre-fg:${esc(g.color || 'var(--t2)')}"></div>`,
+      portrait: `<div class="gn-swatch${canEditLibrary() ? ' gn-swatch--edit' : ''}" id="gn-swatch"
+                      style="--genre-fg:${esc(g.color || '#7d7f88')}"
+                      >${canEditLibrary() ? _gnColorInput(g.id, g.color) : ''}</div>`,
       title: esc(g.name),
       titleId: 'gn-name',
       titleEditable: true,
-      chips: g.color ? `<span class="pp-hero-fact">${esc(g.color)}</span>` : '',
       stats: [
         [g.artist_count || 0, (g.artist_count === 1) ? 'Artist' : 'Artists'],
         [g.recording_count || 0, (g.recording_count === 1) ? 'Recording' : 'Recordings'],
       ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="gn-delete" title="Delete genre">Delete</button>`,
-      // No Photos tab (Ryan, 2026-08-07) — a genre has nothing to photograph.
+      // No Photos tab — a genre has nothing to photograph.
       tabs: [
         { id: 'recordings', label: 'Recordings', count: g.recording_count || 0, active: true,
           html: artists.length
@@ -14052,7 +13664,7 @@ const App = (() => {
     const refreshSidebar = () => invalidateDims('genres')
     async function saveField(patch) {
       try { await API.genres.update(id, patch); refreshSidebar() }
-      catch (e) { alert('Save failed: ' + e.message) }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
     }
     makeInlineEditable(document.getElementById('gn-name'), {
       get: () => g.name,
@@ -14064,20 +13676,32 @@ const App = (() => {
       onSave: async val => { val = val.trim(); g.description = val; await saveField({ description: val || null }) },
     })
 
+    const swatch = document.getElementById('gn-swatch')
+    const swatchInp = swatch && swatch.querySelector('.gn-color')
+    if (swatchInp) {
+      const show = c => swatch.style.setProperty('--genre-fg', c)
+      swatchInp.addEventListener('input', () => show(swatchInp.value))
+      swatchInp.addEventListener('change', async () => {
+        const c = swatchInp.value
+        try { await API.genres.update(id, { color: c }); g.color = c; refreshSidebar() }
+        catch (err) { Notify.error('Save failed: ' + err.message); show(g.color || '#7d7f88'); swatchInp.value = g.color || '#7d7f88' }
+      })
+    }
+
     onAdminClick('gn-delete', async () => {
       if (!confirm(`Delete genre "${g.name}"? This can't be undone.`)) return
       try { await API.genres.remove(id); refreshSidebar(); window.location.hash = '#/genres' }
-      catch (e) { alert(e.message) }
+      catch (e) { Notify.error(e.message) }
     })
   }
 
-  // Ryan assigns all 164 artists' genres by hand — no AI suggestion (see
-  // design spec). One row per artist, sorted by recording count DESC: the
-  // library is a long tail (85 of 164 artists have exactly one recording),
-  // so the top ~30 acts by recording count cover ~62% of the library. Sorted
-  // this way, stopping early after ten minutes is a legitimate end state, not
-  // an unfinished migration. Each pick is its own PUT — no bulk save button,
-  // nothing lost by closing the tab mid-way.
+  // The user assigns all 164 artists' genres by hand — no AI suggestion. One
+  // row per artist, sorted by recording count DESC: the library is a long
+  // tail (85 of 164 artists have exactly one recording), so the top ~30 acts
+  // by recording count cover ~62% of the library. Sorted this way, stopping
+  // early after ten minutes is a legitimate end state, not an unfinished
+  // migration. Each pick is its own PUT — no bulk save button, nothing lost
+  // by closing the tab mid-way.
   async function renderGenreAssignView() {
     setActiveNav('genres'); setActiveArtist(null)
     setNavCurrent('Assign Genres')
@@ -14092,8 +13716,6 @@ const App = (() => {
 
     setMainHTML(`
       <div class="action-bar">
-        <!-- Titled, not back-linked: the App Header's arrow is the way back
-             from every view now (2026-08-22). -->
         <span style="font-size:13px; font-weight:500; color:var(--t0)">Assign Genres</span>
         <label class="genre-assign-toggle" style="margin-left:auto">
           <input type="checkbox" id="ga-show-all" /> Show all <span class="genre-assign-toggle-hint">(default: unassigned only)</span>
@@ -14182,7 +13804,7 @@ const App = (() => {
 
   // ══ Dimension index — one page, five dimensions ════════════════════════════
   //
-  // Replaces three different answers to the same question (Ryan, 2026-09-01):
+  // Replaces three different answers to the same question:
   //
   //   #/venues  and #/genres  were a split list/detail ADMIN screen — a narrow
   //     scrolling column beside an edit form, with inline styles, a Save
@@ -14196,7 +13818,7 @@ const App = (() => {
   //
   // So: one component, parameterised. Every dimension gets the same shell as
   // its own detail page (hero, stats, one pane), the same create form, the
-  // same tile. Editing happens on the record, once, where it already happened
+  // same row. Editing happens on the record, once, where it already happened
   // for Artist and Musician.
   //
   // Filtering and sorting are CLIENT-SIDE over the already-fetched list, and
@@ -14210,18 +13832,25 @@ const App = (() => {
   //   nav        string            — setActiveNav key
   //   title      string            — page title, plural
   //   singular   string            — for "+ New …" and the empty state
-  //   load       fn -> rows        — the list endpoint
-  //   hashFor    fn(row) -> hash   — the record's detail page
+  //   load       fn -> rows        — the list endpoint (the ?index=1 variant)
   //   newHash    string | null     — create form; null hides the + button
-  //   shape      'round'|'square'|'swatch'
-  //   art        fn(row) -> {url, color} — photo url and/or accent colour
-  //   sub        fn(row) -> string  — the tile's second line (may be '')
-  //   meta       fn(row) -> string  — the tile's third line, counts
+  //   row        fn(row, ctx) -> html — one full-width row; ctx.grouped is
+  //                                 true when the page is showing year/letter
+  //                                 gutters (so a row can drop what they say)
   //   searchable fn(row) -> string  — haystack for the filter box
   //   sorts      [{id, label, cmp}] — first is the default
+  //   group      {sort, key(row), label(row)} | null — a gutter label beside
+  //                                 each run of rows while `sort` is active
   //   stats      fn(rows) -> [[n,label], …]
-  //   extraActions html | ''        — e.g. Genres' "Bulk assign"
+  //   extraActionsPlayback html | ''  — e.g. Genres' "Bulk assign"
+  //
+  // Rows, not tiles. One shared row (picture slot, body, counts column) with a
+  // variant per dimension, drawn from tools/design/dimension-index/. The extra
+  // fields a row reads (excerpt, year span, lineup, faces) come from the
+  // ?index=1 form of each list endpoint, which a joined library serves too, over
+  // the visible set only. Fields an older peer does not send simply do not draw.
   const _dimIndexSort = {}          // per-dimension, per-session sort choice
+  const _dimIndexRev  = {}          // ...and whether it is reversed
 
   async function renderDimIndexPage(cfg) {
     setActiveNav(cfg.nav)
@@ -14231,9 +13860,7 @@ const App = (() => {
 
     let rows = []
     try { rows = await cfg.load() } catch (e) {
-      // An index that fails to load must SAY so. CONTEXT.md's standing trap:
-      // a failed fetch that renders as "None yet" is indistinguishable from an
-      // empty library, and we have shipped that mistake more than once.
+      // An index that fails to load must SAY so.
       setMainHTML(`<div class="empty-state">
         <div class="empty-title">Could not load ${esc(cfg.title.toLowerCase())}</div>
         <div class="empty-sub">${esc(e.message)}</div></div>`)
@@ -14243,12 +13870,20 @@ const App = (() => {
     const sorts = cfg.sorts
     let sortId = _dimIndexSort[cfg.nav] || sorts[0].id
     if (!sorts.some(s => s.id === sortId)) sortId = sorts[0].id
+    let rev = !!_dimIndexRev[cfg.nav]
     let query = ''
+    // A sort's own comparator runs in its default direction (A-Z ascending,
+    // counts and dates descending); a second click on it reverses that.
+    const sortBtns = () => sorts.map(s => {
+      const on = s.id === sortId
+      const asc = !!s.defAsc !== (on && rev)
+      return `<button class="dim-sort${on ? ' active' : ''}" data-sort="${esc(s.id)}">${
+        on ? icon(asc ? 'arrow-up' : 'arrow-down') : icon('arrow-up-down')}${
+        esc(on && rev && s.labelRev ? s.labelRev : s.label)}</button>`
+    }).join('')
 
     setMainHTML(entityShellHtml({
       title: esc(cfg.title),
-      chips: `<span class="pp-hero-fact">${rows.length} ${esc(
-                rows.length === 1 ? cfg.singular.toLowerCase() : cfg.title.toLowerCase())}</span>`,
       stats: cfg.stats ? cfg.stats(rows) : [],
       // Creating is an admin verb, so it rides `actions` and the shell drops it
       // in Playback mode on its own — see entityShellHtml. Nothing here may
@@ -14262,60 +13897,62 @@ const App = (() => {
         html: `
           <div class="dim-bar">
             <input type="text" class="dim-search" id="dx-search" autocomplete="off"
-                   placeholder="Filter ${esc(cfg.title.toLowerCase())}…" />
+                   placeholder="Filter ${esc(cfg.title.toLowerCase())}" />
             <div class="dim-sorts" id="dx-sorts">
-              ${sorts.map(s => `<button class="dim-sort${s.id === sortId ? ' active' : ''}"
-                     data-sort="${esc(s.id)}">${esc(s.label)}</button>`).join('')}
+              ${sortBtns()}
             </div>
             <span class="dim-count" id="dx-count"></span>
           </div>
-          <div class="dim-grid dim-grid--${esc(cfg.shape)}" id="dx-grid"></div>`,
+          <div id="dx-grid"></div>`,
       }],
     }))
     wireEntityShell(mainContent, null)
 
-    function tileHtml(row) {
-      const art  = cfg.art(row)
-      const sub  = cfg.sub(row)
-      const meta = cfg.meta(row)
-      // Initials, never a silhouette. Most entities in this library have no
-      // photograph and never will, so the no-photo state IS the page's normal
-      // appearance and has to look intentional.
-      const initials = String(row.name || '?').split(/\s+/).filter(Boolean).slice(0, 2)
-        .map(w => w[0]).join('').toUpperCase()
-      const face = art.url
-        ? `<img class="dim-tile-img" src="${art.url}" alt="" loading="lazy">`
-        : `<span class="dim-tile-initials">${esc(initials)}</span>`
-      return `
-        <a class="dim-tile" href="${esc(cfg.hashFor(row))}"
-           style="--dim-fg:${esc(art.color || 'var(--bd-1)')}">
-          <span class="dim-tile-art">${cfg.shape === 'swatch' ? '' : face}</span>
-          <span class="dim-tile-body">
-            <span class="dim-tile-name truncate">${esc(row.name)}</span>
-            ${sub  ? `<span class="dim-tile-sub truncate">${esc(sub)}</span>`   : ''}
-            ${meta ? `<span class="dim-tile-meta truncate">${esc(meta)}</span>` : ''}
-          </span>
-        </a>`
-    }
+    // A photo that fails to load is removed so the fallback underneath shows.
+    // `error` does not bubble, hence capture on the container.
+    document.getElementById('dx-grid').addEventListener('error', e => {
+      if (e.target && e.target.tagName === 'IMG') e.target.remove()
+    }, true)
 
     function paint() {
       const q = query.trim().toLowerCase()
       const filtered = q
         ? rows.filter(r => cfg.searchable(r).toLowerCase().includes(q))
         : rows
-      const sorted = filtered.slice().sort(sorts.find(s => s.id === sortId).cmp)
+      const cur = sorts.find(s => s.id === sortId)
+      const sorted = filtered.slice().sort(rev && cur.cmpRev ? cur.cmpRev : cur.cmp)
+      if (rev && !cur.cmpRev) sorted.reverse()
 
       const grid  = document.getElementById('dx-grid')
       const count = document.getElementById('dx-count')
       if (!grid) return
-      // Three states, three messages. "No results for a filter" and "this
-      // dimension is empty" are different facts and a shared "None yet" hides
-      // which one you are looking at.
-      grid.innerHTML = sorted.length
-        ? sorted.map(tileHtml).join('')
-        : `<div class="dim-empty">${rows.length
-            ? `Nothing matches “${esc(query.trim())}”.`
-            : `No ${esc(cfg.title.toLowerCase())} yet.`}</div>`
+      const grouped = !!(cfg.group && cfg.group.sort === sortId)
+      const ctx = { grouped }
+      let html
+      if (!sorted.length) {
+        // Three states, three messages. "No results for a filter" and "this
+        // dimension is empty" are different facts and a shared "None yet" hides
+        // which one you are looking at.
+        html = `<div class="dim-empty">${rows.length
+          ? `Nothing matches “${esc(query.trim())}”.`
+          : `No ${esc(cfg.title.toLowerCase())} yet.`}</div>`
+      } else if (grouped) {
+        const runs = []
+        sorted.forEach(r => {
+          const k = cfg.group.key(r)
+          let run = runs[runs.length - 1]
+          if (!run || run.k !== k) { run = { k, label: cfg.group.label(r), rows: [] }; runs.push(run) }
+          run.rows.push(r)
+        })
+        html = runs.map(run => `
+          <section class="dx-group">
+            <div class="dx-gutter">${esc(run.label)}</div>
+            <div class="dx-list">${run.rows.map(r => cfg.row(r, ctx)).join('')}</div>
+          </section>`).join('')
+      } else {
+        html = `<div class="dx-list">${sorted.map(r => cfg.row(r, ctx)).join('')}</div>`
+      }
+      grid.innerHTML = html
       count.textContent = q && rows.length
         ? `${sorted.length} of ${rows.length}`
         : ''
@@ -14326,48 +13963,110 @@ const App = (() => {
     document.getElementById('dx-sorts').addEventListener('click', e => {
       const btn = e.target.closest('.dim-sort')
       if (!btn) return
-      sortId = btn.dataset.sort
+      if (btn.dataset.sort === sortId) rev = !rev
+      else { sortId = btn.dataset.sort; rev = false }
       _dimIndexSort[cfg.nav] = sortId
-      mainContent.querySelectorAll('.dim-sort').forEach(b =>
-        b.classList.toggle('active', b === btn))
+      _dimIndexRev[cfg.nav] = rev
+      document.getElementById('dx-sorts').innerHTML = sortBtns()
       paint()
     })
     onAdminClick('dx-new', () => { window.location.hash = cfg.newHash })
+    if (cfg.wire) cfg.wire({ grid: document.getElementById('dx-grid'), rows, paint })
 
     paint()
   }
 
   // Shared comparators. `byName` sorts on the DISPLAYED name rather than
   // sort_name — ⚠ artist.sort_name and musician.sort_name are NULL for every
-  // row in this library (CONTEXT.md trap; the backfill script has never been
-  // run here), so sorting on it alone ties every row and falls back to whatever
-  // order SQLite felt like. The API already applies COALESCE server-side; this
-  // is the client-side half of the same rule.
+  // row in this library, so sorting on it alone ties every row and falls back
+  // to whatever order SQLite felt like. The API already applies COALESCE
+  // server-side; this is the client-side half of the same rule.
   const _byName  = (a, b) => (a.sort_name || a.name).localeCompare(b.sort_name || b.name)
   const _byCount = key => (a, b) => (b[key] || 0) - (a[key] || 0) || _byName(a, b)
 
   const _plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
+  // ── Row parts shared by every dimension's index ───────────────────────────
+  const _dxInitials = name => String(name || '?').split(/\s+/).filter(Boolean)
+    .slice(0, 2).map(w => w[0]).join('').toUpperCase()
+
+  // The picture slot: a photo over a field. The field is the genre colour where
+  // there is one and a neutral grey where there is not (a person or a hall is
+  // not a genre). Initials, never a silhouette: most records have no photograph
+  // and never will, so the no-photo state is the page's normal appearance.
+  function _dxArt(name, url, color, size) {
+    return `<span class="dx-art${color ? '' : ' dx-art--plain'}"
+        ${size ? `style="--dx-art:${size}px"` : ''} aria-hidden="true">
+      <span class="dx-ini">${esc(_dxInitials(name))}</span>
+      ${url ? `<img src="${esc(url)}" alt="" loading="lazy">` : ''}</span>`
+  }
+
+  // A landscape picture for the text-led rows (Venues, Events). Drawn only when
+  // one exists, so most rows keep their left edge and lose nothing.
+  const _dxPhoto = url => url
+    ? `<span class="dx-photo" aria-hidden="true"><img src="${esc(url)}" alt="" loading="lazy"></span>` : ''
+
+  // Numbers are the identity of a row, set the way a handbill sets a date.
+  function _dxSide(count, span) {
+    return `<span class="dx-side">
+      ${count == null ? '' : `<div class="dx-n">${count}</div>
+        <div class="dx-nl">${count === 1 ? 'Recording' : 'Recordings'}</div>`}
+      ${span ? `<div class="dx-span">${esc(span)}</div>` : ''}</span>`
+  }
+
+  const _dxYears = (a, b) => !a ? '' : (!b || a === b) ? String(a) : `${a}–${b}`
+
+  // "A, B, C and 4 more": a short run of names, honest about the rest.
+  function _dxWith(names, shown, total) {
+    if (!names || !names.length) return ''
+    const more = (total || names.length) - Math.min(shown, names.length)
+    return `<div class="dx-with">${esc(names.slice(0, shown).join(', '))}${
+      more > 0 ? ` and ${more} more` : ''}</div>`
+  }
+
+  // Readable ink for text laid on a genre colour (the Genres colour key).
+  function _dxInkOn(hex) {
+    if (!/^#[0-9a-f]{6}$/i.test(hex || '')) return 'var(--t0)'
+    const n = parseInt(hex.slice(1), 16)
+    const f = v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4) }
+    const L = .2126 * f(n >> 16) + .7152 * f(n >> 8 & 255) + .0722 * f(n & 255)
+    return L > .4 ? '#141210' : '#ffffff'
+  }
+
+  // The colour input IS the click target: a real <input type="color"> laid
+  // invisibly over its circle, so the user's own click opens the picker. Opening
+  // one programmatically from a script (or from a 1px, pointer-events:none
+  // element) is refused by WebKit, which is what the pywebview window runs.
+  function _gnColorInput(gid, color) {
+    const v = /^#[0-9a-f]{6}$/i.test(color || '') ? color.toLowerCase() : '#7d7f88'
+    return `<input type="color" class="gn-color" value="${v}" data-gid="${gid}" aria-label="Change colour">`
+  }
+
   // ── Venues ─────────────────────────────────────────────────────────────────
   function renderVenuesPage() {
     return renderDimIndexPage({
       nav: 'venues', title: 'Venues', singular: 'Venue',
-      load: () => API.venues.list(),
-      hashFor: v => `#/venue/${v.id}`,
+      load: () => API.venues.listIndex(),
       newHash: '#/venue/new',
-      // Square, not round: a hall is a building. The Venue detail page has made
-      // the same distinction since 2026-08-07 via its `venue-page` pageClass.
-      shape: 'square',
-      art:  v => ({ url: v.image_id ? API.venues.imageUrl(v.image_id) : null }),
-      sub:  v => fmtLocation(v.city, v.state, v.country) || '',
-      meta: v => [v.recording_count ? _plural(v.recording_count, 'recording') : '',
-                  v.performance_count ? _plural(v.performance_count, 'show') : '']
-                 .filter(Boolean).join(' · '),
+      // Text-led: 1% of venues have a picture, so no slot is reserved for one.
+      row: v => `
+        <a class="dx-row dx-row--venue" href="#/venue/${v.id}">
+          <span class="dx-body">
+            <div class="dx-name">${esc(v.name)}</div>
+            ${fmtLocation(v.city, v.state, v.country)
+              ? `<div class="dx-sub">${esc(fmtLocation(v.city, v.state, v.country))}</div>` : ''}
+            ${v.excerpt ? `<div class="dx-text">${esc(v.excerpt)}</div>` : ''}
+          </span>
+          <span class="dx-end">
+            ${_dxPhoto(v.image_id ? API.venues.imageUrl(v.image_id) : null)}
+            ${_dxSide(v.recording_count || 0, _dxYears(v.first_year, v.last_year))}
+          </span>
+        </a>`,
       searchable: v => [v.name, v.city, v.state, v.country].filter(Boolean).join(' '),
       sorts: [
-        { id: 'name',  label: 'A–Z',        cmp: _byName },
-        { id: 'recs',  label: 'Recordings', cmp: _byCount('recording_count') },
-        { id: 'shows', label: 'Shows',      cmp: _byCount('performance_count') },
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        { id: 'recs',  label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
+        { id: 'shows', label: 'Show Count',      icon: 'arrow-up-down', cmp: _byCount('performance_count') },
       ],
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Venue' : 'Venues'],
@@ -14380,22 +14079,32 @@ const App = (() => {
   function renderArtistsIndexPage() {
     return renderDimIndexPage({
       nav: 'artists', title: 'Artists', singular: 'Artist',
-      load: () => API.artists.list(),
-      hashFor: p => `#/artist/${p.id}`,
+      load: () => API.artists.listIndex(),
       newHash: '#/artist/new',
-      shape: 'round',
-      // Genre colour is the accent — CONTEXT.md: it is the most complete visual
-      // signal the library owns, far more so than photographs.
-      art: p => ({ url: p.image_id ? API.artists.imageUrl(p.image_id) : null,
-                   color: p.genre_color || null }),
-      sub:  p => (p.members || []).join(', '),
-      meta: p => [p.genre_name || '',
-                  p.recording_count ? _plural(p.recording_count, 'recording') : '']
-                 .filter(Boolean).join(' · '),
+      // The one dimension that leads with a picture: half of the acts have one,
+      // and the rest fall back to the genre colour with initials, which still
+      // reads as designed and colour-coded.
+      row: p => {
+        const color = p.genre_color || null
+        const sub = [p.genre_name ? `<span class="dx-sw"></span>${esc(p.genre_name)}` : '',
+                     p.area ? esc(p.area) : ''].filter(Boolean).join(' · ')
+        return `
+          <a class="dx-row dx-row--artist" href="#/artist/${p.id}"
+             ${color ? `style="--dx-fg:${esc(color)}"` : ''}>
+            ${_dxArt(p.name, p.image_id ? API.artists.imageUrl(p.image_id) : null, color)}
+            <span class="dx-body">
+              <div class="dx-name">${esc(p.name)}</div>
+              ${sub ? `<div class="dx-sub">${sub}</div>` : ''}
+              ${p.excerpt ? `<div class="dx-text">${esc(p.excerpt)}</div>` : ''}
+              ${_dxWith(p.members, 5, (p.members || []).length)}
+            </span>
+            ${_dxSide(p.recording_count || 0, _dxYears(p.first_year, p.last_year))}
+          </a>`
+      },
       searchable: p => [p.name, p.genre_name, ...(p.members || [])].filter(Boolean).join(' '),
       sorts: [
-        { id: 'name', label: 'A–Z',        cmp: _byName },
-        { id: 'recs', label: 'Recordings', cmp: _byCount('recording_count') },
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
       ],
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Artist' : 'Artists'],
@@ -14405,20 +14114,35 @@ const App = (() => {
   }
 
   // ── Musicians (people) ───────────────────────────────────────────────────────
+  // The first letter a name files under: accents folded, anything else '#'.
+  const _dxLetter = a => {
+    const c = String(a.sort_name || a.name || '').trim().charAt(0)
+      .normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase()
+    return /[A-Z]/.test(c) ? c : '#'
+  }
+
   function renderMusiciansIndexPage() {
     return renderDimIndexPage({
       nav: 'musicians', title: 'Musicians', singular: 'Musician',
-      load: () => API.musicians.list(),
-      hashFor: a => `#/musician/${a.id}`,
+      load: () => API.musicians.listIndex(),
       newHash: '#/musician/new',
-      shape: 'round',
-      art: a => ({ url: a.image_id ? API.musicians.imageUrl(a.image_id) : null }),
-      sub:  a => a.artist_count ? _plural(a.artist_count, 'artist') : '',
-      meta: a => a.recording_count ? _plural(a.recording_count, 'recording') : '',
+      // Deliberately plain: 482 people, almost none photographed. Text only.
+      row: a => `
+        <a class="dx-row dx-row--musician" href="#/musician/${a.id}">
+          <span class="dx-body">
+            <div class="dx-name">${esc(a.name)}</div>
+            ${(a.instruments || []).length ? `<div class="dx-sub">${esc(a.instruments.join(', '))}</div>` : ''}
+            ${a.excerpt ? `<div class="dx-text">${esc(a.excerpt)}</div>` : ''}
+            ${_dxWith(a.artists, 3, a.artist_count)}
+          </span>
+          ${_dxSide(a.recording_count ? a.recording_count : null)}
+        </a>`,
       searchable: a => [a.name, a.sort_name].filter(Boolean).join(' '),
+      // 482 rows need a way to find a place: a letter beside each run.
+      group: { sort: 'name', key: _dxLetter, label: _dxLetter },
       sorts: [
-        { id: 'name', label: 'A–Z',        cmp: _byName },
-        { id: 'recs', label: 'Recordings', cmp: _byCount('recording_count') },
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
       ],
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Musician' : 'Musicians'],
@@ -14431,63 +14155,157 @@ const App = (() => {
   function renderGenresPage() {
     return renderDimIndexPage({
       nav: 'genres', title: 'Genres', singular: 'Genre',
-      load: () => API.genres.list(),
-      hashFor: g => `#/genre/${g.id}`,
+      load: () => API.genres.listIndex(),
       newHash: '#/genre/new',
-      // A genre has no likeness — the tile's face IS its colour, which is also
-      // a live preview of what tints every card its artists appear on.
-      shape: 'swatch',
-      art:  g => ({ color: g.color || 'var(--t3)' }),
-      sub:  g => g.description || '',
-      meta: g => [g.artist_count ? _plural(g.artist_count, 'artist') : '',
-                  g.recording_count ? _plural(g.recording_count, 'recording') : '']
-                 .filter(Boolean).join(' · '),
+      // A genre has no likeness. Its face is its colour, which is also what
+      // tints every card its artists appear on, with the recording count set
+      // inside it, and beside it a run of the artists themselves.
+      row: g => `
+        <a class="dx-row dx-row--genre" href="#/genre/${g.id}"
+           style="--dx-fg:${esc(g.color || '#7d7f88')}">
+          <span class="dx-key${canEditLibrary() ? ' dx-key--edit' : ''}" style="color:${_dxInkOn(g.color || '#7d7f88')}">${g.recording_count || 0}${canEditLibrary() ? _gnColorInput(g.id, g.color) : ''}</span>
+          <span class="dx-body">
+            <div class="dx-name">${esc(g.name)}</div>
+            ${g.artist_count ? `<div class="dx-sub">${esc(_plural(g.artist_count, 'artist'))}</div>` : ''}
+            ${g.description ? `<div class="dx-text">${esc(g.description)}</div>` : ''}
+            ${(g.faces || []).length ? `<div class="dx-faces">${g.faces.map(f =>
+              _dxArt(f.name, f.image_id ? API.artists.imageUrl(f.image_id) : null, g.color, 44)).join('')}</div>` : ''}
+          </span>
+        </a>`,
       searchable: g => [g.name, g.description].filter(Boolean).join(' '),
       sorts: [
-        { id: 'name', label: 'A–Z',        cmp: _byName },
-        { id: 'recs', label: 'Recordings', cmp: _byCount('recording_count') },
-        { id: 'acts', label: 'Artists', cmp: _byCount('artist_count') },
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
+        { id: 'acts', label: 'Artist Count', icon: 'arrow-up-down', cmp: _byCount('artist_count') },
       ],
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Genre' : 'Genres'],
         [rows.reduce((n, g) => n + (g.recording_count || 0), 0), 'Recordings'],
       ],
-      // Bulk assign is the actual population mechanism for this dimension (see
-      // the Genre design spec's coverage math), so it belongs on the index
-      // rather than buried. It IS admin-only — it writes — but it is gated by
-      // ADMIN_ONLY_HASHES in route(), which bounces a listener who arrives by
-      // any door, so it does not also need the shell's `actions` gate.
+      // Bulk assign is the actual population mechanism for this dimension, so
+      // it belongs on the index rather than buried. It IS admin-only — it
+      // writes — but it is gated by ADMIN_ONLY_HASHES in route, which bounces
+      // a listener who arrives by any door, so it does not also need the
+      // shell's `actions` gate.
       extraActionsPlayback: canEditLibrary()
         ? `<a class="btn btn-ghost btn-sm" href="#/genres/assign">Bulk assign →</a>` : '',
+      // The colour circle holds a real, invisible colour input, so a click on
+      // it opens the picker and never reaches the row's link.
+      wire: ({ grid, rows, paint }) => {
+        const find = e => {
+          const inp = e.target.closest && e.target.closest('.gn-color')
+          return inp ? { inp, g: rows.find(r => String(r.id) === inp.dataset.gid),
+                         row: inp.closest('.dx-row'), key: inp.closest('.dx-key') } : null
+        }
+        grid.addEventListener('input', e => {
+          const f = find(e); if (!f) return
+          f.row.style.setProperty('--dx-fg', f.inp.value)
+          f.key.style.color = _dxInkOn(f.inp.value)
+        })
+        grid.addEventListener('change', async e => {
+          const f = find(e); if (!f || !f.g) return
+          const c = f.inp.value
+          try { await API.genres.update(f.g.id, { color: c }); f.g.color = c; invalidateDims('genres') }
+          catch (err) { Notify.error('Save failed: ' + err.message) }
+          paint()
+        })
+      },
     })
   }
 
   // ── Events ─────────────────────────────────────────────────────────────────
+  // An event row usually stores no dates of its own (they sit on its
+  // performances), so the range is the row's own when it has one and the
+  // earliest and latest performance otherwise. Each end is [y, m, d] with 0 for
+  // an unknown part.
+  function _dxEventRange(e) {
+    if (e.start_year) {
+      return [[e.start_year, e.start_month || 0, e.start_day || 0],
+              e.end_year ? [e.end_year, e.end_month || 0, e.end_day || 0] : null]
+    }
+    return [e.first || null, e.last || null]
+  }
+
+  const _DX_MON = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+  // "Jun 20, 1998", "Jun 20 to 22, 1998", "Jun 28 to Jul 2, 1998",
+  // "Dec 30, 1998 to Jan 2, 1999". Parts the event does not know are left out.
+  function _dxEventDate(e) {
+    const [a, b] = _dxEventRange(e)
+    if (!a) return ''
+    const md = t => t[1] && t[2] ? `${_DX_MON[t[1]]} ${t[2]}` : t[1] ? _DX_MON[t[1]] : ''
+    const full = t => [md(t), t[0]].filter(Boolean).join(t[1] && t[2] ? ', ' : ' ')
+    const same = !b || (a[0] === b[0] && a[1] === b[1] && a[2] === b[2])
+    if (same) return full(a)
+    if (a[0] !== b[0]) return `${full(a)} to ${full(b)}`
+    if (!a[1] || !b[1]) return full(a)
+    if (a[1] === b[1] && a[2] && b[2]) return `${_DX_MON[a[1]]} ${a[2]} to ${b[2]}, ${a[0]}`
+    return `${md(a)} to ${md(b)}${a[2] && b[2] ? ',' : ''} ${a[0]}`
+  }
+
+  // Sort and gutter key: the event's LATEST date.
+  const _dxEventKey = e => {
+    const [a, b] = _dxEventRange(e)
+    const t = b || a
+    return t ? t[0] * 10000 + t[1] * 100 + t[2] : 0
+  }
+  const _dxEventYear = e => { const [a, b] = _dxEventRange(e); return (b || a || [0])[0] }
+
+  // A run of names, honest about the rest: "A, B, C +4 more".
+  const _dxNames = (names, shown, total) => {
+    if (!names || !names.length) return ''
+    const more = Math.max(total || 0, names.length) - Math.min(shown, names.length)
+    return esc(names.slice(0, shown).join(', ')) + (more > 0 ? ` +${more} more` : '')
+  }
+
   function renderEventsPage() {
     return renderDimIndexPage({
       nav: 'events', title: 'Events', singular: 'Event',
-      load: () => API.events.list(),
-      hashFor: e => `#/event/${e.id}`,
+      load: () => API.events.listIndex(),
       newHash: '#/event/new',
-      shape: 'square',
-      art:  e => ({ url: e.image_id ? API.events.imageUrl(e.image_id) : null }),
-      sub:  e => [fmtEventDates(e), e.venue_name || fmtLocation(e.city, e.state, e.country)]
-                 .filter(Boolean).join(' · '),
-      meta: e => [e.recording_count ? _plural(e.recording_count, 'recording') : '',
-                  e.performance_count ? _plural(e.performance_count, 'show') : '']
-                 .filter(Boolean).join(' · '),
+      row: e => {
+        const date = _dxEventDate(e)
+        const where = [e.show_venue || e.venue_name,
+                       e.show_place || fmtLocation(e.city, e.state, e.country)]
+          .filter(Boolean).join(', ')
+        const venues = (e.venues && e.venues.length) ? e.venues : (where ? [where] : [])
+        const line = (label, html) => html
+          ? `<div class="dx-line"><span class="dx-lab">${label}</span><span class="dx-val">${html}</span></div>` : ''
+        return `
+          <a class="dx-row dx-row--event" href="#/event/${e.id}">
+            <span class="dx-body">
+              <div class="dx-name">${esc(e.name)}</div>
+              ${date ? `<div class="dx-date">${esc(date)}</div>` : ''}
+              ${line('Venues', _dxNames(venues, 4, e.venue_count))}
+              ${line('Artists', _dxNames(e.top_artists, 8, e.artist_count))}
+              ${e.excerpt ? `<div class="dx-text">${esc(e.excerpt)}</div>` : ''}
+            </span>
+            <span class="dx-end">
+              ${_dxPhoto(e.image_id ? API.events.imageUrl(e.image_id) : null)}
+              ${_dxSide(e.recording_count || 0)}
+            </span>
+          </a>`
+      },
       searchable: e => [e.name, e.city, e.state, e.country, e.venue_name,
-                        e.start_year].filter(Boolean).join(' '),
+                        e.start_year, ...(e.venues || []), ...(e.top_artists || [])].filter(Boolean).join(' '),
+      // An event list is a timeline: the year rides in a gutter while the date
+      // sort is on.
+      group: { sort: 'date', key: _dxEventYear, label: e => _dxEventYear(e) || '' },
       sorts: [
-        { id: 'name', label: 'A–Z',        cmp: _byName },
-        // Newest first — an event list is a timeline, and the thing you want is
-        // almost always the recent one. Undated events sort last rather than
-        // first: 0 would put every unlabelled row above 2009.
-        { id: 'date', label: 'Newest',     cmp: (a, b) =>
-            (b.start_year || 0) - (a.start_year || 0) ||
-            (b.start_month || 0) - (a.start_month || 0) ||
-            (b.start_day || 0) - (a.start_day || 0) || _byName(a, b) },
-        { id: 'recs', label: 'Recordings', cmp: _byCount('recording_count') },
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        // Newest first by the event's latest date. Undated events sort last in
+        // both directions rather than first: 0 would put every unlabelled row
+        // above 2009.
+        { id: 'date', label: 'Newest', labelRev: 'Oldest', icon: 'arrow-up-down',
+          cmp: (a, b) => {
+            const ka = _dxEventKey(a), kb = _dxEventKey(b)
+            if (!ka !== !kb) return ka ? -1 : 1
+            return kb - ka || _byName(a, b) },
+          cmpRev: (a, b) => {
+            const ka = _dxEventKey(a), kb = _dxEventKey(b)
+            if (!ka !== !kb) return ka ? -1 : 1
+            return ka - kb || _byName(a, b) } },
+        { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
       ],
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Event' : 'Events'],
@@ -14507,7 +14325,7 @@ const App = (() => {
     // dates recorded, and the honest rendering is nothing at all).
     const a = e.start_year ? fmtDateLong(e.start_year, e.start_month, e.start_day) : ''
     const b = e.end_year   ? fmtDateLong(e.end_year,   e.end_month,   e.end_day)   : ''
-    if (a && b && a !== b) return `${a} – ${b}`
+    if (a && b && a !== b) return `${a} to ${b}`
     return a || b || ''
   }
 
@@ -14559,11 +14377,11 @@ const App = (() => {
   // Views that exist only to edit the library. The three ingest steps — source
   // picker, triage queue and metadata review — all live under '#/ingest'.
   //
-  // Enforced in route(), not in setViewMode (Ryan, 2026-08-22). Toggling to
-  // Playback while standing on one of these is the case that prompted it, but
-  // it is not the only way to arrive: Back, Forward and a typed or bookmarked
-  // URL all get there too, and a listener has no toggle at all. One check on
-  // the way in covers every route.
+  // Enforced in route, not in setViewMode. Toggling to Playback while standing
+  // on one of these is the case that prompted it, but it is not the only way
+  // to arrive: Back, Forward and a typed or bookmarked URL all get there too,
+  // and a listener has no toggle at all. One check on the way in covers every
+  // route.
   const ADMIN_ONLY_HASHES = [
     '#/ingest',          // Add Recordings — source picker, metadata review
     '#/batch',           // Retired; redirects to #/ingest
@@ -14574,8 +14392,8 @@ const App = (() => {
     '#/bulk-ingest',        // Bulk Ingest
     '#/archive/lma',        // Live Music Archive catalog
     '#/downloads',          // Downloads folder
-    '#/workshop',           // Workshop folder (2026-10-01)
-    '#/backlog',            // Backlog folder (2026-10-01)
+    '#/workshop',
+    '#/backlog',
   ]
   const isAdminOnlyHash = h => ADMIN_ONLY_HASHES.includes(
     (h || '').split('?')[0].replace(/^(#\/bulk-ingest)\/\d+$/, '$1'))
@@ -14640,36 +14458,32 @@ const App = (() => {
   }
 
   function wireHeaderNav() {
-    // nav-home removed 2026-08-23 — "My Library" in the sidebar is the Home
-    // link now (see renderSidebar). Back/Forward are unchanged.
     document.getElementById('nav-back')?.addEventListener('click', () => _navGo(-1))
     document.getElementById('nav-fwd')?.addEventListener('click', () => _navGo(1))
 
-    // Wordmark: always the Library, run or no run (Ryan, 2026-10-06).
+    // Wordmark: always the Library, run or no run.
     document.querySelector('.app-wordmark')?.addEventListener('click', () => {
       window.location.hash = '#/'
     })
 
     // "Add Recordings" is a same-hash link whenever the user is already on
     // #/ingest — mid-triage, sitting on "All done", or looking at a filled
-    // review form. A same-hash click fires no hashchange, so route() never
-    // runs and renderIngestView() never fires: the page just sits there
-    // stale (Ryan, 2026-08-26 — the "still shows the previous job" bug).
-    // Same class of issue as the documented fromBatch case on the in-page
-    // back-link below; fixed the same way, by not depending on the hash
-    // actually changing.
+    // review form. A same-hash click fires no hashchange, so route never
+    // runs and renderIngestView never fires: the page just sits there
+    // stale. Same class of issue as the documented fromBatch case on the
+    // in-page back-link below; fixed the same way, by not depending on the
+    // hash actually changing.
     document.getElementById('sidebar-nav')?.addEventListener('click', e => {
-      if (!e.target.closest('.nav-add-btn')) return
+      if (!e.target.closest('.lnav-add')) return
       if (window.location.hash === '#/ingest') {
         e.preventDefault()
         renderIngestView()
       }
     })
 
-    // Sidebar collapse toggle (2026-08-23). Plain localStorage flag, same
-    // idiom as setPalette() above — applied before first paint by the inline
-    // script at the top of <body> in index.html so there's no flash, flipped on
-    // click here.
+    // Sidebar collapse toggle. Plain localStorage flag, same idiom as
+    // setPalette above — applied before first paint by the inline script at the
+    // top of <body> in index.html so there's no flash, flipped on click here.
     const sbToggle = document.getElementById('nav-sidebar-toggle')
     sbToggle?.setAttribute('aria-pressed', String(document.body.classList.contains('sidebar-collapsed')))
     sbToggle?.addEventListener('click', () => {
@@ -14679,8 +14493,6 @@ const App = (() => {
     })
   }
 
-  // ── Bulk Ingest (spec 1.9/4, chunk 7b) ─────────────────────────────────────────────
-  //
   // One run at a time over LIBRARY_ROOT (app/utils/bulk_ingest_run.py). This is
   // the only page for it, at #/bulk-ingest; renderSidebar's nav item and the
   // wordmark/My Library home routing (wireHeaderNav) both read state.bulkIngest
@@ -14719,8 +14531,8 @@ const App = (() => {
     } catch (e) { state.biRuns = [] }
   }
 
-  // There is one Queue (Ryan, 2026-10-06). The Add Recordings count is its
-  // Queue tab count, from the same Queue payload the page shows.
+  // There is one Queue. The Add Recordings count is its Queue tab count,
+  // from the same Queue payload the page shows.
   function _biWaitingCount() {
     const q = state.bulkIngest
     return (state.biRuns || []).length && q ? _biTabCounts(q).queue : 0
@@ -14782,7 +14594,7 @@ const App = (() => {
       : ['rescan', 'Rescan Folder', 'btn-ghost']
     const c = (run && run.counts) || {}
     // Reset Queue shows while the page holds anything, the Imported tabs
-    // included: it empties all of it (Ryan, 2026-10-06).
+    // included: it empties all of it.
     const queued = Object.values(c).reduce((a, b) => a + (b || 0), 0)
     // The Lomax row sits under Mode. Without a key the toggle is locked to Off.
     const hasKey = lxHasKey()
@@ -14942,7 +14754,6 @@ const App = (() => {
     }, 5000)
   }
 
-  // ── Progress table (2026-09-27 redesign) ─────────────────────────────────
   // Rebuilt onto Review & Ingest's own shell (renderTriageView / _lqCompactRow)
   // rather than Batch Import's -- same header shape (title, subtitle, source
   // chip, mode strip, progress bar, primary action top-right), same table
@@ -14963,8 +14774,8 @@ const App = (() => {
   let _biTableIO = null
   let _biTableRunId = null
   let _biOpenRows = new Set()    // ids whose expand panel is open
-  let _biReviewFilter = false    // header "Review"/"Show all" toggle (2026-09-27)
-  let _biTab = 'queue'           // 'queue' | 'live' | 'album' (2026-10-01)
+  let _biReviewFilter = false    // header "Review"/"Show all" toggle
+  let _biTab = 'queue'           // 'queue' | 'live' | 'album'
 
   let _biLastPaintedKey = null   // run.id + ':' + (done ? 'done' : 'active')
 
@@ -15049,9 +14860,9 @@ const App = (() => {
     const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
       ? '' : _biMetaLine(it)
     const basename = _biItemName(it)
-    // Completed tabs (2026-10-01): the recording's own name leads and the
-    // folder name drops to the grey line. Live: Artist - date - venue, place.
-    // Album: Artist - Title.
+    // Completed tabs: the recording's own name leads and the folder name
+    // drops to the grey line. Live: Artist - date - venue, place. Album:
+    // Artist - Title.
     const imported = _biTab !== 'queue' && it.status === 'ingested'
     // Ready / issue labels live in their own status column (_iqStatusCell),
     // not in this line.
@@ -15062,8 +14873,8 @@ const App = (() => {
         ? `${it.venue}, ${it.location}` : (it.venue || it.location)
       const parts = it.kind === 'studio' ? [it.artist, it.title] : [it.artist, it.date_text, place]
       const joined = parts.filter(Boolean).join(' - ')
-      // No grey line on the Imported tabs (Ryan, 2026-10-05): the folder name
-      // was redundant there. Hover on the title still shows the path.
+      // No grey line on the Imported tabs: the folder name was redundant
+      // there. Hover on the title still shows the path.
       if (joined) { title = joined; sub = '' }
     }
     return {
@@ -15082,7 +14893,7 @@ const App = (() => {
       review_issues: reviewIssues,
       status,
       recording_id: it.recording_id,
-      // Completed tabs only: the recording's image at the left (2026-10-01).
+      // Completed tabs only: the recording's image at the left.
       thumb: _biTab !== 'queue' && it.status === 'ingested'
         ? { url: it.image_url || null, initials: String(it.artist || it.title || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() }
         : null,
@@ -15217,15 +15028,15 @@ const App = (() => {
     _lxQPaintLine()
   }
 
-  // Lomax's progress sits beside its switch, in place of the description line
-  // (Ryan, 2026-10-06): "N of M checked" with Pause/Resume while it runs,
-  // "M of M completed" once done. Empty when Lomax has nothing queued.
+  // Lomax's progress sits beside its switch, in place of the description
+  // line: "N of M checked" with Pause/Resume while it runs, "M of M
+  // completed" once done. Empty when Lomax has nothing queued.
   function _lxQStatusHtml() {
     const q = _lxQ
     if (!q) return ''
     _lxQReadPause(q)
     // Only rows still in the Queue count: once it is emptied or reset, the
-    // switch's own line comes back (Ryan, 2026-10-06).
+    // switch's own line comes back.
     if (!_biRun || !_lxColShown() || !document.getElementById('bi-rows')) return ''
     const ids = [...q.items.keys()].filter(id => _biRowsCache.has(id))
     if (!ids.length) return ''
@@ -15603,7 +15414,7 @@ const App = (() => {
   function _biTabsHtml(run) {
     const n = _biTabCounts(run)
     const tabs = [['queue', 'Queue'], ['live', 'Imported - Live Recordings'], ['album', 'Imported - Albums']]
-    // Imported tabs appear only once they hold rows (Ryan, 2026-10-02).
+    // Imported tabs appear only once they hold rows.
     const left = tabs.filter(([id]) => id === 'queue' || n[id] > 0).map(([id, label]) => `
       <button type="button" class="pp-tab bi-tab--${id}${_biTab === id && !_biApplyOpen ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
     // Bulk Value Apply sits at the right end and replaces the table while open; it is not a
@@ -15616,11 +15427,9 @@ const App = (() => {
     document.getElementById('bi-shell')?.classList.toggle('bi-applymode', _biApplyOpen)
   }
 
-  // Line above the rows: the review note on Queue only. The completed tabs'
-  // View buttons were removed (Ryan, 2026-10-01).
+  // Line above the rows: the review note on Queue only.
   function _biTabNoteHtml(run) {
     if (_biTab === 'queue') {
-      // The Queue's instruction line was removed (Ryan, 2026-10-05).
       return ''
     }
     return ''
@@ -15683,10 +15492,8 @@ const App = (() => {
 
   // Toggle a done row's expand panel -- delegated on the table container so
   // it keeps working across every poll's patches and appends without being
-  // rewired.
-  // A review-status item's folder, opened pre-scanned in the Add Recording
-  // wizard -- both the Ingest and the Review button call this ("the
-  // existing confirm path for that folder, in place", spec chunk 7d): a
+  // rewired. A review-status item's folder, opened pre-scanned in the Add
+  // Recording wizard -- both the Ingest and the Review button call this: a
   // bulk item flagged needs_artist/needs_date/unsupported_format cannot be
   // safely one-click auto-ingested, so both buttons land on the same form a
   // human finishes.
@@ -15703,7 +15510,7 @@ const App = (() => {
       renderIngestStep()
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Review' }
-      alert(`Scan failed: ${e.message}`)
+      Notify.error(`Scan failed: ${e.message}`)
     }
   }
 
@@ -15725,7 +15532,7 @@ const App = (() => {
   async function _biIngestItem(it, btn) {
     if (btn) btn.disabled = true
     try { await API.bulkIngest.ingestItem(it.id) }
-    catch (e) { if (btn) btn.disabled = false; alert(e.message); return }
+    catch (e) { if (btn) btn.disabled = false; Notify.error(e.message); return }
     _biSetItem({ ...it, ingest_requested: true })
     await _biAfterAction()
   }
@@ -15733,7 +15540,7 @@ const App = (() => {
   async function _biIngestAllReady(btn) {
     if (btn) btn.disabled = true
     try { await API.bulkIngest.ingestReady(_biPageRunId) }
-    catch (e) { alert(e.message); await _biAfterAction(); return }
+    catch (e) { Notify.error(e.message); await _biAfterAction(); return }
     await _biAfterAction()
   }
 
@@ -15742,7 +15549,7 @@ const App = (() => {
     try { await API.bulkIngest.moveItem(it.id, dest) }
     catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = TRIAGE_LABELS[dest] || dest }
-      alert(`Move failed: ${e.message}`)
+      Notify.error(`Move failed: ${e.message}`)
       return
     }
     // A moved item leaves the Queue.
@@ -15789,7 +15596,7 @@ const App = (() => {
       'Convert All to FLAC', async () => {
         if (btn) btn.disabled = true
         try { await API.bulkIngest.convertUnsupported(_biPageRunId) }
-        catch (e) { if (btn) btn.disabled = false; alert(e.message); return }
+        catch (e) { if (btn) btn.disabled = false; Notify.error(e.message); return }
         await _biTableRefresh()
         clearInterval(_biConvertAllTimer)
         _biConvertAllTimer = setInterval(async () => {
@@ -15865,7 +15672,7 @@ const App = (() => {
     city: '', state: '', country: '', source: '', source_tag: '', lineage: '', notes: '',
   })
   let _biAa = _biEmptyAa()
-  let _biApplyOpen = false   // the Bulk Value Apply tab is showing in place of the table (2026-10-05)
+  let _biApplyOpen = false   // the Bulk Value Apply tab is showing in place of the table
   let _biApplied = null
   let _biAaTimer = null
 
@@ -15897,13 +15704,13 @@ const App = (() => {
     document.getElementById('lq-applyall-apply')?.addEventListener('click', async () => {
       const typed = _aaTyped(_biAa)
       try { await API.bulkIngest.setApplied(_biPageRunId, typed) }
-      catch (e) { alert(e.message); return }
+      catch (e) { Notify.error(e.message); return }
       _biApplied = typed
       _biPaintApplyAll()
     })
     document.getElementById('lq-applyall-clear')?.addEventListener('click', async () => {
       try { await API.bulkIngest.setApplied(_biPageRunId, {}) }
-      catch (e) { alert(e.message); return }
+      catch (e) { Notify.error(e.message); return }
       _biAa = _biEmptyAa()
       _biApplied = null
       _biPaintApplyAll()
@@ -15961,15 +15768,13 @@ const App = (() => {
   }
 
   // Notices above the queue table, shown once the run is done: the
-  // scoring-continues line and the Possible Duplicates list. The counts and
-  // elapsed line this block used to lead with were removed (Ryan, 2026-10-02).
+  // scoring-continues line.
   function _biNoticesHtml(run) {
     if (run.status !== 'done') return ''
     const scorable = run.scorable || 0
     const scored   = run.scored   || 0
     const scoring  = scorable > 0 && scored < scorable
 
-    // The Possible Duplicates list was removed (Ryan, 2026-10-06): the rows say it.
     return scoring ? `<p class="batch-subtitle" id="bi-scoring-line">Listening quality scored for ${scored} of ${scorable} recordings. Scoring continues in the background.</p>` : ''
   }
 
@@ -16117,15 +15922,15 @@ const App = (() => {
     _biApplyMode()
     _biPaintApplyAll()
     document.addEventListener('click', _closeMoveMenus)
-    // Import All Ready sits in the scan row (Ryan, 2026-10-06), which repaints;
-    // the listener lives on #bi-scan, which does not.
+    // Import All Ready sits in the scan row, which repaints; the listener lives
+    // on #bi-scan, which does not.
     document.getElementById('bi-scan')?.addEventListener('click', e => {
       const b = e.target.closest('#bi-ingest-all')
       if (b) _biIngestAllReady(b)
       const all = e.target.closest('#bi-import-everything')
       if (all) _confirmDialog('Try and import all recordings, including ones that Need Review?', 'Import All', async () => {
         all.disabled = true
-        try { await API.bulkIngest.ingestAll() } catch (err) { alert(err.message) }
+        try { await API.bulkIngest.ingestAll() } catch (err) { Notify.error(err.message) }
         await _biAfterAction()
       })
       const c = e.target.closest('#bi-convert-all')
@@ -16185,8 +15990,6 @@ const App = (() => {
   // everything painted here is derived from it, so there is no second copy to
   // drift. The poll runs only while something is queued or active.
   //
-  // Every user-visible string below is a proposal pending Ryan's approval
-  // (spec section 8); labels come from the approved mockups.
   // ══════════════════════════════════════════════════════════════════════════
 
   const DL = {
@@ -16269,8 +16072,8 @@ const App = (() => {
     _dlRebuildKeys()
     // Any job that WAS live and no longer is (done, failed, or cancelled and
     // therefore gone from the list) means the folder list changed: a cancel
-    // deletes its folder server-side (Ryan, 2026-10-01), and nothing else
-    // would tell the Downloads page, because polling stops once idle.
+    // deletes its folder server-side, and nothing else would tell the
+    // Downloads page, because polling stops once idle.
     const now = new Map(DL.jobs.map(j => [j.id, j]))
     return [...prev].some(([id, st]) =>
       (st === 'queued' || st === 'active') && !(now.has(id) && _dlIsLive(now.get(id))))
@@ -16287,7 +16090,7 @@ const App = (() => {
     DL.folder = res
     DL.folderCount = ((res && res.folders) || []).length
     document.querySelectorAll('[data-dl-count]').forEach(el => {
-      el.textContent = DL.folderCount || ''
+      el.textContent = DL.folderCount ? `(${DL.folderCount})` : ''
     })
   }
 
@@ -16399,7 +16202,7 @@ const App = (() => {
           for (const j of gone) await API.downloads.remove(j.id)
         }
       } catch (err) {
-        alert(err.message)
+        Notify.error(err.message)
       }
       await _dlRefreshQueue()
     })
@@ -16433,7 +16236,7 @@ const App = (() => {
       DL.dragging = false
       panel.querySelectorAll('.dlq-q.dragging').forEach(r => r.classList.remove('dragging'))
       if (order.length && order.some((id, i) => id !== DL.dragStart[i])) {
-        try { await API.downloads.reorder(order) } catch (err) { alert(err.message) }
+        try { await API.downloads.reorder(order) } catch (err) { Notify.error(err.message) }
       }
       await _dlRefreshQueue()
     })
@@ -16683,7 +16486,7 @@ const App = (() => {
       _dlAfterChange()
     } catch (e) {
       // 409: already queued or active, which the refresh below resolves.
-      if (e.status !== 409) { alert(e.message); return }
+      if (e.status !== 409) { Notify.error(e.message); return }
     }
     await _dlRefreshQueue()
   }
@@ -16884,10 +16687,10 @@ const App = (() => {
 
   // ── Downloads page: #/downloads ────────────────────────────────────────────
 
-  // Fingerprint verdict from the server, one per working-folder row (2026-10-06):
-  // valid, invalid, unchecked
-  // (MD5 only, never run automatically) or absent. Same glyph and tip box as
-  // the checksum verdicts elsewhere. A row still downloading shows none.
+  // Fingerprint verdict from the server, one per working-folder row: valid,
+  // invalid, unchecked (MD5 only, never run automatically) or absent. Same glyph
+  // and tip box as the checksum verdicts elsewhere. A row still downloading shows
+  // none.
   const _DL_FP = {
     valid:      ['ok',   'Checksums verified'],
     invalid:    ['bad',  'Checksums failed'],
@@ -16909,8 +16712,8 @@ const App = (() => {
   }
 
   // ── Working-folder pages: Downloads, Workshop, Backlog (one design) ──────
-  // All three render the same rows, header and menu (Ryan, 2026-10-06). Only
-  // Downloads has live download progress; only the destinations differ.
+  // All three render the same rows, header and menu. Only Downloads has live
+  // download progress; only the destinations differ.
 
   // Modified as YYYY-MM-DD in local time, never "Today".
   function _dlDate(v) {
@@ -17041,10 +16844,10 @@ const App = (() => {
     document.getElementById('dl-rows').addEventListener('click', async e => {
       const ingest = e.target.closest('.dl-ingest')
       if (ingest) {
-        // Add to Library (Ryan, 2026-10-06): opens Add Recordings with the
-        // folder queued and the scan paused; the person starts it. Outside the
-        // library: the remembered outside mode, Review First by default.
-        _biStartAndOpen(dir(ingest.dataset.name), _biMode(false), true).catch(err => alert(err.message))
+        // Add to Library: opens Add Recordings with the folder queued and the
+        // scan paused; the person starts it. Outside the library: the
+        // remembered outside mode, Review First by default.
+        _biStartAndOpen(dir(ingest.dataset.name), _biMode(false), true).catch(err => Notify.error(err.message))
         return
       }
       const mv = e.target.closest('.dl-move')
@@ -17060,12 +16863,12 @@ const App = (() => {
       if (!opt) return
       const name = opt.dataset.name
       _dlCloseMenus()
-      // Move to another working folder, or to the system Trash (Ryan,
-      // 2026-10-06). Nothing is deleted outright from a working folder.
+      // Move to another working folder, or to the system Trash. Nothing
+      // is deleted outright from a working folder.
       try {
         if (opt.dataset.trash) await API.downloads.trash(which, name)
         else await API.quality.move(dir(name), opt.dataset.dest)
-      } catch (err) { alert(`Move failed: ${err.message}`); return }
+      } catch (err) { Notify.error(`Move failed: ${err.message}`); return }
       try { await load() } catch (_) { /* keep what is on screen */ }
       const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
       paint()
@@ -17127,11 +16930,11 @@ const App = (() => {
                      || hash === '#/workshop' || hash === '#/backlog'
     if ((!canEditLibrary() || (archiveHash && !isAdmin())) && isAdminOnlyHash(hash)) {
       // The Back/Forward step that landed here is ABANDONED, so clear the flag
-      // marking it as ours (2026-08-28). Left set, _navRecord treated the
-      // bounce as our own move and recorded nothing: navPos stayed pointing at
-      // an entry that was not on screen, and the _navReplace set on the next
-      // line was never consumed, so the next genuine navigation overwrote a
-      // history entry instead of pushing one.
+      // marking it as ours. Left set, _navRecord treated the bounce as our own
+      // move and recorded nothing: navPos stayed pointing at an entry that was
+      // not on screen, and the _navReplace set on the next line was never
+      // consumed, so the next genuine navigation overwrote a history entry
+      // instead of pushing one.
       _navMoving  = false
       _navReplace = true
       window.location.hash = '#/'   // hashchange re-enters route() with '#/'
@@ -17268,8 +17071,8 @@ const App = (() => {
       if (id) renderEventView(id)
       else    renderEventsPage()
 
-    // '#/artists' is the acts and '#/musicians' the people (2026-09-16).
-    // Both hashes have meant the other thing before; see CONTEXT.md §2.
+    // '#/artists' is the acts and '#/musicians' the people. Both hashes
+    // have meant the other thing before §2.
     } else if (hash === '#/artists') {
       renderArtistsIndexPage()
 
@@ -17369,10 +17172,9 @@ const App = (() => {
 
   // ── Settings ───────────────────────────────────────────────────────────────
   //
-  // A PAGE, not a modal (Ryan, 2026-08-25 — the dialog was "too small and
-  // strange"). Settings had outgrown a box: profile, appearance, library
-  // behaviour, AI, sharing and an About panel do not belong in something you
-  // dismiss by clicking beside it.
+  // A PAGE, not a modal. Settings had outgrown a box: profile, appearance,
+  // library behaviour, AI, sharing and an About panel do not belong in
+  // something you dismiss by clicking beside it.
   //
   // Nothing here has a Save button except the API key, and that is deliberate —
   // the same reasoning the Peers page already uses for grants: a control that
@@ -17427,11 +17229,10 @@ const App = (() => {
   }
 
 
-  /** Settings › Files (2026-10-05 tabbed redesign). The naming controls are
-   *  rendered only while Rename Files is on, and the template field only for
-   *  Custom: a preset's template is not something the user can act on, and a
-   *  dimmed block of controls that do nothing is noise. Placement moved to the
-   *  Folders tab. */
+  /* Settings › Files. The naming controls are rendered only while Rename Files
+     is on, and the template field only for Custom: a preset's template is not
+     something the user can act on, and a dimmed block of controls that do
+     nothing is noise. Placement moved to the Folders tab. */
   function _fileHandlingSectionHtml(fh) {
     const renaming = !!fh.rename_files
     const isCustom = fh.naming_scheme === 'custom'
@@ -17669,10 +17470,8 @@ const App = (() => {
 
     // ── Display name — commits on blur or Enter, never on every keystroke ────
     const nameInput = $('set-name')
-    // One name since 2026-10-06 (Ryan): it is both what peers see and the
-    // sign-in name, so a save writes the username and clears display_name,
-    // which leaves User.name falling back to it. The desktop app never asks
-    // anyone to sign in, so the credential role costs nothing there.
+    // The desktop app never asks anyone to sign in, so the credential role
+    // costs nothing there.
     let lastName = me.name || me.username
     const commitName = async () => {
       const v = nameInput.value.trim()
@@ -17742,11 +17541,10 @@ const App = (() => {
       } catch (err) { _settingsSaved($(`${id}-flash`), err.message) }
     })
     // ── File handling (spec section 6.2) ─────────────────────────────────────
-    // Every control is install-level (admin_required server-side), so a
-    // failure is always surfaced, never swallowed, and the fh cache is
-    // dropped on every successful save so the ingest screens' strip and any
-    // other open Settings tab pick the new value up on next read.
-    // The mode applies on click (Ryan, 2026-10-06: no confirmation). It
+    // Every control is install-level (admin_required server-side), so a failure
+    // is always surfaced, never swallowed, and the fh cache is dropped on every
+    // successful save so the ingest screens' strip and any other open Settings
+    // tab pick the new value up on next read. The mode applies on click. It
     // rewrites the switches below, and the repaint shows that.
     if ($('fh-mode')) {
       $('fh-mode').addEventListener('click', e => {
@@ -17817,9 +17615,8 @@ const App = (() => {
       })
     })
 
-    // Working folders (2026-09-26; every library since 2026-10-01). First run
-    // no longer asks for most of them, so they are set here. Desktop only:
-    // the folder dialog is PyWebView's.
+    // Working folders. First run no longer asks for most of them, so they are
+    // set here. Desktop only: the folder dialog is PyWebView's.
     ;(async () => {
       const host = $('set-folders')
       const api  = window.pywebview && window.pywebview.api
@@ -17954,12 +17751,9 @@ const App = (() => {
   document.getElementById('settings-btn')?.addEventListener('click',
     () => { window.location.hash = '#/settings' })
 
-  // ── Search (IO-46, 2026-08-18) ─────────────────────────────────────────────
-  //
   // THE RULE: act, person, venue, date, or any combination. Track titles and
   // provenance text are OUT of v1 — see app/utils/search.py before widening
-  // anything here. IO-46's Jira description still promises song identity and
-  // is out of date, not a spec.
+  // anything here.
   //
   // Local library only. The Search Bar hides itself in peer mode via CSS
   // (html.peer-mode .search-bar) rather than by a JS check, so it is gone
@@ -17967,10 +17761,10 @@ const App = (() => {
 
   const SEARCH_DEBOUNCE_MS   = 200
   // Below this, a query is noise: one character matches most of the library and
-  // costs a round trip to say so (Ryan, 2026-08-23). Verified against the live
-  // DB before choosing 3 — no artist, venue or musician name is shorter than
-  // that, so nothing real is currently unreachable. If a two-letter act ever
-  // lands (a "U2" case), this is the one number to change.
+  // costs a round trip to say so. Verified against the live DB before choosing
+  // 3 — no artist, venue or musician name is shorter than that, so nothing real
+  // is currently unreachable. If a two-letter act ever lands (a "U2" case),
+  // this is the one number to change.
   const SEARCH_MIN_CHARS     = 3
   const SEARCH_DROPDOWN_MAX  = 5      // per group in the dropdown
   const SEARCH_OVERVIEW_MAX  = 25     // per group on the results page
@@ -18003,10 +17797,10 @@ const App = (() => {
               <span class="search-item-meta">${esc(where)}</span>`
     }
     if (item.type === 'album') {
-      // Studio Records spec v1, section 7 — an album row leads with its
-      // title, never a date/venue slot it does not have. No title: the
-      // name slot already falls back to the artist, so the meta line is
-      // the year alone -- repeating the artist there would read as an echo.
+      // An album row leads with its
+      // title, never a date/venue slot it does not have. No title: the name
+      // slot already falls back to the artist, so the meta line is the year
+      // alone -- repeating the artist there would read as an echo.
       const meta = item.title ? [item.artist, item.year].filter(Boolean).join(' · ') : (item.year || '')
       return `<span class="search-item-name">${esc(item.title || item.artist || 'Unknown')}</span>
               <span class="search-item-meta">${esc(meta)}</span>`
@@ -18088,7 +17882,7 @@ const App = (() => {
     } catch (e) {
       // A failed fetch that renders as an empty dropdown is indistinguishable
       // from "nothing matched" — a trap this project has hit repeatedly with
-      // remote calls (CONTEXT, "Remote failures disguise themselves").
+      // remote calls.
       if (seq !== _searchSeq) return
       searchDropdown.innerHTML =
         `<div class="search-dropdown-empty">Search failed: ${esc(e.message)}</div>`
@@ -18190,9 +17984,9 @@ const App = (() => {
       searchInput.select()
     })
 
-    // Cmd-R (Ctrl-R elsewhere) reloads the UI (Ryan, 2026-10-01). The desktop
-    // window has no browser menu, so nothing else provides it. The hash route
-    // survives the reload, so the same page comes back.
+    // Cmd-R (Ctrl-R elsewhere) reloads the UI. The desktop window has no
+    // browser menu, so nothing else provides it. The hash route survives the
+    // reload, so the same page comes back.
     document.addEventListener('keydown', e => {
       if ((e.key === 'r' || e.key === 'R') && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault()
@@ -18212,8 +18006,8 @@ const App = (() => {
   function searchRowHtml(item) {
     if (item.type === 'recording') {
       const where = [item.venue, item.city, item.state].filter(Boolean).join(' · ')
-      // Recording-artwork thumbnail (Studio Records spec v1, chunk 5) -- no
-      // placeholder when the recording has no image.
+      // Recording-artwork thumbnail -- no placeholder when the recording
+      // has no image.
       const thumb = item.image_url
         ? `<img class="rec-thumb-sm" src="${esc(item.image_url)}" alt="" loading="lazy">`
         : `<span class="rec-thumb-sm rec-thumb-sm--initials">${esc(recInitials({ artist: item.artist }))}</span>`
@@ -18228,7 +18022,7 @@ const App = (() => {
               </div>`
     }
     if (item.type === 'album') {
-      // Studio Records spec v1, section 7 — title leads, then artist and
+      // An album row: title leads, then artist and
       // year; never a venue slot (a studio record has none). No title: the
       // name slot falls back to the artist, so the meta line is the year
       // alone -- repeating the artist there would read as an echo.
@@ -18272,16 +18066,12 @@ const App = (() => {
 
   function searchZeroStateHtml(q) {
     // Name the miss, then offer real doors in. Deliberately not a fuzzy
-    // suggestion (Ryan, 2026-08-18): a dead end the user understands beats a
-    // confident wrong guess.
+    // suggestion: a dead end the user understands beats a confident wrong
+    // guess.
     return `<div class="search-zero">
       <div class="search-zero-title">Nothing matches “${esc(q)}”.</div>
-      <div class="search-zero-body">
-        Search covers artists, the musicians in them, venues and show dates.
-        Try a shorter name, or a year on its own like <b>1983</b>.
-      </div>
       <div class="search-zero-doors">
-        <button class="btn btn-ghost btn-sm" data-hash="#/">Browse the library</button>
+        <button class="btn btn-ghost btn-sm" data-hash="#/">Browse Live Recordings</button>
         <button class="btn btn-ghost btn-sm" data-hash="#/recent">Recently added</button>
         <button class="btn btn-ghost btn-sm" data-hash="#/artists">All artists</button>
         <button class="btn btn-ghost btn-sm" data-hash="#/venues">All venues</button>
@@ -18305,11 +18095,11 @@ const App = (() => {
   }
 
   // ── Search page ────────────────────────────────────────────────────────────
-  // A full-page search box (Ryan, 2026-08-23). Same engine, same hash and the
-  // same row markup as the App Header's field — but the results render
-  // UNDERNEATH as you type rather than into a dropdown. A dropdown floating
-  // over the page you are already looking at would be covering its own
-  // results; the header field needs one because it has no page of its own.
+  // A full-page search box. Same engine, same hash and the same row markup as
+  // the App Header's field — but the results render UNDERNEATH as you type
+  // rather than into a dropdown. A dropdown floating over the page you are
+  // already looking at would be covering its own results; the header field
+  // needs one because it has no page of its own.
   //
   // The box is rendered ONCE and never re-rendered while typing. Re-rendering
   // it would take the caret with it — which is why only #search-page-results
@@ -18587,8 +18377,7 @@ const App = (() => {
   // whose handler said "Not logged in — show login screen", so ANY error after
   // the auth check — a render bug, a bad endpoint, an unmounted drive — logged
   // you out of a session that was perfectly valid, swallowed the real error,
-  // and sent whoever was debugging it into the auth code. That cost an hour on
-  // 2026-08-23; the actual fault was a shadowed variable in renderSidebar().
+  // and sent whoever was debugging it into the auth code.
   //
   // The rule: never report a failure as a different, more familiar failure.
   async function init() {

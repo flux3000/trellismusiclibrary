@@ -1,5 +1,4 @@
-"""
-A tiny Atlas for tests (Resolver v2, chunk 4).
+"""A tiny Atlas for tests.
 
 Built from hand-written rows in the shape of the MusicBrainz JSON dumps, through the
 real builder (app/atlas/build.py), so the tests exercise the same code that builds the

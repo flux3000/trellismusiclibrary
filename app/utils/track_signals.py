@@ -1,5 +1,4 @@
-"""
-utils/track_signals.py — audio evidence that a track is not music (2026-08-28).
+"""utils/track_signals.py — audio evidence that a track is not music.
 
 Live sets are full of tracks that are not songs: band introductions, tuning,
 chatter, an announcement about the merch table. Trellis already detects those
@@ -101,7 +100,7 @@ NON_MUSIC_STRONG = 0.70
 # names as the single source of truth for the vocabulary.
 NON_MUSIC_FLAGS = frozenset({
     "banter", "tuning", "audience", "announcement",
-    "interview", "introduction", "band_intros",
+    "interview", "introduction", "band_intros", "outro",
 })
 
 # The recording's median is the whole basis of the comparison, so it needs a
@@ -186,15 +185,14 @@ def non_music_scores(tracks):
 
 
 def suggest_non_music(score, title_flags):
-    """
-    Turn a score into a SUGGESTION, or nothing.
+    """Turn a score into a SUGGESTION, or nothing.
 
     Returns None, or {"confidence": "likely"|"strong", "score": float}.
 
-    ENGINE-FACING ONLY. Nothing in the UI shows this (Ryan, 2026-08-28): the
-    signal is here to inform the ingestion and metadata-assignment engines,
-    not to sit a hedged second opinion next to a real flag on screen. It is
-    currently unused pending that engine work; keep it, do not render it.
+    ENGINE-FACING ONLY. Nothing in the UI shows this: the signal is here to
+    inform the ingestion and metadata-assignment engines, not to sit a hedged
+    second opinion next to a real flag on screen. It is currently unused
+    pending that engine work; keep it, do not render it.
 
     Two rules, both deliberate:
 

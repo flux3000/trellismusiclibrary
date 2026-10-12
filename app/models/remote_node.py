@@ -1,5 +1,4 @@
-"""
-models/remote_node.py — OUTBOUND sharing: libraries I have joined as a peer.
+"""models/remote_node.py — OUTBOUND sharing: libraries I have joined as a peer.
 
 The mirror image of models/peer.py. `peer` records who may consume MY library;
 `remote_node` records whose libraries I consume. Every install carries both
@@ -8,9 +7,7 @@ to be flowing.
 
 WHY THERE IS NO TOKEN COLUMN
 ----------------------------
-The design spec's original sketch put `my_token` on this table. Ryan's call
-(2026-08-08) was the OS keychain instead, matching the BYOK pattern in
-utils/prefs.py: the DB stores a reference, never the secret.
+The original sketch put `my_token` on this table.
 
 It cannot be hashed — unlike peer_token on the inbound side, this credential
 has to be replayed verbatim on every proxied request, so a one-way hash is not
@@ -31,7 +28,7 @@ def _utcnow():
 
 
 class RemoteNode(db.Model):
-    """A Flux library I have enrolled into, and may browse and stream from."""
+    """A Trellis library I have enrolled into, and may browse and stream from."""
     __tablename__ = "remote_node"
 
     id           = db.Column(db.Integer, primary_key=True)

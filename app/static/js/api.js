@@ -6,18 +6,16 @@
 
 const API = (() => {
 
-  // ── Library context (peer sharing milestone 2, 2026-08-08) ─────────────────
-  //
   // `null` = my own library. A number = the id of a joined remote_node, and
   // every eligible request is rewritten to travel through the local proxy:
   //
   //     /api/artists/12  →  /api/remotes/3/artists/12
   //
-  // Rewriting HERE, in one function, is what lets the existing Artist,
-  // Venue, Musician and Genre pages render a remote library with no changes of
-  // their own. The alternative — a parallel set of peer-only pages — was
-  // rejected in the Peer UX design session precisely because it would fall out
-  // of step with the local pages within a month.
+  // Rewriting HERE, in one function, is what lets the existing Artist, Venue,
+  // Musician and Genre pages render a remote library with no changes of their
+  // own. The alternative — a parallel set of peer-only pages — was rejected in
+  // the Peer UX design session precisely because it would fall out of step
+  // with the local pages within a month.
   //
   // switchLibrary() in app.js is the only caller of setLibraryContext.
   let _libraryContext = null
@@ -63,10 +61,6 @@ const API = (() => {
     const res = await fetch(contextualise(path), opts)
     if (res.status === 204) return null
 
-    // A server crash answers with an HTML error page, and res.json() on it
-    // throws WebKit's "The string did not match the expected pattern" -- which
-    // hid a missing-column 500 on 2026-10-02. Report the HTTP status instead;
-    // the traceback is in the server log.
     let data
     try {
       data = await res.json()
@@ -86,10 +80,10 @@ const API = (() => {
 
     if (!res.ok) {
       // Carry the status ON the error. A bare Error message forces callers to
-      // string-match or, worse, assume — init() assumed every failure meant
+      // string-match or, worse, assume — init assumed every failure meant
       // "logged out", so a TypeError in the sidebar presented as a login
-      // screen (2026-08-23). `status` lets a caller ask the only question
-      // that actually matters: was this 401, or was it something else?
+      // screen. `status` lets a caller ask the only question that actually
+      // matters: was this 401, or was it something else?
       const err = new Error(data.error || `HTTP ${res.status}`)
       err.status = res.status
       err.payload = data
@@ -107,7 +101,7 @@ const API = (() => {
     if (data && (data.folder_rename_error || data.folder_rename_errors)) {
       const msgs = data.folder_rename_error ? [data.folder_rename_error] : data.folder_rename_errors
       console.warn('Folder rename failed:', msgs)
-      setTimeout(() => alert(
+      setTimeout(() => Notify.notice(
         'Metadata saved, but the folder could not be renamed to match:\n' + msgs.join('\n')), 0)
     }
 
@@ -127,11 +121,11 @@ const API = (() => {
   // 401 on one dimension only.
   //
   // `contextual` is opt-in and currently TRUE only for artists: an <img src>
-  // never passes through request(), so without it a photo URL resolves against
+  // never passes through request, so without it a photo URL resolves against
   // localhost while viewing a remote library. It stays off for the other three
   // because api/share.py exposes no proxy route for their images — turning it
-  // on would rewrite a URL to a door that isn't there, which per CONTEXT.md
-  // renders as an ordinary empty state rather than an error.
+  // on would rewrite a URL to a door that isn't there, which renders as an
+  // ordinary empty state rather than an error.
   function entityImageApi(ns, { contextual = false } = {}) {
     const url = imageId => `/api/${ns}/images/${imageId}`
     return {
@@ -215,10 +209,7 @@ const API = (() => {
       login:  (username, password) => post('/api/auth/login', { username, password }),
       logout: ()             => post('/api/auth/logout'),
 
-      // ── Profile (2026-08-25) ───────────────────────────────────────────────
-      // The display name, the sign-in name and the picture. The sign-in name
-      // joined this on 2026-08-28 — it used to be fixed for the life of the
-      // account, so a name typed once on the setup page could never be fixed.
+      // The display name, the sign-in name and the picture.
       updateProfile: (data) => request('PATCH', '/api/auth/me', data),
       // Plain URL for an <img src>, cache-busted by the server so replacing a
       // picture actually repaints instead of showing the old one.
@@ -240,6 +231,7 @@ const API = (() => {
     musicians: {
       search: (q)        => get(`/api/musicians/search?q=${encodeURIComponent(q)}`),
       list:   ()         => get('/api/musicians/'),
+      listIndex: ()      => get('/api/musicians/?index=1'),
       get:    (id)       => get(`/api/musicians/${id}`),
       create: (data)     => post('/api/musicians/', data),
       update: (id, data) => put(`/api/musicians/${id}`, data),
@@ -247,9 +239,6 @@ const API = (() => {
       addArtist:    (id, data)   => post(`/api/musicians/${id}/artists`, data),
       removeArtist: (id, perfId) => request('DELETE', `/api/musicians/${id}/artists/${perfId}`),
 
-      // Photos (2026-09-01). A person is the one entity here that most
-      // obviously has a likeness; the 2026-08-07 "artist-level only" call
-      // was about CARD surfaces and still stands there.
       ...entityImageApi('musicians'),
     },
 
@@ -268,6 +257,7 @@ const API = (() => {
     artists: {
       search:        (q)         => get(`/api/artists/search?q=${encodeURIComponent(q)}`),
       list:          ()          => get('/api/artists/'),
+      listIndex:     ()          => get('/api/artists/?index=1'),
       allRecordings: ()          => get('/api/artists/all-recordings'),
       get:           (id)        => get(`/api/artists/${id}`),
       recordings:    (id)        => get(`/api/artists/${id}/recordings`),
@@ -278,13 +268,13 @@ const API = (() => {
       updateStint:   (stintId, data)      => put(`/api/artists/stints/${stintId}`, data),
       removeStint:   (stintId)            => request('DELETE', `/api/artists/stints/${stintId}`),
 
-      // Profile pictures (2026-07-22; MULTI-IMAGE 2026-08-07) — a raw upload,
-      // not JSON, so it bypasses request()'s JSON.stringify/Content-Type:
-      // letting the browser set its own multipart boundary is required for a
-      // file upload to parse server-side. imageUrl() is a plain URL string for
-      // an <img src>, not a fetch call — the browser requests it directly
-      // (same-origin session cookie covers the @login_required check, same as
-      // the waveform/spectrogram images already do).
+      // Profile pictures — a raw upload, not JSON, so it bypasses request's
+      // JSON.stringify/Content-Type: letting the browser set its own multipart
+      // boundary is required for a file upload to parse server-side. imageUrl
+      // is a plain URL string for an <img src>, not a fetch call — the browser
+      // requests it directly (same-origin session cookie covers the
+      // @login_required check, same as the waveform/spectrogram images already
+      // do).
       //
       // Images are addressed BY IMAGE ID, not by artist: an artist now has
       // several and "the artist's image" no longer identifies one.
@@ -314,8 +304,6 @@ const API = (() => {
     },
 
     // ── Peers (inbound sharing — who I share TO) ─────────────────────────────
-    // Every one of these endpoints has existed since 2026-07-16 and was
-    // curl-only until now; this is a client for them, not new surface.
     peers: {
       list:        ()             => get('/api/peers/'),
       get:         (id)           => get(`/api/peers/${id}`),
@@ -339,10 +327,9 @@ const API = (() => {
       get:    (id)       => get(`/api/performances/${id}`),
       create: (data)     => post('/api/performances/', data),
       update: (id, data) => put(`/api/performances/${id}`, data),
-      // Per-show instrument / note. NO CALLER as of 2026-08-22 — the inline
-      // editor was cut from V1 (Ryan) and a name click now opens the Musician
-      // page. Kept deliberately: the column, the resolver and the endpoint all
-      // still carry this, and the UI is the only piece that went.
+      // Per-show instrument / note. Kept deliberately: the column, the
+      // resolver and the endpoint all still carry this, and the UI is the only
+      // piece that went.
       updatePersonnelRow: (perfId, personnelId, data) =>
         put(`/api/performances/${perfId}/personnel/${personnelId}`, data),
     },
@@ -350,8 +337,8 @@ const API = (() => {
     // ── Recordings ───────────────────────────────────────────────────────────
     recordings: {
       get:        (id)       => get(`/api/recordings/${id}`),
-      // Sidebar Albums entry + Browse/Top Shelf's kind split (Studio
-      // Records spec v1) -- counts of live vs studio recordings.
+      // Sidebar Albums entry + Browse/Top Shelf's kind split -- counts
+      // of live vs studio recordings.
       kindCounts: ()          => get('/api/recordings/kind-counts'),
       // Two independent opt-ins, both off by default so the List view's flat
       // table request is unchanged (see app/utils/serialize.py):
@@ -369,11 +356,10 @@ const API = (() => {
       },
       // Browse's Recommended module — 3 cards by default, seeded by date
       // (stable within a day). `reroll` is an incrementing counter kept in
-      // memory client-side, not persisted — bumping it is the "Show me
-      // three more" control.
-      // `offset` is a cursor into the ordered sequence, for the Top Shelf's
-      // one-tile-at-a-time flip (2026-09-02). Omitted, it behaves exactly as
-      // it always did — a single diverse draw of `limit`.
+      // memory client-side, not persisted — bumping it is the "Show me three
+      // more" control. `offset` is a cursor into the ordered sequence, for
+      // the Top Shelf's one-tile-at-a-time flip. Omitted, it behaves exactly
+      // as it always did — a single diverse draw of `limit`.
       recommended: (limit, reroll, offset) =>
         get(`/api/recordings/recommended?limit=${limit || 3}&reroll=${reroll || 0}`
             + `&offset=${offset || 0}`),
@@ -421,18 +407,18 @@ const API = (() => {
       renameFiles: (id, { scheme, template } = {}) =>
         post(`/api/recordings/${id}/rename-files`, { scheme, template }),
 
-      // Release lookup (Studio Records spec v1, chunk 3) — studio kind only.
+      // Release lookup — studio kind only.
       releaseCandidates: (id)       => get(`/api/recordings/${id}/release-candidates`),
       releaseLink:       (id, mbid) => post(`/api/recordings/${id}/release-link`, { mbid }),
       releaseUnlink:     (id)       => post(`/api/recordings/${id}/release-unlink`, {}),
 
-      // Recording-level artwork (chunk 5) — the same five-route shape every
+      // Recording-level artwork — the same five-route shape every
       // photographed entity gets (see entityImageApi above). `contextual:
       // true` because api/share.py DOES expose a proxy route for these
       // (recordings/images/<id>), unlike venues/musicians/events.
       ...entityImageApi('recordings', { contextual: true }),
       // Copy the artist's primary image into this recording and make it the
-      // recording's primary (2026-10-04). Idempotent server-side.
+      // recording's primary. Idempotent server-side.
       useArtistImage: (id) => post(`/api/recordings/${id}/images/from-artist`, {}),
       useVenueImage:  (id) => post(`/api/recordings/${id}/images/from-venue`, {}),
     },
@@ -446,34 +432,32 @@ const API = (() => {
     // ── Venues ───────────────────────────────────────────────────────────────
     venues: {
       list:   (q)        => get(`/api/venues/${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      listIndex: ()      => get('/api/venues/?index=1'),
       get:    (id)       => get(`/api/venues/${id}`),
       create: (data)     => post('/api/venues/', data),
       update: (id, data) => put(`/api/venues/${id}`, data),
       remove: (id)       => request('DELETE', `/api/venues/${id}`),
 
-      // Photos (2026-08-07) — same shapes and semantics as artists, sharing
-      // one server-side implementation (app/utils/entity_images.py) and now one
-      // client-side one too, so the gallery component works against any
-      // namespace unchanged.
+      // Photos — same shapes and semantics as artists, sharing one server-side
+      // implementation (app/utils/entity_images.py) and now one client-side one
+      // too, so the gallery component works against any namespace unchanged.
       ...entityImageApi('venues'),
     },
 
     // ── Genres ───────────────────────────────────────────────────────────────
     genres: {
       list:   (q)        => get(`/api/genres/${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      listIndex: ()      => get('/api/genres/?index=1'),
       get:    (id)       => get(`/api/genres/${id}`),
       create: (data)     => post('/api/genres/', data),
       update: (id, data) => put(`/api/genres/${id}`, data),
       remove: (id)       => request('DELETE', `/api/genres/${id}`),
     },
 
-    // ── Search (IO-46, 2026-08-18) ───────────────────────────────────────────
-    //
-    // Deliberately absent from REMOTE_CAPABLE above, so contextualise() never
-    // rewrites it: this searches the LOCAL library only. A peer search has to
-    // filter every group through the visible set or it leaks holdings, which
-    // is IO-48's job. The Search Bar hides itself in peer mode (CSS) so the
-    // box is never offered against a library it cannot answer for.
+    // Deliberately absent from REMOTE_CAPABLE above, so contextualise never
+    // rewrites it: this searches the LOCAL library only. The Search Bar hides
+    // itself in peer mode (CSS) so the box is never offered against a library
+    // it cannot answer for.
     search: {
       // Omnibox: a few per group plus honest totals.
       all:   (q, limit = 5) =>
@@ -487,6 +471,7 @@ const API = (() => {
     // ── Events ───────────────────────────────────────────────────────────────
     events: {
       list:   (q)        => get(`/api/events/${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      listIndex: ()      => get('/api/events/?index=1'),
       search: (q)        => get(`/api/events/search?q=${encodeURIComponent(q)}`),
       get:    (id)       => get(`/api/events/${id}`),
       create: (data)     => post('/api/events/', data),
@@ -550,8 +535,8 @@ const API = (() => {
     },
 
     // ── Listening Quality ────────────────────────────────────────────────────
-    // Stage 1+2 of the unified ingestion flow (2026-07-30). See
-    // app/api/quality.py for the endpoint contracts.
+    // Stage 1+2 of the unified ingestion flow. See app/api/quality.py for the
+    // endpoint contracts.
     quality: {
       // FFP check of a folder not yet imported (Add Recording's Checksums tab).
       fingerprints: (path) => get(`/api/quality/fingerprints?path=${encodeURIComponent(path)}`),
@@ -566,9 +551,9 @@ const API = (() => {
       // guards (allowlisted destinations, import-root check, never overwrites).
       move: (folder_path, destination) => post('/api/quality/move', { folder_path, destination }),
       browse: (path) => get(`/api/quality/browse?path=${encodeURIComponent(path || '')}`),
-      // Shorten / WAV → FLAC, in place (2026-09-02). Background job: start
-      // returns a job_id; poll until the status is not 'running'.
-      // Analyze one folder (Add Recording's Quality pane). Background job: poll analyzeStatus.
+      // Shorten / WAV → FLAC, in place. Background job: start returns a job_id; poll until the
+      // status is not 'running'. Analyze one folder (Add Recording's Quality pane). Background
+      // job: poll analyzeStatus.
       analyze:       (source_dir) => post('/api/quality/analyze', { source_dir, reanalyze: true }),
       analyzeStatus: (jobId) => get(`/api/quality/analyze/${jobId}`),
       convert:       (folder_path) => post('/api/quality/convert', { folder_path }),
@@ -580,8 +565,8 @@ const API = (() => {
     bulkIngest: {
       start:   (path, mode, paused) => post('/api/bulk-ingest/start', { path, mode, paused: !!paused }),
       runs:    () => get('/api/bulk-ingest/runs'),
-      // The one Queue (2026-10-06). The run id arguments are kept for the
-      // callers' signatures and ignored: every action is Queue-wide.
+      // The one Queue. The run id arguments are kept for the callers'
+      // signatures and ignored: every action is Queue-wide.
       current: () => get('/api/bulk-ingest/current'),
       // Review First / queue actions. The three item routes answer 202 and
       // work happens on the server's worker, so callers poll the Queue.

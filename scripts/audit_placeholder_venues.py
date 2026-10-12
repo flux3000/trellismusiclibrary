@@ -1,17 +1,15 @@
-"""
-audit_placeholder_venues.py — Read-only report on placeholder-named venues.
+"""audit_placeholder_venues.py — Read-only report on placeholder-named venues.
 
-Ryan's 2026-07-15 bug report: "Unknown Venue" (and similar placeholder names
-like "TBD", "N/A") get created once and then reused by name-match across
-every recording that doesn't have a real venue yet. Since Venue is meant to
-be one canonical physical place, this silently shares one row across shows
-that are, in reality, all over the map — and any write to city/state/country
-on that row (AI Assist, manual edit, the venue-picker's lockLocation) clobbers
-whatever was there for every OTHER show parked on it.
+(and similar placeholder names like "TBD", "N/A") get created once and then
+reused by name-match across every recording that doesn't have a real venue yet.
+Since Venue is meant to be one canonical physical place, this silently shares
+one row across shows that are, in reality, all over the map — and any write to
+city/state/country on that row (AI Assist, manual edit, the venue-picker's
+lockLocation) clobbers whatever was there for every OTHER show parked on it.
 
 This script makes NO changes. It just lists every placeholder-named Venue row
-and every Performance/Recording currently pointing at it, so Ryan can see the
-blast radius and decide what to do with each show's location data by hand.
+and every Performance/Recording currently pointing at it, so the user can see
+the blast radius and decide what to do with each show's location data by hand.
 
 Run:
     python3 scripts/audit_placeholder_venues.py
@@ -29,8 +27,7 @@ from app.models.performance import Performance
 from app.models.performer import Performer
 from app.models.recording import Recording
 
-# Same list used by the app-side fix (kept in sync manually for now — small
-# and rarely-changing, per Ryan's 2026-07-15 sign-off).
+# Same list used by the app-side fix.
 PLACEHOLDER_VENUE_NAMES = {"unknown venue", "unknown", "tbd", "n/a", "various"}
 
 

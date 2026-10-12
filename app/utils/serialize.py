@@ -10,13 +10,9 @@ import json
 
 # Sentinel distinguishing "the caller didn't pass image_url at all" (fall
 # back to reading rec.images directly) from "the caller batched, and this
-# recording has no image" (image_url IS None, and that null is final). Both
-# recording_summary() and recording_row() used to take `image_url=None` for
-# both meanings, so a batching caller's genuine "no image" answer looked
-# identical to "not batched" and every image-less row (nearly all of them)
-# fell through to a per-row query anyway -- regressing the 2026-08-24 Browse
-# load fix (S1). A plain module-level object is enough; nothing else needs
-# to construct or compare it.
+# recording has no image" (image_url IS None, and that null is final). A
+# plain module-level object is enough; nothing else needs to construct or
+# compare it.
 _UNSET = object()
 
 
@@ -44,23 +40,16 @@ def recording_summary(rec, image_url=_UNSET):
         # replaces neither. None until the recording has been analysed.
         "listening_quality": (rec.quality_score.listening_quality
                               if rec.quality_score else None),
-        # `rating` (0-100 manual) was REMOVED from every payload 2026-08-18 at
-        # Ryan's direction. Three quality signals was one too many: the letter
-        # grade is the human judgement, listening_quality is the machine's, and
-        # is_favorite is the one-click reaction. The DB column survives unread
-        # (8 rows had a value) so the decision stays reversible.
-        # One-click human highlight. Independent of both fields above — see the
-        # comment on Recording.is_favorite.
         "is_favorite":     bool(rec.is_favorite),
         "is_complete":     rec.is_complete,
         "is_official":     rec.is_official,
-        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        # Live show vs studio release.
         "kind":            rec.kind,
-        # Album title for a studio record (Studio Records spec v1, chunk 5).
-        # None for a live show -- the date/venue carry its identity instead.
+        # Album title for a studio record. None for a live show -- the
+        # date/venue carry its identity instead.
         "title":           rec.title,
-        # Release facts for the Albums list (2026-10-01). Only ever filled for
-        # a studio record (MusicBrainz release lookup, fill-if-null).
+        # Release facts for the Albums list. Only ever filled for a studio
+        # record (MusicBrainz release lookup, fill-if-null).
         "mb_label":          rec.mb_label,
         "mb_catalog_number": rec.mb_catalog_number,
         "track_count":     len(rec.tracks),
@@ -69,23 +58,21 @@ def recording_summary(rec, image_url=_UNSET):
         # When this recording was ingested (distinct from the show date) — powers
         # the sortable "Date Added" catalog column.
         "created_at":      rec.created_at.isoformat() if rec.created_at else None,
-        # Recording-level artwork (Studio Records spec v1, chunk 5) — primary
-        # image serve url, or null. See the `image_url` param note above.
+        # Recording-level artwork — primary image serve url, or null. See the
+        # `image_url` param note above.
         "image_url":       image_url if image_url is not _UNSET else _primary_recording_image_url(rec),
     }
 
 
 def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
-    """
-    Self-contained recording row for flat catalog/collection displays — includes
+    """Self-contained recording row for flat catalog/collection displays — includes
     the artist, date, and venue so a single row fully describes the show.
 
     `waveform` (default False, opt-in) adds a downsampled card waveform strip.
     Left off by default: this same serializer backs the flat List views
     (recent, collection, venue) — decoding TrackAnalysis JSON for every one of
     those rows would tax List to benefit the Browse card modules. Currently
-    requested by nothing (the Browse card became a handbill on 2026-08-07);
-    kept because the capability is real and tested.
+    requested by nothing; kept because the capability is real and tested.
 
     `card` (default False, opt-in) adds the Browse cards' visual fields:
     `genre`, `genre_color`, and `image_id` for the artist's primary photo.
@@ -95,8 +82,8 @@ def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
     a 12-card module. Callers passing card=True MUST eager-load those
     relationships or they buy an N+1 — see api/recordings.py.
 
-    `image_url` (Studio Records spec v1, chunk 5): same pre-batched-url
-    parameter recording_summary() takes, for the identical reason.
+    `image_url`: same pre-batched-url parameter recording_summary takes, for
+    the identical reason.
     """
     from app.utils.format import format_partial_date
     p = rec.performance
@@ -122,21 +109,14 @@ def recording_row(rec, waveform=False, card=False, image_url=_UNSET):
         # replaces neither. None until the recording has been analysed.
         "listening_quality": (rec.quality_score.listening_quality
                               if rec.quality_score else None),
-        # `rating` (0-100 manual) was REMOVED from every payload 2026-08-18 at
-        # Ryan's direction. Three quality signals was one too many: the letter
-        # grade is the human judgement, listening_quality is the machine's, and
-        # is_favorite is the one-click reaction. The DB column survives unread
-        # (8 rows had a value) so the decision stays reversible.
-        # One-click human highlight. Independent of both fields above — see the
-        # comment on Recording.is_favorite.
         "is_favorite":     bool(rec.is_favorite),
         "is_complete":     rec.is_complete,
-        # Live show vs studio release (Bulk Ingest spec chunk 2).
+        # Live show vs studio release.
         "kind":            rec.kind,
-        # Album title for a studio record (Studio Records spec v1, chunk 5).
-        # None for a live show -- the date/venue carry its identity instead.
+        # Album title for a studio record. None for a live show -- the
+        # date/venue carry its identity instead.
         "title":           rec.title,
-        # Release facts (2026-10-01): Recently Added's album rows.
+        # Release facts: Recently Added's album rows.
         "mb_label":          rec.mb_label,
         "mb_catalog_number": rec.mb_catalog_number,
         "track_count":     len(rec.tracks),
@@ -165,16 +145,16 @@ _ARTIST_IMG_URL = "/api/artists/images"
 _VENUE_IMG_URL = "/api/venues/images"
 
 
-# The recording image is a CHAIN, resolved here and nowhere else (Ryan,
-# 2026-10-04): the recording's own primary image, else its artist's primary
-# image, else its venue's primary image, else None -- and None is drawn
-# client-side as the artist's initials.
-# Every list, card, row and search result reads `image_url`, so one rule
-# serves them all. A caller in a peer context passes the share-door prefixes
-# for the links of the chain: an unprefixed local path would silently
-# resolve against the consumer's own library. A peer cannot reach venue
-# images at all (the share door has no route for them), so the share door
-# passes venue_url_prefix=None and that link is skipped.
+# The recording image is a CHAIN, resolved here and nowhere else: the
+# recording's own primary image, else its artist's primary image, else its
+# venue's primary image, else None -- and None is drawn client-side as the
+# artist's initials. Every list, card, row and search result reads
+# `image_url`, so one rule serves them all. A caller in a peer context
+# passes the share-door prefixes for the links of the chain: an unprefixed
+# local path would silently resolve against the consumer's own library. A
+# peer cannot reach venue images at all (the share door has no route for
+# them), so the share door passes venue_url_prefix=None and that link is
+# skipped.
 
 def _primary_recording_image_url(rec, url_prefix=_RECORDING_IMG_URL,
                                  artist_url_prefix=_ARTIST_IMG_URL,

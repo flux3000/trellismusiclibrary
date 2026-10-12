@@ -1,5 +1,4 @@
-"""
-tests/test_security_hardening.py — P0 security hardening (2026-07-22):
+"""tests/test_security_hardening.py — P0 security hardening:
 
 1. DEV_MODE now defaults OFF (fail-closed) instead of defaulting ON.
 2. SERVER_MODE boot guard (app._validate_server_mode) refuses to start when

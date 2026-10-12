@@ -1,7 +1,4 @@
-"""
-Atlas reader (Resolver v2, chunk 4, 2026-10-03).
-
-Read-only and immutable: the file is opened `?mode=ro&immutable=1`, once, and the
+"""Read-only and immutable: the file is opened `?mode=ro&immutable=1`, once, and the
 connection is reused. A missing or unreadable Atlas is not an error: every lookup
 returns no candidates and the reason is logged once, so the app and the reader
 work exactly as they did before the Atlas existed.

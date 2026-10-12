@@ -1,10 +1,4 @@
-"""
-width_probe.py — does stereo width predict Ryan's letter grades?
-
-Ryan's observation (2026-07-26): "In SBDs you often get a really clear, wide
-stereo image, instrumentation occupying the entire field hard left and right.
-AUDs will always feel more like it's coming from the centre — they can veer
-towards mono-feeling in comparison. That can impact listenability."
+"""width_probe.py — does stereo width predict the user's letter grades?
 
 Measured as the standard Mid/Side ratio:
 
@@ -17,10 +11,6 @@ This is a better tool than the Pearson L/R correlation already in the Defects
 facet. Correlation answers "are the channels related" (a phase/wiring check);
 M/S answers "how much of the signal is NOT in the centre", which is the thing
 actually being perceived as width.
-
-Deliberately NOT a source-type correction — Ryan ruled that out. This measures
-the underlying property that makes soundboards feel better, without hard-coding
-lineage.
 
 Reuses the exact tracks + window offsets already chosen by the main pipeline,
 read from the feature JSONs, so results line up with the existing scores.

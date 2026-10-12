@@ -93,11 +93,10 @@ def test_health_no_audio_is_zero():
 
 
 def test_health_exposes_track_and_date_detail_for_the_metadata_panel():
-    """
-    The Metadata Quality panel (2026-08-02) reads these fields directly rather
-    than parsing the human-readable factor strings. If they stop matching the
-    factors, the panel and the score start telling different stories on the
-    same card — so pin them against the message they duplicate.
+    """The Metadata Quality panel reads these fields directly rather than parsing
+    the human-readable factor strings. If they stop matching the factors, the
+    panel and the score start telling different stories on the same card — so
+    pin them against the message they duplicate.
     """
     titles = [f"Song {i}" if i <= 5 else f"Track {i:02d}" for i in range(1, 11)]
     tags = _full_core(concert_date="1980-05",
@@ -113,11 +112,6 @@ def test_health_exposes_track_and_date_detail_for_the_metadata_panel():
 
 
 def test_band_labels_are_neutral():
-    """
-    Ryan, 2026-08-02: the band describes measured audio character, it does not
-    recommend an action. "Worth ingesting" presumed a decision that is the
-    archivist's to make — every recording here is worth ingesting to someone.
-    """
     from app.utils.quality import BAND_LABEL
     assert set(BAND_LABEL.values()) == {"High", "Medium", "Low"}
 
@@ -169,8 +163,6 @@ def test_flags_keyword_segments():
     assert detect_track_flags("Announcement") == ["announcement"]
 
 def test_flags_banter_synonyms():
-    # 2026-08-08: "Chatter" wasn't recognized as Banter — added to the
-    # segment thesaurus (_FLAG_SEGMENT_SYNONYMS) alongside "dialogue".
     assert detect_track_flags("Chatter") == ["banter"]
     assert detect_track_flags("Crosstalk") == ["banter"]
 
@@ -182,7 +174,6 @@ def test_flags_no_false_positives_on_real_titles():
         assert detect_track_flags(title) == [], title
 
 
-# ── downsample_peaks (Library Browse View card waveform strip, 2026-08-02) ─────
 
 def test_downsample_peaks_empty_input_is_flat_zero():
     assert downsample_peaks([], 10) == [0.0] * 10
@@ -213,7 +204,7 @@ def test_downsample_peaks_exact_length_is_passthrough_magnitude():
 def test_downsample_peaks_long_input_buckets_by_max_not_average():
     # 100 points → 10 buckets of 10. Each bucket keeps its loudest sample, not
     # the average — a waveform strip's job is to show the peak, not smooth it
-    # away (the design spec calls this out explicitly).
+    # away.
     peaks = [v / 100 for v in range(100)]   # monotonically increasing 0.00-0.99
     result = downsample_peaks(peaks, 10)
     assert len(result) == 10

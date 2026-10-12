@@ -4,7 +4,7 @@ tests/test_remotes.py — outbound sharing: joining and proxying a remote librar
 No real network and no real keychain. The HTTP opener and the three keychain
 functions are monkeypatched, which is the point: these tests are about THIS
 side's behaviour — validation, the allowlist, URL rewriting, error mapping —
-not about whether a remote Flux node works. That is what scripts/probe_peer_door.py
+not about whether a remote Trellis node works. That is what scripts/probe_peer_door.py
 is for, and it runs against a real node B.
 
 Writing to the real OS keychain from a test suite would be genuinely bad

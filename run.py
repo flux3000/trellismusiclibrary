@@ -1,5 +1,5 @@
 """
-run.py — Flux Audio entry point.
+run.py — Trellis entry point.
 
 Starts Flask in a background thread and opens a PyWebView window.
 Exposes a Python API to JavaScript for native OS interactions
@@ -25,31 +25,29 @@ from version import APP_NAME
 app = create_app()
 
 
-# ── First-run library location (2026-08-26) ──────────────────────────────
+# ── First-run library location ──────────────────────────────
 #
-# config.py's LIBRARY_ROOT default is Ryan's own NAS mount -- correct on the
-# machine that mount was built for, meaningless anywhere else. Before this,
-# a fresh install just reported "library drive not mounted" and stopped,
-# with no way forward -- confirmed on a brand-new Mac Mini with none of that
-# infrastructure. Every other install has the identical problem.
+# config.py's LIBRARY_ROOT default is the user's own NAS mount -- correct on
+# the machine that mount was built for, meaningless anywhere else. Before
+# this, a fresh install just reported "library drive not mounted" and
+# stopped, with no way forward -- confirmed on a brand-new Mac Mini with
+# none of that infrastructure. Every other install has the identical
+# problem.
 #
 # TRELLIS_ROOT_MARKER remembers a chosen location across launches. It lives
 # beside the database (Config.DATA_DIR), never inside the library itself --
 # the marker has to be readable before we know where the library even is.
 TRELLIS_ROOT_MARKER     = Config.DATA_DIR / "trellis_root.json"
-# The folder name a person sees in Finder, chosen 2026-08-26 (Ryan): the
-# short "Trellis" collided visually with the code repo of the same name.
 TRELLIS_ROOT_FOLDER_NAME = "Trellis Music Library"
-# "Downloads", not "Download" (2026-10-01): matches the page and nav name.
+# "Downloads", not "Download": matches the page and nav name.
 TRELLIS_SUBFOLDERS       = ("Library", "Downloads", "Backlog", "Workshop")
 
 
 def _read_trellis_root_marker():
-    """
-    What was chosen on a previous run, as a dict, or None.
+    """What was chosen on a previous run, as a dict, or None.
 
     Two shapes, because there are now two ways to answer the first-run
-    question (2026-09-17):
+    question:
 
       {"mode": "created",  "trellis_root": "..."}
           Trellis laid the folder out itself: <root>/{Library, Downloads,
@@ -59,7 +57,7 @@ def _read_trellis_root_marker():
        "import_dir": ... | None, "backlog_dir": ... | None,
        "workshop_dir": ... | None}
           The user pointed Trellis at a library they already had. The three
-          working folders are OPTIONAL here (Ryan, 2026-09-17) -- a collector
+          working folders are OPTIONAL here -- a collector
           may simply not have a Backlog, and inventing one inside their
           collection is not ours to do.
 
@@ -112,28 +110,25 @@ def _paths_overlap(a, b):
 
 
 def _apply_trellis_root(root, import_dir=None, backlog_dir=None, workshop_dir=None):
-    """
-    Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS/IMPORT_ROOTS at <root>'s four
+    """Point LIBRARY_ROOT/IMPORT_DIR/TRIAGE_DIRS/IMPORT_ROOTS at <root>'s four
     folders.
 
-    IMPORT_ROOTS (2026-08-26) matters just as much as the other three and is
-    easy to forget: it's the allowlist every filesystem-reading endpoint
-    checks a folder against before it will browse, import, triage-move, or
-    stream from it (app/api/quality.py, app/api/stream.py) -- config.py
-    computes it once, from the OLD hardcoded default, at class-definition
-    time. Patching the other three keys without this one means "Add
-    Recordings" (and playback) rejects every folder under a freshly chosen
-    root as "outside the permitted import roots," having never heard of it.
-    Set to the whole Trellis root, not just Library, since Downloads/Backlog/
-    Workshop all need to pass this same check. "/Volumes" is kept for parity
-    with the original default -- browsing in from an external drive should
-    still work.
+    IMPORT_ROOTS matters just as much as the other three and is easy to forget:
+    it's the allowlist every filesystem-reading endpoint checks a folder
+    against before it will browse, import, triage-move, or stream from it
+    (app/api/quality.py, app/api/stream.py) -- config.py computes it once, from
+    the OLD hardcoded default, at class-definition time. Patching the other
+    three keys without this one means "Add Recordings" (and playback) rejects
+    every folder under a freshly chosen root as "outside the permitted import
+    roots," having never heard of it. Set to the whole Trellis root, not just
+    Library, since Downloads/Backlog/ Workshop all need to pass this same
+    check. "/Volumes" is kept for parity with the original default -- browsing
+    in from an external drive should still work.
     """
     app.config["LIBRARY_ROOT"] = str(root / "Library")
-    # The three working folders default to <root>'s own subfolders, but any
-    # of them can be pointed elsewhere from Settings (Ryan, 2026-10-01: always
-    # editable, created library or imported). An override is stored in the
-    # marker under the same keys an imported library uses.
+    # The three working folders default to <root>'s own subfolders, but any of
+    # them can be pointed elsewhere from Settings. An override is stored in
+    # the marker under the same keys an imported library uses.
     app.config["IMPORT_DIR"]   = str(import_dir or (root / "Downloads"))
     app.config["TRIAGE_DIRS"]  = {
         "backlog":  str(backlog_dir or (root / "Backlog")),
@@ -146,8 +141,7 @@ def _apply_trellis_root(root, import_dir=None, backlog_dir=None, workshop_dir=No
 
 def _apply_imported_library(library_root, import_dir=None,
                             backlog_dir=None, workshop_dir=None):
-    """
-    Point the app at a library the user ALREADY had (2026-09-17).
+    """Point the app at a library the user ALREADY had.
 
     The difference from _apply_trellis_root is that nothing is derived and
     nothing is created. LIBRARY_ROOT is the folder they picked, full stop --
@@ -161,10 +155,7 @@ def _apply_imported_library(library_root, import_dir=None,
     absent key is already a clean refusal rather than a move into a folder
     that silently gets created on someone's disk.
 
-    IMPORT_ROOTS gets the library plus whichever working folders exist. It is
-    the allowlist every filesystem-reading endpoint checks before it will
-    browse, import, triage-move or stream -- forgetting it is what made "Add
-    Recordings" reject every folder under a freshly chosen root in 2026-08.
+    IMPORT_ROOTS gets the library plus whichever working folders exist.
     """
     library_root = str(library_root)
     app.config["LIBRARY_ROOT"] = library_root
@@ -176,14 +167,14 @@ def _apply_imported_library(library_root, import_dir=None,
         triage["workshop"] = str(workshop_dir)
     app.config["TRIAGE_DIRS"] = triage
 
-    # No Downloads folder set means ~/Downloads/Trellis (2026-10-01). It used
-    # to be the library root, which made Add Recordings open on the whole
-    # collection and gave archive downloads nowhere to land. Not created here:
-    # a permission prompt for ~/Downloads at launch is bad; downloads_dir.
-    # ensure_downloads_dir() creates it on first need.
-    # A saved Downloads folder that is the library itself (or inside it) is a
-    # leftover from before Downloads had its own default: Add Recordings would
-    # open on the collection. Treat it as unset.
+    # No Downloads folder set means ~/Downloads/Trellis. It used to be the
+    # library root, which made Add Recordings open on the whole collection and
+    # gave archive downloads nowhere to land. Not created here: a permission
+    # prompt for ~/Downloads at launch is bad; downloads_dir.
+    # ensure_downloads_dir creates it on first need. A saved Downloads folder
+    # that is the library itself (or inside it) is a leftover from before
+    # Downloads had its own default: Add Recordings would open on the
+    # collection. Treat it as unset.
     if import_dir and _paths_overlap(os.path.realpath(str(import_dir)),
                                      os.path.realpath(library_root)):
         import_dir = None
@@ -200,12 +191,10 @@ def _apply_imported_library(library_root, import_dir=None,
 
 
 def _maybe_start_bulk_ingest_from_marker():
-    """
-    Bulk Ingest (spec 1.9/4, chunk 7): if the marker says
-    ingest_existing (set by confirm_existing_library() when someone answers
-    "Use a folder I already have"), start a run over the configured
-    LIBRARY_ROOT so the app opens straight onto #/bulk-ingest instead of an
-    empty library.
+    """Bulk Ingest: if the marker says ingest_existing (set by
+    confirm_existing_library when someone answers "Use a folder I already
+    have"), start a run over the configured LIBRARY_ROOT so the app opens
+    straight onto #/bulk-ingest instead of an empty library.
 
     Called both right after confirm_existing_library() creates the account
     (the ordinary first-run path) and from first_run_setup() on every boot
@@ -262,30 +251,17 @@ def resolve_trellis_root_and_patch_config():
         _apply_marker(marker)
         return True
 
-    # Nothing chosen yet: first-run setup runs. A reachable hardcoded
-    # default used to count as "configured" (a bypass for the NAS-mounted
-    # dev machine); removed 2026-09-27 on Ryan's call. The machine that
-    # actually uses /Volumes/music/Trellis has a marker, and a dev checkout
-    # must behave like a newcomer's machine so onboarding can be tested.
+    # Nothing chosen yet: first-run setup runs. The machine that actually
+    # uses /Volumes/music/Trellis has a marker, and a dev checkout must
+    # behave like a newcomer's machine so onboarding can be tested.
     return False
 
 
 def _setup_html():
-    """
-    The one-time first-run screen. Inline, not a static file -- Flask isn't
+    """The one-time first-run screen. Inline, not a static file -- Flask isn't
     serving anything yet at this point, and this only ever runs once per
     machine. window.location.href navigates this same window over to the
     real app once setup succeeds.
-
-    Redesigned 2026-09-27 (Ryan) from the four-screen wizard down to one
-    screen: username and library location are both visible and answered in
-    any order, Start Trellis is the only action. File handling is no longer
-    asked here at all -- confirm_trellis_root()/confirm_existing_library()
-    get null for file_handling_mode/placement. The mode follows the answer
-    given: a new library defaults to organize, an existing one to keep
-    (Ryan, 2026-10-02); placement falls back to artist. Settings is where
-    that gets changed later. Every string
-    on this page was approved by Ryan; do not add any without him.
     """
     app_url = f"http://{Config.HOST}:{Config.PORT}"
     home_str = str(Path.home())
@@ -416,7 +392,6 @@ def _setup_html():
   const $ = id => document.getElementById(id)
   const status = $('status')
   const uname  = $('username')
-  // Nothing selected until the person picks (Ryan, 2026-10-01).
   let kind = null
   const HOME = {home_str!r}
   // Shown path only: ~ for the home folder. The full path is what is sent.
@@ -493,13 +468,12 @@ def _setup_html():
 
 
 def first_run_setup(create_default_user=True):
-    """
-    Make an empty machine usable, once.
+    """Make an empty machine usable, once.
 
     An installed app cannot ask someone to run a setup script — the whole point
     is that it opens when you double-click it. So: if there is no database yet,
     create the schema and the owner account, and open straight into an empty
-    library (Ryan, 2026-08-25 — first run should just open).
+    library.
 
     Runs ONLY when the database file is absent. An existing checkout is left
     completely alone: this must never become a substitute for a migration
@@ -512,13 +486,13 @@ def first_run_setup(create_default_user=True):
     log in to on your own machine. If this database is ever pointed at a shared
     node, set a real password first — scripts/init_db.py is the way in.
 
-    create_default_user=False (2026-08-26) on a genuinely fresh install,
-    where the setup page is about to ask the person for a name instead of
-    settling for whatever their OS account is called. In that case this
-    still creates the schema — the User table has to exist before anyone can
-    be inserted into it — it just leaves the table empty. The account gets
-    created once, under the chosen name, by FluxAPI.confirm_trellis_root()
-    when the setup page's form is submitted.
+    create_default_user=False on a genuinely fresh install, where the setup
+    page is about to ask the person for a name instead of settling for whatever
+    their OS account is called. In that case this still creates the schema —
+    the User table has to exist before anyone can be inserted into it — it just
+    leaves the table empty. The account gets created once, under the chosen
+    name, by FluxAPI.confirm_trellis_root when the setup page's form is
+    submitted.
     """
     if Config.DB_PATH.exists():
         return
@@ -540,9 +514,9 @@ def first_run_setup(create_default_user=True):
     # every static check passed it.
     importlib.import_module("app.models")   # registers every model with SQLAlchemy
 
-    # resolve() follows a db/trellis.db symlink to its target. Creating only
+    # resolve follows a db/trellis.db symlink to its target. Creating only
     # the link's own folder left SQLite facing a missing target folder and
-    # failing with "unable to open database file" (2026-09-26).
+    # failing with "unable to open database file".
     Config.DB_PATH.resolve().parent.mkdir(parents=True, exist_ok=True)
     with app.app_context():
         db.create_all()
@@ -571,23 +545,20 @@ def first_run_setup(create_default_user=True):
 # state, and one convention beats two. It is deliberately NOT a UserPreference
 # row -- window size is per-machine (a laptop and a desktop want different
 # answers from the same account) and it is needed before Flask is serving, let
-# alone before anyone has logged in.
-# 2026-08-25: hangs off Config.DATA_DIR rather than the source folder. The
-# reasoning below is unchanged — this still lives beside the database, which is
-# still where per-machine state belongs. What changed is that "beside the
-# database" is a writable per-user directory once the app is installed, because
-# an installed app's own folder is sealed.
+# alone before anyone has logged in. The reasoning below is unchanged — this
+# still lives beside the database, which is still where per-machine state
+# belongs. What changed is that "beside the database" is a writable per-user
+# directory once the app is installed, because an installed app's own folder is
+# sealed.
 WINDOW_STATE_PATH = Config.DATA_DIR / "db" / "window_state.json"
 
 MIN_W, MIN_H = 960, 640
 
-# The DEFAULT width is capped; the height is not (Ryan, 2026-08-22 — 88% of an
-# ultrawide is a window nobody wants, but 88% of any screen's height is fine).
-# 1760 is about a large laptop's full width, which is as wide as this layout has
-# anything to say: the sidebar is fixed, the search field is 620px, and past
-# roughly here the Track List is just growing whitespace between a title and its
-# duration. Only the default is capped — if you deliberately drag the window
-# wider, that is remembered as-is.
+# The DEFAULT width is capped; the height is not. 1760 is about a large laptop's
+# full width, which is as wide as this layout has anything to say: the sidebar
+# is fixed, the search field is 620px, and past roughly here the Track List is
+# just growing whitespace between a title and its duration. Only the default is
+# capped — if you deliberately drag the window wider, that is remembered as-is.
 MAX_DEFAULT_W = 1760
 
 
@@ -601,11 +572,10 @@ def _screen_size():
 
 
 def _default_geometry():
-    """
-    Most of the screen, not a fixed number. The old 1440x900 default was picked
-    for one display and read as cramped on anything larger (Ryan, 2026-08-22) --
-    and a bigger fixed number would simply be wrong in the other direction on a
-    laptop. 88% leaves the dock and menu bar clear.
+    """Most of the screen, not a fixed number. The old 1440x900 default was picked
+    for one display and read as cramped on anything larger -- and a bigger
+    fixed number would simply be wrong in the other direction on a laptop. 88%
+    leaves the dock and menu bar clear.
 
     Width is then clamped to MAX_DEFAULT_W. Height is not: vertical space is
     always useful here (it is more track rows), horizontal space past a point is
@@ -716,9 +686,8 @@ class FluxAPI:
                                  import_dir=None, backlog_dir=None,
                                  workshop_dir=None, file_handling_mode=None,
                                  placement=None):
-        """
-        First-run, the OTHER answer (2026-09-17): the user already has a
-        library and wants Trellis to use it where it sits.
+        """First-run, the OTHER answer: the user already has a library and wants
+        Trellis to use it where it sits.
 
         Nothing is created and nothing is moved. The folder they picked
         becomes LIBRARY_ROOT as-is. The three working folders are optional
@@ -746,9 +715,9 @@ class FluxAPI:
                 "import_dir":   str(import_dir)   if import_dir   else None,
                 "backlog_dir":  str(backlog_dir)  if backlog_dir  else None,
                 "workshop_dir": str(workshop_dir) if workshop_dir else None,
-                # Bulk Ingest (spec 1.9/4, chunk 7): "Use a folder I
-                # already have" means there is existing material to walk and
-                # turn into Recordings, not an empty library to just open on.
+                # Bulk Ingest: "Use a folder I already have" means there is
+                # existing material to walk and turn into Recordings, not an
+                # empty library to just open on.
                 "ingest_existing": True,
             })
             _apply_imported_library(root, import_dir, backlog_dir, workshop_dir)
@@ -764,16 +733,16 @@ class FluxAPI:
 
         return {"ok": True, "root": str(root)}
 
-    # The optional working folders of an ingested library (2026-09-26). They
-    # were first-run only; first run stopped asking (a newcomer does not know
-    # what a Backlog is), so Settings sets them instead. Only an "imported"
+    # The optional working folders of an ingested library. They were
+    # first-run only; first run stopped asking (a newcomer does not know what
+    # a Backlog is), so Settings sets them instead. Only an "imported"
     # library has them to set: a created library's working folders are its
     # own fixed subfolders.
     _WORKING_FOLDER_KEYS = ("import_dir", "backlog_dir", "workshop_dir")
 
     def get_working_folders(self):
         data = _read_trellis_root_marker() or {}
-        # Editable for every library (Ryan, 2026-10-01), not just imported.
+        # Editable for every library, not just imported.
         out = {"editable": bool(data)}
         triage = app.config.get("TRIAGE_DIRS") or {}
         effective = {"import_dir":   app.config.get("IMPORT_DIR"),
@@ -781,8 +750,8 @@ class FluxAPI:
                      "workshop_dir": triage.get("workshop")}
         for k in self._WORKING_FOLDER_KEYS:
             out[k] = data.get(k) or effective[k]
-        # The folder downloads actually land in, set or not (2026-10-01), so
-        # Settings can show ~/Downloads/Trellis rather than a blank.
+        # The folder downloads actually land in, set or not, so Settings can
+        # show ~/Downloads/Trellis rather than a blank.
         out["effective_import_dir"] = app.config.get("IMPORT_DIR")
         return out
 
@@ -797,8 +766,8 @@ class FluxAPI:
         if not path or not Path(path).is_dir():
             return {"ok": False, "error": "That folder could not be opened."}
         if which == "import_dir":
-            # Downloads must never overlap the library or a working folder
-            # (2026-10-01): Ingest and Move act on its folders as loose material.
+            # Downloads must never overlap the library or a working folder:
+            # Ingest and Move act on its folders as loose material.
             real = os.path.realpath(path)
             lib = os.path.realpath(app.config["LIBRARY_ROOT"])
             if _paths_overlap(real, lib):
@@ -832,21 +801,12 @@ class FluxAPI:
                 placement=placement if placement in ("artist", "root") else "artist")
 
     def _create_owner_account(self, username):
-        """
-        Create the owner account under `username` -- same random-password,
+        """Create the owner account under `username` -- same random-password,
         thrown-away-on-the-spot, auto-login design as first_run_setup(); see
         that docstring for why nobody ever types a password on this machine.
 
-        If an account already exists this ADOPTS the typed name onto it
-        rather than leaving it alone (Ryan, 2026-08-28). It used to return
-        silently, which made this page ask a question and then discard the
-        answer: Ryan typed "jeff" on a second install and got `ryanfbaker`,
-        his macOS account name, because the database had survived.
-        **Deleting the Trellis library folder does not reset an install** --
-        the account lives in Application Support, so every "fresh" install on
-        a machine that has run Trellis before inherits the first account it
-        ever made, and first_run_setup() returns at
-        `if Config.DB_PATH.exists()` long before it could make a second one.
+        If an account already exists this ADOPTS the typed name onto it rather
+        than leaving it alone.
 
         Renaming is safe. `username` is read in exactly three places -- the
         login lookup, the /api/auth/me payload, and User.name's display
@@ -906,17 +866,16 @@ class FluxAPI:
 
 
 def start_flask():
-    """
-    Run Flask in a background thread so PyWebView owns the main thread.
+    """Run Flask in a background thread so PyWebView owns the main thread.
 
-    threaded=True (2026-07-19): the dev server otherwise handles ONE request
-    at a time — a single slow request (a Batch Import "Review" scan hitting
-    a slow NAS read, for example) blocks the ENTIRE app, including unrelated
-    UI actions and even the debug panel's own polling. That's what made a
-    stuck scan look like "the whole app died" rather than "one request is
-    slow" — and why "New Scan" never helped: the retry just queued up behind
-    the same stuck worker. config.py already sets check_same_thread=False on
-    the SQLite connection specifically to support this.
+    threaded=True: the dev server otherwise handles ONE request at a time — a
+    single slow request (a Batch Import "Review" scan hitting a slow NAS read,
+    for example) blocks the ENTIRE app, including unrelated UI actions and even
+    the debug panel's own polling. That's what made a stuck scan look like "the
+    whole app died" rather than "one request is slow" — and why "New Scan"
+    never helped: the retry just queued up behind the same stuck worker.
+    config.py already sets check_same_thread=False on the SQLite connection
+    specifically to support this.
     """
     app.run(
         host         = Config.HOST,
@@ -935,12 +894,8 @@ if __name__ == "__main__":
     #
     # It exists because the interesting packaging failures happen at IMPORT
     # time, before there is a window or a log to look at: a data file the
-    # packager did not know to copy, a module it could not see. From Finder
-    # that looks like nothing happening at all. By the time create_app() has
-    # returned and first_run_setup() has built a database, every module has
-    # been imported and every import-time data file has been read — which is
-    # precisely the class of bug that shipped a broken bundle on 2026-08-25
-    # (geonamescache's JSON tables).
+    # packager did not know to copy, a module it could not see. From Finder that
+    # looks like nothing happening at all.
     if os.environ.get("TRELLIS_SELFTEST") == "1":
         first_run_setup()
         print(f"selftest ok — {Config.DB_PATH}")
@@ -1017,7 +972,19 @@ if __name__ == "__main__":
     except Exception:
         pass
 
-    webview.start()
+    # DEV_MODE turns on the WebKit inspector: right-click > Inspect Element in the
+    # window. Off in every normal and packaged launch.
+    #
+    # private_mode=False + storage_path: PyWebView defaults to a PRIVATE session
+    # whose localStorage is thrown away on quit, so the palette (and sidebar
+    # state), which live in localStorage so they can apply on the first frame,
+    # reverted to the default on every launch. Persist the web store in the data
+    # dir instead.
+    # debug=True opens the inspector window on every launch by default; this keeps
+    # the right-click Inspect Element and stops the auto-open.
+    webview.settings['OPEN_DEVTOOLS_IN_DEBUG'] = False
+    webview.start(debug=Config.DEV_MODE, private_mode=False,
+                  storage_path=str(Config.DATA_DIR / "webview"))
 
     # Belt and braces: if `closing` never fired -- the event is missing on this
     # backend, or the window went away another way -- start() still returns on a

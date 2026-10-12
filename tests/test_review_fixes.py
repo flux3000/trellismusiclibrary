@@ -1,6 +1,5 @@
-"""
-tests/test_review_fixes.py -- regression tests from the independent review of
-the file-handling build (review.md, 2026-09-25).
+"""tests/test_review_fixes.py -- regression tests from the independent review of
+the file-handling build.
 
 The review's root-cause finding: chunk-3/6 tests hand-built dicts around
 scan_folder()/_do_confirm() rather than driving the real path, so a payload
@@ -190,8 +189,7 @@ def test_real_ingest_path_carries_disc_source_tag_shnid_and_fp_rel_path(app, cli
 
     # Fingerprint rows: rel_path preserved, and scoped-matching (S2) actually
     # matched each disc's own track against its own checksum.md5 -- stored,
-    # never recomputed-and-compared at confirm (MD5 never automatic,
-    # Ryan 2026-09-27), so both are left unverified.
+    # never recomputed-and-compared at confirm, so both are left unverified.
     fps = {fp.rel_path: fp for fp in rec.fingerprints}
     assert set(fps) == {"CD1/checksum.md5", "CD2/checksum.md5"}
     for fp in fps.values():
@@ -335,14 +333,6 @@ def test_original_scheme_on_nested_keep_recording_keeps_each_discs_own_path():
     assert proposed == ["CD1/01.flac", "CD2/01.flac"], proposed
 
 
-# ── R2 (re-review, 2026-09-25), superseded 2026-09-26 by the Bulk Ingest
-# in-root fix (spec section 1.1, chunk 1): move_to_library's same-place
-# branch used to still apply the rename map/flatten in place under organize
-# mode. That branch is gone -- an in-root source (which this re-add case
-# always is, since its "own canonical destination" sits under LIBRARY_ROOT)
-# is now ingested with no renaming at all, in every mode. See
-# tests/test_db_logic.py's test_do_confirm_ingests_nested_in_root_source_in_organize_mode
-# for the current behavior this test used to check the opposite of.
 
 def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path):
     from app.api.ingest import _do_confirm
@@ -362,9 +352,9 @@ def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path)
     )
     # The source ALREADY sits at its own canonical destination -- the S1 case
     # (a show re-added from the library picker that lands exactly where it
-    # already is). It is therefore an in-root source, and the Bulk Ingest
-    # fix (2026-09-26) means it is ingested with no rename at all, organize
-    # mode notwithstanding.
+    # already is). It is therefore an in-root source, and the Bulk Ingest fix
+    # means it is ingested with no rename at all, organize mode
+    # notwithstanding.
     src = lib / artist_name / folder_name
     src.mkdir(parents=True)
     (src / "01.flac").write_bytes(b"a" * 10)
@@ -391,8 +381,8 @@ def test_organize_mode_reingest_in_place_keeps_original_names(app, db, tmp_path)
     assert sorted(t.file_path for t in rec.tracks) == ["01.flac", "02.flac"]
 
 
-# ── R1 (re-review, 2026-09-25): a non-flattening custom template on a
-# nested CD1/CD2 source must not double the disc directory.
+# ── R1: a non-flattening custom template on a nested CD1/CD2 source
+# must not double the disc directory.
 
 def test_custom_template_no_position_token_does_not_double_the_disc_dir():
     from app.utils.ingest import compute_audio_rename_map, resolve_ingest_file_path
@@ -410,8 +400,8 @@ def test_custom_template_no_position_token_does_not_double_the_disc_dir():
     assert out == ["CD1/Dark Star.flac", "CD2/Eyes.flac"], (rename_map, out)
 
 
-# ── R3 (re-review, 2026-09-25): a non-numeric shnid must be rejected before
-# any file is moved -- not after Recording() blows up mid-job.
+# ── R3: a non-numeric shnid must be rejected before any file is moved --
+# not after Recording blows up mid-job.
 
 def test_confirm_rejects_non_numeric_shnid_before_moving_anything(app, client, tmp_path):
     _login_as(client)

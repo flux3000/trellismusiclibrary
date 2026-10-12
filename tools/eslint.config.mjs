@@ -1,4 +1,4 @@
-// tools/eslint.config.mjs — catch undefined names in the frontend (2026-08-28).
+// tools/eslint.config.mjs — catch undefined names in the frontend.
 //
 // WHY THIS EXISTS
 //
@@ -13,7 +13,7 @@
 // With the declaration gone, `open` resolved to `window.open`. Truthy, so the
 // panel rendered; never equal to a pane key, so every pane came out empty with
 // no tab active. `node --check` passed. Nothing threw. The page just quietly
-// did the wrong thing (Ryan, 2026-08-28).
+// did the wrong thing.
 //
 // This is the JS counterpart of tests/test_no_undefined_names.py, and it exists
 // for the same reason that file does.
@@ -44,7 +44,7 @@ const BROWSER = [
 ]
 
 // This app's own globals.
-const APP = ['App', 'API', 'Player', 'fluxDebug', 'pywebview']
+const APP = ['App', 'API', 'Player', 'Notify', 'fluxDebug', 'pywebview']
 
 export default [{
   files: ['**/*.js'],

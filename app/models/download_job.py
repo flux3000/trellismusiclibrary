@@ -1,5 +1,4 @@
-"""
-models/download_job.py -- the archive download queue (2026-10-01).
+"""models/download_job.py -- the archive download queue.
 
 One row per "download this show from an archive" request. One queue per
 install (no user_id): the Downloads folder is the install's, not a person's.
@@ -48,9 +47,8 @@ class DownloadJob(db.Model):
     # Short, shown in the panel.
     error = db.Column(db.Text, nullable=True)
     # JSON {"verified": n, "mismatched": [names]} written when a job finishes
-    # `done` (2026-10-01). NULL for a job that never completed. Drives the
-    # Downloads page fingerprint icon; a file the archive gave no MD5 for is in
-    # neither list.
+    # `done`. NULL for a job that never completed. Drives the Downloads page
+    # fingerprint icon; a file the archive gave no MD5 for is in neither list.
     checksums = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime(timezone=True), default=_now, nullable=False)

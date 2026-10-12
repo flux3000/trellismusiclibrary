@@ -1,5 +1,4 @@
-"""
-api/bulk_ingest.py -- Bulk Ingest control surface (spec chunk 5d).
+"""api/bulk_ingest.py -- Bulk Ingest control surface.
 
 Routes:
     POST /api/bulk-ingest/start           start (or return) the run for a
@@ -100,10 +99,9 @@ def _serialize_run(run):
     for status, n in rows:
         counts[status] = n
 
-    # Reason breakdowns for the redesigned bulk_ingest page (2026-09-27): why an
-    # item needs a look, and why one was skipped. Grouped queries, not a
-    # per-item loop -- run.items can be tens of thousands of rows on a real
-    # collection.
+    # Reason breakdowns for the redesigned bulk_ingest page: why an item needs a
+    # look, and why one was skipped. Grouped queries, not a per-item loop --
+    # run.items can be tens of thousands of rows on a real collection.
     reasons = {
         reason: n for reason, n in (
             db.session.query(BulkIngestItem.reason, func.count(BulkIngestItem.id))
@@ -131,11 +129,10 @@ def _serialize_run(run):
 
     # Listening Quality scoring is a follow-up-queue pass that runs after
     # bulk_ingest (app/api/ingest.py::_handle_audio) -- "scorable" is every
-    # LIVE recording this run ingested (studio recordings are never scored,
-    # 2026-09-27), "scored" is how many of those already carry a
-    # RecordingQuality row with an actual number in it (a row can exist with
-    # listening_quality still NULL if extraction failed, so the NULL check
-    # matters, not just row existence).
+    # LIVE recording this run ingested, "scored" is how many of those
+    # already carry a RecordingQuality row with an actual number in it (a
+    # row can exist with listening_quality still NULL if extraction failed,
+    # so the NULL check matters, not just row existence).
     scorable = (db.session.query(func.count(BulkIngestItem.id))
                 .filter(BulkIngestItem.run_id == run.id,
                         BulkIngestItem.status == "ingested",
@@ -225,7 +222,7 @@ def runs():
     # Distinct folders waiting on a person across every listed run. Summing
     # per-run counts double-counts a folder that sits in two queues (a
     # one-folder Downloads run and a later run over all of Downloads), which
-    # put "4" on the Add Recordings badge for two rows (2026-10-02).
+    # put "4" on the Add Recordings badge for two rows.
     waiting = set()
     ids = [r.id for r in listed]
     if ids:
@@ -287,7 +284,7 @@ def current():
 
     payload = _serialize_run(runs[0]) if run_id is not None else _serialize_queue(runs)
     if getattr(current_user, "role", None) != "admin":
-        # R2-N1: last_error is a full Python traceback with absolute
+        # last_error is a full Python traceback with absolute
         # filesystem paths -- fine for the admin who can already see and
         # touch every path in it, not for a viewer/listener/member who just
         # needs to know a run is in flight.
@@ -301,8 +298,8 @@ def current():
     payload["current"] = _item_name(current_item, by_id[current_item.run_id]) if current_item else None
     payload["now"] = payload["current"]
 
-    # "Up next" (spec chunk 5e, 2026-09-27): the next eight pending items in
-    # the order process() will actually reach them (id asc), basenames only.
+    # "Up next": the next eight pending items in the order process will
+    # actually reach them (id asc), basenames only.
     upcoming_rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestItem.run_id)
                      .filter(BulkIngestItem.run_id.in_(ids), BulkIngestItem.status == "pending")
                      .order_by(BulkIngestItem.id.asc())
@@ -310,8 +307,8 @@ def current():
                      .all())
     payload["upcoming"] = [_rel_name(rp, by_id[rid]) for (rp, rid) in upcoming_rows]
 
-    # "Recently added" (spec chunk 5e): the last twelve ingested items,
-    # newest first, one join -- never a per-item loop.
+    # "Recently added": the last twelve ingested items, newest first,
+    # one join -- never a per-item loop.
     recent_rows = (db.session.query(BulkIngestItem.recording_id, Recording.title,
                                     Recording.kind, Artist.name,
                                     Performance.start_year, Performance.start_month,
@@ -430,22 +427,21 @@ def items(run_id):
         image_urls = batch_recording_image_urls([it.recording_id for it in rows if it.recording_id])
         return jsonify({"total": len(rows), "page": 1, "per_page": len(rows),
                         "items": [_serialize_item(it, image_urls) for it in rows]})
-    # "done" is a pseudo-status, not a real one (spec chunk 5e, 2026-09-27):
-    # every item that has left pending/in_progress, for the log's infinite
-    # scroll. Newest first there (id desc) -- the log itself reads newest
-    # first -- unlike the plain per-status filter below, which keeps the
-    # original id-asc order every other caller of this endpoint already
-    # relies on.
+    # "done" is a pseudo-status, not a real one: every item that has left
+    # pending/in_progress, for the log's infinite scroll. Newest first there
+    # (id desc) -- the log itself reads newest first -- unlike the plain
+    # per-status filter below, which keeps the original id-asc order every
+    # other caller of this endpoint already relies on.
     if status == "done":
         q = q.filter(BulkIngestItem.status.in_(_DONE_STATUSES))
         order = BulkIngestItem.id.desc()
     elif status == "queue":
-        # Import page tabs (2026-10-01): everything not yet in the library --
-        # pending, in progress, ready, review, skipped, failed. Discovery
-        # order. 'moved' items went to Backlog/Workshop: terminal, not queued.
+        # Import page tabs: everything not yet in the library -- pending, in
+        # progress, ready, review, skipped, failed. Discovery order. 'moved'
+        # items went to Backlog/Workshop: terminal, not queued.
         q = q.filter(BulkIngestItem.status.notin_(("ingested", "moved")))
         # Skipped rows (exact duplicates) sit at the bottom: they are out of
-        # the work (Ryan, 2026-10-06).
+        # the work.
         order = (case((BulkIngestItem.status == "skipped", 1), else_=0), BulkIngestItem.id.asc())
     elif status in ("live", "album"):
         # The two completed tabs: ingested, split by kind. A NULL kind on an
@@ -457,11 +453,11 @@ def items(run_id):
             q = q.filter(or_(BulkIngestItem.kind.is_(None), BulkIngestItem.kind != "studio"))
         order = BulkIngestItem.id.asc()
     elif status and status != "all":
-        # "all" (2026-09-27, the progress/log table redesign) is every status,
-        # pending and in_progress included, ordered like the rest -- id
-        # ascending, discovery order. The default (no status param) already
-        # behaved this way; "all" just gives it a name callers can ask for
-        # explicitly rather than relying on the absence of a filter.
+        # "all" is every status, pending and in_progress included, ordered
+        # like the rest -- id ascending, discovery order. The default (no
+        # status param) already behaved this way; "all" just gives it a name
+        # callers can ask for explicitly rather than relying on the absence of
+        # a filter.
         q = q.filter(BulkIngestItem.status == status)
         order = BulkIngestItem.id.asc()
     else:
@@ -482,8 +478,8 @@ def items(run_id):
                 .limit(per_page)
                 .all())
 
-    # Recording artwork for imported rows (2026-10-01): the completed tabs
-    # show it at the left of each row. One batched query, not one per row.
+    # Recording artwork for imported rows: the completed tabs show it at
+    # the left of each row. One batched query, not one per row.
     from app.utils.serialize import batch_recording_image_urls
     image_urls = batch_recording_image_urls([it.recording_id for it in rows if it.recording_id])
 
@@ -523,13 +519,8 @@ def _serialize_item(it, image_urls=None):
 
 
 def _item_meta_fields(it):
-    """
-    Flatten BulkIngestItem.meta (a small JSON blob written at extraction
-    time, app/utils/bulk_ingest_run.py::process) into the fields the
-    2026-09-27 progress/log page's expand panel shows -- artist, date_text,
-    venue, location (city/state/country joined, same rule as app.js's
-    fmtLocation), source, title. Every field is None when meta is None
-    (extract() never ran for this item, e.g. an already-in-library skip).
+    """Every field is None when meta is None (extract never ran for this item,
+    e.g. an already-in-library skip).
     """
     meta = {}
     if it.meta:
@@ -555,9 +546,9 @@ def _item_meta_fields(it):
         "track_count": meta.get("track_count"),
         "duration_sec": meta.get("duration_sec"),
         "tracks":      meta.get("tracks") or [],
-        # Metadata band for the unified ingest queue table (2026-09-27) --
-        # computed once at extraction time (bulk_ingest_run.py::process),
-        # never here, so listing a page of items is still one query.
+        # Metadata band for the unified ingest queue table -- computed
+        # once at extraction time (bulk_ingest_run.py::process), never
+        # here, so listing a page of items is still one query.
         "meta_band": meta.get("meta_band"),
         # Pre-ingest Listening Quality (Review First, live items only).
         "listening_quality": meta.get("listening_quality"),
@@ -866,7 +857,7 @@ def convert_unsupported(run_id):
     return jsonify({"queued": len(ready), "run": _serialize_run(run)}), 202
 
 
-# ── Queue-wide actions (Ryan, 2026-10-06: one Queue) ────────────────────────
+# ── Queue-wide actions ────────────────────────
 # Each applies to every run behind the Queue; the per-run routes above stay
 # for callers that name one run.
 
@@ -944,10 +935,11 @@ def queue_convert_unsupported():
 @bp.route("/queue/ingest-all", methods=["POST"])
 @admin_required
 def queue_ingest_all():
-    """Import All (Ryan, 2026-10-06): request ingest for every ready AND
-    review row in the Queue. A row that still cannot be ingested (no artist,
-    exact duplicate) comes back flagged, as a single "Import anyway" does.
-    Rows held back for unsupported audio are left alone: they need converting."""
+    """Import All: request ingest for every ready AND review row in the Queue. A
+    row that still cannot be ingested (no artist, exact duplicate) comes back
+    flagged, as a single "Import anyway" does. Rows held back for unsupported
+    audio are left alone: they need converting.
+    """
     runs = bulk_ingest_run.queue_runs()
     if any(r.status == "paused" for r in runs):
         return jsonify({"error": "run is paused"}), 409

@@ -1,6 +1,6 @@
-"""
-tests/test_atlas_wikidata.py -- the Wikidata fetch and the Atlas update that uses it
-(Resolver v2, chunk 4). HTTP is mocked; nothing is downloaded and the real Atlas is never opened.
+"""tests/test_atlas_wikidata.py -- the Wikidata fetch and the Atlas update that
+uses it. HTTP is mocked; nothing is downloaded and the real Atlas is never
+opened.
 """
 import http.client
 import io

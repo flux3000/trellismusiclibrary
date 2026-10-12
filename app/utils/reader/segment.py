@@ -1,7 +1,4 @@
-"""
-Segmenter (Resolver v2, chunk 2, 2026-10-03).
-
-Splits info text into segments and keeps what later steps need as evidence:
+"""Splits info text into segments and keeps what later steps need as evidence:
 the line index, the blank-line block, the separator that preceded the segment
 and the character span in the original text. Pure function, no I/O.
 

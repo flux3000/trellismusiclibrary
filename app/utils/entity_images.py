@@ -1,12 +1,10 @@
-"""
-app/utils/entity_images.py — image behaviour shared by Artist and Venue.
+"""app/utils/entity_images.py — image behaviour shared by Artist and Venue.
 
-Ryan's call (2026-08-07): PARALLEL TABLES, shared LOGIC. `artist_image` and
-`venue_image` are separate tables so each keeps a real foreign key — this
-project turned FK enforcement on deliberately in July, and a polymorphic
-(entity_type, entity_id) pair cannot be enforced by SQLite at all. What is NOT
-duplicated is the behaviour: one-primary maintenance, promotion on delete, and
-the upload/serve/delete endpoint bodies all live here, once.
+`artist_image` and `venue_image` are separate tables so each keeps a real
+foreign key — this project turned FK enforcement on deliberately in July, and a
+polymorphic (entity_type, entity_id) pair cannot be enforced by SQLite at all.
+What is NOT duplicated is the behaviour: one-primary maintenance, promotion on
+delete, and the upload/serve/delete endpoint bodies all live here, once.
 
 Each image model declares `__parent_fk__` (the column naming its owner), which
 is the only thing that differs between them. That single hook is what lets
@@ -184,14 +182,6 @@ def handle_delete(img, images_dir):
     return jsonify({"ok": True})
 
 
-# ── Route registrar (2026-09-01) ─────────────────────────────────────────────
-#
-# The endpoint BODIES have been shared since 2026-08-07; the five route
-# DECLARATIONS around them were still copy-pasted per blueprint. With four
-# photographed entities (Artist, Venue, Musician, Event) that is four places
-# to forget `require_library`, four URL shapes to get subtly different, and
-# four chances for a `has_image` to mean something slightly else.
-#
 # So the declarations move here too. One call per blueprint mounts the whole
 # standard set:
 #
@@ -286,14 +276,12 @@ def register_image_routes(bp, *, parent_model, image_model, url_prefix,
 
 
 def image_dir(kind, name):
-    """
-    DATA_DIR/images/<kind>/<sanitized name>.
+    """DATA_DIR/images/<kind>/<sanitized name>.
 
     Image files live under DATA_DIR (app-writable storage), never under
-    LIBRARY_ROOT (Bulk Ingest spec chunk 2) -- a bring-your-own-library
-    point at someone else's read-only collection must not need to write photo
-    folders into it, and DATA_DIR always exists whether or not the library
-    volume is mounted.
+    LIBRARY_ROOT -- a bring-your-own-library point at someone else's read-only
+    collection must not need to write photo folders into it, and DATA_DIR
+    always exists whether or not the library volume is mounted.
 
     `kind` is 'artists' / 'venues' / 'musicians' / 'events' / 'recordings'.
     Artists used to have no bucket at all (photos lived beside the recording
@@ -316,5 +304,11 @@ def image_dir(kind, name):
         assert str(name).isdigit(), \
             f"image_dir('recordings', ...) expects a numeric id, got {name!r}"
         return Path(data_dir) / "images" / kind / str(name)
-    from app.utils.ingest import _sanitize_path
-    return Path(data_dir) / "images" / kind / _sanitize_path(name)
+    from app.utils.ingest import _sanitize_path, _legacy_sanitize_path
+    path = Path(data_dir) / "images" / kind / _sanitize_path(name)
+    # A name with a quote or ? (Leroy "Mack" McNees) was stored under the
+    # old macOS-only rule; keep finding it there rather than orphan it.
+    legacy = Path(data_dir) / "images" / kind / _legacy_sanitize_path(name)
+    if not path.exists() and legacy != path and legacy.exists():
+        return legacy
+    return path

@@ -23,8 +23,8 @@ def _validate_server_mode(app):
     if app.config.get("DEV_MODE"):
         raise RuntimeError(
             "Refusing to boot: SERVER_MODE and DEV_MODE are both enabled. "
-            "DEV_MODE auto-logs-in the first admin user with no credentials — "
-            "combined with SERVER_MODE (a publicly reachable instance), this "
+            "DEV_MODE auto-logs-in the first admin user with no credentials. "
+            "Combined with SERVER_MODE (a publicly reachable instance), this "
             "is an open admin panel. Unset DEV_MODE or disable SERVER_MODE."
         )
 
@@ -69,21 +69,23 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
 
-    # ── Schema upgrades (2026-10-05) ───────────────────────────
     # Additive, idempotent, one transaction each; every mode, before anything queries Artist.
     with app.app_context():
         from app.utils.schema_upgrades import (ensure_artist_confirmed_at, ensure_bulk_meta_band, ensure_lomax,
-                                              ensure_venue_history, ensure_full_library_grants,
-                                              ensure_invite_code, ensure_bulk_run_cleared_at)
+                                              ensure_venue_history, ensure_event_history, ensure_full_library_grants,
+                                              ensure_invite_code, ensure_bulk_run_cleared_at,
+                                              ensure_lomax_easter_eggs, ensure_genre_colors)
         ensure_artist_confirmed_at(db.engine)
         ensure_bulk_run_cleared_at(db.engine)
         ensure_venue_history(db.engine)
+        ensure_event_history(db.engine)
         ensure_lomax(db.engine)
+        ensure_lomax_easter_eggs(db.engine)
         ensure_bulk_meta_band(db.engine)
         ensure_full_library_grants(db.engine)
+        ensure_genre_colors(db.engine)
         ensure_invite_code(db.engine)
 
-    # ── Install Epoch (2026-09-18) ─────────────────────────────
     # Runs for every mode this factory builds, including SERVER_MODE — placed
     # before that branch's early return rather than after it. Non-fatal by
     # design; see app/utils/install_epoch.py.
@@ -91,7 +93,6 @@ def create_app(config_class=Config):
         from app.utils.install_epoch import ensure_install_epoch
         ensure_install_epoch()
 
-    # ── Unauthenticated requests (2026-08-08) ──────────────────
     # Without this, flask_login 302s an unauthenticated caller to `login_view`
     # — which is auth.login, a POST-ONLY route. No rule matches GET there, so
     # Flask falls through to serve_frontend's catch-all and returns index.html
@@ -102,7 +103,7 @@ def create_app(config_class=Config):
     #   * the frontend detects logged-out only because res.json() chokes on
     #     the HTML — it works by accident, not by design
     #   * the peer-door probe read it as a peer token reaching the admin API
-    #   * the milestone-2 consumer proxy has to distinguish "auth failed" from
+    #   * a consumer proxy has to distinguish "auth failed" from
     #     "success" WITHOUT sniffing the body, which a 200 makes impossible
     #
     # So: JSON 401 for anything under /api/, and a redirect to the SPA root
@@ -118,14 +119,14 @@ def create_app(config_class=Config):
 
     # ── SERVER_MODE: the share door, and nothing else ──────────
     #
-    # This is the whole point of SERVER_MODE (Ryan, 2026-08-25). A Cloudflare
-    # Tunnel points at a PORT, not at a set of routes, so everything this
-    # process serves is on the public internet. The peer door was deliberately
-    # built as a blueprint with no write endpoints in it — safety by
-    # construction rather than by remembering to check a role. Registering the
-    # front door alongside it would put the login page, delete-with-files,
-    # folder moves and the BYOK-funded AI endpoints out there too, protected by
-    # a password rather than by not existing.
+    # This is the whole point of SERVER_MODE. A Cloudflare Tunnel points at a
+    # PORT, not at a set of routes, so everything this process serves is on the
+    # public internet. The peer door was deliberately built as a blueprint with
+    # no write endpoints in it — safety by construction rather than by
+    # remembering to check a role. Registering the front door alongside it would
+    # put the login page, delete-with-files, folder moves and the BYOK-funded AI
+    # endpoints out there too, protected by a password rather than by not
+    # existing.
     #
     # So: return BEFORE the front-door imports run. Those routes are not
     # refused in this process, they are never constructed, and `/api/auth/login`
@@ -197,8 +198,8 @@ def create_app(config_class=Config):
     app.register_blueprint(naming_bp,       url_prefix="/api/naming")
     app.register_blueprint(bulk_ingest_bp,     url_prefix="/api/bulk-ingest")
 
-    # Archive Downloads (2026-10-01): catalog browsing + the download queue.
-    # After the SERVER_MODE return above, so a share node never has them.
+    # Archive Downloads: catalog browsing + the download queue. After the
+    # SERVER_MODE return above, so a share node never has them.
     from app.api.lomax     import bp as lomax_bp
     app.register_blueprint(lomax_bp,     url_prefix="/api/lomax")
     from app.api.archive   import bp as archive_bp
@@ -206,7 +207,7 @@ def create_app(config_class=Config):
     app.register_blueprint(archive_bp,   url_prefix="/api/archive")
     app.register_blueprint(downloads_bp, url_prefix="/api/downloads")
 
-    # ── Bulk Ingest: pick a run left running back up (2026-09-26) ────────
+    # ── Bulk Ingest: pick a run left running back up ────────
     # Never in SERVER_MODE (that branch already returned above) -- a share
     # node has no bulk_ingest surface at all. A run left 'paused' is left
     # exactly as it was; only a run left 'running' when the process last
@@ -223,7 +224,7 @@ def create_app(config_class=Config):
     #   DEV_MODE            — a developer does not want a login screen between
     #                         them and the thing they are editing.
     #   SINGLE_USER_DESKTOP — an installed app on one person's own machine has
-    #                         nothing to log in to (Ryan, 2026-08-25).
+    #                         nothing to log in to.
     # Both are refused above when SERVER_MODE is on, which is the only context
     # where either would be a hole rather than a convenience.
     if app.config.get("DEV_MODE") or app.config.get("SINGLE_USER_DESKTOP"):

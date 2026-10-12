@@ -1,9 +1,8 @@
-"""
-tests/test_disc_migration.py -- scripts/migrate_file_handling.py, disc
+"""tests/test_disc_migration.py -- scripts/migrate_file_handling.py, disc
 migration and the surrounding column/mode/preference steps.
 
 Runs the script as a subprocess against a small hand-built sqlite database,
-exactly as Ryan would from the repo root, rather than importing its
+exactly as the user would from the repo root, rather than importing its
 internals -- the script's whole contract is "run me from the command line".
 """
 
@@ -216,10 +215,11 @@ def test_row_counts_unchanged(tmp_path):
 
 
 def test_already_migrated_database_is_a_no_op_on_second_run(tmp_path):
-    """S11 (review, 2026-09-25): every step is idempotent, so a second
-    --apply against an already-migrated database succeeds and changes
-    nothing, rather than the old hard refusal (a precondition, not a
-    real safety check -- the steps themselves never needed it)."""
+    """S11: every step is idempotent, so a second --apply against an
+    already-migrated database succeeds and changes nothing, rather than the old
+    hard refusal (a precondition, not a real safety check -- the steps
+    themselves never needed it).
+    """
     db_path = tmp_path / "test.db"
     _make_db(db_path)
     _run(db_path, apply=True)
@@ -238,11 +238,12 @@ def test_already_migrated_database_is_a_no_op_on_second_run(tmp_path):
 
 
 def test_second_apply_never_overwrites_a_user_chosen_keep_mode(tmp_path):
-    """S11 (re-review, 2026-09-25): seed_file_handling_mode() must only ever
-    INSERT the mode/switches when the key is ABSENT. A second --apply run
-    against a database whose owner has since switched to 'keep' (or any
-    other value) must leave that choice alone -- the old ON CONFLICT DO
-    UPDATE silently flipped it back to 'organize' on every re-run."""
+    """S11: seed_file_handling_mode must only ever INSERT the mode/switches when
+    the key is ABSENT. A second --apply run against a database whose owner has
+    since switched to 'keep' (or any other value) must leave that choice alone
+    -- the old ON CONFLICT DO UPDATE silently flipped it back to 'organize' on
+    every re-run.
+    """
     db_path = tmp_path / "test.db"
     _make_db(db_path)
     _run(db_path, apply=True)
@@ -275,10 +276,11 @@ def test_second_apply_never_overwrites_a_user_chosen_keep_mode(tmp_path):
 
 
 def test_apply_backs_up_the_database_with_sqlite_backup(tmp_path):
-    """S11 (re-review, 2026-09-25): the pre-apply backup must be a real
-    sqlite3 .backup snapshot (Connection.backup()), not a raw file copy --
-    proven here by simply checking the backup file is itself a valid,
-    openable SQLite database with the pre-migration schema/data."""
+    """S11: the pre-apply backup must be a real sqlite3 .backup snapshot
+    (Connection.backup), not a raw file copy -- proven here by simply checking
+    the backup file is itself a valid, openable SQLite database with the
+    pre-migration schema/data.
+    """
     db_path = tmp_path / "test.db"
     _make_db(db_path)
 

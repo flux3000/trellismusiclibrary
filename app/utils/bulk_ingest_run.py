@@ -1,5 +1,4 @@
-"""
-app/utils/bulk_ingest_run.py -- Bulk Ingest worker (spec chunk 5).
+"""app/utils/bulk_ingest_run.py -- Bulk Ingest worker.
 
 A run walks LIBRARY_ROOT once (discover), then works through every show-
 shaped folder it found (process), turning each into either a Recording
@@ -97,9 +96,8 @@ _WAKE = threading.Event()
 # "md5" is deliberately excluded there too: two different recordings of the
 # same show do not share MD5s (that hash covers the whole file, encoding
 # included), so it would never fire, and computing it here would mean the
-# exact per-file re-hash chunk 5 spends effort NOT doing during ingest (see
-# _do_confirm's bulk=True skip of MD5 verification) just to build a map that
-# gains nothing from it.
+# exact(see _do_confirm's bulk=True skip of MD5 verification) just to build
+# a map that gains nothing from it.
 _DEDUP_FP_TYPES = DEDUP_FP_TYPES
 
 
@@ -147,7 +145,7 @@ def _abs_key(base, rel):
 def _on_disk_path(root, rel):
     """
     The path to actually scan/open on disk for an BulkIngestItem's NFC
-    rel_path (R2-2).
+    rel_path.
 
     rel_path is deliberately NFC-normalised -- it is the dedup key shared
     with Recording.folder_path -- but the bytes a folder was created or
@@ -247,10 +245,9 @@ def listed_runs():
     return sorted(out, key=lambda r: r.id)
 
 
-# ── The one Queue (Ryan, 2026-10-06: "There should only be one queue. Ever.") ──
-# A run is a scan of one source folder, kept as the record of where its items
-# came from. It is never something a person sees: the Queue is every item of
-# every listed run, and every Queue action applies to all of them.
+# ── The one Queue ── A run is a scan of one source folder, kept as the record of
+# where its items came from. It is never something a person sees: the Queue is
+# every item of every listed run, and every Queue action applies to all of them.
 
 _QUEUED = ("pending", "in_progress", "ready", "review", "failed")
 
@@ -293,9 +290,10 @@ def resume_queue():
 
 
 def reset_whole_queue():
-    """Reset Queue: every listed run's Queue emptied and the run closed, and
-    every run marked cleared so its Imported rows leave the page too (Ryan,
-    2026-10-06). Imported recordings stay in the library, of course."""
+    """Reset Queue: every listed run's Queue emptied and the run closed, and every
+    run marked cleared so its Imported rows leave the page too. Imported
+    recordings stay in the library, of course.
+    """
     removed = sum(reset_queue(run) for run in listed_runs())
     now = datetime.now(timezone.utc)
     for run in db.session.query(BulkIngestRun).filter(BulkIngestRun.cleared_at.is_(None)).all():
@@ -521,7 +519,7 @@ def process(run, stop_flag):
         if item is None:
             break
 
-        # R2-2: item.rel_path is deliberately NFC (the dedup key), but the
+        # item.rel_path is deliberately NFC (the dedup key), but the
         # bytes actually on disk can be NFD -- resolve the real path to
         # scan/open rather than the one that merely LOOKS right.
         # normpath: an outside single-show item is rel "." and "<root>/." has
@@ -633,32 +631,28 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         resolved = outcome["resolved"]
         item.format = outcome.get("format")
 
-        # Live folders that wait for a person (Ready, and Needs Review: Ryan,
-        # 2026-10-06) are scored now, before anything enters the library, so
-        # the person sees the number while deciding. Ingest promotes this
-        # staging row (promote_to_recording), and the audio pass then skips
-        # scoring. Albums are never scored, nor audio Trellis cannot import.
-        # An in-place (library) run never scores here: scanning a whole
-        # library's audio before anything is catalogued would take hours, and
-        # the background audio pass scores it after ingest anyway.
+        # Live folders that wait for a person are scored now, before anything
+        # enters the library, so the person sees the number while deciding.
+        # Ingest promotes this staging row (promote_to_recording), and the
+        # audio pass then skips scoring. Albums are never scored, nor audio
+        # Trellis cannot import. An in-place (library) run never scores here:
+        # scanning a whole library's audio before anything is catalogued
+        # would take hours, and the background audio pass scores it after
+        # ingest anyway.
         quality = None
         if (status in ("ready", "review") and resolved is not None and resolved.kind != "studio"
                 and not in_library and "unsupported_format" not in (reasons or [])):
             quality = _score_before_ingest(folder_abs, base)
 
-        # meta_band (2026-09-27 unified ingest queue table, 2026-10-05 completeness): the
-        # High/Medium/Low band of how complete the resolver's reading is (app/utils/
-        # completeness.py), computed here at extraction time and carried inside the existing
-        # `meta` JSON blob (no schema change). It no longer turns Low for a row in review.
+        # meta_band: the High/Medium/Low band of how complete the resolver's reading is
+        # (app/utils/ completeness.py), computed here at extraction time and carried inside
+        # the existing `meta` JSON blob (no schema change). It no longer turns Low for a row
+        # in review.
         meta_band = completeness_band(resolved) if resolved is not None else None   # unread: no band
 
         date = (resolved.date.value if resolved else None) or {}
         track_count, track_titles, duration_sec = _scan_tracks_and_length(
             resolved.scan if resolved else None)
-        # 2026-09-27 progress/log redesign: the log's expand panel needs
-        # these fields without a per-item re-scan -- stash whatever the
-        # resolver found, win or lose (a review/failed item still has
-        # partial data worth showing).
         item.meta = json.dumps({
             "artist":    resolved.artist.value if resolved else None,
             "date_text": format_partial_date(date.get("year"), date.get("month"),
@@ -711,7 +705,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         else:  # "failed" -- no_audio / unreadable
             item.status = "failed"
             item.reason = reason_str
-            # R2-N2: detail is supposed to be a human-readable message,
+            # detail is supposed to be a human-readable message,
             # not the reason word itself.
             item.detail = outcome.get("detail") or reason_str
         item.ingest_requested = False
@@ -729,7 +723,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         item.ingest_requested = False
         db.session.commit()
     except OSError as e:
-        # R2-1: a folder that became unreadable between discover() and
+        # a folder that became unreadable between discover() and
         # here (an NFS mount that dropped, a chmod that landed mid-run)
         # is reported the same way discover()'s own top-level check
         # reports one, not folded into the generic 'failed' bucket
@@ -765,8 +759,7 @@ def _scan_tracks_and_length(scan):
     if not scan:
         return None, [], None
     # One row per audio file, titled exactly as the review form will title it
-    # (resolve_tracks), so a track with no known title still shows (Ryan,
-    # 2026-10-06).
+    # (resolve_tracks), so a track with no known title still shows.
     from app.utils.resolve import resolve_tracks
     rows = [{"n": t["track_number"], "title": t["title"]} for t in resolve_tracks(scan)][:200]
     return scan.get("audio_file_count"), rows, _scan_seconds(scan)
@@ -838,7 +831,7 @@ def _write_review_staging(folder_abs, library_root, item):
     # folder is, not a human decision. Scores and triage_status are a paid
     # analysis and a human's call: only set them on a brand-new row, never
     # null or reset them on a re-run that finds the row already there
-    # (S2 -- CONTEXT: research the human paid for is never discarded).
+    # (research the human paid for is never discarded).
     row.source_dir = norm_path(library_root)
     row.name = os.path.basename(folder_abs.rstrip("/\\"))
     if is_new:
@@ -890,7 +883,7 @@ def _reconcile_review_items(run=None):
             item.recording_id = staging.recording_id
             reconciled += 1
         elif staging.triage_status == "rejected":
-            # R2-N6: a review row the reviewer rejected (not accepted) never
+            # a review row the reviewer rejected (not accepted) never
             # gets a recording_id, so it used to stay 'review' forever --
             # counted under Need Review even though the review list itself
             # (which excludes rejected rows) no longer shows it. 'skipped'
@@ -903,12 +896,12 @@ def _reconcile_review_items(run=None):
     return reconciled
 
 
-# ── Queue re-check after a person confirms an act, venue or event (chunk 8) ──
-# A review row waits on a reading ("Sam Bush Band", "Wilkes Commnity College").
-# Once a person has settled that reading on one row, every other waiting row that
-# quotes the same text should not ask again. Re-checking is just re-processing:
-# the row goes back to pending and the worker reads the folder again, now against
-# a library that holds the confirmed row and its learned alias. The worker then
+# ── Queue re-check after a person confirms an act, venue or event ── A review
+# row waits on a reading ("Sam Bush Band", "Wilkes Commnity College"). Once a
+# person has settled that reading on one row, every other waiting row that quotes
+# the same text should not ask again. Re-checking is just re-processing: the row
+# goes back to pending and the worker reads the folder again, now against a
+# library that holds the confirmed row and its learned alias. The worker then
 # does what the run's mode says (Import Automatically ingests a row that reaches
 # the verdict, Review First parks it Ready), and the run's staged blanket values
 # still overwrite whatever it reads, so human-set values stay locked.
@@ -1083,7 +1076,7 @@ def _start_worker(run_id=None, app=None):
 
     def _leaving():
         """
-        R2-3: called when no run is workable. The thread is still
+        Called when no run is workable. The thread is still
         `is_alive()` for as long as it takes to actually return, and a Resume
         landing in that window used to see an "alive" worker and refuse to
         start a new one, even though this one had already committed to
@@ -1103,7 +1096,7 @@ def _start_worker(run_id=None, app=None):
             return True
 
     def _pause_with_error(run_id):
-        # R2-N5: leave the run 'paused', not 'running', so the page offers
+        # leave the run 'paused', not 'running', so the page offers
         # Resume instead of showing a run nobody is driving and polling
         # forever with no worker to catch up to. Only the run that failed;
         # the other runs keep going.
@@ -1182,13 +1175,11 @@ def default_mode(root):
 
 
 def start_run(root, mode=None, paused=False):
-    """
-    Return the unfinished run already pointed at `root` (keeping ITS mode),
-    else create a new one (status running) and make sure the worker is going.
-    A run for a different root while another is active simply queues behind
-    the worker's small-runs-first picking; nothing is refused or replaced.
-    `mode` is 'auto' or 'hold'; None picks default_mode(root).
-    `paused` (Add to Library from a working folder, Ryan 2026-10-06): the run is
+    """Return the unfinished run already pointed at `root` (keeping ITS mode),
+    else create a new one (status running) and make sure the worker is going. A
+    run for a different root while another is active simply queues behind the
+    worker's small-runs-first picking; nothing is refused or replaced. `mode`
+    is 'auto' or 'hold'; None picks default_mode(root). `paused`: the run is
     created paused with its folders already listed in the Queue, and waits for
     the person's Start; an unfinished run for `root` is returned as it is.
     """

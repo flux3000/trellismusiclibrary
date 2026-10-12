@@ -36,6 +36,8 @@ DEFAULTS = {
     "submit_recording_research": {"thinking": "t", "proposals": [], "tracks": []},
     "submit_artist_history": {"thinking": "t", "biography": "A bio.", "members": [], "resources": []},
     "submit_venue_history": {"thinking": "t", "history": "h", "proposals": []},
+    "submit_musician_biography": {"thinking": "t", "biography": "A bio."},
+    "submit_event_history": {"thinking": "t", "history": "h", "proposals": [], "lineup": []},
 }
 
 

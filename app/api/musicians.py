@@ -25,12 +25,7 @@ from app.api.system import require_library
 bp = Blueprint("musicians", __name__)
 
 
-# ── Photos (2026-09-01) ──────────────────────────────────────────────────────
-# Fourth photographed entity. Routes are generated, not written — see
-# ei.register_image_routes() for why, and models/musician_image.py for why this
-# reverses the 2026-08-07 "artist-level only" call for the PAGE while
-# leaving it standing for cards (a card keys off the act; a wall of identical
-# tiles is still the failure mode it was protecting against).
+# Fourth photographed entity.
 
 _IMG_URL = "/api/musicians/images"
 
@@ -68,8 +63,7 @@ def list_musicians():
     rows = db.session.query(Musician).order_by(
         func.coalesce(Musician.sort_name, Musician.name)).all()
 
-    # ⚠ sort_name is NULL for every row in Ryan's library (CONTEXT.md trap —
-    # scripts/backfill_sort_names.py has never been run here), so COALESCE is
+    # ⚠ sort_name is NULL for every row in the user's library, so COALESCE is
     # load-bearing rather than decorative. Do not "simplify" it away.
 
     # Counts and the primary-photo id, for the Musicians index page. Grouped
@@ -93,22 +87,21 @@ def list_musicians():
                          func.count(func.distinct(Membership.artist_id)))
         .group_by(Membership.musician_id).all()
     )
-    image_ids = {}
-    for aid, iid, _p in (
-        db.session.query(MusicianImage.musician_id, MusicianImage.id, MusicianImage.is_primary)
-        .order_by(MusicianImage.musician_id, MusicianImage.is_primary.desc(),
-                  MusicianImage.sort_order, MusicianImage.id).all()
-    ):
-        image_ids.setdefault(aid, iid)
+
+    # ?index=1: instruments, acts and excerpt for the Musicians INDEX page.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.musician_extras()
 
     return jsonify([
         {
+            **extra.get(a.id, {}),
             "id":              a.id,
             "name":            a.name,
             "sort_name":       a.sort_name,
             "recording_count": rec_counts.get(a.id, 0),
             "artist_count": perf_counts.get(a.id, 0),
-            "image_id":        image_ids.get(a.id),
         }
         for a in rows
     ])
@@ -117,15 +110,13 @@ def list_musicians():
 @bp.route("/<int:musician_id>")
 @login_required
 def get_musician(musician_id):
-    """
-    A person + every Artist (act) they're a member of, PLUS individual
-    show-level appearances reached only via performance_personnel — sit-ins
-    or explicit-mode picks on acts they're not formally a Membership of at
-    all (2026-07-18, Per-Show Personnel design doc ripple item 3: "Béla's
-    page would finally surface his All-Stars sit-ins"). Kept as a separate
-    `guest_appearances` list rather than folded into `artists`, since the
-    existing UI pulls EVERY recording of a listed artist — doing that for
-    a one-off sit-in would misrepresent a single show as full membership.
+    """A person + every Artist (act) they're a member of, PLUS individual
+    show-level appearances reached only via performance_personnel — sit-ins or
+    explicit-mode picks on acts they're not formally a Membership of at all.
+    Kept as a separate `guest_appearances` list rather than folded into
+    `artists`, since the existing UI pulls EVERY recording of a listed artist —
+    doing that for a one-off sit-in would misrepresent a single show as full
+    membership.
     """
     a = db.session.get(Musician, musician_id)
     if not a:

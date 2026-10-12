@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Musicians</title>
+<style>
+@font-face{font-family:'Archivo';font-weight:100 900;src:url('../../../app/static/fonts/archivo-latin-wght-normal.woff2') format('woff2-variations')}
+@font-face{font-family:'IBM Plex Sans';font-weight:100 700;src:url('../../../app/static/fonts/ibm-plex-sans-latin-wght-normal.woff2') format('woff2-variations')}
+</style>
+<link rel="stylesheet" href="../../../app/static/css/main.css">
+<link rel="stylesheet" href="dimension-index.css">
+</head><body class="dx-mock">
+<div class="dx-mockbar"><select id="pal"><option>steely</option><option>krauss</option><option>monk</option><option>joni</option><option>hazel</option><option>townes</option><option>chet</option><option>gram</option><option>cale</option><option>miles</option><option>alice</option><option>eno</option></select></div>
+<main class="dx-page" id="page"></main>
+<script>
+const KIND="musicians";
+const DATA=[{"id": 20, "name": "Aaron Parks", "sort": null, "text": "", "inst": [], "artists": ["Aaron Parks Trio"], "nartists": 1, "recs": 1, "y0": 2018, "y1": 2018, "img": null}, {"id": 241, "name": "Andy Boyett", "sort": "Boyett, Andy", "text": "Also known as Andy \"Bijou\" Boyett.", "inst": ["bass", "guitar"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 177, "name": "B-Real", "sort": null, "text": "", "inst": [], "artists": ["Cypress Hill"], "nartists": 1, "recs": 3, "y0": 1995, "y1": 2000, "img": null}, {"id": 280, "name": "Bob Black", "sort": "Black, Bob", "text": "", "inst": ["banjo"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 250, "name": "Carter Stanley", "sort": "Stanley, Carter", "text": "", "inst": ["guitar"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 239, "name": "Cedric Rainwater", "sort": "Watts, Howard", "text": "Also known as Howard Watts.", "inst": ["bass"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 230, "name": "Clyde Moody", "sort": "Moody, Clyde", "text": "", "inst": ["guitar", "mandolin"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 229, "name": "Cousin Wilbur", "sort": "Wesbrooks, Bill", "text": "Also known as Bill Wesbrooks.", "inst": ["bass"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 116, "name": "David Rawlings", "sort": null, "text": "", "inst": [], "artists": ["Gillian Welch & David Rawlings"], "nartists": 1, "recs": 2, "y0": 1995, "y1": 1999, "img": null}, {"id": 262, "name": "Eddie Adcock", "sort": "Adcock, Eddie", "text": "", "inst": ["banjo"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 69, "name": "Gene Johnson", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 232, "name": "Howdy Forrester", "sort": "Forrester, Howard", "text": "Also known as Howard Forrester.", "inst": ["fiddle"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 260, "name": "Jack Cooke", "sort": "Cooke, Jack", "text": "", "inst": ["guitar", "bass"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 96, "name": "Jimmy Gaudreau", "sort": null, "text": "", "inst": [], "artists": ["Auldridge, Bennett and Gaudreau", "Chesapeake"], "nartists": 2, "recs": 4, "y0": 1994, "y1": 2001, "img": null}, {"id": 300, "name": "Jon Scott", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 154, "name": "Leo Kottke", "sort": null, "text": "", "inst": [], "artists": ["Leo Kottke"], "nartists": 1, "recs": 4, "y0": 1972, "y1": 1992, "img": null}, {"id": 139, "name": "Michael Brecker", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 251, "name": "Old Joe Clark", "sort": "Clark, Manuel", "text": "Also known as Manuel Clark.", "inst": ["comedy"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 62, "name": "Pat Enright", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 434, "name": "Rob Barraco", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 28, "name": "Ronnie Simpkins", "sort": null, "text": "", "inst": [], "artists": ["Seldom Scene", "Merlefest Hillside Jam"], "nartists": 2, "recs": 27, "y0": 1973, "y1": 2001, "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 236, "name": "Sally Ann Forrester", "sort": "Forrester, Wilene", "text": "Also known as Wilene Forrester.", "inst": ["accordion"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 163, "name": "Scotty Stoneman", "sort": null, "text": "", "inst": [], "artists": [], "nartists": 0, "recs": 0, "y0": null, "y1": null, "img": null}, {"id": 233, "name": "Stringbean", "sort": "Akeman, David", "text": "Also known as David Akeman.", "inst": ["banjo"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}, {"id": 228, "name": "Tommy Magness", "sort": "Magness, Tommy", "text": "", "inst": ["fiddle"], "artists": ["Bill Monroe and the Bluegrass Boys"], "nartists": 1, "recs": 3, "y0": 1964, "y1": 1979, "img": null}];
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+const initials=n=>String(n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+const years=(a,b)=>!a?'':(!b||a===b)?String(a):`${a}-${b}`;
+const byName=(a,b)=>(a.sort||a.name).localeCompare(b.sort||b.name);
+const inkOn=hex=>{if(!/^#[0-9a-f]{6}$/i.test(hex||''))return 'var(--t0)';
+  const n=parseInt(hex.slice(1),16),f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};
+  const L=.2126*f(n>>16)+.7152*f(n>>8&255)+.0722*f(n&255);return L>.4?'#141210':'#ffffff'};
+document.getElementById('pal').addEventListener('change',e=>document.documentElement.setAttribute('data-palette',e.target.value));
+document.getElementById('pal').value='cale';
+
+/* photo with fallback underneath. Place files at photos/<kind>/<id>.<ext>
+   (see README); a missing file just leaves the fallback showing. */
+function art(d,kind,color){
+  const f=`<span class="dx-ini">${esc(initials(d.name))}</span>`;
+  const im=d.img?`<img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.remove()">`:'';
+  return `<span class="dx-art"${color?` style="--dx-fg:${esc(color)}"`:''}>${f}${im}</span>`;
+}
+function photo(d,kind){
+  if(!d.img)return '';
+  return `<span class="dx-photo"><img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></span>`;
+}
+
+/* cfg: title, rows, row(d)->html, sorts[{id,label,cmp}], search(d)->string,
+   filter{label,get(d)} optional, group{sort,key(d),label(d)} optional */
+function run(cfg){
+  let sortId=cfg.sorts[0].id,q='',fv='';
+  const opts=cfg.filter?[...new Set(cfg.rows.map(cfg.filter.get).filter(Boolean))].sort():[];
+  document.getElementById('page').innerHTML=`
+   <h1 class="dx-title">${esc(cfg.title)}</h1>
+   <div class="dim-bar">
+     <input class="dim-search" id="q" placeholder="Filter ${esc(cfg.title.toLowerCase())}…" autocomplete="off">
+     <div class="dim-sorts" id="sorts">${cfg.sorts.map(s=>`<button class="dim-sort${s.id===sortId?' active':''}" data-s="${s.id}">${esc(s.label)}</button>`).join('')}</div>
+     ${cfg.filter?`<select class="dx-select" id="f"><option value="">${esc(cfg.filter.label)}</option>${opts.map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:''}
+     <span class="dim-count" id="n"></span>
+   </div><div id="out"></div>`;
+  function paint(){
+    const t=q.trim().toLowerCase();
+    let r=cfg.rows.filter(d=>(!t||cfg.search(d).toLowerCase().includes(t))&&(!fv||cfg.filter.get(d)===fv));
+    r=r.slice().sort(cfg.sorts.find(s=>s.id===sortId).cmp);
+    let h='';
+    if(cfg.group&&cfg.group.sort===sortId){
+      const gs=[];r.forEach(d=>{const k=cfg.group.key(d);let g=gs[gs.length-1];if(!g||g.k!==k){g={k,l:cfg.group.label(d),rows:[]};gs.push(g)}g.rows.push(d)});
+      h=gs.map(g=>`<section class="dx-group"><div class="dx-gutter">${esc(g.l)}</div><div class="dx-list">${g.rows.map(cfg.row).join('')}</div></section>`).join('');
+    }else h=`<div class="dx-list">${r.map(cfg.row).join('')}</div>`;
+    document.getElementById('out').innerHTML=r.length?h:`<div class="dim-empty">Nothing matches.</div>`;
+    document.getElementById('n').textContent=(t||fv)?`${r.length} of ${cfg.rows.length}`:'';
+  }
+  document.getElementById('q').addEventListener('input',e=>{q=e.target.value;paint()});
+  document.getElementById('sorts').addEventListener('click',e=>{const b=e.target.closest('.dim-sort');if(!b)return;sortId=b.dataset.s;
+    document.querySelectorAll('.dim-sort').forEach(x=>x.classList.toggle('active',x===b));paint()});
+  if(cfg.filter)document.getElementById('f').addEventListener('change',e=>{fv=e.target.value;paint()});
+  paint();
+}
+
+run({
+  title:'Musicians', rows:DATA,
+  row:d=>`<a class="dx-row dx-row--musician" href="#/musician/${d.id}">
+    ${art(d,KIND,null)}
+    <span class="dx-body">
+      <div class="dx-name">${esc(d.name)}</div>
+      <div class="dx-sub">${esc(d.inst.join(', '))}</div>
+      ${d.text?`<div class="dx-text">${esc(d.text)}</div>`:''}
+      ${d.artists.length?`<div class="dx-with">${esc(d.artists.join(', '))}${d.nartists>3?` and ${d.nartists-3} more`:''}</div>`:''}
+    </span>
+    <span class="dx-side"><div class="dx-n">${d.recs||''}</div>${d.recs?`<div class="dx-nl">${d.recs===1?'Recording':'Recordings'}</div>`:''}</span></a>`,
+  sorts:[{id:'name',label:'A-Z',cmp:byName},{id:'recs',label:'Recordings',cmp:(a,b)=>b.recs-a.recs||byName(a,b)}],
+  search:d=>[d.name,...d.inst,...d.artists].join(' '),
+  group:{sort:'name',key:d=>((d.sort||d.name)[0]||'#').toUpperCase(),label:d=>((d.sort||d.name)[0]||'#').toUpperCase()}
+});
+
+</script></body></html>

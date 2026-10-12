@@ -1,10 +1,9 @@
-"""
-models/artist_image.py — multiple images per Artist, one designated primary.
+"""models/artist_image.py — multiple images per Artist, one designated primary.
 
-Replaces the single `Artist.image_ext` slot (2026-08-07). That column is left
-in place rather than dropped: SQLite cannot drop a column without a full table
-rebuild, and this project has already been burned once by rebuild-adjacent DDL
-(the 07-22 stale-FK episode). It is now LEGACY — nothing reads it. The migration
+Replaces the single `Artist.image_ext` slot. That column is left in place
+rather than dropped: SQLite cannot drop a column without a full table rebuild,
+and this project has already been burned once by rebuild-adjacent DDL (the
+07-22 stale-FK episode). It is now LEGACY — nothing reads it. The migration
 backfills every populated `image_ext` into a row here as the primary image, and
 deliberately does not move the file on disk, so a half-run migration can never
 orphan a photo.
@@ -40,7 +39,7 @@ class ArtistImage(db.Model):
 
     # Basename only, inside the artist's _images dir. Never a full path —
     # the library root is config, and recording paths are deliberately never
-    # exposed to the frontend (see the file-obfuscation rule in CONTEXT.md).
+    # exposed to the frontend.
     filename   = db.Column(db.String(255), nullable=False)
     ext        = db.Column(db.String(8), nullable=False)
 
@@ -75,6 +74,6 @@ class ArtistImage(db.Model):
 
 
 # Behaviour lives in app/utils/entity_images.py so Artist and Venue photo
-# management cannot drift apart (2026-08-07). Re-exported here because existing
-# callers import these names from this module.
+# management cannot drift apart. Re-exported here because existing callers
+# import these names from this module.
 from app.utils.entity_images import set_primary, primary_for   # noqa: E402,F401

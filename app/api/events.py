@@ -1,14 +1,7 @@
-"""
-api/events.py — Event endpoints.
+"""api/events.py — Event endpoints.
 
 An Event is a named container for one or more performances.
 Examples: "Bonnaroo 2009" (festival), "Fall 1989 Tour" (tour run).
-
-Promoted to a full dimension 2026-09-01 (Ryan). It had list / search / detail /
-create / update and nothing else: no delete, no photos, no recordings on the
-detail payload, and no page in the app at all — the only way to touch an event
-was the ingest form's autocomplete. It is now the fifth dimension alongside
-Venue, Artist, Musician and Genre, and carries the same surface as the rest.
 
 Routes:
   GET    /api/events/            — list events (q= for search)
@@ -91,10 +84,8 @@ def list_events():
         # festival, and answering it for one but not the other is arbitrary.
         query = query.filter(or_(Event.name.ilike(like), Event.city.ilike(like)))
 
-    # No limit. It was 200, copied from the shape list_venues had before
-    # 2026-08-30 — and that cap is exactly the bug that silently truncated the
-    # Venues nav list mid-alphabet. Ordered by name, a 200-row cut is invisible:
-    # nothing says anything is missing. Removed here before it could bite twice.
+    # No limit. Ordered by name, a 200-row cut is invisible: nothing says
+    # anything is missing. Removed here before it could bite twice.
     events = query.order_by(Event.name).all()
 
     # Grouped counts + primary photo, not one lazy-load per row — the index page
@@ -118,8 +109,15 @@ def list_events():
     ):
         image_ids.setdefault(eid, iid)
 
+    # ?index=1: dates, venue, lineup and excerpt for the Events INDEX page.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.event_extras()
+
     return jsonify([
-        {**_event_summary(e, perf_counts.get(e.id, 0)),
+        {**extra.get(e.id, {}),
+         **_event_summary(e, perf_counts.get(e.id, 0)),
          "recording_count": rec_counts.get(e.id, 0),
          "image_id":        image_ids.get(e.id)}
         for e in events
@@ -147,16 +145,14 @@ def get_event(event_id):
     return jsonify({
         **_event_summary(e),
         "notes": e.notes,
+        "history": e.history,
         "venue": {"id": e.venue.id, "name": e.venue.name} if e.venue else None,
         "performances": [
             {
                 "id":        p.id,
-                # ⚠ This read a relationship Performance does not have until
-                # 2026-09-01 and had never been exercised — a line the
-                # 2026-07-11 remodel missed. Any
-                # request for an event with a performance attached raised
-                # AttributeError. Nothing called it, because there was no
-                # Event page. There is one now.
+                # Any request for an event with a performance attached
+                # raised AttributeError. Nothing called it, because there
+                # was no Event page. There is one now.
                 "artist":    p.artist.name if p.artist else None,
                 "artist_id": p.artist_id,
                 "date":      format_partial_date(p.start_year, p.start_month, p.start_day),
@@ -240,6 +236,8 @@ def update_event(event_id):
             setattr(e, f, _int_or_none(data[f]))
     if "notes" in data:
         e.notes = (data["notes"] or "").strip() or None
+    if "history" in data:
+        e.history = (data["history"] or "").strip() or None
 
     db.session.commit()
     return jsonify(_event_summary(e))

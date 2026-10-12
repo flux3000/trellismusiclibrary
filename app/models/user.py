@@ -20,12 +20,10 @@ class User(UserMixin, db.Model):
     username      = db.Column(db.String(64),  unique=True, nullable=False)
     email         = db.Column(db.String(255), unique=True, nullable=True)
 
-    # ── Identity, 2026-08-25 ──────────────────────────────────────────────────
     # `username` is the CREDENTIAL and stays put once chosen; `display_name` is
     # what a human sees, here and on any library this person shares. Two fields
-    # because they answer different questions — Ryan's collecting partner signed
-    # everything "oldindian" and was called Jeff, and renaming yourself should
-    # not change how you log in.
+    # because they answer different questions —  and was called Jeff, and
+    # renaming yourself should not change how you log in.
     #
     # Nullable, falling back to `username`: every existing row predates this and
     # a blank name on screen is worse than a handle.

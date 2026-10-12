@@ -1,10 +1,4 @@
-"""
-tests/test_unauthorized_responses.py — what an unauthenticated caller gets.
-
-Added 2026-08-08 after a peer-door probe reported that a peer Bearer token had
-reached the local admin API. It hadn't. flask_login was 302-ing to `login_view`
-(auth.login, a POST-only route); nothing matched GET there, so Flask fell
-through to serve_frontend's catch-all and returned index.html with status 200.
+"""tests/test_unauthorized_responses.py — what an unauthenticated caller gets.
 
 A failed authentication that answers 200 is a trap for every client:
   * the frontend only noticed because res.json() choked on HTML

@@ -1,4 +1,4 @@
-"""Strict date grammar (Resolver v2 chunk 1, 2026-10-03): never fills an unwritten component."""
+"""Strict date grammar: never fills an unwritten component."""
 import json
 import pathlib
 
@@ -109,6 +109,5 @@ def test_guitar_trio_fixture():
 
 
 def test_never_fills_from_today():
-    # Old dateutil path returned 2026-07-11 / 1974-08-03 for these.
     assert _ymd("JULY 11,1981") == (1981, 7, 11)
     assert _ymd("August 1974")[2] is None

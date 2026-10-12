@@ -1,5 +1,4 @@
-"""
-migrate_add_node_setting.py — Add the node_setting table.
+"""migrate_add_node_setting.py — Add the node_setting table.
 
 node_setting holds install-level key/value facts (currently just
 share_base_url — the public address peers enroll through) that live with
@@ -11,12 +10,11 @@ in run.py) — an existing checkout is left alone on every later boot, on
 purpose, so a half-finished model can never silently conjure a table and
 hide a skipped migration. That means every new table needs one of these.
 
-Without this, any code path touching node_setting (Settings > Sharing >
-Public address, and minting an invite) hits "no such table: node_setting"
-on an existing database, which Flask returns as an HTML error page instead
-of JSON — and Safari/WKWebView reports that as the unhelpful
-"The string did not match the expected pattern." (2026-08-30, Ryan hit
-this on both the Public address save and Create invite.)
+Without this, any code path touching node_setting (Settings > Sharing > Public
+address, and minting an invite) hits "no such table: node_setting" on an
+existing database, which Flask returns as an HTML error page instead of JSON —
+and Safari/WKWebView reports that as the unhelpful "The string did not match
+the expected pattern."
 
 Additive and idempotent — safe to re-run.
 

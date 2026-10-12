@@ -1,7 +1,4 @@
-"""
-LibraryIndex (Resolver v2, chunk 3, 2026-10-03).
-
-The reader's view of the user's own library: the Artist (act), Musician,
+"""The reader's view of the user's own library: the Artist (act), Musician,
 Membership, Venue and Event rows, loaded once per run and handed in, so the
 decoder stays pure and testable without an app context.
 

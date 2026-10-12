@@ -1,13 +1,11 @@
-"""
-tests/test_performance_personnel.py — Per-Show Personnel, Phase 1 (2026-07-18).
+"""tests/test_performance_personnel.py — Per-Show Personnel, Phase 1.
 
 Covers: stint date-bound resolution (union of intervals, coarse-date
-normalization), inherit vs explicit mode, guest rows, the stint-safe write
-path (a roster resync must not destroy dated stint history — the actual bug
-being fixed), pruning of guest-only Musicians, and the musician-aggregation
-guest_appearances field. Pure logic + DB behavior against the seeded temp DB
-— no filesystem/FLAC/librosa needed. See "Context Library/Per-Show
-Personnel — Design Plan (DRAFT).md".
+normalization), inherit vs explicit mode, guest rows, the stint-safe write path
+(a roster resync must not destroy dated stint history — the actual bug being
+fixed), pruning of guest-only Musicians, and the musician-aggregation
+guest_appearances field. Pure logic + DB behavior against the seeded temp DB —
+no filesystem/FLAC/librosa needed.(DRAFT).md".
 """
 
 import pytest
@@ -51,9 +49,6 @@ def _make_performance(artist, year, month=None, day=None, mode="inherit"):
 # ── Resolver: stint date-bound coverage ─────────────────────────────────────
 
 def test_unbounded_membership_always_covers(app, seeded_ids):
-    """Every pre-2026-07-18 row is NULL/NULL and must resolve identically to
-    'always a member' — for a normal date, and for a performance with no
-    date at all (never silently drop someone over missing data)."""
     artist = _db.session.get(Artist, seeded_ids["artist_id"])
     perf = _make_performance(artist, 1980, 2, 22)
     resolved = resolve_performance_personnel(perf)
@@ -192,8 +187,6 @@ def test_set_artist_members_keeps_dated_stint_when_dropped(app):
 
 
 def test_set_artist_members_drops_unbounded_row_when_removed(app, seeded_ids):
-    """The common case (no stint dates) still behaves exactly like before
-    2026-07-18: dropping a name from the list deletes their membership."""
     artist = _db.session.get(Artist, seeded_ids["artist_id"])
     set_artist_members(artist, [])
     remaining = _db.session.query(Membership).filter_by(artist_id=artist.id).count()
@@ -227,12 +220,13 @@ def test_update_and_remove_membership_stint(app):
 # ── API: PUT /api/performances/<id> members (the actual bug fix) ───────────
 
 def test_recording_page_edit_does_not_touch_act_roster(api, seeded_ids):
-    """The original bug: editing a recording page's Musicians pills used to
-    call set_artist_members(p.artist, ...), rewriting the ACT's global
-    roster. Adding a guest here must leave the act roster — and any OTHER
-    performance of that act — untouched. Members/Guests two-row UI
-    (2026-07-22): the two roles are now two separate submitted lists, not one
-    list with guest-vs-member inferred by diffing."""
+    """The original bug: editing a recording page's Musicians pills used to call
+    set_artist_members(p.artist, ...), rewriting the ACT's global roster.
+    Adding a guest here must leave the act roster — and any OTHER performance
+    of that act — untouched. Members/Guests two-row UI: the two roles are now
+    two separate submitted lists, not one list with guest-vs-member inferred by
+    diffing.
+    """
     perf_id = seeded_ids["performance_id"]
     artist_id = seeded_ids["artist_id"]
 
@@ -280,10 +274,11 @@ def test_dropping_inherited_member_switches_to_explicit(api, seeded_ids):
 
 
 def test_adding_member_in_inherit_mode_does_not_flip_to_explicit(api, seeded_ids):
-    """Members/Guests two-row UI (2026-07-22): adding someone via the Members
-    row who isn't on the act roster is a full-member addition for this show,
-    not a guest sit-in — but it must NOT flip the performance to explicit
-    mode (only DROPPING an inherited member does that, per case 5)."""
+    """Members/Guests two-row UI: adding someone via the Members row who isn't on
+    the act roster is a full-member addition for this show, not a guest sit-in
+    — but it must NOT flip the performance to explicit mode (only DROPPING an
+    inherited member does that, per case 5).
+    """
     perf_id = seeded_ids["performance_id"]
 
     resp = api.put(f"/api/performances/{perf_id}",
@@ -298,14 +293,14 @@ def test_adding_member_in_inherit_mode_does_not_flip_to_explicit(api, seeded_ids
 
 
 def test_added_member_later_joining_roster_does_not_duplicate(api, seeded_ids):
-    """Regression test (Ryan, 2026-07-23 — JD Crowe & the New South, recording
-    #239): add someone via the recording page's Members row (creates a
-    performance_personnel 'added' row), then separately add that SAME person
-    to the act's roster on the Artist page (a new Membership). Both
-    mechanisms now cover them, but resolve_performance_personnel must show
-    them exactly once — and removing that one pill must actually remove
-    them, not silently no-op because a duplicate with the same name kept the
-    name "in the target set" from the diffing's point of view."""
+    """Regression test: add someone via the recording page's Members row (creates
+    a performance_personnel 'added' row), then separately add that SAME person
+    to the act's roster on the Artist page (a new Membership). Both mechanisms
+    now cover them, but resolve_performance_personnel must show them exactly
+    once — and removing that one pill must actually remove them, not silently
+    no-op because a duplicate with the same name kept the name "in the target
+    set" from the diffing's point of view.
+    """
     perf_id = seeded_ids["performance_id"]
     artist = _db.session.get(Performance, perf_id).artist
 
@@ -424,13 +419,6 @@ def test_guest_only_musician_pruned_after_recording_delete(app):
 # ── Musician aggregation: guest_appearances ───────────────────────────────────
 
 def test_guest_appearance_surfaces_on_musician_page(api, app):
-    """Covers the real bug Ryan hit: Darol Anger added as a guest via the
-    recording page pill row didn't show up on his Musician page at all — the
-    backend computed guest_appearances (Chunk 4) but the frontend never
-    rendered them (2026-07-18 fix). This asserts the API includes everything
-    the person-page UI needs to render a clickable recording row: split
-    date parts, venue/location, and the actual recordings — not just a
-    display string."""
     artist = _make_artist("Someone Else's Band")
     perf = _make_performance(artist, 1985, 7, 4)
     guest = resolve_or_create_musician("Cross Pollinator")

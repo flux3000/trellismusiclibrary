@@ -1,11 +1,9 @@
-"""
-api/genres.py — Genre endpoints.
+"""api/genres.py — Genre endpoints.
 
-Genre is a proper dimension (see the Genre design spec in Context Library,
-2026-08-02): its own table, one FK from Artist, guarded delete — matching
-how Venue, Collection and Musician deletes already behave. Nothing here ever
-creates a genre implicitly; every picker in the frontend selects from this
-list only.
+Genre is a proper dimension: its own table, one FK from Artist, guarded delete
+— matching how Venue, Collection and Musician deletes already behave. Nothing
+here ever creates a genre implicitly; every picker in the frontend selects from
+this list only.
 
 Routes:
   GET    /api/genres/         — list genres (q= for search)
@@ -50,6 +48,12 @@ def list_genres():
         .filter(Artist.genre_id.isnot(None))
         .group_by(Artist.genre_id).all()
     )
+    # ?index=1: the run of artist faces on the Genres INDEX page.
+    faces = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        faces = dim_index.genre_faces()
+
     return jsonify([
         {
             "id":              g.id,
@@ -58,6 +62,7 @@ def list_genres():
             "color":           g.color,
             "artist_count": artist_counts.get(g.id, 0),
             "recording_count": recording_counts.get(g.id, 0),
+            **({"faces": faces.get(g.id, [])} if request.args.get("index") else {}),
         }
         for g in genres
     ])
@@ -71,10 +76,10 @@ _HEX_RE = __import__("re").compile(r"^#[0-9a-fA-F]{6}$")
 
 def _clean_color(raw):
     """
-    Normalise a submitted colour to lowercase `#rrggbb`, or None to clear it.
+    Normalise a submitted colour to lowercase `#rrggbb`.
 
-    Returns (value, error). Clearing is explicitly supported: NULL is a real
-    state that renders neutral grey, not a validation failure.
+    Returns (value, error). Empty or missing input returns (None, None); the
+    caller decides what that means (create assigns a default, update rejects).
     """
     if raw is None:
         return None, None
@@ -161,6 +166,9 @@ def create_genre():
     color, err = _clean_color(data.get("color"))
     if err:
         return jsonify({"error": err}), 400
+    if color is None:
+        from app.utils.genre_color import next_genre_color
+        color = next_genre_color(db.session)
     g = Genre(name=name, description=(data.get("description") or "").strip() or None,
               color=color)
     db.session.add(g)
@@ -190,6 +198,8 @@ def update_genre(genre_id):
         color, err = _clean_color(data["color"])
         if err:
             return jsonify({"error": err}), 400
+        if color is None:
+            return jsonify({"error": "color is required"}), 400
         g.color = color
     db.session.commit()
     return jsonify({"id": g.id, "color": g.color})

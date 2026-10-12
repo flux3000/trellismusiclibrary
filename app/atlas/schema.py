@@ -1,5 +1,4 @@
-"""
-Atlas schema, matching keys and fuzzy scoring (Resolver v2, chunk 4).
+"""Atlas schema, matching keys and fuzzy scoring.
 
 Shared by build.py (writes the file) and lookup.py (reads it), so the two can
 never disagree about how a name becomes a key. Stdlib only.

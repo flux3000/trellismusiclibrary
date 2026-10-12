@@ -25,13 +25,14 @@ from app.lomax import core
 from app.lomax.apply import ApplyError, apply_proposal
 from app.lomax.core import LomaxConflict, LomaxError, LomaxNotFound, norm_key
 from app.lomax.skills import SKILLS
-from app.models.lomax import LomaxProposal, LomaxRun
+from app.lomax import eggs
+from app.models.lomax import LomaxEasterEggSeen, LomaxProposal, LomaxRun
 
 __all__ = ["SKILLS", "LomaxError", "LomaxNotFound", "ApplyError", "create_run", "start_run", "run_now",
            "get_run", "list_runs", "latest_run", "latest_result", "decide", "estimate", "repoint_folder",
            "adopt_result", "run_dict", "restore", "usage_log", "LomaxConflict"]
 
-_SUBJECT_MODELS = {"recording": "Recording", "artist": "Artist", "venue": "Venue"}
+_SUBJECT_MODELS = {"recording": "Recording", "artist": "Artist", "venue": "Venue", "musician": "Musician", "event": "Event"}
 
 
 def _parsed(text):
@@ -106,6 +107,16 @@ def clean_result(run, result):
     return out
 
 
+def _lineup_rows(names):
+    """The lineup as {name, in_library}: reference data only, flagged when an Artist of that name exists."""
+    from sqlalchemy import func
+    from app.models.artist import Artist
+    names = [n if isinstance(n, str) else (n or {}).get("name") for n in names]
+    have = {n.lower() for (n,) in db.session.query(func.lower(Artist.name))
+            .filter(func.lower(Artist.name).in_([n.lower() for n in names if n])).all()}
+    return [{"name": n, "in_library": n.lower() in have} for n in names if n]
+
+
 def run_dict(run):
     result = _parsed(run.result_json)
     skill = "recording" if run.skill == "resolution" else run.skill      # legacy rows still read
@@ -115,11 +126,40 @@ def run_dict(run):
     if result is not None and run.proposals:
         result["proposals"] = [proposal_dict(p) for p in run.proposals]
     result = clean_result(run, result)
+    if isinstance(result, dict) and run.skill == "event" and result.get("lineup"):
+        result = dict(result, lineup=_lineup_rows(result["lineup"]))
     return {"id": run.id, "skill": skill, "subject_type": run.subject_type, "subject_id": run.subject_id,
             "subject_key": run.subject_key, "level": core.LEVEL_ALIASES.get(run.level, run.level), "question": run.question,
             "status": run.status, "result": result, "usage": _parsed(run.usage_json), "model": run.model,
             "error": run.error, "created_by": run.created_by, "fingerprint": fingerprint,
+            "ack_text": eggs.EGGS.get((_parsed(run.input_json) or {}).get("egg")),
             "created_at": _iso(run.created_at), "finished_at": _iso(run.finished_at)}
+
+
+def _pick_egg(run, user_id):
+    """The easter egg this run opens with, or None. Only a run a person started with a question on a saved
+    subject or About page (an import run has no question, a folder run is unsaved); about one in ODDS; never right after another egg for the
+    same person; each egg at most once per person. Records the pick. Off under TESTING unless
+    LOMAX_EGGS is set."""
+    import random
+    cfg = current_app.config
+    if not user_id or not run.question or run.subject_type == "folder":
+        return None
+    if not cfg.get("LOMAX_EGGS", not cfg.get("TESTING")):
+        return None
+    if random.randrange(int(cfg.get("LOMAX_EGG_ODDS", eggs.ODDS))) != 0:
+        return None
+    last = (db.session.query(LomaxRun).filter(LomaxRun.created_by == user_id, LomaxRun.question.isnot(None))
+            .order_by(LomaxRun.id.desc()).first())
+    if last is not None and (_parsed(last.input_json) or {}).get("egg"):
+        return None
+    seen = {r[0] for r in db.session.query(LomaxEasterEggSeen.egg_key).filter_by(user_id=user_id)}
+    left = [k for k in eggs.EGGS if k not in seen]
+    if not left:
+        return None
+    key = random.choice(left)
+    db.session.add(LomaxEasterEggSeen(user_id=user_id, egg_key=key))
+    return key
 
 
 def create_run(skill, subject_type, *, subject_id=None, subject_key=None, level="research",
@@ -149,6 +189,9 @@ def create_run(skill, subject_type, *, subject_id=None, subject_key=None, level=
                    level=level, question=(question or "").strip() or None, status="queued",
                    model=core.default_model(user_id), created_by=user_id,
                    input_json=json.dumps(current) if (subject_type == "folder" and current) else None)
+    egg = _pick_egg(run, user_id)
+    if egg:
+        run.input_json = json.dumps({"egg": egg})
     db.session.add(run)
     db.session.commit()
     return run
@@ -220,8 +263,8 @@ def decide(proposal_id, decision, user_id=None):
     prop = db.session.get(LomaxProposal, proposal_id)
     if prop is None:
         raise LomaxNotFound("Proposal not found.")
-    if prop.agrees:
-        raise LomaxError("Lomax agrees with this value; there is nothing to decide.")
+    if prop.agrees:      # "agrees" was true when the run was made; the page offers a decision only once the live value differs
+        prop.agrees = False
     if decision == "accepted" and prop.decision != "accepted":
         apply_proposal(prop, prop.run, user_id)
     prop.decision, prop.decided_at = decision, datetime.now(timezone.utc)
@@ -265,7 +308,7 @@ def adopt_result(recording_id, result, user_id=None, skill=None):
     return run
 
 
-_RESTORABLE = {"bio": ("artist", "bio"), "history": ("venue", "history")}
+_RESTORABLE = {"bio": ("artist", "musician"), "history": ("venue", "event")}
 
 
 def restore(run_id):
@@ -279,7 +322,10 @@ def restore(run_id):
         raise LomaxNotFound("Nothing to restore.")
     if result.get("restored_at"):
         raise LomaxError("Already restored.")
-    subject_type, attr = _RESTORABLE[rep["field"]]
+    attr = rep["field"]
+    subject_type = run.subject_type
+    if subject_type not in _RESTORABLE.get(attr, ()):
+        raise LomaxNotFound("Nothing to restore.")
     obj = db.session.get(getattr(models, subject_type.capitalize()), run.subject_id)
     if obj is None:
         raise LomaxNotFound("The %s no longer exists." % subject_type)
@@ -293,7 +339,8 @@ def restore(run_id):
 
 
 SKILL_LABELS = {"resolution": "Recording", "recording": "Recording",
-                "artist": "Artist History", "venue": "Venue History", "album": "Album"}
+                "artist": "Artist History", "venue": "Venue History", "album": "Album",
+                "musician": "Musician Biography", "event": "Event History"}
 
 
 def _subject_label(run):

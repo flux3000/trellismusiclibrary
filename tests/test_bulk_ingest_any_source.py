@@ -55,7 +55,7 @@ def _never_stop():
 @pytest.fixture()
 def env(app, tmp_path, monkeypatch, seeded_ids):
     """allowed/ holds the library and an incoming folder; elsewhere/ is outside
-    IMPORT_ROOTS. Follow-up enqueueing is stubbed (R2-N4)."""
+    IMPORT_ROOTS. Follow-up enqueueing is stubbed."""
     allowed = tmp_path / "allowed"
     lib = allowed / "lib"
     incoming = allowed / "incoming"
@@ -150,8 +150,6 @@ def test_start_rejects_bad_paths(app, env):
 
 
 def test_start_accepts_any_folder_for_the_admin(app, env):
-    # Ryan, 2026-10-02: the admin's music can live anywhere, so IMPORT_ROOTS
-    # does not bind them; a folder outside the roots starts a run.
     c = app.test_client()
     _admin(c)
     r = c.post("/api/bulk-ingest/start", json={"path": str(env.elsewhere)})
@@ -371,8 +369,6 @@ def test_in_library_single_show_folder_is_cataloged_in_place(env):
 
 
 def test_runs_waiting_counts_a_folder_once_across_runs(app, env):
-    # 2026-10-02: a one-folder Downloads run and a later run over all of
-    # Downloads both held the same show, and the badge read 4 for 2 rows.
     show = env.incoming / "ShowA"
     show.mkdir()
     one = _run(show, status="paused")

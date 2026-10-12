@@ -1,13 +1,11 @@
-"""
-app/utils/peer_auth.py — the peer authentication door.
+"""app/utils/peer_auth.py — the peer authentication door.
 
 Entirely separate from the local `@login_required` (flask_login) path. A peer
 never gets a cookie session and never becomes `current_user`; they present a
 Bearer token that resolves to a Peer stored on `flask.g`. The peer-facing
 blueprint (api/share.py) is the ONLY place `@peer_required` is used, and it
 contains no editing endpoints — so a peer token is structurally incapable of
-reaching anything that mutates the library. See "Peer Sharing — Design Spec
-v1" in the Drive Context Library.
+reaching anything that mutates the library.
 
 Secrets (tokens + invite codes) are generated here, shown to the human ONCE,
 and stored only as SHA-256 hashes. Verification re-hashes the presented

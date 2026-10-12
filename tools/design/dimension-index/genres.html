@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Genres</title>
+<style>
+@font-face{font-family:'Archivo';font-weight:100 900;src:url('../../../app/static/fonts/archivo-latin-wght-normal.woff2') format('woff2-variations')}
+@font-face{font-family:'IBM Plex Sans';font-weight:100 700;src:url('../../../app/static/fonts/ibm-plex-sans-latin-wght-normal.woff2') format('woff2-variations')}
+</style>
+<link rel="stylesheet" href="../../../app/static/css/main.css">
+<link rel="stylesheet" href="dimension-index.css">
+</head><body class="dx-mock">
+<div class="dx-mockbar"><select id="pal"><option>steely</option><option>krauss</option><option>monk</option><option>joni</option><option>hazel</option><option>townes</option><option>chet</option><option>gram</option><option>cale</option><option>miles</option><option>alice</option><option>eno</option></select></div>
+<main class="dx-page" id="page"></main>
+<script>
+const KIND="genres";
+const DATA=[{"id": 1, "name": "Rock & Pop", "color": "#c9605a", "text": "", "nartists": 23, "recs": 64, "dec": {"1960": 7, "1970": 21, "2010": 4, "2020": 7, "2000": 9, "1990": 9, "1980": 7}, "faces": [{"id": 274, "name": "Radiohead", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 1, "name": "Grateful Dead", "img": {"ext": ".png", "origin": "commons", "credit": "Herb Greene · Public domain · via Wikimedia Commons"}}, {"id": 26, "name": "Crosby, Stills, Nash & Young", "img": {"ext": ".jpg", "origin": "commons", "credit": "Tony Morelli · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 171, "name": "Elton John", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 276, "name": "Michael Jackson", "img": {"ext": ".webp", "origin": "upload", "credit": null}}, {"id": 12, "name": "Khruangbin", "img": {"ext": ".jpg", "origin": "commons", "credit": "Raph_PH · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 22, "name": "Brian Wilson", "img": {"ext": ".jpg", "origin": "commons", "credit": "IthakaDarinPappas · CC BY-SA 4.0 · via Wikimedia Commons"}}, {"id": 23, "name": "Bruce Hornsby", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}]}, {"id": 2, "name": "Blues", "color": "#3f7fa8", "text": "", "nartists": 5, "recs": 18, "dec": {"1970": 10, "2000": 2, "1980": 3, "1990": 3}, "faces": [{"id": 17, "name": "Allman Brothers Band", "img": {"ext": ".jpg", "origin": "commons", "credit": "Unknown authorUnknown author · Public domain · via Wikimedia Commons"}}, {"id": 48, "name": "Danny Gatton", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 185, "name": "Corey Harris", "img": {"ext": ".jpg", "origin": "commons", "credit": "Mossburg79 · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 169, "name": "Danny Gatton & Funhouse", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 84, "name": "Danny Gatton Trio", "img": null}]}, {"id": 3, "name": "Jazz", "color": "#6a7fb5", "text": "", "nartists": 42, "recs": 197, "dec": {"1970": 38, "1980": 32, "1960": 14, "1990": 24, "2010": 11, "2000": 69, "2020": 6, "1950": 3}, "faces": [{"id": 56, "name": "Esbjörn Svensson Trio", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 39, "name": "Pat Metheny Group", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 252, "name": "Oscar Peterson Trio", "img": {"ext": ".webp", "origin": "upload", "credit": null}}, {"id": 2, "name": "Bill Evans Trio", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 285, "name": "Keith Jarrett", "img": {"ext": ".jpg", "origin": "commons", "credit": "Published by ABC/Impulse! Records. Photographer uncredited and unknown. · Public domain · via Wikimedia Commons"}}, {"id": 47, "name": "Al Di Meola, John McLaughlin and Paco de Lucía", "img": {"ext": ".png", "origin": "upload", "credit": null}}, {"id": 196, "name": "Cannonball Adderley Quintet", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 275, "name": "Mehliana", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}]}, {"id": 5, "name": "Bluegrass & Traditional", "color": "#7a9a5b", "text": "", "nartists": 70, "recs": 259, "dec": {"1980": 51, "1990": 82, "2000": 48, "1960": 43, "1970": 29, "1950": 4, "2020": 1, "2010": 1}, "faces": [{"id": 83, "name": "Tony Rice Unit", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 162, "name": "Seldom Scene", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 159, "name": "Kentucky Colonels", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 125, "name": "Hot Rize", "img": {"ext": ".jpg", "origin": "commons", "credit": "armadilo60 · CC BY-SA 2.0 · via Wikimedia Commons"}}, {"id": 10, "name": "Alison Krauss & Union Station", "img": {"ext": ".jpg", "origin": "commons", "credit": "https://www.flickr.com/photos/ejmc/ · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 91, "name": "J.D. Crowe and the New South", "img": {"ext": ".jpg", "origin": "commons", "credit": "Lee Paxton · CC BY-SA 4.0 · via Wikimedia Commons"}}, {"id": 96, "name": "Bluegrass Sessions", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 71, "name": "Acoustic All-Stars", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}]}, {"id": 6, "name": "Acoustic Jazz & Newgrass", "color": "#5fa39a", "text": "", "nartists": 26, "recs": 70, "dec": {"1990": 11, "2000": 38, "2010": 8, "2020": 4, "1970": 5, "1980": 4}, "faces": [{"id": 61, "name": "Chris Thile", "img": {"ext": ".jpg", "origin": "commons", "credit": "Marcelo Teson from Los Angeles, CA, USA · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 79, "name": "David Grisman Quintet", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 37, "name": "Bela Fleck & Sandip Burman", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 135, "name": "Mike Marshall, Todd Phillips, Tony Rice, Darol Anger", "img": {"ext": ".png", "origin": "upload", "credit": null}}, {"id": 59, "name": "Brad Mehldau", "img": {"ext": ".jpg", "origin": "commons", "credit": "Björn Milcke · Public domain · via Wikimedia Commons"}}, {"id": 63, "name": "Chris Thile & Friends", "img": {"ext": ".webp", "origin": "upload", "credit": null}}, {"id": 189, "name": "Bill Frisell, Jerry Douglas, Victor Krauss", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 133, "name": "Hot Club of Nashville", "img": null}]}, {"id": 7, "name": "Folk", "color": "#9a8f5e", "text": "", "nartists": 1, "recs": 20, "dec": {"1960": 5, "1970": 12, "1980": 3}, "faces": [{"id": 144, "name": "Joni Mitchell", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}]}, {"id": 8, "name": "Americana & Country", "color": "#c08a4a", "text": "", "nartists": 12, "recs": 24, "dec": {"1970": 10, "1980": 1, "1940": 4, "1950": 1, "2010": 2, "2000": 3, "1990": 3}, "faces": [{"id": 21, "name": "Bonnie Raitt", "img": {"ext": ".jpg", "origin": "commons", "credit": "John Edwards · CC BY-SA 2.0 · via Wikimedia Commons"}}, {"id": 160, "name": "Leo Kottke", "img": {"ext": ".jpg", "origin": "commons", "credit": "Anthony Pepitone · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 114, "name": "Darrell Scott", "img": {"ext": ".jpg", "origin": "commons", "credit": "Erik Joling at Dutch Wikipedia (Original text: Erik Joling) · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 121, "name": "Hank Williams", "img": {"ext": ".jpg", "origin": "commons", "credit": "WSM radio · Public domain · via Wikimedia Commons"}}, {"id": 100, "name": "Bob Wills and His Texas Playboys", "img": {"ext": ".jpg", "origin": "commons", "credit": "University of Missouri · Public domain · via Wikimedia Commons"}}, {"id": 105, "name": "Black Prairie", "img": {"ext": ".jpg", "origin": "commons", "credit": "Johan Broberg · CC BY 2.0 · via Wikimedia Commons"}}, {"id": 113, "name": "Cahalen Morrison and Eli West", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 120, "name": "Guy Clark", "img": {"ext": ".jpg", "origin": "commons", "credit": "William Wallace from Austin, TX, USA · CC BY 2.0 · via Wikimedia Commons"}}]}, {"id": 10, "name": "Funk", "color": "#d08a2e", "text": "", "nartists": 6, "recs": 19, "dec": {"1990": 6, "1970": 5, "2020": 1, "1980": 6, "2000": 1}, "faces": [{"id": 53, "name": "Fela Kuti", "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 7, "name": "The Meters", "img": {"ext": ".jpg", "origin": "commons", "credit": "Annettejones07 · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 29, "name": "Dr. John with The Meters", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 166, "name": "Dr. John and the Lower 911", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 41, "name": "The Budos Band", "img": null}, {"id": 60, "name": "The Meters with The JB Horns", "img": null}]}, {"id": 11, "name": "Soul / R&B", "color": "#a05a3c", "text": "", "nartists": 8, "recs": 13, "dec": {"2000": 3, "1970": 2, "1980": 3, "2010": 2, "2020": 1, "1960": 1, "1990": 1}, "faces": [{"id": 11, "name": "D'Angelo & the Soultronics", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 16, "name": "Al Green", "img": {"ext": ".jpg", "origin": "commons", "credit": "Mike Douglas Show · Public domain · via Wikimedia Commons"}}, {"id": 27, "name": "Curtis Mayfield", "img": {"ext": ".png", "origin": "commons", "credit": "AVRO · CC BY-SA 3.0 nl · via Wikimedia Commons"}}, {"id": 58, "name": "Marvin Gaye", "img": {"ext": ".jpg", "origin": "commons", "credit": "Photograph by Jim Britt, whose other (copyrighted) photos of Gaye from the same session—many of them in full color—can be seen at his website. Originally distributed by Motown Records. · Public domain · via Wikimedia Commons"}}, {"id": 38, "name": "Olivia Dean", "img": {"ext": ".jpg", "origin": "commons", "credit": "Raph_PH · CC BY 4.0 · via Wikimedia Commons"}}, {"id": 175, "name": "Aretha Franklin", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 273, "name": "Isaac Hayes", "img": {"ext": ".jpg", "origin": "commons", "credit": "Unknown photographer · Public domain · via Wikimedia Commons"}}, {"id": 35, "name": "D'Angelo & the Vanguard", "img": null}]}, {"id": 13, "name": "Reggae", "color": "#3f9a6a", "text": "", "nartists": 2, "recs": 2, "dec": {"1970": 1, "2000": 1}, "faces": [{"id": 20, "name": "Bob Marley & The Wailers", "img": {"ext": ".jpg", "origin": "commons", "credit": "Tankfield · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 192, "name": "Buju Banton", "img": {"ext": ".jpg", "origin": "commons", "credit": "Flickr user wili_hybrid · CC BY 2.0 · via Wikimedia Commons"}}]}, {"id": 20, "name": "World", "color": "#b06a8a", "text": "", "nartists": 1, "recs": 1, "dec": {"1990": 1}, "faces": [{"id": 55, "name": "Ali Farka Touré", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}]}, {"id": 21, "name": "Rap", "color": "#7d7f88", "text": "", "nartists": 5, "recs": 8, "dec": {"1990": 3, "2000": 5}, "faces": [{"id": 173, "name": "Cypress Hill", "img": {"ext": ".jpg", "origin": "commons", "credit": "Philgarlic · CC BY-SA 2.0 · via Wikimedia Commons"}}, {"id": 168, "name": "Outkast", "img": {"ext": ".jpg", "origin": "commons", "credit": "Sven Mandel · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 14, "name": "A Tribe Called Quest", "img": {"ext": ".jpg", "origin": "commons", "credit": "swimfinfan from Chicago · CC BY-SA 2.0 · via Wikimedia Commons"}}, {"id": 19, "name": "Black Star", "img": {"ext": ".jpg", "origin": "commons", "credit": "Tuomas Vitikainen · CC BY-SA 3.0 · via Wikimedia Commons"}}, {"id": 190, "name": "Big Boi", "img": {"ext": ".jpg", "origin": "commons", "credit": "Utoks · CC BY 3.0 · via Wikimedia Commons"}}]}, {"id": 22, "name": "Hindustani", "color": null, "text": "", "nartists": 3, "recs": 3, "dec": {"1990": 1, "1980": 1, "2010": 1}, "faces": [{"id": 193, "name": "Aruna Sairam", "img": {"ext": ".jpg", "origin": "commons", "credit": "Rockjaz · CC BY-SA 4.0 · via Wikimedia Commons"}}, {"id": 236, "name": "Hariprasad Chaurasia & Zakir Hussain", "img": {"ext": ".jpeg", "origin": "upload", "credit": null}}, {"id": 249, "name": "Shahid Parvez Khan & Lalgudi Krishnan", "img": null}]}];
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+const initials=n=>String(n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+const years=(a,b)=>!a?'':(!b||a===b)?String(a):`${a}-${b}`;
+const byName=(a,b)=>(a.sort||a.name).localeCompare(b.sort||b.name);
+const inkOn=hex=>{if(!/^#[0-9a-f]{6}$/i.test(hex||''))return 'var(--t0)';
+  const n=parseInt(hex.slice(1),16),f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};
+  const L=.2126*f(n>>16)+.7152*f(n>>8&255)+.0722*f(n&255);return L>.4?'#141210':'#ffffff'};
+document.getElementById('pal').addEventListener('change',e=>document.documentElement.setAttribute('data-palette',e.target.value));
+document.getElementById('pal').value='cale';
+
+/* photo with fallback underneath. Place files at photos/<kind>/<id>.<ext>
+   (see README); a missing file just leaves the fallback showing. */
+function art(d,kind,color){
+  const f=`<span class="dx-ini">${esc(initials(d.name))}</span>`;
+  const im=d.img?`<img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.remove()">`:'';
+  return `<span class="dx-art"${color?` style="--dx-fg:${esc(color)}"`:''}>${f}${im}</span>`;
+}
+function photo(d,kind){
+  if(!d.img)return '';
+  return `<span class="dx-photo"><img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></span>`;
+}
+
+/* cfg: title, rows, row(d)->html, sorts[{id,label,cmp}], search(d)->string,
+   filter{label,get(d)} optional, group{sort,key(d),label(d)} optional */
+function run(cfg){
+  let sortId=cfg.sorts[0].id,q='',fv='';
+  const opts=cfg.filter?[...new Set(cfg.rows.map(cfg.filter.get).filter(Boolean))].sort():[];
+  document.getElementById('page').innerHTML=`
+   <h1 class="dx-title">${esc(cfg.title)}</h1>
+   <div class="dim-bar">
+     <input class="dim-search" id="q" placeholder="Filter ${esc(cfg.title.toLowerCase())}…" autocomplete="off">
+     <div class="dim-sorts" id="sorts">${cfg.sorts.map(s=>`<button class="dim-sort${s.id===sortId?' active':''}" data-s="${s.id}">${esc(s.label)}</button>`).join('')}</div>
+     ${cfg.filter?`<select class="dx-select" id="f"><option value="">${esc(cfg.filter.label)}</option>${opts.map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:''}
+     <span class="dim-count" id="n"></span>
+   </div><div id="out"></div>`;
+  function paint(){
+    const t=q.trim().toLowerCase();
+    let r=cfg.rows.filter(d=>(!t||cfg.search(d).toLowerCase().includes(t))&&(!fv||cfg.filter.get(d)===fv));
+    r=r.slice().sort(cfg.sorts.find(s=>s.id===sortId).cmp);
+    let h='';
+    if(cfg.group&&cfg.group.sort===sortId){
+      const gs=[];r.forEach(d=>{const k=cfg.group.key(d);let g=gs[gs.length-1];if(!g||g.k!==k){g={k,l:cfg.group.label(d),rows:[]};gs.push(g)}g.rows.push(d)});
+      h=gs.map(g=>`<section class="dx-group"><div class="dx-gutter">${esc(g.l)}</div><div class="dx-list">${g.rows.map(cfg.row).join('')}</div></section>`).join('');
+    }else h=`<div class="dx-list">${r.map(cfg.row).join('')}</div>`;
+    document.getElementById('out').innerHTML=r.length?h:`<div class="dim-empty">Nothing matches.</div>`;
+    document.getElementById('n').textContent=(t||fv)?`${r.length} of ${cfg.rows.length}`:'';
+  }
+  document.getElementById('q').addEventListener('input',e=>{q=e.target.value;paint()});
+  document.getElementById('sorts').addEventListener('click',e=>{const b=e.target.closest('.dim-sort');if(!b)return;sortId=b.dataset.s;
+    document.querySelectorAll('.dim-sort').forEach(x=>x.classList.toggle('active',x===b));paint()});
+  if(cfg.filter)document.getElementById('f').addEventListener('change',e=>{fv=e.target.value;paint()});
+  paint();
+}
+
+/* Three alternatives over the same rows. Genres are few (13) and have no
+   photographs or descriptions, so no search or filter in any of them. */
+const G=DATA.slice().sort((a,b)=>b.recs-a.recs);
+const maxR=Math.max(...G.map(g=>g.recs));
+const DEC=[1950,1960,1970,1980,1990,2000,2010,2020];
+const maxD=Math.max(...G.flatMap(g=>DEC.map(d=>g.dec[d]||0)));
+const fg=g=>g.color?`--dx-fg:${g.color}`:'';
+const num=(n,w)=>`<div class="dx-n">${n}</div><div class="dx-nl">${w}</div>`;
+const A=`<div class="dx-opt">A. Composition strip and ledger</div>
+ <div class="gx-strip">${G.filter(g=>g.recs).map(g=>`<i style="${fg(g)};flex:${g.recs}" title="${esc(g.name)}"></i>`).join('')}</div>
+ <div class="dx-list">${G.map(g=>`<a class="gx-row" href="#/genre/${g.id}" style="${fg(g)}"><span class="dx-sw"></span>
+   <span class="dx-name">${esc(g.name)}</span><span class="dx-side">${num(g.nartists,'Artists')}</span><span class="dx-side">${num(g.recs,'Recordings')}</span></a>`).join('')}</div>`;
+const B=`<div class="dx-opt">B. Colour key and roster</div>
+ <div class="dx-list">${G.map(g=>`<a class="gb-row" href="#/genre/${g.id}" style="${fg(g)}">
+   <span class="gb-key" style="color:${inkOn(g.color)}">${g.recs}</span>
+   <span class="dx-body"><div class="dx-name">${esc(g.name)}</div><div class="dx-sub">${plural(g.nartists,'artist')}</div>
+   <div class="gb-faces">${g.faces.map(f=>art(f,'artists',g.color)).join('')}</div></span></a>`).join('')}</div>`;
+const C=`<div class="dx-opt">C. Decades</div>
+ <div class="gc-head"><span></span><div class="gc-dec" style="--cols:${DEC.length}">${DEC.map(d=>`<span>${String(d).slice(2)}s</span>`).join('')}</div><span></span></div>
+ <div class="dx-list">${G.map(g=>`<a class="gc-row" href="#/genre/${g.id}" style="${fg(g)}">
+   <span class="dx-name"><span class="dx-sw"></span>${esc(g.name)}</span>
+   <span class="gc-dec" style="--cols:${DEC.length}">${DEC.map(d=>{const n=g.dec[d]||0;return n?`<i style="--p:${Math.round(18+82*Math.sqrt(n/maxD))}%" title="${n}"></i>`:'<i></i>'}).join('')}</span>
+   <span class="dx-side"><div class="dx-n">${g.recs}</div></span></a>`).join('')}</div>`;
+document.getElementById('page').innerHTML=`<h1 class="dx-title">Genres</h1>${A}${B}${C}`;
+
+</script></body></html>

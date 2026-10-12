@@ -4,7 +4,7 @@ import json
 from app.extensions import db
 from app.lomax import evidence as ev
 from app.lomax.prompts import EvidenceSection
-from app.lomax.skills.base import Skill
+from app.lomax.skills.base import REPLY_PROP, Skill
 from app.lomax.sources import trusted_section
 
 INSTRUCTIONS = """SKILL: Artist History.
@@ -39,6 +39,7 @@ SUBMIT = {
         "properties": {
             "thinking": {"type": "string"},
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
+            "reply": REPLY_PROP,
             "biography": {"type": "string"},
             "members": {"type": "array", "description": "One entry per person per continuous stint.",
                         "items": {"type": "object", "properties": {
@@ -70,7 +71,7 @@ def gather(subject, ctx):
 def normalize(raw, subject):
     members = [m for m in (raw.get("members") or []) if isinstance(m, dict) and m.get("name")]
     resources = [r for r in (raw.get("resources") or []) if isinstance(r, dict) and r.get("url")]
-    result = {"thinking": raw.get("thinking", ""), "answer": raw.get("answer", ""),
+    result = {"thinking": raw.get("thinking", ""), "answer": raw.get("answer", ""), "reply": raw.get("reply", ""),
               "biography": raw.get("biography", ""), "members": members, "resources": resources,
               "sources": raw.get("sources") or []}
     props = ([{"field": "member", "proposed": json.dumps(m), "confidence": m.get("confidence"),
@@ -80,8 +81,10 @@ def normalize(raw, subject):
 
 
 def apply_auto(subject, result):
-    """The one auto-apply (CONTEXT.md): a non-empty biography replaces the description. It is
-    visible the moment it lands, freely editable, and nothing else computes from it."""
+    """The one auto-apply: a non-empty biography replaces the description. It is
+    visible the moment it lands, freely editable, and nothing else computes
+    from it.
+    """
     bio = (result.get("biography") or "").strip()
     if not bio:
         return None

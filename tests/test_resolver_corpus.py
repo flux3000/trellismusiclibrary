@@ -573,7 +573,7 @@ def test_missing_g3_message_points_at_the_collector(tmp_path):
         ev.run_tier("G3", "reader", corpus_dir=tmp_path)
 
 
-# ── The real catalog pages (excerpt, saved 2026-10-04) ────────────────────────
+# ── The real catalog pages ────────────────────────
 
 def test_real_excerpt_rows_are_found_though_almost_none_link_to_a_folder():
     html = common.decode_text((FIX / "catalog_real_excerpt.htm").read_bytes())    # cp1252, no </body></html>

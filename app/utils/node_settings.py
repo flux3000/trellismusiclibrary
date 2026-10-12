@@ -1,12 +1,8 @@
-"""
-app/utils/node_settings.py -- env-first, DB-fallback settings for this install.
+"""app/utils/node_settings.py -- env-first, DB-fallback settings for this install.
 
-SHARE_BASE_URL started as env-var-only (2026-08-25): fine for the headless
-share node (run_headless.py takes real env vars), useless for the desktop
-app that actually mints invites (a Dock launch gets none). Decided
-2026-08-27: keep the env var as an override for the server-mode deployment,
-but fall back to a value stored in the node_setting table so the desktop app
-can set it from Settings instead of a shell.
+SHARE_BASE_URL started as env-var-only: fine for the headless share node
+(run_headless.py takes real env vars), useless for the desktop app that
+actually mints invites (a Dock launch gets none).
 """
 
 import os
@@ -16,8 +12,8 @@ from app.models.node_setting import NodeSetting
 
 SHARE_BASE_URL_KEY = "share_base_url"
 
-# Whether new ingests are filed under an <Artist>/ directory (2026-09-17).
-# An INSTALL-level setting, not a per-user preference: a library has one
+# Whether new ingests are filed under an <Artist>/ directory. An
+# INSTALL-level setting, not a per-user preference: a library has one
 # shape, and two users on one install disagreeing would produce exactly the
 # hybrid tree this setting exists to prevent. Defaults ON, which is what
 # every library Trellis laid out itself already looks like -- an existing
@@ -85,8 +81,6 @@ def set_file_under_artist_folder(enabled):
     return enabled
 
 
-# ── File handling (2026-09-25) ───────────────────────────────────────────────
-#
 # One install-level mode, `file_handling_mode` (`keep` / `organize`), that
 # governs six independently-editable switches. Absent reads as `keep`; the
 # migration seeds `organize` on any database that already has recording rows
@@ -206,18 +200,18 @@ def set_file_handling(**changes):
         effective_template = changes.get(NAMING_TEMPLATE_KEY)
         if effective_template is None:
             effective_template = _get_setting(NAMING_TEMPLATE_KEY)
-        # R4 (review, 2026-09-25): S9's "reject custom with an empty
-        # template" HERE, at save time, made Custom unselectable on a fresh
-        # install -- the Settings select saves naming_scheme='custom' alone
-        # the moment it's picked, before the (until-then readonly) Template
-        # field has anything in it, so that first save always hit this
-        # rejection and reverted the select. naming_scheme=custom with an
-        # empty template is now accepted as a transitional state: Settings
-        # unlocks the Template field once the stored scheme reads 'custom',
-        # the user types a template, and THAT save (naming_template alone,
-        # scheme already 'custom') is what gets parse-validated below.
-        # Ingest time still refuses an empty template outright --
-        # rename_plan()/compute_audio_rename_map() raise their own
+        # R4: S9's "reject custom with an empty template" HERE, at save
+        # time, made Custom unselectable on a fresh install -- the Settings
+        # select saves naming_scheme='custom' alone the moment it's picked,
+        # before the (until-then readonly) Template field has anything in
+        # it, so that first save always hit this rejection and reverted the
+        # select. naming_scheme=custom with an empty template is now
+        # accepted as a transitional state: Settings unlocks the Template
+        # field once the stored scheme reads 'custom', the user types a
+        # template, and THAT save (naming_template alone, scheme already
+        # 'custom') is what gets parse-validated below. Ingest time still
+        # refuses an empty template outright --
+        # rename_plan/compute_audio_rename_map raise their own
         # TemplateError before any file is touched, unchanged by this.
         if effective_template:
             from app.utils.file_naming import parse_template, TemplateError
@@ -247,7 +241,7 @@ DOWNLOAD_QUEUE_PAUSED_KEY = "download_queue_paused"
 def download_queue_paused():
     """Paused means the worker takes no NEW job; a running one finishes. A node
     setting rather than a column: it is a fact about the queue, not a job.
-    (2026-10-01)"""
+    """
     row = db.session.get(NodeSetting, DOWNLOAD_QUEUE_PAUSED_KEY)
     return bool(row and row.value == "true")
 

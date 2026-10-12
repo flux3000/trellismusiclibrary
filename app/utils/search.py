@@ -1,5 +1,4 @@
-"""
-utils/search.py — the V1 search engine (IO-46).
+"""utils/search.py — the V1 search engine.
 
 Pure Python: no Flask, no SQLAlchemy, no app context. Callers build a plain
 index of dicts (see `build_index`) and hand it to `run_search`. That split is
@@ -9,7 +8,6 @@ hardest thing in this codebase to test honestly. Keeping the matching logic
 pure sidesteps that trap for the part where the bugs actually live.
 
 ────────────────────────────────────────────────────────────────────────────
-THE RULE  (Ryan, 2026-08-18, re-confirmed at build kickoff)
 
     "We search only the musician, artist, date, venue, or any combination
      of the above."
@@ -17,20 +15,17 @@ THE RULE  (Ryan, 2026-08-18, re-confirmed at build kickoff)
 Four dimensions. Track titles are NOT searchable, and neither is provenance
 free text (`recording.lineage`, `recording.info_file_content`). Both were
 approved earlier in that same design session and then explicitly cut — "start
-with a basic search that ignores text file and song names." The computed
-"Songs — N versions" group depends on title search and therefore does not
-exist in V1. Do not add either back without asking; IO-46's Jira description
-still promises song identity and is out of date, not a spec.
+with a basic search that ignores text file and song names." The computed "Songs
+— N versions" group depends on title search and therefore does not exist in V1.
 ────────────────────────────────────────────────────────────────────────────
 
-Sizing: this is a ~1,300-row problem. Measured 2026-08-18 against a
-deliberately larger 10,696-row set — 15ms to fetch, 15ms to normalise, 0.4ms
-to filter. So there is no `search_key` column, no index and no FTS5 table, on
-purpose: infix matching is `LIKE '%x%'`, and a leading wildcard cannot use a
-B-tree index, so a stored key buys nothing while costing DDL on five tables
-plus a write-path maintenance obligation forever. FTS5 is available (SQLite
-3.37.2) and becomes the right answer only if the corpus grows ~10x. Keep the
-query layer swappable so that stays a substitution rather than a rewrite.
+Sizing: this is a ~1,300-row problem. So there is no `search_key` column, no
+index and no FTS5 table, on purpose: infix matching is `LIKE '%x%'`, and a
+leading wildcard cannot use a B-tree index, so a stored key buys nothing while
+costing DDL on five tables plus a write-path maintenance obligation forever.
+FTS5 is available (SQLite 3.37.2) and becomes the right answer only if the
+corpus grows ~10x. Keep the query layer swappable so that stays a substitution
+rather than a rewrite.
 """
 
 import re
@@ -62,7 +57,7 @@ def norm(s):
     settled on the way through (NFD to strip the marks, back to NFC), which
     also covers the case a name arrives decomposed from macOS Finder —
     filename-vs-database normalisation mismatch has already broken a whole
-    folder-to-grade join in this project once (see CONTEXT, "Traps").
+    folder-to-grade join in this project once.
 
     Deliberately NOT consolidated with `checksums._norm_name` or
     `quality_store._canon_path`, despite the design note suggesting it. Those
@@ -114,17 +109,13 @@ _YEAR_MIN, _YEAR_MAX = 1900, 2099
 
 
 def _expand_two_digit_year(yy, today_year=None):
-    """
-    Expand the 2-digit year inside a slashed date (4/12/83 → 1983).
+    """Expand the 2-digit year inside a slashed date (4/12/83 → 1983).
 
     Pivot on the current 2-digit year rather than a hardcoded constant: the
     corpus runs 1940–2026, so "83" is unambiguously 1983 and "12" is 2012,
     and the boundary moves correctly as time passes.
 
-    Note this applies ONLY inside an unambiguous slashed date. A BARE
-    two-digit token is deliberately NOT a date — Ryan, 2026-08-18: with shows
-    from 1940 to 2026 a lone "26" is genuinely ambiguous, so it stays text and
-    we never silently guess.
+    Note this applies ONLY inside an unambiguous slashed date.
     """
     ty = today_year if today_year is not None else date.today().year
     pivot = ty % 100
@@ -225,14 +216,13 @@ class Query:
 
 
 def parse_query(q, today_year=None):
-    """
-    Split a raw query into ANDed text and date terms.
+    """Split a raw query into ANDed text and date terms.
 
-    Multi-term is AND by design (Ryan): typing more must NARROW rather than
-    break, so "hot rize 1983" means the act AND the year. There is no
-    field-prefix grammar ("artist:"), no quoting and no negation — the
-    invited cohort will never use it, and every one of those is a way for a
-    query to silently mean something the user didn't intend.
+    Multi-term is AND by design: typing more must NARROW rather than break, so
+    "hot rize 1983" means the act AND the year. There is no field-prefix
+    grammar ("artist:"), no quoting and no negation — the invited cohort will
+    never use it, and every one of those is a way for a query to silently mean
+    something the user didn't intend.
 
     A token is tested as a date first (against the RAW token, before norm()
     eats the separators); anything else is normalised into a text term.
@@ -254,11 +244,11 @@ def parse_query(q, today_year=None):
 # ── Match scoring ──────────────────────────────────────────────────────────
 #
 # Ranking is match strength first, then listening quality as a tiebreak among
-# equally good matches (Ryan, 2026-08-18). Quality is the only dense signal —
-# it covers 100% of recordings, where hand grades cover ~22% and favourites
-# cover two. CONTEXT's caveat that the quality model is "far less reliable at
-# the bad end than the good end" is about HIDING things; ordering equally
-# relevant hits best-sounding-first hides nothing.
+# equally good matches. Quality is the only dense signal — it covers 100% of
+# recordings, where hand grades cover ~22% and favourites cover two.
+# The quality model is "far less reliable at the bad end than the good end",
+# which matters when HIDING things; ordering equally relevant
+# hits best-sounding-first hides nothing.
 
 EXACT      = 100   # the whole key is the term
 PREFIX     = 80    # the key starts with the term
@@ -371,16 +361,12 @@ def build_index(artists, musicians, venues, recordings):
             })
             continue
         # A recording's searchable text is the union of its three text
-        # dimensions: the act, its members (musician reaches shows through
-        # membership, NOT performance_personnel — Ryan, 2026-08-18, matching
-        # the precedent already set for peer musician visibility), and the
-        # venue including its geography.
+        # dimensions: the act, its members, and the venue including its
+        # geography.
         #
-        # Geography comes from the VENUE, not the performance. Measured
-        # 2026-08-18: only 13 of 552 performances carry a `city` of their
-        # own, so performance.city is effectively empty and reading it as
-        # the primary source would lose the dimension. The 10 shows with no
-        # venue at all are unreachable by geography — accepted, not a bug.
+        # Geography comes from the VENUE, not the performance. The 10 shows
+        # with no venue at all are unreachable by geography — accepted, not
+        # a bug.
         idx["recordings"].append({
             **r,
             "_keys": keys(
@@ -397,7 +383,7 @@ def build_index(artists, musicians, venues, recordings):
 
 GROUP_LABELS = {
     "artists": "Artists",
-    "recordings": "Recordings",
+    "recordings": "Live Recordings",
     "albums":     "Albums",
     "venues":     "Venues",
     "musicians":    "Musicians",
@@ -406,7 +392,7 @@ GROUP_LABELS = {
 # Fixed group order rather than reordering by best match. A dropdown whose
 # groups reshuffle between keystrokes is impossible to aim at — the user
 # starts moving toward a row that has already moved. Albums sits right after
-# Recordings/Shows (Studio Records spec v1, section 7).
+# Recordings/Shows.
 GROUP_ORDER = ("artists", "recordings", "albums", "venues", "musicians")
 
 

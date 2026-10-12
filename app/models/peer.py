@@ -1,9 +1,7 @@
-"""
-models/peer.py — Peer sharing (inbound side).
+"""models/peer.py — Peer sharing (inbound side).
 
 The five tables that let this instance share Collections OUT to named remote
-people. See "Peer Sharing — Design Spec v1" in the Drive Context Library for
-the full rationale. Short version:
+people. Short version:
 
   Peer            — a named remote person I share with (Matt). NOT a `user`;
                     a peer authenticates through a totally separate door
@@ -23,7 +21,7 @@ the full rationale. Short version:
                     last_seen_at and the peer-management activity read.
 
 The OUTBOUND side (libraries I consume from others) is a separate concern —
-see models/remote_node.py (built in the client-side milestone), not here.
+see models/remote_node.py, not here.
 """
 
 from datetime import datetime, timezone
@@ -96,20 +94,14 @@ class CollectionGrant(db.Model):
 class PeerInvite(db.Model):
     """Reusable, expiring enrollment code. Raw code shown to the sharer once;
     only its SHA-256 hash is stored.
-
-    Reusable as of 2026-08-30 (Ryan): the code is no longer burned on first
-    join, so the same link can enroll more than one device without minting a
-    fresh one each time. `consumed_at` is kept -- it still records WHEN it
-    was first used (drives the "Used · joined <date>" admin display), it just
-    no longer gates validity. Only expiry does that now."""
+    """
     __tablename__ = "peer_invite"
 
     id          = db.Column(db.Integer, primary_key=True)
     peer_id     = db.Column(db.Integer, db.ForeignKey("peer.id"), nullable=False, index=True)
     code_hash   = db.Column(db.String(64), unique=True, nullable=False, index=True)  # sha256 hex
-    # The raw code, kept so the sharer can copy the invite at any time (Ryan,
-    # 2026-10-06: not sensitive enough to justify a show-once code). NULL on
-    # invites minted before then. Enrollment still matches on code_hash.
+    # The raw code, kept so the sharer can copy the invite at any time. NULL
+    # on invites minted before then. Enrollment still matches on code_hash.
     code        = db.Column(db.String(128), nullable=True)
     created_at  = db.Column(db.DateTime, default=_utcnow)
     expires_at  = db.Column(db.DateTime, nullable=False)

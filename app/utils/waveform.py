@@ -1,6 +1,5 @@
-"""
-utils/waveform.py — Downsample a track's stored peak envelope for compact
-display (Library Browse card waveform strip, 2026-08-02 design spec).
+"""utils/waveform.py — Downsample a track's stored peak envelope for compact
+display.
 
 Pure function: no audio decode, no Flask, no filesystem. Takes whatever is
 already sitting in TrackAnalysis.waveform_json (already parsed from JSON by
@@ -9,9 +8,9 @@ bar of the strip.
 
 Accepts both analysis shapes that exist in the live DB (see
 app/utils/analysis.py):
-  v2 (current) — {"min": [...], "max": [...]}, signed, -1.0..1.0, ~2000 points
-  v1 (legacy)   — flat list of unsigned 0.0..1.0 RMS magnitudes, ~300 points
-Older v1 rows are still real usable peaks (per the design spec's Risk
+  v2 (current) — {"min": [...], "max": [...]}, signed, -1.0.1.0, ~2000 points
+  v1 (legacy)   — flat list of unsigned 0.0.1.0 RMS magnitudes, ~300 points
+Older v1 rows are still real usable peaks (
 section) — not re-decoded, just accepted as-is.
 """
 

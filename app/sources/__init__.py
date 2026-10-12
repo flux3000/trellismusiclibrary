@@ -1,5 +1,4 @@
-"""
-app/sources/ -- archive connectors for the Downloads feature (2026-10-01).
+"""app/sources/ -- archive connectors for the Downloads feature.
 
 Each source implements app.sources.base.Source. Today only the Live Music
 Archive ("lma"); Bluegrass Archive ("bga") is a later second source and

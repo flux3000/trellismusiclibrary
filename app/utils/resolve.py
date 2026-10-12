@@ -1,10 +1,9 @@
-"""
-app/utils/resolve.py -- The one field resolver for ingest.
+"""app/utils/resolve.py -- The one field resolver for ingest.
 
-Ingest Field Resolver Design Spec v1 (2026-09-28). Every ingest path -- the
-Add Recording wizard, Batch Import, and the Bulk Ingest worker -- runs its
-scan payload through resolve() instead of keeping its own merge rules, so a
-folder resolves identically no matter which door it came through.
+Every ingest path -- the Add Recording
+wizard, Batch Import, and the Bulk Ingest worker -- runs its scan payload
+through resolve instead of keeping its own merge rules, so a folder resolves
+identically no matter which door it came through.
 
 Pure: no network, no filesystem writes. find_duplicates() is the one
 read-only DB touch point, kept separate so everything else here stays
@@ -64,8 +63,8 @@ def _tag_container_values(tracks, *keys):
 def _consistent_tag(tracks, *keys):
     """The tag value shared by EVERY track, or None on any mismatch/absence.
 
-    Moved here from bulk_ingest.py (2026-09-28) -- resolve() is the only
-    remaining caller (album/artist rules), so this is its single home now.
+    Moved here from bulk_ingest.py -- resolve is the only remaining caller
+    (album/artist rules), so this is its single home now.
     """
     values = _tag_container_values(tracks, *keys)
     if not values or not values[0]:
@@ -470,7 +469,7 @@ def _act_key_norm(name):
 
 
 # A free-form folder name beside the info-text artist (reader/folder.py). Two switches, each
-# measured on G1 (2026-10-05):
+# measured on G1:
 #   FOLDER_LEAD_AGREES   the folder's lead (the text before its first date or separator) IS the
 #                        info reading: a full second source, scored like a template folder.
 #                        A folder that only CONTAINS the reading earns the +3 agreement bonus.
@@ -482,7 +481,7 @@ FOLDER_LEAD_EXTENDS = True
 # Septet"): a billing variant, so the folder still agrees. Score it like an exact lead
 # (FOLDER_TEMPLATE_SCORE) or, at 0.0, with only the agreement bonus.
 FOLDER_LEAD_VARIANT_SCORE = None            # None: the template score
-# Cross-checks between the sources (2026-10-06), each switchable and measured on G1/G2/G3:
+# Cross-checks between the sources, each switchable and measured on G1/G2/G3:
 #   FOLDER_LEAD_COMPETES  the lead is a known act and the info reading matches no act at all:
 #                         the lead is the artist (tentative)
 #   SHOW_INDEX_ARTIST     the Atlas lists the chosen act on the resolved date: an independent source
@@ -759,8 +758,8 @@ def _free_form_folder_source(groups, reading, cased_reading, folder_name, templa
         # glued shortcode: no more than the contains bonus below
     if not templated and names_artist(folder_name, reading):
         # Any folder that names the artist is a second source, in whatever naming
-        # scheme (Ryan, 2026-10-06): most start with the artist, not only Trellis's.
-        # A shortcode glued to digits ("gd77-05-08") stays at the bonus only.
+        # scheme: most start with the artist, not only Trellis's. A shortcode glued
+        # to digits ("gd77-05-08") stays at the bonus only.
         sc = 0.0 if _glued_shortcode(folder_name, lead) else _conf.FOLDER_TEMPLATE_SCORE["artist"]
         groups.add(nk, sc, cased_reading,
                    [_row("folder", reading, None, None, "folder name", sc, "free-form")])

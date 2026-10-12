@@ -1,4 +1,4 @@
-"""Segmenter and place peeler (Resolver v2 chunk 2, 2026-10-03)."""
+"""Segmenter and place peeler."""
 import pytest
 
 from app.utils.ingest import _parse_location, _parse_location_plain, parse_info_file
@@ -125,7 +125,7 @@ def test_not_a_place(line):
 
 def test_venue_no_longer_swallows_city():
     assert _venue("Concertgebouw, Amsterdam, Netherlands") == "Concertgebouw"
-    # a festival-only line is an EVENT now (Resolver v2 chunk 3), not a venue
+    # a festival-only line is an EVENT now, not a venue
     r = parse_info_file(None, text="Some Artist\nBoxcar Pinion Memorial Bluegrass Festival  Chattanooga, TN\n")
     assert r["event"] == "Boxcar Pinion Memorial Bluegrass Festival"
     assert r["venue"] is None

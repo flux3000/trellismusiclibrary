@@ -1,11 +1,8 @@
-"""
-quality_features.py — Raw feature extraction for the Recording Quality Score.
+"""quality_features.py — Raw feature extraction for the Recording Quality Score.
 
 Deliberately depends only on numpy / scipy / soundfile / pyloudnorm.
 Librosa is NOT used: everything here is STFT, filtering and statistics, and
 soundfile's native seek lets us decode only the windows we care about.
-
-Spec: Context Library/2026-07-25 - Recording Quality Score — Design Spec v1.md
 
 Feature extraction is kept strictly separate from scoring. This module answers
 "what is physically true about this audio"; quality_scoring.py answers "how
@@ -26,10 +23,9 @@ import soundfile as sf
 # import anything from the quality engine.
 from app.utils.ingest import RESOLVE_AUDIO_EXTS
 
-# Bumped to "2" on 2026-07-31: crowd_snr_db, noise_nonstationarity_db and
-# modulation_index were added to analyse_window(). Rows extracted at version 1
-# do not contain them, so they must be re-decoded rather than merely re-scored —
-# this is the one kind of change that a score-only rescore cannot fix.
+# Rows extracted at version 1 do not contain them, so they must be re-decoded
+# rather than merely re-scored — this is the one kind of change that a
+# score-only rescore cannot fix.
 QUALITY_ANALYSIS_VERSION = "2"
 
 # ── Sampling parameters (spec §Sampling strategy) ────────────────────────────
@@ -44,11 +40,11 @@ QUALITY_ANALYSIS_VERSION = "2"
 #
 # 3 tracks x 2 windows x 20 s covers both axes for ~120 s of decode.
 #
-# Tested at 2 tracks (2026-07-28) against all 20 graded recordings: average
-# error rose 4.94 -> 6.19, worst case 7.9 -> 13.3, correlation 0.857 -> 0.740,
-# and within-corpus ranking collapsed to chance on two of three artists.
-# Scores moved 2.7 points on average, above the +/-2 measurement noise floor.
-# Not worth the ~5 s saved. Decode is not the bottleneck anyway — see below.
+# Tested at 2 tracks against all 20 graded recordings: average error rose 4.94
+# -> 6.19, worst case 7.9 -> 13.3, correlation 0.857 -> 0.740, and within-corpus
+# ranking collapsed to chance on two of three artists. Scores moved 2.7 points
+# on average, above the +/-2 measurement noise floor. Not worth the ~5 s saved.
+# Decode is not the bottleneck anyway — see below.
 N_TRACKS       = 3      # distinct tracks to sample
 N_WINDOWS      = 2      # windows per track
 WINDOW_SEC     = 20.0   # seconds per window
@@ -169,15 +165,14 @@ def select_tracks(folder):
     # recursing there made select_tracks choose from 22 files spanning two
     # different transfers, shifting that recording's score by 2.4 points.
     #
-    # Preferring the root resolves both: an un-flattened recording has an empty
-    # root and falls through to the recursive search; a folder with its own
-    # audio ignores whatever is nested below it.
-    # glob.escape() on the FOLDER only (2026-07-31). Collector folder names
-    # routinely carry [FLAC], [SBD], [EAC-FLAC] — and glob reads [...] in the
-    # directory portion as a character class, so
-    # "Grant Green ... (1972) [FLAC]" was searched as ".../(1972) F/", ".../(1972) L/"
-    # etc. None exist, so the recording reported "no flac files" and silently
-    # scored nothing. The *pattern* half must stay unescaped to keep globbing.
+    # Preferring the root resolves both: an un-flattened recording has an empty root
+    # and falls through to the recursive search; a folder with its own audio ignores
+    # whatever is nested below it. glob.escape on the FOLDER only. Collector folder
+    # names routinely carry [FLAC], [SBD], [EAC-FLAC] — and glob reads [...] in the
+    # directory portion as a character class, so "Grant Green ... (1972) [FLAC]" was
+    # searched as ".../(1972) F/", ".../(1972) L/" etc. None exist, so the recording
+    # reported "no flac files" and silently scored nothing. The *pattern* half must
+    # stay unescaped to keep globbing.
     safe = glob.escape(folder)
     paths = sorted(glob.glob(os.path.join(safe, "*.flac")))
     if not paths:
@@ -299,7 +294,7 @@ def analyse_window(x, sr):
     # up at 10-16 kHz, so the ratio collapses and the recording scores as hissy
     # when in truth there is simply nothing there. The 1981 Bushnell tape read
     # 13.0 dB "HF SNR" while its real 1-8 kHz SNR is 27.0 dB — the best in its
-    # corpus, and Ryan graded it an A.
+    # corpus, and the user graded it an A.
     #
     # 1-8 kHz carries the bulk of musical information, is where hiss is most
     # audible, and — critically — every recording has content there regardless
@@ -350,7 +345,6 @@ def analyse_window(x, sr):
     else:
         out["spectral_tilt_db_oct"] = 0.0
 
-    # ── AUDIENCE / ROOM (added 2026-07-31) ───────────────────────────────────
     # Why these exist: validation against 113 graded recordings showed the
     # engine is BLIND within audience tapes (grade correlation -0.015 across
     # n=42 AUD). Bandwidth, which discriminates soundboards strongly (HF edge
@@ -359,9 +353,7 @@ def analyse_window(x, sr):
     # tape has roughly the same bandwidth as a good one.
     #
     # What actually separates them is crowd noise and room reverberation, and
-    # nothing here measured either. These three features close that gap. They
-    # are extraction-only until validated against the corpus — the lesson of
-    # 2026-07-31 is that a metric earns its weight with evidence, not intent.
+    # nothing here measured either. These three features close that gap.
 
     # Crowd noise lives in the voice band. Deliberately 250-2500 Hz rather than
     # mid_snr's 1-8 kHz: chatter, shouting and applause concentrate below
@@ -779,7 +771,6 @@ _MEDIAN_KEYS = ["noise_floor_468_db", "program_468_db", "snr_468_db", "hiss_db",
                 "spectral_tilt_db_oct", "crest_factor_db", "peak_db", "rms_db",
                 "channel_balance_db", "phase_correlation", "hum_ratio_db",
                 "dc_offset", "channel_rms_min_db",
-                # Audience/room measures added 2026-07-31 — see analyse_window.
                 "crowd_snr_db", "noise_nonstationarity_db", "modulation_index"]
 _MAX_KEYS    = ["clipping_pct", "clipping_pct_raw", "clip_longest_run",
                 "dropout_count", "true_peak_dbtp", "lossy_wall_drop_db"]
@@ -810,10 +801,10 @@ def extract_recording_features(folder, non_music_paths=None):
                 continue
             per_window.append(analyse_window(x, sr))
             used.append(round(off, 1))
-        # `rel` (added 2026-07-30) is what the UI streams with: the preview
-        # endpoint joins folder + this path, and a bare basename does not
-        # resolve for an un-flattened recording whose audio sits in CD1/.
-        # `track` stays the basename because it is what gets displayed.
+        # `rel` is what the UI streams with: the preview endpoint joins
+        # folder + this path, and a bare basename does not resolve for an
+        # un-flattened recording whose audio sits in CD1/. `track` stays
+        # the basename because it is what gets displayed.
         sampled.append({"track": os.path.basename(path),
                         "rel": os.path.relpath(path, folder),
                         "duration_s": round(duration, 1),

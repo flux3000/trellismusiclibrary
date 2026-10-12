@@ -1,5 +1,4 @@
-"""
-Country and state for a bare city, from the Atlas (Resolver v2, chunk 4b).
+"""Country and state for a bare city, from the Atlas.
 
 "Royal Albert Hall, London" names a city and nothing else. The Atlas holds every GeoNames
 city of 5,000 people or more and every MusicBrainz place, so it can often say which London.

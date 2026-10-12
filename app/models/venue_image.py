@@ -1,10 +1,9 @@
-"""
-models/venue_image.py — multiple images per Venue, one designated primary.
+"""models/venue_image.py — multiple images per Venue, one designated primary.
 
-A parallel table to `artist_image` rather than a shared polymorphic one
-(Ryan, 2026-08-07). The duplication is SCHEMA ONLY: every behaviour —
-one-primary maintenance, promotion on delete, upload/serve/delete — lives once
-in `app/utils/entity_images.py` and is parameterised by `__parent_fk__`.
+A parallel table to `artist_image` rather than a shared polymorphic one. The
+duplication is SCHEMA ONLY: every behaviour — one-primary maintenance,
+promotion on delete, upload/serve/delete — lives once in
+`app/utils/entity_images.py` and is parameterised by `__parent_fk__`.
 
 Why parallel rather than polymorphic: a real foreign key. FK enforcement was
 turned on deliberately in July, and SQLite cannot enforce an (entity_type,
@@ -35,7 +34,7 @@ class VenueImage(db.Model):
 
     # Basename only, inside the venue's _images dir. Never a full path — the
     # library root is config, and paths are deliberately not exposed to the
-    # frontend (see the file-obfuscation rule in CONTEXT.md).
+    # frontend.
     filename   = db.Column(db.String(255), nullable=False)
     ext        = db.Column(db.String(8), nullable=False)
 

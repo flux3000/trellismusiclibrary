@@ -1,11 +1,4 @@
-"""
-app/utils/paula.py — "Paula": the free, non-AI completeness/confidence scorer.
-
-Named in the 2026-07-16 design conversation with Ryan as shorthand for the
-deterministic (regex/fuzzy-match) info parser, paired with "Jeff" for the
-paid Lomax research pass (app/lomax/). Paula runs
-automatically, for free, as part of every folder scan — Jeff is an explicit,
-opt-in, paid action layered on top when a human wants deeper research.
+"""app/utils/paula.py — "Paula": the free, non-AI completeness/confidence scorer.
 
 Paula answers two separate questions with two separate 0-100 scores:
 
@@ -15,7 +8,6 @@ Paula answers two separate questions with two separate 0-100 scores:
   2. Track Completeness Score — how much of the setlist do we already have,
      and does the FLAC TITLE tag agree with the info file's track listing?
 
-Design history (2026-07-16 conversation):
   - Each Primary Attribute is scored from four raw signals: tag present,
     tag DB-matched, txt present, txt DB-matched. Weights reflect how much
     each attribute matters (Artist/Date highest; Country lowest, since
@@ -23,7 +15,6 @@ Design history (2026-07-16 conversation):
   - IMPORTANT CALIBRATION FIX: a DB match is a catalog-consistency signal
     ("have we seen this exact name before"), not a truth signal. A brand
     new artist/venue that isn't in the DB yet is NOT less reliable data
-    just because it's new — Ryan flagged this explicitly after an early
     version of this scorer badly under-scored a well-tagged show with a
     new-to-the-DB artist (58 instead of ~75). Match is now a modest
     +0.20 bonus on top of a much higher presence-only base, not a gate.
@@ -33,7 +24,7 @@ Design history (2026-07-16 conversation):
     Once DB-matched, source doesn't matter (0.20 bonus either way) — a
     confirmed match is a confirmed match regardless of which pipeline
     produced the candidate string.
-  - Date has no DB-match concept (nothing to check a date against). Ryan
+  - Date has no DB-match concept (nothing to check a date against). the user
     was explicit that date agreement must be all-or-nothing: the +0.30
     corroboration bonus ONLY fires when both tag and txt carry full
     day-precision dates that are byte-identical. A coarser "same year and
@@ -42,7 +33,7 @@ Design history (2026-07-16 conversation):
     DIFFERENT nearby date would otherwise look "confirmed."
   - Track titles get a from-scratch, five-state model (Confirmed / Tag-only
     / Txt-only / Conflict / Missing) rather than a binary "has a title."
-    Ryan's real-world calibration: only ~5% of recordings "in the wild"
+    the user's real-world calibration: only ~5% of recordings "in the wild"
     will ever hit Confirmed (both sources present AND agreeing) — so
     Tag-only alone is scored as solidly good (0.75), not treated as an
     incomplete/penalized state.
@@ -84,7 +75,7 @@ _DATE_AGREE_BONUS = 0.30   # both full day-precision AND byte-identical — all 
 
 # Track completeness — per-track point value by state. Calibrated so a
 # "Tag-only" recording (the common case) still reads as solidly good, since
-# full "Confirmed" corroboration is realistically rare (~5% per Ryan).
+# full "Confirmed" corroboration is realistically rare.
 _TRACK_POINTS = {
     "confirmed": 1.00,
     "tag_only":  0.75,
@@ -206,10 +197,6 @@ def _score_date(tag_ymd, txt_ymd):
     else:
         base = 0.0
 
-    # All-or-nothing per Ryan's call: only a full day-precision, byte-identical
-    # match on BOTH sides earns the bonus. A coarser "same year/month" agreement
-    # earns nothing — implying a date match when it's merely close is worse
-    # than showing no corroboration at all.
     exact_agree = (tag_prec == 3 and txt_prec == 3 and tag_ymd == txt_ymd)
     bonus = _DATE_AGREE_BONUS if exact_agree else 0.0
 
@@ -303,7 +290,7 @@ def compute_paula_score(scan, known_artists=None, known_venues=None):
     txt_venue = info.get("venue")
     tag_venue_rec = _match_venue(tag_venue, known_venues)
     txt_venue_rec = _match_venue(txt_venue, known_venues)
-    winning_venue = tag_venue_rec or txt_venue_rec   # tag wins ties, per Ryan's rule #3
+    winning_venue = tag_venue_rec or txt_venue_rec
     venue_sub, venue_detail = _score_name_attribute(
         tag_venue, bool(tag_venue_rec), txt_venue, bool(txt_venue_rec))
 

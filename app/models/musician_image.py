@@ -1,12 +1,9 @@
-"""
-models/musician_image.py — multiple images per Musician (person), one primary.
+"""models/musician_image.py — multiple images per Musician (person), one primary.
 
-Third parallel table alongside `artist_image` and `venue_image` (Ryan,
-2026-09-01). It reverses the 2026-08-07 call that photos are artist-level
-only — that decision was about the CARD surfaces, which still key off the act,
-and it stands there. What changed is that the Musician page is now a real
-dimension page with a Photos tab like every other, and a person is the one
-entity in this schema that most obviously HAS a likeness.
+Third parallel table alongside `artist_image` and `venue_image`. What changed
+is that the Musician page is now a real dimension page with a Photos tab like
+every other, and a person is the one entity in this schema that most obviously
+HAS a likeness.
 
 Why parallel rather than polymorphic, again: a real foreign key. FK enforcement
 was turned on deliberately in July and SQLite cannot enforce an
@@ -39,7 +36,7 @@ class MusicianImage(db.Model):
 
     # Basename only, inside the person's _images dir. Never a full path — the
     # library root is config and paths are deliberately not exposed to the
-    # frontend (see the file-obfuscation rule in CONTEXT.md).
+    # frontend.
     filename   = db.Column(db.String(255), nullable=False)
     ext        = db.Column(db.String(8), nullable=False)
 

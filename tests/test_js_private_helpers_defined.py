@@ -1,12 +1,4 @@
-"""
-Every underscore-prefixed helper CALLED in app.js must be DEFINED in app.js.
-
-2026-09-27: a rebuild retired _biMetaLine but left one call behind. node
---check and test_no_undefined_names both passed; the first user to open the
-page got "Can't find variable: _biMetaLine" and a stalled ingest. Private
-helpers in app.js all start with an underscore, which makes this check cheap
-and precise: a call to _foo( with no `function _foo(` / `const _foo =` /
-`let _foo` anywhere in the file is a bug, not a style choice.
+"""Every underscore-prefixed helper CALLED in app.js must be DEFINED in app.js.
 """
 import re
 from pathlib import Path

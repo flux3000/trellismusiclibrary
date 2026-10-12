@@ -1,5 +1,4 @@
-"""
-cleanup_orphaned_venues_and_events.py — One-time backfill (2026-08-29).
+"""cleanup_orphaned_venues_and_events.py — One-time backfill.
 
 Venue and Event never had automatic pruning: update_performance's field loop
 would repoint venue_id/event_id without ever checking whether the row it left
@@ -17,10 +16,9 @@ anchored to it (an Event's venue_id is a separate reference). Any venue
 photos are unlinked from disk only after the delete actually commits — see
 prune_venue_if_orphaned's docstring for why that ordering matters.
 
-Approved by Ryan (2026-08-29): also fine to re-run after the festival Event
-merge (Rockygrass/Telluride/Merlefest/etc.) to sweep whatever it orphans.
-Idempotent — running it again with nothing new orphaned reports 0 and exits
-clean.
+Approved by the user: also fine to re-run after the festival Event merge
+(Rockygrass/Telluride/Merlefest/etc.) to sweep whatever it orphans. Idempotent
+— running it again with nothing new orphaned reports 0 and exits clean.
 
 Run:
     python3 scripts/cleanup_orphaned_venues_and_events.py --dry-run

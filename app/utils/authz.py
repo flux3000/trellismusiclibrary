@@ -1,8 +1,5 @@
-"""
-app/utils/authz.py -- shared authorization decorators.
+"""app/utils/authz.py -- shared authorization decorators.
 
-`admin_required` lived in app/api/peers.py until 2026-09-17, when a second
-settings surface (library layout, in api/system.py) needed the same gate.
 Copying it was the obvious move and the wrong one: two implementations of an
 auth check that must agree is the same shape as the three-list peer-surface
 bug, and each copy drifts silently in its own direction.

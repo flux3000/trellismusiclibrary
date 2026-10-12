@@ -5,20 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Trellis</title>
   <link rel="stylesheet" href="/css/main.css" />
-  <!-- The saved palette and sidebar-collapse state are applied at the top of
-       <body> below, before first paint, so the app never repaints itself in
-       front of the user once app.js loads. Both are per-machine display state
-       (localStorage, not the server) that must be correct on frame one. -->
 </head>
 <body>
-  <!-- MOVED out of <head> 2026-08-23. It ran there for years touching
-       document.body — which does not exist yet while <head> is parsing, so
-       every load threw "null is not an object" and NEITHER the saved palette
-       nor the saved sidebar state was ever restored. The error was invisible
-       because an uncaught inline-script error does not stop parsing.
-       Here, body exists and this still runs before any content paints, which
-       was the whole point of putting it inline. -->
   <script>
+    // Runs in <body>, not <head>: body does not exist while <head> is parsing.
     // The saved palette id goes straight onto <html> — it must be right on the
     // very first frame or the app repaints itself in front of the user.
     // Deliberately dumb: it validates nothing and knows nothing about which
@@ -28,9 +18,8 @@
     ;(function () {
       var id = localStorage.getItem('trellisPalette')
       if (!id) {
-        // One-time migration off the old two-value key (2026-08-30). Light was
-        // Parchment, which Steely replaces; dark was Warm Ash, which is Cale
-        // unchanged. Written back so this runs once, not every load.
+        // One-time migration off the old two-value theme key. Written back so
+        // this runs once, not every load.
         id = localStorage.getItem('trellisTheme') === 'light' ? 'steely' : 'cale'
         localStorage.setItem('trellisPalette', id)
       }
@@ -39,15 +28,9 @@
     if(localStorage.getItem('trellisSidebarCollapsed')==='1')document.body.classList.add('sidebar-collapsed')
   </script>
 
-  <!-- ── Login ──────────────────────────────────────────────────────────────── -->
   <div id="login-screen" class="login-screen hidden">
     <div class="login-card">
       <div class="login-logo">
-        <!-- "Flux Audio" retired 2026-08-23 — Ryan decided on the rebrand
-             (see CONTEXT.md / project_app_naming.md): everyday name Trellis,
-             full name Trellis Music Library. Mark + text updated here first
-             since the login screen is the other place besides the App Header
-             that says the app's name out loud. -->
         <div class="logo-mark">T</div>
         <span class="logo-text">Trellis</span>
       </div>
@@ -66,37 +49,12 @@
     </div>
   </div>
 
-  <!-- ── App shell ──────────────────────────────────────────────────────────── -->
   <div id="app-shell" class="app-shell hidden">
 
-    <!-- ── App header (2026-08-22) ────────────────────────────────────────
-         Full width across the top, above BOTH the sidebar and the content —
-         it is chrome for the whole window, not for the page. Three cells:
-         wordmark + navigation on the left, the search field centred in the
-         window, the view-mode toggle on the right.
-
-         The centre cell is centred against the WINDOW, not against whatever
-         is left over after the side cells — hence 1fr / auto / 1fr with equal
-         side columns, so a longer wordmark or an extra nav button cannot
-         nudge the search box off centre. -->
     <header class="app-header" id="app-header">
       <div class="app-header-left">
-        <!-- Trellis is the decided name (Ryan, 2026-08-23 — see
-             project_app_naming.md: everyday name "Trellis", full name for the
-             App Store/trademark "Trellis Music Library"; "Flux Audio" is
-             retired). This span is still a plain-text wordmark standing in
-             for a designed mark — the NAME is final, the TYPOGRAPHY isn't. -->
         <span class="app-wordmark">Trellis</span>
         <div class="app-nav-btns">
-          <!-- Home button removed 2026-08-23 — "My Library" in the sidebar is
-               now itself a link to the same place (see renderSidebar), and two
-               controls that both just go Home was the redundant half. -->
-          <!-- Sidebar collapse/expand (2026-08-23, Ryan) — left of Back per his
-               spec. Same icon idiom as the player-bar controls below: inline
-               SVG, not a unicode glyph, so it's crisp and sized on purpose
-               rather than however a given font happens to render a character.
-               State lives in localStorage (see the head script above) and on
-               <body class="sidebar-collapsed"> — wired in wireHeaderNav(). -->
           <button type="button" class="hdr-btn" id="nav-sidebar-toggle" title="Toggle sidebar" aria-label="Toggle sidebar" aria-pressed="false">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
           </button>
@@ -104,11 +62,6 @@
           <button type="button" class="hdr-btn" id="nav-fwd" title="Forward" aria-label="Forward" disabled><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
         </div>
 
-        <!-- Library selector, moved here from the right cluster 2026-08-23
-             (Ryan). Switching library is a context change — which library am I
-             looking at — so it sits with the controls that move you around
-             rather than beside the account chrome. Rendered by
-             renderLibrarySelector(); empty and invisible with no remotes. -->
         <div class="lib-select-host" id="lib-select-host"></div>
       </div>
 
@@ -116,7 +69,7 @@
         <div class="search-field">
           <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span>
           <input type="text" id="search-input" class="search-input"
-                 placeholder="Search artists, musicians, venues, dates…"
+                 placeholder="Search artists, musicians, venues, dates"
                  autocomplete="off" spellcheck="false"
                  role="combobox" aria-expanded="false" aria-autocomplete="list"
                  aria-controls="search-dropdown" />
@@ -127,23 +80,11 @@
       </div>
 
       <div class="app-header-right">
-        <!-- Which library am I looking at? Moved out of the sidebar 2026-08-22:
-             it is a whole-app context switch (the theme flips, every list
-             changes meaning), which puts it with the other context controls up
-             here, not among the navigation links. Rendered by
-             renderLibrarySelector(); empty and invisible with no remotes. -->
-        <!-- Admin / Playback (Ryan, 2026-08-21). Rendered hidden and revealed by
-             JS only for roles that can edit — a listener has no mode to choose
-             and never sees it. Playback is what a listener always gets, so the
-             toggle doubles as a way to look at the app through their eyes. -->
         <div class="view-mode-toggle hidden" id="view-mode-toggle" role="group" aria-label="View mode">
           <button type="button" class="vm-opt" data-mode="admin" aria-pressed="false">Admin</button>
           <button type="button" class="vm-opt" data-mode="playback" aria-pressed="false">Playback</button>
         </div>
 
-        <!-- Who am I, and the two things I might want to do about it. Came up
-             from the sidebar footer 2026-08-22 — the sidebar is now a list of
-             places in the library, and an account is not one of them. -->
         <div class="hdr-user">
           <div class="user-chip">
             <div class="user-avatar" id="user-avatar">?</div>
@@ -161,15 +102,8 @@
 
     <div class="sidebar-resizer" id="sidebar-resizer" title="Drag to resize"></div>
 
-    <!-- The content column: drive banner above, page below. The search box
-         moved up into the App Header on 2026-08-22 — it is chrome for the
-         window, and it was never the Action Bar (which is per-view markup
-         rendered inside five pages and absent from the Library landing page,
-         so it could never host a global search box). -->
     <div class="content-column">
 
-      <!-- Library drive status. Hidden while the drive is healthy, which is
-           almost always, so it costs no vertical space in normal use. -->
       <div class="library-banner hidden" id="library-banner" role="status" aria-live="polite">
         <span class="library-banner-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
         <span class="library-banner-text" id="library-banner-text"></span>
@@ -186,7 +120,6 @@
 
   </div>
 
-  <!-- ── Player bar ─────────────────────────────────────────────────────────── -->
   <div class="player-bar" id="player-bar">
     <div class="player-track-info" id="player-info">
       <div class="player-track-title" id="player-title">—</div>
@@ -215,23 +148,13 @@
     <div class="player-right">
       <label class="skip-toggle" title="Skip announcements, banter &amp; tuning from playback queue">
         <input type="checkbox" class="skip-filter-cb" id="skip-filter-player" />
-        <span class="skip-toggle-track"></span>
-        <span class="skip-toggle-label">Skip non-music</span>
+        <span class="skip-toggle-label">Skip Non-Music</span>
       </label>
       <span class="vol-sep"></span>
-      <!-- Lucide volume-2. Was the U+1F50A speaker emoji, drawn by the OS colour
-           emoji font at its own weight, baseline and palette. Nothing else in the
-           app is a colour emoji, which is exactly why it stood out. -->
       <span class="vol-icon" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></svg>
       </span>
       <input type="range" class="volume-bar" id="volume-bar" min="0" max="1" value="0.8" step="0.01" />
-      <!-- WebKit-only (Safari + the packaged app's WKWebView). No equivalent
-           API exists in Chrome/Firefox, so this stays display:none until
-           player.js feature-detects webkitShowPlaybackTargetPicker and
-           reveals it. Lucide's airplay glyph, same idiom as the other
-           player-bar icons above (inline, not the ICONS registry — this bar
-           never went through that helper). -->
       <button class="player-btn airplay-btn" id="btn-airplay" title="AirPlay" style="display:none">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7Z"/></svg>
       </button>
@@ -241,6 +164,7 @@
   <audio id="audio-el" preload="none"></audio>
 
   <script src="/js/vendor/wavesurfer.min.js"></script>
+  <script src="/js/notify.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/player.js"></script>
   <script src="/js/app.js"></script>

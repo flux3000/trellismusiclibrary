@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Inventory the Vorbis comments actually present on disk across the library.
+"""Inventory the Vorbis comments actually present on disk across the library.
 
 Read-only. Splits the library in two:
 
@@ -12,8 +11,6 @@ Read-only. Splits the library in two:
 
 Reports key frequency, multi-value usage and distinct example values, and
 separates de facto standard keys from genuinely custom ones.
-
-Run natively, inside .venv -- a Cowork session cannot open the NAS FLACs.
 
     source .venv/bin/activate
     python3 tools/survey_flac_tags.py

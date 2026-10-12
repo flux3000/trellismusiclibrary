@@ -1,7 +1,4 @@
-"""
-tests/test_flac_tag_taxonomy.py — the 2026-09-16 FLAC tag taxonomy.
-
-Write side (build_recording_tags / write_flac_tags): ARTIST and ALBUMARTIST
+"""Write side (build_recording_tags / write_flac_tags): ARTIST and ALBUMARTIST
 both carry the act, ALBUM is "date - venue", DATE is the full partial date,
 VENUE / LOCATION / SOURCE replace the CONCERT* and RECORDINGSOURCE keys, GENRE
 is the act's genre, and PERFORMER repeats once per musician in the show's
@@ -305,10 +302,11 @@ def test_disc_one_of_disctotal_greater_than_one_is_kept(tmp_path):
 
 
 def test_tag_disc_carrier_sets_sets_detected(tmp_path):
-    """The latent bug (spec chunk 7f): a flat folder with no subdir/filename
-    carrier at all still got its disc fields stamped by DISCNUMBER tags, but
-    sets_detected stayed False -- app.js's toTracks() trusts that flag, not
-    the presence of disc_number, to pick index vs tag ordering."""
+    """The latent bug: a flat folder with no subdir/filename carrier at all still
+    got its disc fields stamped by DISCNUMBER tags, but sets_detected stayed
+    False -- app.js's toTracks trusts that flag, not the presence of
+    disc_number, to pick index vs tag ordering.
+    """
     root = tmp_path / "flat_tagged_sets"; root.mkdir()
     _flac_with_tags(root / "01.flac", DISCNUMBER="1", TRACKNUMBER="1", DISCTOTAL="2")
     _flac_with_tags(root / "02.flac", DISCNUMBER="1", TRACKNUMBER="2", DISCTOTAL="2")

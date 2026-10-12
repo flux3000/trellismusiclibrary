@@ -1,8 +1,3 @@
-"""
-tests/test_lomax_fixes.py -- the 2026-10-05 Lomax fixes: state abbreviations, track notes, lineage
-as the recording chain only, orphaned "no question" sentences, genre (Lomax and the MusicBrainz
-suggestion), and the stored decision being the truth after a reload. No network.
-"""
 import pytest
 
 import app.lomax as lomax
@@ -534,7 +529,8 @@ def test_one_arrow_does_not_bypass_the_commentary_check():
     assert filters.clean_lineage("Schoeps > MixPre > Audacity (the show opener) > FLAC") != ""
 
 
-# ── junk notes: Ryan's own examples, at normalize and at read time ──────────
+# ── junk notes: the user's own examples, at normalize and at read time
+# ──────────
 
 RYAN_INFO = ("Go Kurosawa\n01. Tuning:\n02. Blues on the Corner\n03. Announcer\n04. Applause\n"
              "05. Nardis *\n\n* with Jerry Garcia on pedal steel\n")

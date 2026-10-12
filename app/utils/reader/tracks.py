@@ -1,5 +1,4 @@
-"""
-Tracks, sets and timestamps from an info file (Resolver v2, chunk 3, 2026-10-03).
+"""Tracks, sets and timestamps from an info file.
 
   unnumbered_titles(doc, dec)   an unnumbered setlist: the TRACK-role lines
   set_label_at(sets, line)      the SET_HEADER in force at a line (the set carrier)

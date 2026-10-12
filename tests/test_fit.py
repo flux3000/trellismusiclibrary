@@ -1,6 +1,6 @@
-"""
-Resolver v2 chunk 7b: the weight fitter (reader/fit.py), the shipped weights and the
-leave-one-out alignment. Pure python, no corpus, no network, no database.
+"""Resolver v2 chunk 7b: the weight fitter (reader/fit.py), the shipped weights
+and the leave-one-out alignment. Pure python, no corpus, no network, no
+database.
 """
 import importlib.util
 import json

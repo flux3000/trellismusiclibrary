@@ -1,5 +1,4 @@
-"""
-tests/test_peer_sharing.py — inbound peer-sharing server side (milestone 1).
+"""tests/test_peer_sharing.py — inbound peer-sharing server side.
 
 Covers the security-critical surface:
   * token hashing + resolution (valid / unknown / revoked token / revoked peer)
@@ -67,15 +66,14 @@ def _auth(raw):
 
 
 def _login_as(client, username="admin"):
-    """
-    Put `username` into the client's session, then PROVE it authenticated.
+    """Put `username` into the client's session, then PROVE it authenticated.
 
-    The proof matters (2026-08-08). This helper previously just wrote session
-    keys and returned; if flask_login declined to load the user, the next
-    assertion saw an unauthenticated response and — because the accepted status
-    sets included the unauthenticated code — read it as an authorization
-    result. test_admin_peer_management_requires_admin passed for two weeks
-    without ever reaching the role gate it exists to test.
+    The proof matters. This helper previously just wrote session keys and
+    returned; if flask_login declined to load the user, the next assertion saw
+    an unauthenticated response and — because the accepted status sets included
+    the unauthenticated code — read it as an authorization result.
+    test_admin_peer_management_requires_admin passed for two weeks without ever
+    reaching the role gate it exists to test.
 
     So: assert the precondition. A broken login now fails HERE, saying so,
     instead of impersonating a passing authorization test downstream.
@@ -155,7 +153,6 @@ def test_invite_valid_expired_consumed(app):
     _db.session.commit()
     assert fresh.is_valid() is True
     assert expired.is_valid() is False
-    # Reusable as of 2026-08-30 — consumed no longer means invalid, only expiry does.
     assert consumed.is_valid() is True
 
 
@@ -217,8 +214,6 @@ def test_enroll_mints_working_token_and_is_reusable(app):
     assert me.status_code == 200
     assert me.get_json()["peer_name"] == peer.name
 
-    # Reusable as of 2026-08-30 -- a second device can enroll with the SAME
-    # code and gets its own, independent token.
     resp2 = client.post("/api/share/enroll", json={"invite_code": raw_code})
     assert resp2.status_code == 201
     token2 = resp2.get_json()["token"]
@@ -300,9 +295,7 @@ def test_peer_token_cannot_reach_editing_endpoint(app, seeded_ids):
 
 
 def test_admin_peer_management_requires_admin(app):
-    # No session at all → login_required blocks. Since 2026-08-08 the local
-    # door answers JSON 401 rather than redirecting to a POST-only login route
-    # (see tests/test_unauthorized_responses.py), so this is exact now.
+    # No session at all → login_required blocks.
     assert app.test_client().get("/api/peers/").status_code == 401
 
     # A non-admin session → admin_required's ROLE gate, which is the thing this

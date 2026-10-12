@@ -198,13 +198,11 @@ def test_put_file_handling_rejects_an_invalid_custom_template(client):
 
 
 def test_put_file_handling_selects_custom_with_no_template_yet(client):
-    """
-    R4 (re-review, 2026-09-25): the Settings scheme select saves
-    naming_scheme='custom' ALONE, immediately, the moment it's picked --
-    the Template field is readonly until the STORED scheme reads 'custom',
-    so on a fresh install there is no template to send yet. This must
-    succeed (a transitional state), not 400 and revert the select back to
-    'Keep original' before the field ever unlocks.
+    """R4: the Settings scheme select saves naming_scheme='custom' ALONE,
+    immediately, the moment it's picked -- the Template field is readonly until
+    the STORED scheme reads 'custom', so on a fresh install there is no
+    template to send yet. This must succeed (a transitional state), not 400 and
+    revert the select back to 'Keep original' before the field ever unlocks.
     """
     _login_as(client, "admin")
     resp = client.put("/api/system/file-handling", json={"naming_scheme": "custom"})

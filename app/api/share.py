@@ -1,12 +1,11 @@
-"""
-api/share.py — the peer-facing door (INBOUND sharing).
+"""api/share.py — the peer-facing door (INBOUND sharing).
 
 Everything here is authenticated by a peer Bearer token (@peer_required),
 NOT a local login. This blueprint is deliberately READ-ONLY: it exposes
 browse + stream over a peer's granted collections and nothing else. There is
 no route here that mutates the library — a peer token is structurally
 incapable of editing/deleting, because the only endpoints it can authenticate
-to are the ones in this file. See "Peer Sharing — Design Spec v1".
+to are the ones in this file.
 
 Routes (url_prefix /api/share):
   POST /enroll                    invite-code handshake → mints a token (the
@@ -18,8 +17,8 @@ Routes (url_prefix /api/share):
   GET  /recordings/<id>           full recording detail (read-only)
   GET  /stream/<track_id>         transcoded MP3 256k stream (access-checked)
 
-Entity pages (milestone 2, 2026-08-08) — paths mirror the LOCAL API so the
-consumer's frontend can reuse its existing render functions:
+Entity pages — paths mirror the LOCAL API so the consumer's frontend can reuse
+its existing render functions:
   GET  /artists/<id>              catalog metadata (bio, dossier, genre…)
   GET  /artists/<id>/recordings   holdings — filtered to the visible set
   GET  /artists/images/<image_id> artist photo, checked via its owner
@@ -28,9 +27,9 @@ consumer's frontend can reuse its existing render functions:
   GET  /genres/                      genres present in the visible set
   GET  /genres/<id>                  one genre, its visible acts and shows
 
-All routes are strict_slashes=False (2026-08-08): the consumer proxies paths
-built by the LOCAL api.js, whose conventions differ on trailing slashes
-(/api/collections/ but /api/venues/12). A peer client should not have to guess.
+All routes are strict_slashes=False: the consumer proxies paths built by the
+LOCAL api.js, whose conventions differ on trailing slashes (/api/collections/
+but /api/venues/12). A peer client should not have to guess.
 
 Every one of those is filtered through peer_visible_recording_ids(). Counts
 included — see the rule in the ENTITY PAGES banner below.
@@ -82,15 +81,14 @@ def _owner_user():
 def _node_identity():
     """This instance's public identity, shown to peers on enroll/‘me’.
     Config-driven with sensible fallbacks; SHARE_NODE_NAME / SHARE_OWNER_NAME
-    become real settings in the server-mode config milestone."""
+    may become real settings."""
     # Owner first — the node name is derived from it when unset.
     owner = current_app.config.get("SHARE_OWNER_NAME")
     if not owner:
         admin = _owner_user()
-        # `.name`, not `.username` (2026-08-25). This is the most public place a
-        # person's name appears — it is what a peer's library selector shows —
-        # and a display name that does not reach it is a display name for
-        # nobody.
+        # `.name`, not `.username`. This is the most public place a person's
+        # name appears — it is what a peer's library selector shows — and a
+        # display name that does not reach it is a display name for nobody.
         owner = admin.name if admin else "Unknown"
 
     # A node with no configured name is "<Owner>'s Library" rather than a
@@ -108,11 +106,6 @@ def _node_identity():
 # ── POST /api/share/enroll ────────────────────────────────────────────────────
 # The one unauthenticated-by-token route. The invite code IS the credential:
 # unguessable, single-use, expiring.
-#
-# Rate limited since 2026-08-25 (the July TODO, closed before exposure). The
-# code being unguessable assumes a bounded number of guesses; nothing bounded
-# them. Separately, every attempt costs a database lookup, so an unlimited
-# endpoint is a way to make the machine unhappy without ever guessing anything.
 
 @bp.route("/enroll", methods=["POST"], strict_slashes=False)
 @rate_limited("ENROLL_RATE_LIMIT", "ENROLL_RATE_WINDOW", bucket="enroll")
@@ -131,10 +124,9 @@ def enroll():
     if peer is None or not peer.is_active:
         return jsonify({"error": "This invite is no longer active"}), 403
 
-    # Invites are reusable (2026-08-30) -- only stamp the FIRST-use timestamp,
-    # never re-consume. This still drives the "Used · joined <date>" admin
-    # display; it no longer blocks a second device from enrolling with the
-    # same code.
+    # Invites are reusable -- only stamp the FIRST-use timestamp, never
+    # re-consume. This still drives the "Used · joined <date>" admin display;
+    # it no longer blocks a second device from enrolling with the same code.
     if invite.consumed_at is None:
         invite.consumed_at = _utcnow()
     raw_token = generate_token()
@@ -205,22 +197,23 @@ def list_collections():
     peer = current_peer()
     collections = _peer_visible_collections(peer)
 
-    # System collections are hidden from the peer's collection list (2026-08-24).
-    # A Full Library grant means the peer is already browsing the whole library;
-    # listing a collection whose contents are exactly that library is noise
-    # pretending to be navigation — the same argument that dropped the dimension
-    # indexes for 3-show grants, applied the other way round.
+    # System collections are hidden from the peer's collection list. A Full
+    # Library grant means the peer is already browsing the whole library; listing
+    # a collection whose contents are exactly that library is noise pretending to
+    # be navigation — the same argument that dropped the dimension indexes for
+    # 3-show grants, applied the other way round.
     collections = [c for c in collections if not c.is_system]
 
     collections.sort(key=lambda c: (c.name or "").lower())
+    visible = peer_visible_recording_ids(peer)
     return jsonify([
         {
             "id":              c.id,
             "name":            c.name,
             "description":     c.description,
-            # Model-resolved: len(c.recordings) both materialises every row and
-            # reports 0 for a dynamic collection.
-            "recording_count": c.recording_count,
+            # Counted over the peer's visible set: the model's own count would
+            # include records the share policy withholds.
+            "recording_count": len(c.resolved_recording_ids() & visible),
         }
         for c in collections
     ])
@@ -235,16 +228,16 @@ def collection_detail(collection_id):
     collection = db.session.get(Collection, collection_id)
     if collection is None:
         abort(404)
-    # Visible-set derived, not grant-derived (2026-08-24): a collection is
-    # reachable if the peer can see something in it. Under the MVP's
-    # share-everything policy that is every curated collection; under selective
-    # sharing it narrows on its own, with no second rule to keep in step.
+    # Visible-set derived, not grant-derived: a collection is reachable if the
+    # peer can see something in it. Under the MVP's share-everything policy
+    # that is every curated collection; under selective sharing it narrows on
+    # its own, with no second rule to keep in step.
     visible = peer_visible_recording_ids(peer)
     if collection.is_system or not (collection.resolved_recording_ids() & visible):
         abort(403)
-    # card=True (2026-08-08): adds genre, genre_color and image_id, which the
-    # handbill Browse cards need. Without it a peer's collection renders as
-    # colourless cards with initials where every photo should be.
+    # card=True: adds genre, genre_color and image_id, which the handbill
+    # Browse cards need. Without it a peer's collection renders as colourless
+    # cards with initials where every photo should be.
     recs = [r for r in collection.recordings if r.id in visible]
     img_urls = _peer_image_urls(recs)
     return jsonify({
@@ -304,23 +297,23 @@ def recording_detail(recording_id):
     return jsonify({
         "id":               rec.id,
         # The recording page's NEXT call: it fetches /performances/<id> for
-        # artist, date, venue and personnel. Omitting this (2026-08-08) left
-        # the page with nothing to look up, so it rendered its local empty
-        # state — "Set artist / Add date / Add venue" — as though the record
-        # were unfilled rather than the fetch never having happened.
+        # artist, date, venue and personnel. Omitting this left the page
+        # with nothing to look up, so it rendered its local empty state —
+        # "Set artist / Add date / Add venue" — as though the record were
+        # unfilled rather than the fetch never having happened.
         "performance_id":   rec.performance_id,
         "title":            rec.title,
-        # The VIEWER's star, not the owner's (2026-08-24). A peer has no
-        # favourites of their own yet, so this is False — see _peer_row.
+        # The VIEWER's star, not the owner's. A peer has no favourites
+        # of their own yet, so this is False — see _peer_row.
         "is_favorite":      False,
         # Show identity (self-contained, so the peer client needs no other call)
         "artist":        p.artist.name if (p and p.artist) else None,
-        # Nav ids (2026-08-08). Milestone 1 sent names only, which was right
-        # when a peer had nowhere to navigate TO. With entity pages, the
-        # frontend builds #/artist/<id> and #/venue/<id> from exactly these
-        # two fields — without them the pages exist but are unreachable.
-        # Not a leak: both endpoints are access-checked, so an id for something
-        # ungranted buys a 403 and nothing else.
+        # Nav ids. Milestone 1 sent names only, which was right when a peer had
+        # nowhere to navigate TO. With entity pages, the frontend builds
+        # #/artist/<id> and #/venue/<id> from exactly these two fields —
+        # without them the pages exist but are unreachable. Not a leak: both
+        # endpoints are access-checked, so an id for something ungranted buys a
+        # 403 and nothing else.
         "artist_id":     p.artist_id if p else None,
         "date":             format_partial_date(p.start_year, p.start_month, p.start_day) if p else None,
         "venue":            v.name    if v else None,
@@ -336,11 +329,11 @@ def recording_detail(recording_id):
         "is_official":      bool(rec.is_official),
         "info_file_content": rec.info_file_content,
         "notes":            rec.notes,
-        # Recording-level artwork (Studio Records spec v1, chunk 5) --
-        # reachable here at all only for a recording peer_can_access_recording()
-        # already approved above, so "visible" is already the only case this
-        # payload gets built for. See _peer_row/_peer_summary for the list
-        # payloads (they reuse recording_row/recording_summary unchanged).
+        # Recording-level artwork -- reachable here at all only for a recording
+        # peer_can_access_recording already approved above, so "visible" is
+        # already the only case this payload gets built for. See
+        # _peer_row/_peer_summary for the list payloads (they reuse
+        # recording_row/recording_summary unchanged).
         "image_url":        _primary_recording_image_url(rec, url_prefix="/api/share/recordings/images",
                                                          artist_url_prefix=_SHARE_IMG_URL, venue_url_prefix=None),
         "tracks": [
@@ -408,16 +401,15 @@ def stream(track_id):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ENTITY PAGES  (milestone 2, 2026-08-08)
 # ══════════════════════════════════════════════════════════════════════════════
 #
-# Ryan's requirement: a peer should get a HOLISTIC experience — learn about the
-# artist, see the venue, see who played that night — not a bare list of
+# The user's requirement: a peer should get a HOLISTIC experience — learn about
+# the artist, see the venue, see who played that night — not a bare list of
 # streamable files. So these mirror the LOCAL endpoints' paths and payload
 # shapes exactly, which is what lets the consumer's frontend reuse its existing
 # render functions instead of growing a parallel set of peer-only pages.
 #
-# The distinction that makes this safe (Peer UX Design Spec v1 §2):
+# The distinction that makes this safe:
 #
 #   CATALOG METADATA — bio, dossier, photo, genre, lineup, venue name/city.
 #       Reference data about the WORLD. Reveals nothing about what is held.
@@ -451,26 +443,24 @@ def _peer_row(rec, card=False, image_url=_serialize_UNSET):
     """recording_row, with the owner's star removed.
 
     `is_favorite` means "the VIEWER starred this" everywhere in the UI — it
-    renders as the star you click. Passing the OWNER's value through would
-    scatter Ryan's private bookmarks across Matt's screen while looking, to
-    Matt, like his own.
+    renders as the star you click.
 
-    The owner's favourites deliberately do not travel (2026-08-24): the star is
-    only free to mean "this one is special" while it stays private, and
-    Collections is the surface built for curation that IS meant to be read.
-    False is the honest answer here, not a redaction — a peer genuinely has no
-    favourites yet. When peer-side favourites are built, this is where the
-    viewer's own value gets filled in.
+    The owner's favourites deliberately do not travel: the star is only free to
+    mean "this one is special" while it stays private, and Collections is the
+    surface built for curation that IS meant to be read. False is the honest
+    answer here, not a redaction — a peer genuinely has no favourites yet. When
+    peer-side favourites are built, this is where the viewer's own value gets
+    filled in.
 
-    image_url must be computed with the SHARE-prefixed url (chunk 5), not
-    recording_row()'s local default -- app/api/remotes.py's proxy only
-    rewrites strings that start with "/api/share/" into the consumer's
-    "/api/remotes/<id>/" shape, so an unprefixed local path here would
-    silently resolve against the consumer's OWN library instead. A LIST
-    caller passes `_peer_image_urls(recs).get(rec.id)` (one query for the
-    whole list, S1); omitted (a single-recording caller), this falls back to
-    the per-row lookup with the share prefix -- still correct, just not
-    batched, exactly like recording_row()'s own local default.
+    image_url must be computed with the SHARE-prefixed url, not recording_row's
+    local default -- app/api/remotes.py's proxy only rewrites strings that
+    start with "/api/share/" into the consumer's "/api/remotes/<id>/" shape, so
+    an unprefixed local path here would silently resolve against the consumer's
+    OWN library instead. A LIST caller passes
+    `_peer_image_urls(recs).get(rec.id)` (one query for the whole list, S1);
+    omitted (a single-recording caller), this falls back to the per-row lookup
+    with the share prefix -- still correct, just not batched, exactly like
+    recording_row's own local default.
     """
     if image_url is _serialize_UNSET:
         image_url = _primary_recording_image_url(rec, url_prefix=_SHARE_RECORDING_IMG_URL,
@@ -494,12 +484,12 @@ def _peer_summary(rec, image_url=_serialize_UNSET):
 def _peer_visible_collections(peer):
     """Curated collections holding at least one recording this peer can see.
 
-    ONE rule for both worlds (2026-08-24). Under the MVP's share-everything
-    policy this returns every curated collection — Matt sees the curator's
-    shelves, which is the intended experience. When selective sharing returns,
-    the same code narrows correctly, because it asks about the VISIBLE SET
-    rather than about the grant list. Do not special-case "share everything"
-    anywhere; let it fall out of the visible set being everything.
+    ONE rule for both worlds. Under the MVP's share-everything policy this
+    returns every curated collection — Matt sees the curator's shelves, which
+    is the intended experience. When selective sharing returns, the same code
+    narrows correctly, because it asks about the VISIBLE SET rather than about
+    the grant list. Do not special-case "share everything" anywhere; let it
+    fall out of the visible set being everything.
 
     System collections are excluded: a collection whose contents are exactly
     the library you are already browsing is noise pretending to be curation.
@@ -651,11 +641,11 @@ def artist_image(image_id):
 
 
 # ── GET /api/share/recordings/images/<image_id> ────────────────────────────
-# The recording-artwork photo route (Studio Records spec v1, chunk 5). Access
-# is checked against the image's OWNING recording via peer_can_access_recording
-# -- the same visibility rule as recording_detail()/stream() above: the image
-# row can only be reached through a recording id, and that id is access-checked
-# here exactly like every other recording-scoped route in this file.
+# The recording-artwork photo route. Access is checked against the image's
+# OWNING recording via peer_can_access_recording -- the same visibility rule as
+# recording_detail/stream above: the image row can only be reached through a
+# recording id, and that id is access-checked here exactly like every other
+# recording-scoped route in this file.
 
 @bp.route("/recordings/images/<int:image_id>", strict_slashes=False)
 @peer_required
@@ -675,7 +665,7 @@ def recording_image(image_id):
 # ── GET /api/share/venues/<id> ────────────────────────────────────────────────
 # The count-leak endpoint. Local `get_venue` returns performance_count and
 # recording_count over the venue's ENTIRE history; served unfiltered to a peer
-# that publishes exactly how much of that venue Ryan holds. Both counts here
+# that publishes exactly how much of that venue the user holds. Both counts here
 # are computed over the filtered lists.
 
 @bp.route("/venues/<int:venue_id>", strict_slashes=False)
@@ -712,9 +702,9 @@ def venue_detail(venue_id):
         "performance_count": len(perfs),
         "recording_count":   len(recordings),
         "recordings":        recordings,
-        # Venue photos are not exposed to peers: venue_image has zero rows
-        # (2026-08-08), so a peer image route for it would be untested code
-        # guarding an empty table. Add it when venues actually have photos.
+        # Venue photos are not exposed to peers: venue_image has zero rows,
+        # so a peer image route for it would be untested code guarding an
+        # empty table. Add it when venues actually have photos.
         "has_image":         False,
         "images":            [],
     })
@@ -829,6 +819,13 @@ def list_genres():
     genres = (db.session.query(Genre)
               .filter(Genre.id.in_(artists_by_genre.keys()))
               .order_by(Genre.name).all())
+    # ?index=1 (the Genres index page): the run of artist faces, drawn only
+    # from acts with something visible.
+    faces = None
+    if request.args.get("index"):
+        from app.utils import dim_index
+        faces = dim_index.genre_faces(visible_recs, peer_visible_artist_ids(peer))
+
     return jsonify([
         {
             "id":              g.id,
@@ -837,6 +834,7 @@ def list_genres():
             "color":           g.color,
             "artist_count": len(artists_by_genre.get(g.id, ())),
             "recording_count": len(recordings_by_genre.get(g.id, ())),
+            **({"faces": faces.get(g.id, [])} if faces is not None else {}),
         }
         for g in genres
     ])
@@ -944,10 +942,10 @@ def genre_detail(genre_id):
 # metadata, then the PERFORMANCE for who/when/where — artist, date, venue and
 # resolved personnel live here, not on the recording.
 #
-# Missing it (2026-08-08) is why a peer's View Recording page rendered "Set
-# artist / Add date / Add venue": the page had a recording with no
-# performance to describe it, so it fell back to its empty-state prompts and
-# looked like an unfilled local record rather than a failed remote fetch.
+# Missing it is why a peer's View Recording page rendered "Set artist / Add date
+# / Add venue": the page had a recording with no performance to describe it, so
+# it fell back to its empty-state prompts and looked like an unfilled local
+# record rather than a failed remote fetch.
 
 @bp.route("/performances/<int:performance_id>", strict_slashes=False)
 @peer_required
@@ -996,13 +994,7 @@ def performance_detail(performance_id):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# BROWSE MODULES  (2026-08-08)
 # ══════════════════════════════════════════════════════════════════════════════
-#
-# Ryan's call: a peer gets a real Library page built from the granted set, not
-# just a list of collections. app.js composes Browse from five independent
-# fetches and hides any module whose fetch fails or comes back empty, so these
-# mirror the local paths one for one and the page assembles itself.
 #
 # The Recommended algorithm is NOT reimplemented here. Its diversity rules
 # (distinct artist as a hard rule, distinct genre as a soft preference,
@@ -1193,8 +1185,17 @@ def list_venues():
                            Performance.venue_id.isnot(None))):
         counts[vid] = counts.get(vid, 0) + 1
 
+    # ?index=1 (the Venues index page): extras computed over the VISIBLE
+    # recordings only, so a year span or "who played" line can never reach past
+    # what this peer was granted. The base fields win on any shared key.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.venue_extras(peer_visible_recording_ids(peer))
+
     return jsonify([
         {
+            **extra.get(v.id, {}),
             "id":                v.id,
             "name":              v.name,
             "city":              v.city,
@@ -1226,8 +1227,17 @@ def list_musicians():
     rows = (db.session.query(Musician)
             .filter(Musician.id.in_(musician_ids))
             .order_by(_func.coalesce(Musician.sort_name, Musician.name)).all())
+    # ?index=1 (the Musicians index page): acts and counts over the VISIBLE
+    # set only -- the same membership-by-visible-act rule as the list itself.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.musician_extras(
+            peer_visible_recording_ids(peer), peer_visible_artist_ids(peer))
+
     return jsonify([
-        {"id": a.id, "name": a.name, "sort_name": a.sort_name} for a in rows
+        {**extra.get(a.id, {}),
+         "id": a.id, "name": a.name, "sort_name": a.sort_name} for a in rows
     ])
 
 
@@ -1342,18 +1352,17 @@ def search():
 @bp.route("/artists/all-recordings", strict_slashes=False)
 @peer_required
 def all_recordings():
-    """
-    The Library/Browse payload: every visible artist with their visible
+    """The Library/Browse payload: every visible artist with their visible
     performances and recordings, in one request.
 
-    MIRRORS `GET /api/artists/all-recordings` (api/artists.py) key for
-    key, deliberately. The frontend's `renderLibraryView()` consumes this shape
-    and `contextualise()` rewrites the URL transparently, so any divergence
-    here shows up as a broken Library page on the peer side only — which is
-    exactly how this endpoint came to be missing in the first place. The local
-    route was added during the Browse rebuild (2026-08-23) and the share door
-    never got its counterpart, so a peer's Library said "Failed to load
-    library" while everything else worked.
+    MIRRORS `GET /api/artists/all-recordings` (api/artists.py) key for key,
+    deliberately. The frontend's `renderLibraryView` consumes this shape and
+    `contextualise` rewrites the URL transparently, so any divergence here
+    shows up as a broken Library page on the peer side only — which is exactly
+    how this endpoint came to be missing in the first place. The local route
+    was added during the Browse rebuild and the share door never got its
+    counterpart, so a peer's Library said "Failed to load library" while
+    everything else worked.
 
     Every list AND every count is computed over the visible set. A peer must
     not learn that an act they can see three shows by actually has forty-one:
@@ -1384,14 +1393,9 @@ def all_recordings():
     )
 
     # ONE query for every visible performance across every artist, with
-    # selectinload chains for everything the loop below and _peer_summary()
+    # selectinload chains for everything the loop below and _peer_summary
     # touch -- venue, recordings, and each recording's tracks/quality_score
-    # (recording_summary() reads rec.tracks and rec.quality_score). Mirrors
-    # the 2026-08-24 fix in app/api/artists.py all_recordings(): this route
-    # used to run a query per artist for performances, then lazy-load each
-    # performance's venue and recordings, and each recording's tracks and
-    # quality_score -- one grouped query per relationship level now, instead
-    # of one per row, regardless of library size.
+    # (recording_summary reads rec.tracks and rec.quality_score).
     performances = (
         db.session.query(Performance)
         .filter(Performance.artist_id.in_(visible_artists),
@@ -1500,8 +1504,17 @@ def list_artists():
             .group_by(Artist.id)
             .order_by(func.coalesce(Artist.sort_name, Artist.name))
             .all())
+    # ?index=1 (the Artists index page): excerpt, area, year span over the
+    # VISIBLE recordings, and the primary photo id. The photo is served by
+    # /artists/images/<id> above, which re-checks the owning artist is visible.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.artist_extras(visible)
+
     return jsonify([
         {
+            **extra.get(p.id, {}),
             "id":              p.id,
             "name":            p.name,
             "sort_name":       p.sort_name,
@@ -1509,6 +1522,7 @@ def list_artists():
             "members":         [a.name for a in p.musicians],
             "genre_id":        p.genre_id,
             "genre_name":      p.genre.name if p.genre else None,
+            "genre_color":     p.genre.color if p.genre else None,
         }
         for p, rc in rows
     ])

@@ -1,5 +1,4 @@
-"""
-models/remote_favorite.py — MY favourites, in someone else's library.
+"""models/remote_favorite.py — MY favourites, in someone else's library.
 
 `Recording.is_favorite` is a column on a recording I own. It cannot answer this
 question, because the recording being starred lives in a different database on
@@ -15,8 +14,7 @@ by peer. It was rejected for two reasons:
    is nothing there to mutate, rather than because every handler remembers to
    check. Adding the first write endpoint to that blueprint trades a
    load-bearing security property for convenience.
-2. **A listener's taste is their own business.** Storing Matt's stars in Ryan's
-   database means Ryan can read what Matt likes. That is not information the
+2. **A listener's taste is their own business.** Storing Matt's stars in the user's
    act of sharing a library ought to hand over — the same argument that keeps
    `play_log` from travelling in the other direction.
 

@@ -158,7 +158,7 @@ def test_ingest_tag_write_reports_a_read_only_file_error_without_failing(app, db
 
 
 def test_in_root_source_never_gets_the_tag_write_even_when_bulk_is_false(app, db, tmp_path):
-    """R2-N7: an in-root source (found already sitting inside LIBRARY_ROOT --
+    """an in-root source (found already sitting inside LIBRARY_ROOT --
     e.g. a Review & Ingest Accept on a Bulk Ingest review row) must skip
     step 12 regardless of write_tags_on_ingest, even though that call goes
     through _do_confirm with bulk=False (Accept is a deliberate click, not
@@ -197,7 +197,7 @@ def test_in_root_source_never_gets_the_tag_write_even_when_bulk_is_false(app, db
 
 
 def test_outside_root_source_still_gets_the_tag_write_in_organize(app, db, tmp_path):
-    """R2-N7 (guard rail): the fix is scoped to in-root sources only -- a
+    """Guard rail: the fix is scoped to in-root sources only -- a
     source arriving from OUTSIDE LIBRARY_ROOT still follows
     write_tags_on_ingest exactly as before, bulk or not."""
     from app.api.ingest import _do_confirm

@@ -1,5 +1,4 @@
-"""
-Hand-set weights for the role decoder (Resolver v2, chunk 3, 2026-10-03).
+"""Hand-set weights for the role decoder.
 
 Every number the decoder uses is in this file, as readable rows:
 
@@ -11,8 +10,8 @@ plus the role's BIAS. The decoder then picks the best whole-file labelling
 (Viterbi), so a name that follows "with" is a MEMBER because the transition
 CONNECTOR -> MEMBER is strong, not because a special rule says so.
 
-They are hand-set to work on day one; chunk 7 fits them offline from the
-evaluation corpus. Units are log-score points: +3 is "clearly", +6 "decisively".
+They are hand-set to work on day one; weights_fitted.py holds the table fitted offline. Units are log-score points: +3 is "clearly", +6
+"decisively".
 """
 
 ROLES = ("TITLE", "ARTIST", "CONNECTOR", "MEMBER", "VENUE", "EVENT", "STAGE", "PLACE",
@@ -195,7 +194,7 @@ EMISSION = [
 
     # ── EVENT ─────────────────────────────────────────────────────────────
     ("event_word",        "EVENT",   5.0),
-    ("not_event",         "EVENT",  -8.0),   # a tour, residency or billing note (2026-10-05)
+    ("not_event",         "EVENT",  -8.0),   # a tour, residency or billing note
     ("lib_event",         "EVENT",   5.0),
     ("label_event",       "EVENT",   5.0),
     ("w8p",               "EVENT",  -2.0),

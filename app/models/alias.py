@@ -1,5 +1,4 @@
-"""
-models/alias.py -- learned aliases for venues and artists (Resolver v2, chunk 4).
+"""models/alias.py -- learned aliases for venues and artists.
 
 The second layer the reader consults, between the user's own rows and the shipped
 Atlas (design proposal 4.1): when a person confirms a venue or an artist that
@@ -7,9 +6,9 @@ differs from what the text said ("Wilkes Commnity College" saved as the Merlefes
 venue), the text the evidence quoted is stored here, linked to the saved row. The
 next import of a text that quotes it resolves at once.
 
-These tables exist from chunk 4 and stay EMPTY until chunk 8 fills them. Rows are
-written only from a human's confirmed save, only for venues and artists, and never
-from an AI proposal the person did not accept.
+Rows
+are written only from a human's confirmed save, only for venues and artists,
+and never from an AI proposal the person did not accept.
 
 `alias` is the text as quoted; `alias_key` is its normalised form (the same key the
 library index and the Atlas use: accents, case, "&"/"and", punctuation and a

@@ -9,8 +9,8 @@ Grammar: curly-brace tokens with optional colon-chained modifiers
 ({title:lower:underscore}), optional square-bracket groups that render only
 when every token inside them resolves to a value, and literal text
 everywhere else. The file's own extension is never part of a template — it
-is appended by the caller of render()/rename_plan(). Illegal filesystem
-characters (/ : \\ * ? " < > |) become "-".
+is appended by the caller of render()/rename_plan(). Names are made safe for
+Windows as well as macOS by windows_safe(); see its docstring for the rules.
 
 rename_plan() is the one renderer used by ingest, retitle, Rename Files and
 the preview endpoint — see app/api/naming.py, app/api/tracks.py and
@@ -37,15 +37,134 @@ TOKENS = {
 
 MODIFIERS = {"lower", "upper", "nospace", "underscore"}
 
-# Characters illegal in a filename on the platforms Trellis targets — spec
-# section 4, not the narrower macOS-only set app/utils/folder_naming.py's
-# own _sanitize() uses for folder names.
-_ILLEGAL_CHARS_RE = re.compile(r'[/:\\*?"<>|]')
+# ── Windows-safe names ───────────────────────────────────
+# One rule set for every file and folder name Trellis writes, so a library
+# copied to Windows, an exFAT drive or a peer never meets a name it cannot
+# create. Folder names (folder_naming._sanitize, ingest._sanitize_path) use
+# this too.
+
+_SEGUE_RE    = re.compile(r"\s*[<>|:]+\s*")       # Tweezer>Light, Encore: X
+_EDGE_SEGUE  = re.compile(r"^\s*[<>|:]+\s*|\s*[<>|:]+\s*$")
+_CONTROL_RE  = re.compile(r"[\x00-\x1f]")
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL",
+                 *(f"COM{i}" for i in range(1, 10)),
+                 *(f"LPT{i}" for i in range(1, 10))}
+
+# Longest relative path (folder_path + "/" + file) Trellis will write. Leaves
+# ~60 characters of Windows' 260 for the library root (C:\Users\...\Library\).
+MAX_REL_PATH = 200
+
+
+def windows_safe(text, whole_name=True):
+    """
+    Make one name component legal on Windows and macOS. Only illegal
+    characters are touched, so an already-legal name comes back unchanged
+    (no whitespace collapsing, no case changes) and never triggers a rename.
+
+      >  <  |  :   become " - "   (Tweezer>Light -> Tweezer - Light;
+                                   Encore: X -> Encore - X); at either end
+                                   of the name they are dropped
+      "           becomes '
+      ?  *        are removed      (M*A*S*H* -> MASH)
+      /  \\        become "-"
+      control characters removed; a reserved device name (CON, NUL,
+      COM1...) gets "_" appended.
+
+    whole_name: strip trailing spaces and dots, which Windows forbids at the
+    end of a whole name (a folder). A file STEM passes False: "E.M.D..flac"
+    is legal, its name ends in "flac".
+    """
+    t = _CONTROL_RE.sub("", text or "")
+    t = _EDGE_SEGUE.sub("", t)
+    t = _SEGUE_RE.sub(" - ", t)
+    t = t.replace('"', "'")
+    t = t.replace("?", "").replace("*", "")
+    t = t.replace("/", "-").replace("\\", "-")
+    if whole_name:
+        t = t.rstrip(" .")
+    if t.split(".")[0].strip().upper() in _WIN_RESERVED:
+        t += "_"
+    return t
 
 
 def sanitize_filename_part(text):
-    """Replace illegal filename characters with '-'."""
-    return _ILLEGAL_CHARS_RE.sub("-", text or "")
+    """A file stem made Windows-safe. Kept under its old name for render()."""
+    return windows_safe(text, whole_name=False)
+
+
+def _words(text):
+    return set(re.findall(r"[^\W\d_]+", (text or "").lower()))
+
+
+def _drop_repeated_artist(stem, folder_rel):
+    """
+    Remove the one inner " - " segment of a file stem that restates the
+    artist from the recording's folder ("01 - 01 Stephen Layton; Britten
+    Sinfonia, Polyphony - Mid-Winter Songs - 4" -> "01 - Mid-Winter Songs - 4").
+    A segment counts when at least half its words, and at least two (one for
+    a one-word artist), appear in the artist folder's name. The first and
+    last segments (track number, title) are never dropped.
+    """
+    artist = _words((folder_rel or "").split("/")[0])
+    segs = stem.split(" - ")
+    if not artist or len(segs) < 3:
+        return stem
+    need = min(2, len(artist))
+    for i in range(1, len(segs) - 1):
+        w = _words(segs[i])
+        hit = len(w & artist)
+        if w and hit >= need and hit / len(w) >= 0.5:
+            return " - ".join(segs[:i] + segs[i + 1:])
+    return stem
+
+
+def fit_name(rel_name, folder_rel, max_len=MAX_REL_PATH):
+    """
+    Shorten the file STEM of rel_name (which may carry a subdir prefix) so
+    folder_rel + "/" + rel_name fits in max_len, cutting at a word boundary.
+    The extension and any subdir prefix are kept. Titles in the database are
+    never shortened; only the name on disk is.
+    """
+    head, base = os.path.split(rel_name)
+    stem, ext = os.path.splitext(base)
+    used = (len(folder_rel) + 1 if folder_rel else 0) + (len(head) + 1 if head else 0)
+    budget = max(max_len - used - len(ext) - 4, 12)   # 4 spare for a " (2)" dedupe suffix
+    if len(stem) <= budget:
+        return rel_name
+    # Before cutting any title, drop an artist name the file repeats from the
+    # folder: it is the least informative part of the name.
+    stem = _drop_repeated_artist(stem, folder_rel)
+    if len(stem) <= budget:
+        return f"{head}/{stem}{ext}" if head else f"{stem}{ext}"
+    cut = stem[:budget]
+    space = cut.rfind(" ")
+    if space >= budget * 0.6:
+        cut = cut[:space]
+    cut = cut.rstrip(" -.,;(")
+    return f"{head}/{cut}{ext}" if head else f"{cut}{ext}"
+
+
+def safe_name_plan(folder_rel, file_paths):
+    """
+    Windows-safe, length-fitted replacements for a recording's EXISTING file
+    names: same naming, only illegal characters and over-long names fixed.
+    Unlike rename_plan() it never applies a naming scheme, so a library's
+    own naming survives. Pure, no disk or DB access.
+
+    Returns new rel paths aligned with file_paths (equal where no change).
+    """
+    out = []
+    for cur in file_paths:
+        cur = cur or ""
+        parts = cur.split("/")
+        *dirs, base = parts
+        stem, ext = os.path.splitext(base)
+        safe_dirs = [windows_safe(d) or d for d in dirs]
+        safe_base = (windows_safe(stem, whole_name=False).strip() or stem) + ext
+        new = "/".join(safe_dirs + [safe_base])
+        out.append(fit_name(new, folder_rel or ""))
+    # Two names can land on the same safe name ("A?" and "A"); keep them apart.
+    return _dedupe_names(out)
 
 
 def parse_template(text):
@@ -115,9 +234,9 @@ def parse_template(text):
 PRESETS = {
     "original":     "{original}",
     "number_title": "{track} - {title}",
-    # "etree" in the picker (2026-10-06): one continuous track number, no disc.
-    # The older "etree" key below keeps its with-disc meaning so a saved
-    # choice does not change under anyone; the picker calls it "etree with disc".
+    # "etree" in the picker: one continuous track number, no disc. The older
+    # "etree" key below keeps its with-disc meaning so a saved choice does not
+    # change under anyone; the picker calls it "etree with disc".
     "etree_tracks": "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].t{track}",
     "etree":        "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}].[d{disc}]t{track_in_disc}",
     "etree_sets":   "{artist_abbr}{date}[.{source:lower}][.{source_tag}][.{shnid}][s{set}]t{track_in_set}",
@@ -421,5 +540,7 @@ def rename_plan(recording, scheme, template=None):
                 name = f"{current_dir}/{name}"
         names.append(name)
 
+    folder_rel = getattr(recording, "folder_path", "") or ""
+    names = [fit_name(n, folder_rel) for n in names]
     names = _dedupe_names(names)
     return list(zip(tracks, (t.file_path for t in tracks), names))

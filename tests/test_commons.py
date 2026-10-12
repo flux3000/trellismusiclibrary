@@ -1,5 +1,4 @@
-"""
-tests/test_commons.py — Wikidata → Wikimedia Commons photo fetch (2026-08-07).
+"""tests/test_commons.py — Wikidata → Wikimedia Commons photo fetch.
 
 Network-free, like test_musicbrainz.py. What matters here is the LICENCE GATE
 and the URL/QID plumbing, both pure functions over canned API payloads.
@@ -106,9 +105,7 @@ def test_image_filenames_from_p18(monkeypatch):
 
 
 def test_uses_wbgetentities_not_wbgetclaims(monkeypatch):
-    """Regression guard for 2026-08-08.
-
-    wbgetclaims' `property` parameter takes ONE property id. Asking it for
+    """wbgetclaims' `property` parameter takes ONE property id. Asking it for
     "P18|P373" failed validation, and MediaWiki reports that as HTTP 200 with an
     `error` body — which read as "no images" for every artist in the library.
     Two properties means wbgetentities.

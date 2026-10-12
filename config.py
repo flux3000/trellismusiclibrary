@@ -45,27 +45,24 @@ def resource_dir():
 
 
 def _default_data_dir():
-    """
-    Where THIS MACHINE'S library data lives — database, transcode cache.
+    """Where THIS MACHINE'S library data lives — database, transcode cache.
 
     From source: the repo, unchanged, so nothing about a dev checkout moves.
 
-    Installed: the per-user application-data location the platform expects
-    (Ryan, 2026-08-25). It survives app updates, it is per-user on a shared
-    machine, and backup software already knows about it. Windows and Linux
-    are answered here too — not because either is supported yet, but because
-    the alternative is discovering this function again later with a Windows
-    user waiting.
+    Installed: the per-user application-data location the platform expects. It
+    survives app updates, it is per-user on a shared machine, and backup
+    software already knows about it. Windows and Linux are answered here too —
+    not because either is supported yet, but because the alternative is
+    discovering this function again later with a Windows user waiting.
     """
     if not is_installed_app():
         return BASE_DIR
 
     home = Path.home()
-    # The FULL name (Ryan, 2026-08-25). This folder is something a person opens
-    # in Finder looking for their library — "Trellis" alone is a word, "Trellis
-    # Music Library" is an answer. The short form survives only where there is a
-    # hard length budget: the macOS menu bar, and the wordmark in the app's own
-    # header.
+    # The FULL name. This folder is something a person opens in Finder looking
+    # for their library — "Trellis" alone is a word, "Trellis Music Library" is
+    # an answer. The short form survives only where there is a hard length
+    # budget: the macOS menu bar, and the wordmark in the app's own header.
     if sys.platform == "darwin":
         return home / "Library" / "Application Support" / APP_NAME
     if os.name == "nt":
@@ -96,7 +93,7 @@ def _env_flag(name, default=False):
 DEV_SECRET_DEFAULT = "dev-secret-change-me"
 
 
-# ── Renamed environment variables (2026-09-04) ───────────────────────────────
+# ── Renamed environment variables ───────────────────────────────
 # FLUX_DB_PATH / FLUX_PORT / FLUX_COOKIE_NAME became TRELLIS_*. There is no
 # compatibility fallback, deliberately.
 #
@@ -121,7 +118,7 @@ _RENAMED_ENV = {
 _stale_env = [(old, new) for old, new in _RENAMED_ENV.items() if os.environ.get(old)]
 if _stale_env:
     raise RuntimeError(
-        "These environment variables were renamed on 2026-09-04 and are no "
+        "These environment variables were renamed and are no "
         "longer read:\n  "
         + "\n  ".join(f"{old}  ->  {new}" for old, new in _stale_env)
         + "\nUpdate whatever sets them. Continuing would silently put this "
@@ -134,24 +131,17 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", DEV_SECRET_DEFAULT)
 
     # ── Database ──────────────────────────────────────────────
-    # TRELLIS_DB_PATH exists for the two-node peer-sharing dev rig (2026-08-08):
-    # a second instance needs its own database, and the path was hardcoded.
-    # Prefixed (unlike LIBRARY_ROOT / IMPORT_DIR) on purpose — see TRELLIS_PORT.
-    # Everything this machine WRITES hangs off DATA_DIR. Same relative layout
-    # in both cases (db/, cache/), so only the root differs and no other code
-    # has to know which mode it is in.
+    # TRELLIS_DB_PATH exists for the two-node peer-sharing dev rig: a second
+    # instance needs its own database, and the path was hardcoded. Prefixed
+    # (unlike LIBRARY_ROOT / IMPORT_DIR) on purpose — see TRELLIS_PORT.
+    # Everything this machine WRITES hangs off DATA_DIR. Same relative layout in
+    # both cases (db/, cache/), so only the root differs and no other code has
+    # to know which mode it is in.
     #
-    # The database file is `trellis.db` as of 2026-08-25 (Ryan: "we should not
-    # be calling it fluxaudio.db"). The rename had been deferred; moving his
-    # library into Application Support was the moment to stop deferring, since
-    # it was being moved anyway.
-    #
-    # A `db/fluxaudio.db` symlink pointed at the same real file until
-    # 2026-09-04, so that ~20 scripts hardcoding the old name kept working.
-    # It is gone. The live tools were updated; the one-shot migration scripts
-    # that still name it were deliberately NOT touched, because they are a
-    # record of schema changes that already happened and rewriting history to
-    # keep dead code runnable is a bad trade.
+    # The live tools were updated; the one-shot migration scripts that still
+    # name it were deliberately NOT touched, because they are a record of schema
+    # changes that already happened and rewriting history to keep dead code
+    # runnable is a bad trade.
     DATA_DIR = Path(os.environ.get("TRELLIS_DATA_DIR") or _default_data_dir())
 
     DB_PATH = Path(os.environ.get("TRELLIS_DB_PATH") or (DATA_DIR / "db" / "trellis.db"))
@@ -169,13 +159,8 @@ class Config:
     }
 
     # ── Library ───────────────────────────────────────────────
-    # Root directory where all audio recordings are stored.
-    # Tracks are referenced by ID; this path never leaves the server.
-    # "Trellis" (Ryan, 2026-08-23) — the NAS folder itself was renamed on disk
-    # from "Flux Audio" to "Trellis"; these defaults follow it. See
-    # project_app_naming.md for the naming decision. (The dev repo/app root at
-    # ~/Workshop/dev/trellis and the DB filename are a separate, deliberately
-    # deferred rename — see that memo's "Rebrand blast radius" section.)
+    # Root directory where all audio recordings are stored. Tracks are
+    # referenced by ID; this path never leaves the server.
     LIBRARY_ROOT = Path(os.environ.get(
         "LIBRARY_ROOT",
         "/Volumes/music/Trellis/Library"
@@ -186,13 +171,6 @@ class Config:
     # one of these roots — otherwise arbitrary filesystem reads would be
     # possible for any logged-in user. Override via IMPORT_ROOTS env var
     # (":"-separated list of paths).
-    #
-    # Widened 2026-08-31 (Ryan) to include the home directory: Add Recordings
-    # was refusing any source folder outside LIBRARY_ROOT/Volumes with an
-    # unexplained 403, which meant an existing folder anywhere under ~ (an
-    # external drive aside) could never be used as a source. Still bounded —
-    # this is not "any path the process can read" — just widened to cover
-    # where a single-user Mac actually keeps files.
     _import_roots_env = os.environ.get("IMPORT_ROOTS", "").strip()
     if _import_roots_env:
         IMPORT_ROOTS = [p for p in _import_roots_env.split(":") if p]
@@ -202,10 +180,7 @@ class Config:
     # Where new material lands before ingest. This is the folder every "pick a
     # folder" box should open to. Defined here rather than hardcoded in the
     # frontend so there is one place to change it — it has moved three times
-    # now (Live Music Archive/Workshop/Import -> Flux Workshop/Download ->
-    # Flux Audio/Download, 2026-08-13 -> Trellis/Download, 2026-08-23 ->
-    # Trellis/Downloads, 2026-10-01) and an
-    # old value was once baked into app.js.
+    # now and an old value was once baked into app.js.
     IMPORT_DIR = os.environ.get(
         "IMPORT_DIR",
         "/Volumes/music/Trellis/Downloads"
@@ -257,8 +232,7 @@ class Config:
     # ── Single-user desktop ───────────────────────────────────
     # An installed app on someone's own Mac has nothing to log in to: one
     # person, one machine, no remote access to the front door. Requiring a
-    # password there is friction protecting nothing (Ryan, 2026-08-25 — first
-    # run should just open).
+    # password there is friction protecting nothing.
     #
     # Deliberately NOT reusing DEV_MODE, which happens to do the same
     # auto-login: DEV_MODE also turns on developer debug logging, and a flag
@@ -268,7 +242,7 @@ class Config:
     SINGLE_USER_DESKTOP = _env_flag(
         "SINGLE_USER_DESKTOP", default=is_installed_app())
 
-    # ── Peer sharing identity (2026-08-08) ────────────────────
+    # ── Peer sharing identity ────────────────────
     # api/peers.py and api/share.py already read these; until now nothing
     # DEFINED them, so `mint_invite` returned `invite: null` and there was no
     # way to hand a peer the single `address#code` string the design calls for.
@@ -281,17 +255,16 @@ class Config:
     SHARE_BASE_URL = os.environ.get("SHARE_BASE_URL") or None
 
     # ── User avatars ──────────────────────────────────────────
-    # Beside the database, NOT under LIBRARY_ROOT (Ryan, 2026-08-25). Artist
-    # and venue photos live in the music library because they are about its
-    # contents; a person's own picture is about the INSTALL. A listener has no
-    # music library at all — putting an avatar there would mean Jeff cannot have
-    # a face.
-    # Derived from the DATABASE, not from DATA_DIR, and RESOLVED through any
-    # symlink (2026-08-25). Ryan's library file lives in Application Support
-    # with a symlink left at the old repo path so the twenty-odd scripts that
-    # hardcode it keep working. Without .resolve() a source run would put
-    # pictures in the repo and the installed app would put them in Application
-    # Support — one library, two faces, and neither app showing the other's.
+    # Beside the database, NOT under LIBRARY_ROOT. Artist and venue photos live
+    # in the music library because they are about its contents; a person's own
+    # picture is about the INSTALL. A listener has no music library at all —
+    # putting an avatar there would mean Jeff cannot have a face. Derived from
+    # the DATABASE, not from DATA_DIR, and RESOLVED through any symlink. The
+    # user's library file lives in Application Support with a symlink left at
+    # the old repo path so the twenty-odd scripts that hardcode it keep working.
+    # Without .resolve a source run would put pictures in the repo and the
+    # installed app would put them in Application Support — one library, two
+    # faces, and neither app showing the other's.
     #
     # Following the database also gets the rigs right for free: a consumer node
     # pointed at its own database gets its own avatars, which is correct — it is
@@ -306,7 +279,7 @@ class Config:
     # app gets a minimal PATH that excludes /opt/homebrew/bin.
     FFMPEG_BIN = os.environ.get("FFMPEG_BIN") or None
 
-    # ── Peer-door rate limiting (2026-08-25) ──────────────────
+    # ── Peer-door rate limiting ──────────────────
     # /api/share/enroll is the only route reachable with no credentials, and
     # the only one an internet stranger can call. See app/utils/rate_limit.py.
     # Ten tries per caller per fifteen minutes: generous for a person fumbling
@@ -324,13 +297,10 @@ class Config:
 
     # How this node introduces itself on enroll and /api/share/me. The owner
     # falls back to the first admin's username when unset (see share.py).
-    # "Trellis Library" (Ryan, 2026-08-23) — the rebrand's default share name;
-    # was "Flux Library". See project_app_naming.md for the naming decision.
-    # Deliberately None when unset, NOT a shared default string (2026-08-24).
-    # "Trellis Library" as a fallback meant every install on earth introduced
-    # itself with the identical name, so a collector who joined three friends'
-    # libraries saw three indistinguishable entries in their selector. The name
-    # is now DERIVED from the owner in share._node_identity(), which can reach
-    # the admin user that config cannot.
+    # Deliberately None when unset, NOT a shared default string. "Trellis Library" as a fallback meant
+    # every install on earth introduced itself with the identical name, so a
+    # collector who joined three friends' libraries saw three indistinguishable
+    # entries in their selector. The name is now DERIVED from the owner in
+    # share._node_identity, which can reach the admin user that config cannot.
     SHARE_NODE_NAME = os.environ.get("SHARE_NODE_NAME") or None
     SHARE_OWNER_NAME = os.environ.get("SHARE_OWNER_NAME") or None

@@ -1,8 +1,7 @@
-"""
-tests/test_studio_library_payloads.py -- Studio Records spec v1, contract
-items 1-3 (backend plumbing): title/kind on every recording list payload,
-a live-only Top Shelf, and GET /api/recordings/kind-counts (owner + peer
-mirror, peer counted over the visible set only).
+"""tests/test_studio_library_payloads.py -- Studio Records spec v1, contract items
+1-3 (backend plumbing): title/kind on every recording list payload, a live-only
+Top Shelf, and GET /api/recordings/kind-counts (owner + peer mirror, peer
+counted over the visible set only).
 
 Search's own "albums" group (contract item 4) lives entirely in
 app/utils/search.py and app/api/search.py, and is covered in
@@ -73,8 +72,8 @@ def client(app):
 
 def _peer_granted_full_library(name="Peer"):
     """A peer granted the Full Library system collection -- sees every
-    is_published recording of either kind (2026-09-27: kind is a display
-    concern, never a visibility one)."""
+    is_published recording of either kind.
+    """
     col = Collection(name="Full Library", system_key=SYSTEM_FULL_LIBRARY)
     _db.session.add(col)
     _db.session.flush()
@@ -216,7 +215,9 @@ def test_all_recordings_carries_title_kind_and_image_url(app, client):
 
 
 def test_share_all_recordings_mirrors_owner_shape(app, client):
-    rec, artist = _recording("Odessa", kind="studio", title="American Beauty")
+    # A live row shares with the owner's shape; a studio row is withheld
+    # (app/utils/share_policy.py).
+    rec, artist = _recording("Odessa", kind="live", title="American Beauty")
     col, peer, raw = _peer_granted_full_library()
 
     owner_row = None
@@ -230,16 +231,25 @@ def test_share_all_recordings_mirrors_owner_shape(app, client):
     peer_entry = next(a for a in peer_resp.get_json() if a["artist_id"] == artist.id)
     peer_row = peer_entry["performances"][0]["recordings"][0]
 
-    assert peer_row["kind"] == owner_row["kind"] == "studio"
+    assert peer_row["kind"] == owner_row["kind"] == "live"
     assert peer_row["title"] == owner_row["title"] == "American Beauty"
 
 
+def test_share_all_recordings_omits_studio_artist(app, client):
+    rec, artist = _recording("Odessa", kind="studio", title="American Beauty")
+    col, peer, raw = _peer_granted_full_library()
+    peer_resp = client.get("/api/share/artists/all-recordings", headers=_auth(raw))
+    assert artist.id not in [a["artist_id"] for a in peer_resp.get_json()]
+
+
 def test_share_recent_carries_title_and_kind(app, client):
-    _recording("Odessa", kind="studio", title="American Beauty")
+    _recording("Odessa", kind="live", title="American Beauty")
+    _recording("Hotel", kind="studio", title="Hidden Album")
     col, peer, raw = _peer_granted_full_library()
     body = client.get("/api/share/recordings/recent", headers=_auth(raw)).get_json()
     by_title = {r["title"]: r for r in body if r["title"]}
-    assert by_title["American Beauty"]["kind"] == "studio"
+    assert by_title["American Beauty"]["kind"] == "live"
+    assert "Hidden Album" not in by_title
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -320,11 +330,11 @@ def test_kind_counts_peer_scoped_to_visible_set(app, client):
     studio, artist = _recording("Odessa", kind="studio", title="American Beauty")
     live, _a2 = _recording("Fillmore Show", kind="live")
 
-    # A peer granted only the studio recording must not see the live one in
-    # its counts, even though it exists in the library.
-    col, peer, raw = _peer_granted_junction([studio], name="Narrow Peer")
+    # A peer granted only the live recording sees only it in its counts; the
+    # studio record is withheld by the share policy even when granted.
+    col, peer, raw = _peer_granted_junction([studio, live], name="Narrow Peer")
     body = client.get("/api/share/recordings/kind-counts", headers=_auth(raw)).get_json()
-    assert body == {"live": 0, "studio": 1}
+    assert body == {"live": 1, "studio": 0}
 
 
 def test_kind_counts_peer_full_library_matches_owner(app, client, seeded_ids):
@@ -333,7 +343,7 @@ def test_kind_counts_peer_full_library_matches_owner(app, client, seeded_ids):
 
     owner = client.get("/api/recordings/kind-counts").get_json()
     peer_body = client.get("/api/share/recordings/kind-counts", headers=_auth(raw)).get_json()
-    assert peer_body == owner
+    assert peer_body == {"live": owner["live"], "studio": 0}
 
 
 def test_kind_counts_peer_with_no_grants_is_zero(app, client):

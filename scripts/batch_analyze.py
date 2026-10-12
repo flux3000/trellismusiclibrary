@@ -49,7 +49,7 @@ def run():
         total_tracks     = sum(len(r.tracks) for r in recordings)
 
         print(f"\n{'='*60}")
-        print(f"  Flux Audio — Batch Analysis")
+        print(f"  Trellis — Batch Analysis")
         print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"{'='*60}")
         print(f"  Library root : {library_root}")
@@ -85,9 +85,9 @@ def run():
                 abs_path = os.path.join(folder_abs, track.file_path)
 
                 # The analyse + version-check + upsert logic lives in
-                # app/utils/analysis.py (extracted 2026-08-07) so this script,
-                # analyse_recording(), and the quality backfill all share one
-                # copy and cannot drift as track_analysis gains columns.
+                # app/utils/analysis.py so this script, analyse_recording, and
+                # the quality backfill all share one copy and cannot drift as
+                # track_analysis gains columns.
                 print(f"  ⏳ analyzing  {track.file_path}", end="", flush=True)
                 t0 = time.time()
                 status = analyse_and_store_track(track, abs_path, db.session,

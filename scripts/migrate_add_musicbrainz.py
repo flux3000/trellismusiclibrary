@@ -1,11 +1,10 @@
-"""
-scripts/migrate_add_musicbrainz.py
+"""scripts/migrate_add_musicbrainz.py
 
-Adds the MusicBrainz fact columns to `performer` (2026-08-07). Additive and
-idempotent — safe to re-run.
+Adds the MusicBrainz fact columns to `performer`. Additive and idempotent —
+safe to re-run.
 
-Real columns rather than a JSON blob (Ryan's call): these are queryable facts
-("which acts formed in New Orleans"), and a blob can't answer that.
+Real columns rather than a JSON blob: these are queryable facts ("which acts
+formed in New Orleans"), and a blob can't answer that.
 
 Every column is nullable and every existing row keeps `mb_status = NULL`, which
 the model documents as "never looked up" — distinct from 'none' ("looked, found

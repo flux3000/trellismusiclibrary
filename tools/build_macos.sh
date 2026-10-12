@@ -33,7 +33,7 @@ python3 -m PyInstaller --version >/dev/null 2>&1 || {
 # contents, then rmdir's the directory itself, and that last step fails with
 # "Directory not empty" if anything recreates a file in the gap. Finder does
 # exactly that: leave a window open on dist/ and it writes .DS_Store straight
-# back, which failed a 0.2.3 build on 2026-09-18. Emptying has the same effect
+# back, which failed a 0.2.3 build. Emptying has the same effect
 # on PyInstaller and nothing to race against.
 for d in build dist; do
   mkdir -p "$d"
@@ -61,7 +61,7 @@ find "$APP" -name 'libsndfile*' | grep -q . \
 # A bundle that is missing a data file or a hidden import does not fail during
 # use — it fails on LAUNCH, before there is a window, and from Finder that looks
 # like nothing happening at all. Which is how a broken build got as far as being
-# double-clicked on 2026-08-25.
+# double-clicked.
 #
 # So: start the real bundled binary, against a throwaway data directory so it
 # cannot touch a real library, and make it prove it can get all the way through

@@ -1,10 +1,4 @@
-"""
-Listening Quality engine.
-
-Moved here from `tools/quality/` on 2026-07-30 when the score was integrated
-into the ingestion flow. `tools/quality/quality_app.py` (the standalone
-experimentation harness) now imports from this package, so there is exactly one
-copy of the engine and it cannot drift.
+"""Listening Quality engine.
 
 Three layers, deliberately separated:
 

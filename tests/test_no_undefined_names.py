@@ -1,5 +1,4 @@
-"""
-tests/test_no_undefined_names.py — catch NameErrors before they reach a request.
+"""tests/test_no_undefined_names.py — catch NameErrors before they reach a request.
 
 WHY
 
@@ -10,12 +9,6 @@ exist, because that is a runtime question. So this compiles cleanly and then
     visible = ...            # never written — a patch aborted halfway
     ...
     if r.id in visible       # NameError, at request time
-
-That happened twice in one session on 2026-08-24: once a patch script aborted
-mid-run leaving a function referencing an undefined local, and once
-`peer_visible_venue_ids` / `peer_visible_musician_ids` were used in api/share.py
-without ever being imported. Both compiled. Both were NameErrors on the first
-peer request. This is the Python counterpart of "node --check is not enough".
 
 SCOPE AWARENESS IS THE WHOLE DIFFICULTY
 

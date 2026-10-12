@@ -1,5 +1,5 @@
 """Skill registry. Adding Lomax to a new entity means one new file here and one line below."""
 from app.lomax.skills.base import Ctx, NothingToDo, Skill, Subject  # noqa: F401
-from app.lomax.skills import album, artist, recording, venue
+from app.lomax.skills import album, artist, event, musician, recording, venue
 
-SKILLS = {s.key: s for s in (recording.SKILL, artist.SKILL, venue.SKILL, album.SKILL)}
+SKILLS = {s.key: s for s in (recording.SKILL, artist.SKILL, venue.SKILL, album.SKILL, musician.SKILL, event.SKILL)}

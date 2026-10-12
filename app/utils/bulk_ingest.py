@@ -1,6 +1,5 @@
-"""
-app/utils/bulk_ingest.py -- pure functions shared by Bulk Ingest and the
-field resolver (Ingest Field Resolver spec v1).
+"""app/utils/bulk_ingest.py -- pure functions shared by Bulk Ingest and the field
+resolver.
 
 extract()/classify()/confirm_payload() and the per-field merge rules that
 used to live here moved to app/utils/resolve.py (resolve(), classify_kind(),
@@ -9,9 +8,9 @@ still someone else's dependency: folder_format() (batch_scan, Review &
 Ingest), and the folder-tree-artist walk / tag-consistency helpers
 resolve.py's own artist and album rules call.
 
-_tag_container_values()/_consistent_tag() and _resolve_venue() moved on to
-app/utils/resolve.py too (2026-09-28) -- resolve() was their only real
-caller left, so resolve.py is their single home now.
+_tag_container_values/_consistent_tag and _resolve_venue moved on to
+app/utils/resolve.py too -- resolve was their only real caller left, so
+resolve.py is their single home now.
 
 No network: this module never imports musicbrainz or anything that reaches
 the internet (tests/test_bulk_ingest_classify.py asserts this directly).
@@ -42,11 +41,7 @@ def folder_format(scan):
     """Comma-joined, alphabetical format labels found in one scan_folder()
     result -- "FLAC", "WAV", or "FLAC, MP3" for a mixed folder. None when
     nothing recognisable was found at all.
-
-    Public (no leading underscore) as of 2026-09-27: batch_scan() and the
-    Review & Ingest staging payload (app/api/quality.py's _scan_metadata)
-    call this directly so all three ingest queue tables show the same
-    FORMAT pill for the same folder."""
+    """
     labels = set()
     for f in scan.get("audio_files", []):
         ext = Path(f["filename"]).suffix.lower()

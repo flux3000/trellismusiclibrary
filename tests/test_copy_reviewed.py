@@ -1,12 +1,11 @@
-"""
-tests/test_copy_reviewed.py — no unreviewed copy slips in.
+"""tests/test_copy_reviewed.py — no unreviewed copy slips in.
 
 WHY
 
-Every string Trellis shows a user is Ryan's to write or approve (2026-09-17).
-An agent may propose copy; it does not ship it. This test is the BACKSTOP for
-text that got in anyway. It is not a licence: "the gate will catch it" is not a
-reason to add an unreviewed string and move on.
+Every string Trellis shows a user is the user's to write or approve. An agent
+may propose copy; it does not ship it. This test is the BACKSTOP for text that
+got in anyway. It is not a licence: "the gate will catch it" is not a reason to
+add an unreviewed string and move on.
 
 It re-extracts on every run and matches what it finds against
 `app/utils/copyreview/ledger/copy_ledger.json`. The extraction, the ledger and
@@ -83,7 +82,7 @@ def test_every_recorded_span_reproduces_its_own_text(extraction):
 
 
 @pytest.mark.skip(reason=(
-    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+    "copy review gate is off: unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
 ))
 def test_no_unreviewed_user_facing_copy(extraction):
     ledger = Ledger.load(REPO_ROOT)
@@ -114,7 +113,7 @@ def test_no_unreviewed_user_facing_copy(extraction):
 
 
 @pytest.mark.skip(reason=(
-    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+    "copy review gate is off: unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
 ))
 def test_baseline_only_shrinks(extraction):
     """A key in the baseline that is also decided is stale, not a conflict.
@@ -135,7 +134,7 @@ def test_baseline_only_shrinks(extraction):
 
 
 @pytest.mark.skip(reason=(
-    "copy review gate is off (Ryan, 2026-09-18): unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
+    "copy review gate is off: unreviewed copy is not a priority right now. The tool still works: python3 -m app.utils.copyreview --report. Delete the skips to re-arm."
 ))
 def test_no_decision_points_at_a_string_that_is_gone(extraction):
     """Pending WRITES must still have somewhere to write to.

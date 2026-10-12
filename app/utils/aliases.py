@@ -1,5 +1,4 @@
-"""
-app/utils/aliases.py -- learned aliases (Resolver v2, chunk 8).
+"""app/utils/aliases.py -- learned aliases.
 
 When a person saves a recording whose venue or artist differs from what the
 resolver read, the text the resolver quoted for that field becomes an alias of the

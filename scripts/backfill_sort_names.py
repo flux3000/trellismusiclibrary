@@ -1,8 +1,4 @@
-"""
-backfill_sort_names.py — Apply approved Last,First sort names to existing artists.
-
-Ryan approved this backfill on 2026-07-09 (second session). Two mechanical
-transforms plus an explicit leave-alone set:
+"""backfill_sort_names.py — Apply approved Last,First sort names to existing artists.
 
   1. Clean "First Last" -> "Last, First"  (solo performers)
   2. "The X"            -> "X, The"        (drop leading article for sort)

@@ -110,13 +110,12 @@ def update_track(track_id):
         if new_abs != old_abs:
             if os.path.exists(old_abs):
                 # Never let a retitle destroy a sibling track's audio.
-                # os.rename() REPLACES an existing destination file silently
-                # (a directory at least errors), and two tracks can reach the
+                # os.rename REPLACES an existing destination file silently (a
+                # directory at least errors), and two tracks can reach the
                 # same filename honestly — same number + same title, or any
                 # folder that ended up holding two shows, both numbered from
                 # 01. Dedupe with the same "(2)" convention used for folder
                 # names and for within-batch collisions at ingest.
-                # 2026-09-01, alongside the ingest folder-merge fix.
                 subdir        = os.path.dirname(new_file_path)
                 parent_abs    = os.path.join(library_root, rec.folder_path, subdir)
                 unique        = unique_file_name(parent_abs,
@@ -194,10 +193,9 @@ def track_spectrogram(track_id):
 @bp.route("/spectrogram-file")
 @login_required
 def file_spectrogram():
-    """
-    GET /api/tracks/spectrogram-file?path=<abs path>
-    The same spectrogram for an audio file not yet imported (Add Recording's
-    Quality tab, Ryan 2026-10-06). Admin only, and only inside the import roots.
+    """GET /api/tracks/spectrogram-file?path=<abs path> The same spectrogram for
+    an audio file not yet imported. Admin only, and only inside the import
+    roots.
     """
     from app.utils.paths import within_import_roots
     if getattr(current_user, "role", None) != "admin":

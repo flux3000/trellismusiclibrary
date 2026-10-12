@@ -1,6 +1,5 @@
-"""
-tests/test_ingest_rescan_and_genre.py — Add Recording's two new server-side
-behaviours (2026-09-01).
+"""tests/test_ingest_rescan_and_genre.py — Add Recording's two new server-side
+behaviours.
 
 1. RESCAN. `parse_info_file(text=...)` and `build_scan_payload(info_override=)`
    let the Rescan button re-run the inference over an info file the reviewer

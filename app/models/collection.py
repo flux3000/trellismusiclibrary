@@ -1,11 +1,9 @@
-"""
-models/collection.py — Collection and its Recording junction.
+"""models/collection.py — Collection and its Recording junction.
 
 A Collection is an optional, user-defined grouping of Recordings (a curated
 set, a box, a project). Many-to-many: a Recording can be in many Collections,
 a Collection holds many Recordings.
 
-SYSTEM COLLECTIONS (2026-08-24)
 -------------------------------
 Peer sharing has exactly one primitive: the Collection grant. Whole-library
 sharing therefore needs a Collection that MEANS "everything" rather than a
@@ -32,8 +30,8 @@ from datetime import datetime, timezone
 from app.extensions import db
 
 # The only system collection today. Deliberately a single hardcoded case rather
-# than a rule/criteria language (Ryan, 2026-08-24): generalise only if a second
-# real case turns up, not in anticipation of one.
+# than a rule/criteria language: generalise only if a second real case turns
+# up, not in anticipation of one.
 SYSTEM_FULL_LIBRARY = "full_library"
 
 
@@ -65,17 +63,12 @@ class Collection(db.Model):
     def _system_query(self):
         """The queryset behind a system collection. One branch per system_key.
 
-        Full Library is every PUBLISHED recording. `is_published` is False for a
-        show moved out to Workshop or Backlog, and such a show must stop being
-        shared — its folder is no longer under LIBRARY_ROOT, so it would browse
-        but not play, which is exactly the "empty state that is really a broken
-        fetch" CONTEXT.md warns about.
+        Full Library is every PUBLISHED recording.
 
-        ⚠ This is the ONLY thing in the codebase that filters on `is_published`
-        (reversing the 2026-08-21 "nothing filters on it" call, for this case
-        only — Ryan, 2026-08-24). It is invisible in testing while every
-        recording is published, so it is covered by a test that creates an
-        unpublished row rather than by inspection.
+        ⚠ This is the ONLY thing in the codebase that filters on
+        `is_published`. It is invisible in testing while every recording is
+        published, so it is covered by a test that creates an unpublished row
+        rather than by inspection.
         """
         from app.models.recording import Recording
         if self.system_key == SYSTEM_FULL_LIBRARY:

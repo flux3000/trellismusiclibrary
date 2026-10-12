@@ -28,10 +28,7 @@ class Recording(db.Model):
     # Free-text technical/distinguishing detail: transfer chain (e.g. "Nakamichi
     # CM300 > Sony D5 DAT > CD > EAC > FLAC"), taper credit, mic position — anything
     # that identifies this specific tape or distinguishes it from another recording
-    # of the same source type for the same show. As of 2026-07, this absorbed the
-    # old standalone source_modifier field ("Source Detail") — distinguishing
-    # between two same-source recordings is now done here or in notes, not a
-    # separate structured field.
+    # of the same source type for the same show.
     lineage         = db.Column(db.Text,        nullable=True)
 
     # Letter grade: A+, A, A-, B+, B, B-, C — expanded in V2
@@ -50,7 +47,7 @@ class Recording(db.Model):
     # scan that grows with the library.
     folder_path    = db.Column(db.String(512), nullable=False, index=True)
 
-    # In the library, or back out at the workbench? (2026-08-21)
+    # In the library, or back out at the workbench?
     #
     # True  — the folder lives under LIBRARY_ROOT at folder_path and the show is
     #         part of the browsable collection. Every row ingested before this
@@ -63,9 +60,7 @@ class Recording(db.Model):
     #
     # Why a flag rather than deleting the row: deleting throws away everything
     # ingest learned, so a show that comes back has to be re-ingested from
-    # scratch. Why not leave it published: folder_path would point at nothing,
-    # and a recording that browses but cannot play is the failure mode CONTEXT.md
-    # warns about — an empty state that is really a broken fetch.
+    # scratch.
     #
     # ⚠ folder_path is deliberately NOT rewritten on a move. It stays as the
     # library-relative path the show HAD, because it is only meaningful relative
@@ -80,17 +75,17 @@ class Recording(db.Model):
     # Full text content of the accompanying info/text file
     info_file_content    = db.Column(db.Text, nullable=True)
 
-    # RETIRED 2026-08-18 — "remove rating everywhere" (Ryan). Was a 0-100
-    # holistic listener score. Nothing reads or writes it: it is gone from every
-    # serializer, API payload, form and view. The column stays because 8 rows
-    # carry a value and dropping it is the one step that cannot be undone; drop
-    # it on Ryan's word. Do NOT reintroduce it into a payload — the product has
-    # three quality signals already (the `quality` letter grade, the automated
-    # listening_quality score, and is_favorite), and this was the fourth.
+    # Was a 0-100 holistic listener score. Nothing reads or writes it: it is
+    # gone from every serializer, API payload, form and view. The column stays
+    # because 8 rows carry a value and dropping it is the one step that cannot
+    # be undone; drop it on the user's word. Do NOT reintroduce it into a
+    # payload — the product has three quality signals already (the `quality`
+    # letter grade, the automated listening_quality score, and is_favorite), and
+    # this was the fourth.
     rating     = db.Column(db.Integer, nullable=True)
 
-    # Favorite / highlight star (2026-07-31). A purely human marker, and
-    # deliberately the THIRD independent quality signal on a recording:
+    # Favorite / highlight star. A purely human marker, and deliberately the
+    # THIRD independent quality signal on a recording:
     #
     #   quality        letter grade — a considered judgement, needs thought
     #   quality_score  the automated Listening Quality analysis
@@ -108,19 +103,19 @@ class Recording(db.Model):
 
     notes      = db.Column(db.Text, nullable=True)
 
-    # etree-style naming facts (2026-09-25). Both are suggestions the user can
-    # edit; never written by scan/detection without going through the form.
-    # source_tag: gear/taper token (schoeps, nak300, miller...), the
-    # {source_tag} naming token. etree_shnid: the LMA/etree source id
-    # (118671), the {shnid} naming token.
+    # etree-style naming facts. Both are suggestions the user can edit; never
+    # written by scan/detection without going through the form. source_tag:
+    # gear/taper token (schoeps, nak300, miller...), the {source_tag} naming
+    # token. etree_shnid: the LMA/etree source id (118671), the {shnid} naming
+    # token.
     source_tag  = db.Column(db.String(64), nullable=True)
     etree_shnid = db.Column(db.Integer,    nullable=True)
 
-    # Live show vs studio release (Bulk Ingest spec chunk 2). Studio
-    # recordings may attach to a venue-less, possibly dateless Performance.
+    # Live show vs studio release. Studio recordings may attach to a
+    # venue-less, possibly dateless Performance.
     kind = db.Column(db.String(16), nullable=False, default="live", server_default="live")
 
-# MusicBrainz release lookup (Studio Records spec v1, section 2). Filled
+# MusicBrainz release lookup. Filled
     # fill-if-null only by try_match_release()/link_release() -- never
     # written for a live recording. mb_release_status mirrors the artist
     # mb_status values (None = never looked up) plus 'linked' (a human
@@ -130,6 +125,10 @@ class Recording(db.Model):
     mb_release_group_id   = db.Column(db.String(36),  nullable=True)
     mb_release_status     = db.Column(db.String(16),  nullable=True)
     mb_release_type       = db.Column(db.String(32),  nullable=True)
+    # MusicBrainz's own release status, verbatim (Official, Promotion, Bootleg,
+    # ...), stored at link time so the share layer never calls MusicBrainz.
+    # NULL = unknown, which app/utils/share_policy.py treats as not shareable.
+    mb_release_db_status  = db.Column(db.String(24),  nullable=True)
     mb_label              = db.Column(db.String(120), nullable=True)
     mb_catalog_number     = db.Column(db.String(64),  nullable=True)
     mb_release_country    = db.Column(db.String(2),   nullable=True)
@@ -169,9 +168,9 @@ class Recording(db.Model):
                                     order_by="Track.track_number")
     events        = db.relationship("RecordingEvent",       back_populates="recording",
                                     order_by="RecordingEvent.created_at")
-    # Studio Records spec v1 chunk 4 -- recording-level artwork, one flagged
+    # Recording-level artwork, one flagged
     # primary. Sort mirrors artist/venue images (primary first, then
-    # sort_order/id) via app/utils/entity_images.py's primary_for()/set_primary().
+    # sort_order/id) via app/utils/entity_images.py's primary_for/set_primary.
     images        = db.relationship("RecordingImage",       back_populates="recording",
                                     cascade="all, delete-orphan",
                                     order_by="RecordingImage.sort_order, RecordingImage.id")
@@ -201,7 +200,7 @@ class RecordingFingerprint(db.Model):
 
     # This fingerprint file's location relative to the recording folder (e.g.
     # "CD1/checksum.md5"). Scopes checksum matching to one disc on a
-    # multi-disc recording (2026-09-25). NULL until backfilled.
+    # multi-disc recording. NULL until backfilled.
     rel_path         = db.Column(db.String(512), nullable=True)
     created_at       = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 

@@ -1,5 +1,4 @@
-"""
-writeback.py — turning decisions into edits, without ever guessing.
+"""writeback.py — turning decisions into edits, without ever guessing.
 
 The rule that shapes everything here: **never a regex.** A replacement is a
 splice into a byte range recovered by re-parsing the file at write time, and
@@ -16,7 +15,6 @@ Eight ways this could ship a wrong edit, and what stops each:
    Any replacement that drops a rare token the code compares against user
    input carries a loud warning.
 
-   ⚠ Measured 2026-09-17: Trellis has none. The plan for this tool assumed
    `'DELETE'` at sixteen sites was such a guard; it is the HTTP method in
    `api.js`, and deletes are confirmed with `confirm()` dialogs instead. The
    check finds nothing today, which is the right answer, and the hazard is

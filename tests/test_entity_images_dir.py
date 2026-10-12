@@ -1,6 +1,4 @@
-"""
-tests/test_entity_images_dir.py — image store moved out of the library
-(Bulk Ingest spec chunk 2).
+"""tests/test_entity_images_dir.py — image store moved out of the library.
 
 Covers app/utils/entity_images.py::image_dir() and
 scripts/migrate_bulk_ingest.py's filesystem move step.

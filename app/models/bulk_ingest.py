@@ -1,12 +1,11 @@
-"""
-models/bulk_ingest.py -- Bulk Ingest run/item tracking.
+"""models/bulk_ingest.py -- Bulk Ingest run/item tracking.
 
-Durable, resumable bulk ingest of an existing library into Trellis
-(spec chunk 2). A BulkIngestRun is one "point LIBRARY_ROOT at this folder and
-ingest it" pass; a BulkIngestItem is one candidate folder found under that run's
-root. Both survive an app restart on purpose -- a run over a real collector's
-library is not a five-second operation, and progress must not evaporate
-because the app quit mid-walk.
+Durable, resumable bulk ingest of an existing library into Trellis. A
+BulkIngestRun is one "point LIBRARY_ROOT at this folder and ingest it" pass; a
+BulkIngestItem is one candidate folder found under that run's root. Both
+survive an app restart on purpose -- a run over a real collector's library is
+not a five-second operation, and progress must not evaporate because the app
+quit mid-walk.
 
 Counts (how many pending/ingested/failed/etc.) are deliberately NOT stored on
 BulkIngestRun: they are derived by grouping BulkIngestItem.status at read time, the
@@ -54,8 +53,8 @@ class BulkIngestRun(db.Model):
     # inferred for the fields it sets. NULL = nothing staged.
     applied_json = db.Column(db.Text, nullable=True)
 
-    # Set by Reset Queue (2026-10-06): the person emptied everything, the
-    # Imported tabs included, so this run is never shown on the page again.
+    # Set by Reset Queue: the person emptied everything, the Imported tabs
+    # included, so this run is never shown on the page again.
     cleared_at = db.Column(db.DateTime(timezone=True), nullable=True)
 
     items = db.relationship("BulkIngestItem", back_populates="run",
@@ -105,18 +104,16 @@ class BulkIngestItem(db.Model):
     kind = db.Column(db.String(16), nullable=True)
 
     # Comma-joined set of audio formats found in the folder at extraction
-    # time (2026-09-27 progress/log redesign) -- "FLAC", "MP3", "WAV", "SHN",
-    # or a mix like "FLAC, MP3". NULL until classified, same as `kind`. Set
-    # from every readable AUDIO_EXTENSIONS format actually found plus SHN
-    # specifically (the one unsupported format worth naming in the log; see
-    # extract() in app/utils/bulk_ingest.py).
+    # time -- "FLAC", "MP3", "WAV", "SHN", or a mix like "FLAC, MP3". NULL
+    # until classified, same as `kind`. Set from every readable
+    # AUDIO_EXTENSIONS format actually found plus SHN specifically (the one
+    # unsupported format worth naming in the log; see extract in
+    # app/utils/bulk_ingest.py).
     format = db.Column(db.String(32), nullable=True)
 
-    # Small JSON blob of the fields extract() found for this folder (artist,
-    # date_text, venue, city, state, country, source, title) -- 2026-09-27
-    # progress/log redesign. Lets GET .../items show these without a
-    # per-item re-scan; NULL for an item extract() never ran for (e.g. a
-    # skip that short-circuited before extraction).
+    # Lets GET .../items show these without a per-item re-scan; NULL for an
+    # item extract never ran for (e.g. a skip that short-circuited before
+    # extraction).
     meta = db.Column(db.Text, nullable=True)
 
     # The Recording this item became, once ingested. SET NULL (not CASCADE): the

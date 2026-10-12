@@ -5,8 +5,7 @@
 #
 #   ./tools/run_share_node.sh
 #
-# This existed only in Ryan's shell history until 2026-09-04. That is a poor
-# home for load-bearing infrastructure: if it is lost, share.trellismusiclibrary.com
+# If this script is lost, share.trellismusiclibrary.com
 # still resolves and the tunnel still answers, so the failure presents as a
 # tunnel problem rather than as "nothing is listening on 5760." Committing it
 # makes the thing reproducible and reviewable.

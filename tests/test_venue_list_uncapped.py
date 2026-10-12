@@ -1,14 +1,5 @@
-"""
-tests/test_venue_list_uncapped.py — GET /api/venues/ must return every venue,
+"""tests/test_venue_list_uncapped.py — GET /api/venues/ must return every venue,
 not just the first 200 alphabetically.
-
-Ryan reported 2026-08-30: the Venues list in the sidebar's bottom-left nav
-"stops midway through the alphabet at L". list_venues() (app/api/venues.py)
-carried a `.limit(200)` that list_artists/list_musicians/list_genres —
-the sidebar's three sibling dimension endpoints — never had; ordered by
-`Venue.name`, a 200-row cut lands exactly where a library with more than 200
-venues would appear to run out partway through the alphabet, with nothing on
-screen to say anything was missing.
 """
 
 import pytest
@@ -47,8 +38,6 @@ def client(app):
 
 
 def test_venue_list_is_not_capped_at_200(app, client):
-    # 250 venues, so a name starting past "L" alphabetically exists beyond
-    # row 200 — the exact shape of the bug Ryan saw.
     with app.app_context():
         for i in range(250):
             _db.session.add(Venue(name=f"Venue {i:04d}"))

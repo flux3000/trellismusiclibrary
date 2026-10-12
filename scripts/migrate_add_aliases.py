@@ -1,9 +1,8 @@
-"""
-migrate_add_aliases.py -- add the venue_alias and artist_alias tables.
+"""migrate_add_aliases.py -- add the venue_alias and artist_alias tables.
 
-Resolver v2, chunk 4 (2026-10-03). Learned aliases: text a person's confirmed
-correction taught the resolver ("Wilkes Commnity College" is Merlefest's venue).
-The tables ship now and stay empty until chunk 8 fills them; see
+Resolver v2, chunk 4. Learned aliases: text a person's confirmed correction
+taught the resolver ("Wilkes Commnity College" is Merlefest's venue). The
+tables ship now and stay empty until chunk 8 fills them; see
 app/models/alias.py.
 
 Run it against the database the app uses (from the repo, .venv active):

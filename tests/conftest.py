@@ -47,7 +47,7 @@ def app():
 
     application = create_app(config_class=TestConfig)
 
-    # ── Per-request identity, as in production (2026-08-08) ──────────────────
+    # ── Per-request identity, as in production ──────────────────
     # This fixture holds ONE app context open for the whole test. Flask's
     # RequestContext.push() reuses an already-pushed app context for the same
     # app rather than creating a new one, so `g` — which lives on the app
@@ -76,11 +76,8 @@ def app():
         _db.drop_all()
     os.unlink(path)
     # SQLite in WAL mode writes -wal and -shm sidecars beside the DB file, and
-    # unlinking only the DB leaks them. At ~1.5MB each across a 650-test suite
-    # that is gigabytes of /tmp per full run — it exhausted the Cowork VM's
-    # disk mid-run twice on 2026-09-01, surfacing as a burst of unrelated
-    # OSError/sqlalchemy errors in tests that were fine. 4,186 files had
-    # accumulated before anyone looked.
+    # unlinking only the DB leaks them. 4,186 files had accumulated before
+    # anyone looked.
     for _sidecar in (f"{path}-wal", f"{path}-shm"):
         try:
             os.unlink(_sidecar)
@@ -147,7 +144,7 @@ def seeded_ids(app):
     }
 
 
-# ── Rate-limiter isolation (2026-08-25) ──────────────────────────────────────
+# ── Rate-limiter isolation ──────────────────────────────────────
 # app/utils/rate_limit.py keeps its counters in a module-level dict, which
 # outlives any single test. Without this, enroll attempts accumulate across
 # files and the eleventh one in a run starts failing for reasons that have

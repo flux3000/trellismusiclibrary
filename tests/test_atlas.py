@@ -1,5 +1,4 @@
-"""
-tests/test_atlas.py -- the Atlas: its builder, its schema and its reader (Resolver v2, chunk 4).
+"""tests/test_atlas.py -- the Atlas: its builder, its schema and its reader.
 
 Every test here runs against the tiny fixture Atlas (tests/fixtures/atlas_fixture.py), built
 from hand rows through the real builder. Nothing is downloaded and the real Atlas
@@ -484,7 +483,7 @@ def test_the_synthetic_atlas_and_the_timing_report_build(tmp_path):
     assert "p95" in text and "slowest" in text
 
 
-# ── size and rebuild work (chunk 4b) ─────────────────────────────────────────
+# ── size and rebuild work ─────────────────────────────────────────
 
 def test_place_kind_keeps_every_type_but_studios_and_pressing_plants():
     from app.atlas.build import place_kind

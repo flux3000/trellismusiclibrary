@@ -1,22 +1,21 @@
-"""
-api/search.py — global search (IO-46 V1).
+"""api/search.py — global search.
 
 Routes:
   GET /api/search?q=              — all four groups, top `limit` each (omnibox)
   GET /api/search?q=&type=<group> — one group, paged (results page)
 
-THE RULE (Ryan, 2026-08-18): musician, artist, date, venue, or any
-combination. Track titles and provenance free text are OUT of V1 — see the
-module docstring in app/utils/search.py before widening this.
+THE RULE: musician, artist, date, venue, or any combination. Track titles and
+provenance free text are OUT of V1 — see the module docstring in
+app/utils/search.py before widening this.
 
 Deliberately NOT in this story:
 
-  * Publish gating. `is_published` does not exist yet (IO-57); this endpoint
+  * Publish gating. `is_published` does not exist yet; this endpoint
     is @login_required and nothing more, so search and publishing stay
     independent stories.
   * Peer/remote scope. A peer search MUST filter every group through the
     visible-set helpers in app/utils/peer_access.py or it leaks holdings,
-    and wiring all four correctly is a story of its own (IO-48). There is no
+    and wiring all four correctly is a story of its own. There is no
     peer route here on purpose — its absence is safer than a half-filtered
     one, because the peer blueprint's whole premise is that it is
     structurally incapable of exposing what it shouldn't.
@@ -76,10 +75,10 @@ def build_search_index():
     ]
 
     # Musician → the acts they're a member of. Membership, NOT
-    # performance_personnel (Ryan, 2026-08-18). Stint dates are deliberately
-    # ignored: a person's connection to a band is catalog metadata about the
-    # act, and narrowing it to the nights they demonstrably played gives the
-    # same incoherent result that made peer musician visibility derive from
+    # performance_personnel. Stint dates are deliberately ignored: a
+    # person's connection to a band is catalog metadata about the act, and
+    # narrowing it to the nights they demonstrably played gives the same
+    # incoherent result that made peer musician visibility derive from
     # membership too.
     member_of = {}
     for musician_id, artist_id in db.session.query(
@@ -125,12 +124,11 @@ def build_search_index():
         .all()
     )
 
-    # Recording-level artwork (Studio Records spec v1, chunk 5) -- one grouped
-    # query for a primary-image-id per recording, same batching pattern as
-    # artists.py::all_recordings(). This function already reads every
-    # searchable row as columns rather than ORM objects specifically to avoid
-    # a per-row query (see the docstring above), so a thumbnail here has to
-    # follow the same rule.
+    # Recording-level artwork -- one grouped query for a primary-image-id per
+    # recording, same batching pattern as artists.py::all_recordings. This
+    # function already reads every searchable row as columns rather than ORM
+    # objects specifically to avoid a per-row query (see the docstring above),
+    # so a thumbnail here has to follow the same rule.
     rec_image_ids = {}
     for rid, iid, _is_primary in (
         db.session.query(RecordingImage.recording_id, RecordingImage.id,
@@ -253,8 +251,9 @@ def _recording_item(row):
 
 
 def _album_item(row):
-    """Studio Records spec v1, section 7 -- an album leads with its title,
-    not a date/venue it does not have."""
+    """An album leads with its title, not a
+    date/venue it does not have.
+    """
     return {
         "type": "album", "id": row["id"],
         "title": row.get("title"),
@@ -270,8 +269,9 @@ def _derived_counts(index):
     """Recording counts per act and per venue, free from the index we already built.
 
     An act's count includes its albums -- an albums-only act still has
-    recordings, and a count that only ever looked at index["recordings"]
-    (live-only, Studio Records spec v1) would print 0 for one."""
+    recordings, and a count that only ever looked at index["recordings"] would
+    print 0 for one.
+    """
     artists, venues = {}, {}
     for r in index["recordings"]:
         pid, vid = r.get("artist_id"), r.get("venue_id")

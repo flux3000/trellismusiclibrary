@@ -63,7 +63,7 @@ elif os.environ.get("TRELLIS_ALLOW_NO_ATLAS") != "1":
 # no PyInstaller hook. app/utils/ingest.py builds its lookup sets AT IMPORT
 # TIME, so a bundle without these files does not fail later during an ingest —
 # it fails on launch, before the window appears, with a FileNotFoundError
-# naming a path nobody recognises. (Exactly what happened, 2026-08-25.)
+# naming a path nobody recognises.
 #
 # numpy, scipy, matplotlib and sqlalchemy are NOT listed here on purpose:
 # PyInstaller ships hooks for all four, and collecting them by hand would add

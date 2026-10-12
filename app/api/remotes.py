@@ -1,5 +1,5 @@
 """
-api/remotes.py — OUTBOUND sharing: consuming someone else's Flux library.
+api/remotes.py — OUTBOUND sharing: consuming someone else's Trellis library.
 
 The mirror of api/peers.py. That file manages who may consume MY library; this
 one manages whose libraries I consume, and relays my requests to them.
@@ -96,10 +96,9 @@ _opener = urllib.request.build_opener(
 # A peer's own address means nothing to the OTHER end of these requests until
 # it identifies itself -- and Python's default (`Python-urllib/3.13`) is a
 # textbook automated-traffic signature, exactly what a host's bot protection
-# exists to block. Every outbound call in this file carries this instead
-# (Ryan, 2026-08-30 -- traced a live "library refused the invite (403)" to a
-# Cloudflare edge block on the default UA; peer.is_active was fine).
-# The string itself now lives in app/utils/net.py, version-derived.
+# exists to block. Every outbound call in this file carries this instead ( to
+# a Cloudflare edge block on the default UA; peer.is_active was fine). The
+# string itself now lives in app/utils/net.py, version-derived.
 
 
 def fetch_remote_json(node, subpath, query=None):
@@ -218,7 +217,7 @@ def enroll():
         "invite_code": code,
         # The label the REMOTE files this device under ("Matt's MacBook").
         # Falls back to the product name only when this node has none of its
-        # own; "Flux" here was stale branding.
+        # own.
         "device_label": current_app.config.get("SHARE_NODE_NAME") or "Trellis",
     }).encode()
     req = urllib.request.Request(f"{base_url}/api/share/enroll", data=body, method="POST")

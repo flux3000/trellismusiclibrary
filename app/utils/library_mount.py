@@ -51,7 +51,7 @@ _PROBE_TIMEOUT = 3.0     # seconds before we call the mount hung
 #                    Almost always a squatter dir; the share is probably at
 #                    <name>-1. See tools/mount_library.py teardown step 2.
 #   unreadable       mounted, but LIBRARY_ROOT cannot be listed (permissions,
-#                    or the Flux Audio folder moved on the NAS)
+#                    or the library folder moved on the NAS)
 #   timeout          I/O hung — treat as disconnected, the mount is half-dead
 
 

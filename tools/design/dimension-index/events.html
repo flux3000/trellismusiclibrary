@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Events</title>
+<style>
+@font-face{font-family:'Archivo';font-weight:100 900;src:url('../../../app/static/fonts/archivo-latin-wght-normal.woff2') format('woff2-variations')}
+@font-face{font-family:'IBM Plex Sans';font-weight:100 700;src:url('../../../app/static/fonts/ibm-plex-sans-latin-wght-normal.woff2') format('woff2-variations')}
+</style>
+<link rel="stylesheet" href="../../../app/static/css/main.css">
+<link rel="stylesheet" href="dimension-index.css">
+</head><body class="dx-mock">
+<div class="dx-mockbar"><select id="pal"><option>steely</option><option>krauss</option><option>monk</option><option>joni</option><option>hazel</option><option>townes</option><option>chet</option><option>gram</option><option>cale</option><option>miles</option><option>alice</option><option>eno</option></select></div>
+<main class="dx-page" id="page"></main>
+<script>
+const KIND="events";
+const DATA=[{"id": 60, "name": "Atlanta Jazz Festival", "text": "", "venue": "Grant Park", "place": "Atlanta, GA", "date": "Jun 4", "year": 1989, "key": 19890604, "lineup": ["John McLaughlin"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1989, "y1": 1989, "img": null}, {"id": 46, "name": "Big Ears Festival", "text": "", "venue": "Barley's Tap Room", "place": "Knoxville, TN", "date": "Mar 28", "year": 2026, "key": 20260328, "lineup": ["Go Kurosawa"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2026, "y1": 2026, "img": null}, {"id": 41, "name": "Bonnaroo Music Festival", "text": "", "venue": "Bonnaroo - Arena Stage", "place": "Manchester, TN", "date": "Jun 23-11", "year": 2002, "key": 20020623, "lineup": ["Bela Fleck & Edgar Meyer", "The Black Crowes"], "nartists": 2, "recs": 2, "shows": 2, "y0": 2002, "y1": 2005, "img": null}, {"id": 20, "name": "Camp Springs Bluegrass Festival", "text": "", "venue": "Camp Springs Bluegrass Festival", "place": "Reidsville, NC", "date": "Sep", "year": 1977, "key": 19770900, "lineup": ["Boone Creek"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1977, "y1": 1977, "img": null}, {"id": 45, "name": "Estival Jazz", "text": "", "venue": "Piazza Della Riforma", "place": "Lugano", "date": "May 5 - Jul 14", "year": 1986, "key": 19860505, "lineup": ["Cubanismo", "Gil Evans Orchestra"], "nartists": 2, "recs": 2, "shows": 2, "y0": 1986, "y1": 2001, "img": null}, {"id": 27, "name": "Gathering of the Vibes", "text": "", "venue": "Indian Lookout Country Club", "place": "Mariaville, NY", "date": "Jul 17", "year": 2004, "key": 20040717, "lineup": ["Masters of Bluegrass"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2004, "y1": 2004, "img": null}, {"id": 4, "name": "Grande Parade du Jazz", "text": "", "venue": "Arènes et Jardins de Cimiez", "place": "Nice", "date": "Jul 7", "year": 1978, "key": 19780707, "lineup": ["Bill Evans Trio + Friends"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1978, "y1": 1978, "img": null}, {"id": 47, "name": "Grey Fox Bluegrass Festival", "text": "", "venue": "Rothvoss Farm", "place": "Ancramdale, NY", "date": "Jul 21-20", "year": 2001, "key": 20010721, "lineup": ["David Grisman Quintet", "Jerry Douglas Band", "Mountain Heart", "Blue Highway"], "nartists": 6, "recs": 6, "shows": 6, "y0": 2001, "y1": 2007, "img": null}, {"id": 51, "name": "Hulstsfred Festival", "text": "", "venue": "Citypark", "place": "Hulstsfred", "date": "Jun 19", "year": 1999, "key": 19990619, "lineup": ["Esbjörn Svensson Trio"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1999, "y1": 1999, "img": null}, {"id": 57, "name": "Jazznojazz Festival", "text": "", "venue": "Theaterhaus Gessnerallee", "place": "Zürich", "date": "Nov 1", "year": 2008, "key": 20081101, "lineup": ["Dr. John and the Lower 911"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2008, "y1": 2008, "img": {"ext": ".jpg", "origin": "upload", "credit": null}}, {"id": 59, "name": "Kool Jazz Festival", "text": "", "venue": "Avery Fisher Hall", "place": "New York, NY", "date": "Jul 1", "year": 1982, "key": 19820701, "lineup": ["Oscar Peterson Trio"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1982, "y1": 1982, "img": null}, {"id": 58, "name": "Monte Carlo Jazz Festival", "text": "", "venue": "Salle Garnier", "place": "Monte Carlo", "date": "Nov 26", "year": 2013, "key": 20131126, "lineup": ["Mehliana"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2013, "y1": 2013, "img": null}, {"id": 43, "name": "Montreal Jazz Festival", "text": "", "venue": "Monument-National", "place": "Montreal, QC", "date": "Jul 9 - Jun 29", "year": 1989, "key": 19890709, "lineup": ["Bobby Mcferrin and Jack Dejohnette", "Oscar Peterson Trio"], "nartists": 2, "recs": 2, "shows": 2, "y0": 1989, "y1": 2003, "img": null}, {"id": 56, "name": "Montreux Jazz Festival", "text": "", "venue": "Auditorium Stravinski", "place": "Montreux", "date": "Jul 20", "year": 2000, "key": 20000720, "lineup": ["Brad Mehldau"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2000, "y1": 2000, "img": null}, {"id": 44, "name": "New Orleans Jazz & Heritage Festival", "text": "", "venue": "Fair Grounds Race Course", "place": "New Orleans, LA", "date": "May 5", "year": 2002, "key": 20020505, "lineup": ["Corey Harris"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2002, "y1": 2002, "img": null}, {"id": 3, "name": "Nice Jazz Festival", "text": "", "venue": "Jardins de Cimiez", "place": "Nice", "date": "Jul 24", "year": 2010, "key": 20100724, "lineup": ["Pat Metheny Group"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2010, "y1": 2010, "img": null}, {"id": 38, "name": "North Sea Jazz Festival", "text": "", "venue": "Congresgebouw", "place": "The Hague", "date": "Jul 16-13", "year": 2000, "key": 20000716, "lineup": ["D'Angelo & the Soultronics", "Esbjörn Svensson Trio"], "nartists": 2, "recs": 2, "shows": 2, "y0": 2000, "y1": 2007, "img": null}, {"id": 53, "name": "Northwest String Summit", "text": "", "venue": "Horning’s Hideout", "place": "North Plains, OR", "date": "Aug 26", "year": 2006, "key": 20060826, "lineup": ["Darol Anger's Republic of Strings"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2006, "y1": 2006, "img": null}, {"id": 30, "name": "River City Bluegrass Festival", "text": "", "venue": "Oregon Convention Center", "place": "Portland, OR", "date": "Jan 7", "year": 2006, "key": 20060107, "lineup": ["River City Dream Band"], "nartists": 1, "recs": 1, "shows": 1, "y0": 2006, "y1": 2006, "img": null}, {"id": 49, "name": "Rockygrass", "text": "", "venue": "Rockygrass", "place": "Lyons, CO", "date": "Aug 1 - Jul 27", "year": 1997, "key": 19970801, "lineup": ["Rockygrass Thunder Jam", "Rockygrass House Band", "Blue Highway", "Rockygrass Late Night Jam"], "nartists": 5, "recs": 6, "shows": 6, "y0": 1997, "y1": 2007, "img": null}, {"id": 2, "name": "Summer Jam at Watkins Glen", "text": "", "venue": "Watkins Glen Grand Prix Raceway (Race Course)", "place": "Watkins Glen, NY", "date": "Jul 28", "year": 1973, "key": 19730728, "lineup": ["Allman Brothers Band"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1973, "y1": 1973, "img": null}, {"id": 54, "name": "Suwannee Springfest", "text": "", "venue": "Spirit of the Suwannee Music Park", "place": "Live Oak, FL", "date": "Mar 27-26", "year": 2004, "key": 20040327, "lineup": ["Darol Anger's Republic of Strings", "Tony Rice Unit"], "nartists": 2, "recs": 2, "shows": 2, "y0": 2004, "y1": 2006, "img": null}, {"id": 48, "name": "Telluride Bluegrass Festival", "text": "", "venue": "Town Park", "place": "Telluride, CO", "date": "Jun 22-18", "year": 1985, "key": 19850622, "lineup": ["Chris Thile", "Hot Rize", "Alison Krauss & Union Station", "David Grisman Quartet"], "nartists": 16, "recs": 32, "shows": 31, "y0": 1985, "y1": 2026, "img": {"ext": ".webp", "origin": "upload", "credit": null}}, {"id": 50, "name": "Umeå Jazz Festival", "text": "", "venue": "Studion, Folkets Hus", "place": "Umea", "date": "Oct 28", "year": 1995, "key": 19951028, "lineup": ["Esbjörn Svensson & Lina Syberg"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1995, "y1": 1995, "img": null}, {"id": 35, "name": "WAMU Bluegrass Winter Festival", "text": "", "venue": "Lisner Auditorium", "place": "Washington, DC", "date": "Feb 27", "year": 1983, "key": 19830227, "lineup": ["Seldom Scene"], "nartists": 1, "recs": 1, "shows": 1, "y0": 1983, "y1": 1983, "img": null}];
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+const initials=n=>String(n||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();
+const years=(a,b)=>!a?'':(!b||a===b)?String(a):`${a}-${b}`;
+const byName=(a,b)=>(a.sort||a.name).localeCompare(b.sort||b.name);
+const inkOn=hex=>{if(!/^#[0-9a-f]{6}$/i.test(hex||''))return 'var(--t0)';
+  const n=parseInt(hex.slice(1),16),f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};
+  const L=.2126*f(n>>16)+.7152*f(n>>8&255)+.0722*f(n&255);return L>.4?'#141210':'#ffffff'};
+document.getElementById('pal').addEventListener('change',e=>document.documentElement.setAttribute('data-palette',e.target.value));
+document.getElementById('pal').value='cale';
+
+/* photo with fallback underneath. Place files at photos/<kind>/<id>.<ext>
+   (see README); a missing file just leaves the fallback showing. */
+function art(d,kind,color){
+  const f=`<span class="dx-ini">${esc(initials(d.name))}</span>`;
+  const im=d.img?`<img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.remove()">`:'';
+  return `<span class="dx-art"${color?` style="--dx-fg:${esc(color)}"`:''}>${f}${im}</span>`;
+}
+function photo(d,kind){
+  if(!d.img)return '';
+  return `<span class="dx-photo"><img src="photos/${kind}/${d.id}${esc(d.img.ext)}" alt="" loading="lazy" onerror="this.parentNode.remove()"></span>`;
+}
+
+/* cfg: title, rows, row(d)->html, sorts[{id,label,cmp}], search(d)->string,
+   filter{label,get(d)} optional, group{sort,key(d),label(d)} optional */
+function run(cfg){
+  let sortId=cfg.sorts[0].id,q='',fv='';
+  const opts=cfg.filter?[...new Set(cfg.rows.map(cfg.filter.get).filter(Boolean))].sort():[];
+  document.getElementById('page').innerHTML=`
+   <h1 class="dx-title">${esc(cfg.title)}</h1>
+   <div class="dim-bar">
+     <input class="dim-search" id="q" placeholder="Filter ${esc(cfg.title.toLowerCase())}…" autocomplete="off">
+     <div class="dim-sorts" id="sorts">${cfg.sorts.map(s=>`<button class="dim-sort${s.id===sortId?' active':''}" data-s="${s.id}">${esc(s.label)}</button>`).join('')}</div>
+     ${cfg.filter?`<select class="dx-select" id="f"><option value="">${esc(cfg.filter.label)}</option>${opts.map(o=>`<option>${esc(o)}</option>`).join('')}</select>`:''}
+     <span class="dim-count" id="n"></span>
+   </div><div id="out"></div>`;
+  function paint(){
+    const t=q.trim().toLowerCase();
+    let r=cfg.rows.filter(d=>(!t||cfg.search(d).toLowerCase().includes(t))&&(!fv||cfg.filter.get(d)===fv));
+    r=r.slice().sort(cfg.sorts.find(s=>s.id===sortId).cmp);
+    let h='';
+    if(cfg.group&&cfg.group.sort===sortId){
+      const gs=[];r.forEach(d=>{const k=cfg.group.key(d);let g=gs[gs.length-1];if(!g||g.k!==k){g={k,l:cfg.group.label(d),rows:[]};gs.push(g)}g.rows.push(d)});
+      h=gs.map(g=>`<section class="dx-group"><div class="dx-gutter">${esc(g.l)}</div><div class="dx-list">${g.rows.map(cfg.row).join('')}</div></section>`).join('');
+    }else h=`<div class="dx-list">${r.map(cfg.row).join('')}</div>`;
+    document.getElementById('out').innerHTML=r.length?h:`<div class="dim-empty">Nothing matches.</div>`;
+    document.getElementById('n').textContent=(t||fv)?`${r.length} of ${cfg.rows.length}`:'';
+  }
+  document.getElementById('q').addEventListener('input',e=>{q=e.target.value;paint()});
+  document.getElementById('sorts').addEventListener('click',e=>{const b=e.target.closest('.dim-sort');if(!b)return;sortId=b.dataset.s;
+    document.querySelectorAll('.dim-sort').forEach(x=>x.classList.toggle('active',x===b));paint()});
+  if(cfg.filter)document.getElementById('f').addEventListener('change',e=>{fv=e.target.value;paint()});
+  paint();
+}
+
+run({
+  title:'Events', rows:DATA,
+  row:d=>`<a class="dx-row dx-row--event" href="#/event/${d.id}">
+    <span class="dx-body">
+      ${d.date?`<div class="dx-date">${esc(d.date)}</div>`:''}
+      <div class="dx-name">${esc(d.name)}</div>
+      <div class="dx-sub">${esc([d.venue,d.place].filter(Boolean).join(', '))}</div>
+      ${d.text?`<div class="dx-text">${esc(d.text)}</div>`:''}
+      ${d.lineup.length?`<div class="dx-with">${esc(d.lineup.join(', '))}${d.nartists>4?` and ${d.nartists-4} more`:''}</div>`:''}
+    </span>
+    <span class="dx-end">${photo(d,KIND)}<span class="dx-side"><div class="dx-n">${d.recs}</div><div class="dx-nl">${d.recs===1?'Recording':'Recordings'}</div></span></span></a>`,
+  sorts:[{id:'date',label:'Date',cmp:(a,b)=>(a.key||9e9)-(b.key||9e9)||byName(a,b)},{id:'name',label:'A-Z',cmp:byName},
+         {id:'recs',label:'Recordings',cmp:(a,b)=>b.recs-a.recs||byName(a,b)}],
+  search:d=>[d.name,d.venue,d.place,...d.lineup].join(' '),
+  group:{sort:'date',key:d=>d.year||0,label:d=>d.year||''}
+});
+
+</script></body></html>

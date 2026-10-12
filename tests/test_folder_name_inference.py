@@ -1,14 +1,8 @@
-"""
-tests/test_folder_name_inference.py — what a folder name alone can tell us.
+"""tests/test_folder_name_inference.py — what a folder name alone can tell us.
 
 The folder name is a third witness alongside the FLAC tags and the info file,
 and for a folder with no info file it is the ONLY one — which is the exact
 case a collector ingesting an existing library is in.
-
-Source detection (detect_source_from_name) has been in the codebase since
-2026-08 and was never covered by a test; gear detection
-(detect_gear_from_name) is new on 2026-09-17. Both are pure string logic, no
-DB or app context needed.
 
 The negative controls are the point of this file. A folder name is short and
 adversarial — act names, venue names, city names, taper surnames — and a
@@ -182,9 +176,9 @@ def test_source_tag_and_shnid_negative(folder):
 
 
 def test_build_scan_payload_suggests_shnid_from_folder_name(tmp_path):
-    """The LMA example folder name: build_scan_payload surfaces the shnid as
-    a suggestion, flagged, and writes nothing on its own — a scan is
-    read-only (spec section 5 / chunk 4 done-when)."""
+    """The LMA example folder name: build_scan_payload surfaces the shnid as a
+    suggestion, flagged, and writes nothing on its own — a scan is read-only.
+    """
     folder = tmp_path / "gd1988-05-01.ec7.bowen.foster.118671.flac16"
     folder.mkdir()
     (folder / "01.flac").write_bytes(b"x")
@@ -206,7 +200,7 @@ def test_build_scan_payload_suggests_source_tag_from_folder_name(tmp_path):
     assert scan["source_tag_from_folder_name"] is True
 
 
-# ── Round-trip through the PUT endpoints (chunk 4 done-when) ────────────────
+# ── Round-trip through the PUT endpoints ────────────────
 
 def test_recording_source_tag_and_shnid_round_trip(app, client, seeded_ids):
     _login_as(client)

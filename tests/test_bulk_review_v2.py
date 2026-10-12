@@ -1,6 +1,5 @@
-"""
-tests/test_bulk_review_v2.py -- fixes from the second independent review of
-Bulk Ingest (Context Library/Bulk Ingest -- Independent Review v2.md).
+"""tests/test_bulk_review_v2.py -- fixes from the second independent review of
+Bulk Ingest.
 
 R2-1 (nested unreadable folders), R2-2 (NFD on-disk folder names), R2-3
 (resume/worker-exit race), R2-4 (root-level checksum files with per-disc
@@ -43,7 +42,7 @@ def _never_stop():
 
 @pytest.fixture(autouse=True)
 def _no_real_followup_thread(monkeypatch):
-    """R2-N4: every test in this file drives a run to 'done', which queues
+    """every test in this file drives a run to 'done', which queues
     the real follow-up pass (score / mb_artist) against this test's own temp
     DB via a background thread. Left unpatched, that thread can still be
     running when the test's fixture drops the DB out from under it, which

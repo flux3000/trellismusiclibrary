@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 
+REPLY_PROP = {"type": "string", "description": "One or two plain first-person sentences telling the user what you "
+              "found or did, in a warm, low-key voice. Never a greeting, never the user's name, no hedging."}
+
+
 class NothingToDo(Exception):
     """Raised by a skill's gather(): no model call is made and the run finishes empty.
     The message becomes the result's `thinking`."""
@@ -20,7 +24,7 @@ class Ctx:
 
 @dataclass
 class Subject:
-    type: str                       # recording | folder | artist | venue
+    type: str                       # recording | folder | artist | venue | musician | event
     id: Optional[int] = None
     key: Optional[str] = None       # folder path for "folder"
     obj: object = None              # the ORM row (recording, artist, venue); None for a folder

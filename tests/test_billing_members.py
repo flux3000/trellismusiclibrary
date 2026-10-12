@@ -1,6 +1,5 @@
-"""
-Resolver v2 chunk 7b: a billing of several people ("X and Y") stays one Artist reading.
-Splitting a billing into Musicians is postponed (Ryan, 2026-10-05): too many traps
+"""Resolver v2 chunk 7b: a billing of several people ("X and Y") stays one Artist
+reading. Splitting a billing into Musicians is postponed: too many traps
 ("Peter Rowan and Hot Rize") and no way to measure how often it is right.
 """
 import pytest
@@ -40,7 +39,7 @@ def test_resolving_creates_no_musician_rows(app, tmp_path):
     assert db.session.query(Musician).count() == before
 
 
-# ── pre-filling Members from the billing (Ryan, 2026-10-05) ──────────────────
+# ── pre-filling Members from the billing ──────────────────
 
 _BILLED = "Doc Watson and Jack Lawrence"
 

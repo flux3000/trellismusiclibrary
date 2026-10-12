@@ -1,14 +1,14 @@
-"""
-app/utils/schema_upgrades.py -- additive schema upgrades that run at every start.
+"""app/utils/schema_upgrades.py -- additive schema upgrades that run at every start.
 
 create_all() cannot add a column to a table that exists, and first_run_setup() runs only
 when the database file is absent, so a column added to an existing model needs a check
 here. Each upgrade is idempotent, runs in one transaction, and is a no-op on a database
 that already has it or has no table yet (a fresh one: create_all() builds it complete).
 
-ensure_artist_confirmed_at (Resolver v2 chunk 7b): artist.confirmed_at, backfilled on every
-existing row with created_at, else the migration time. scripts/migrate_add_artist_confirmed.py
-does the same by hand; the app does not depend on it.
+ensure_artist_confirmed_at: artist.confirmed_at, backfilled on every existing
+row with created_at, else the migration time.
+scripts/migrate_add_artist_confirmed.py does the same by hand; the app does not
+depend on it.
 
 Failure behaviour: a database that does not exist yet (no file, or no folder) is left alone and
 never created here; first_run_setup() and create_all() build it. A real migration error (read-only
@@ -74,7 +74,6 @@ def ensure_artist_confirmed_at(engine):
             pass
 
 
-# ── Lomax (2026-10-05) ───────────────────────────────────────────────────────
 
 # (table, json column, skill, subject_type) of the three columns Lomax runs replace.
 _LOMAX_LEGACY = (("recording", "ai_research_json", "recording", "recording"),
@@ -182,9 +181,55 @@ def ensure_venue_history(engine):
         raise RuntimeError(msg) from e
 
 
+def ensure_event_history(engine):
+    """Add event.history (Lomax Event History text) when the column is missing. Returns True when
+    added, None when nothing was needed (no file, no event table, or already there)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(event)"))}
+            if not cols or "history" in cols:
+                return None
+            con.execute(text("ALTER TABLE event ADD COLUMN history TEXT"))
+        log.warning("schema: added event.history in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not add the event.history column to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
+def ensure_lomax_easter_eggs(engine):
+    """Create lomax_easter_egg_seen when missing. Returns True when created, None when nothing was
+    needed (no file, no user table yet, or the table is already there)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.connect() as con:
+            names = {r[0] for r in con.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "user" not in names or "lomax_easter_egg_seen" in names:
+            return None
+        from app.models.lomax import LomaxEasterEggSeen
+        LomaxEasterEggSeen.__table__.create(engine, checkfirst=True)
+        log.warning("schema: created lomax_easter_egg_seen in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not create the lomax_easter_egg_seen table in the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
 def ensure_bulk_run_cleared_at(engine):
-    """Add bulk_ingest_run.cleared_at (Reset Queue, 2026-10-06) when missing. Returns True when
-    added, None when nothing was needed (no file, no table, or already there)."""
+    """Add bulk_ingest_run.cleared_at when missing. Returns True when added, None
+    when nothing was needed (no file, no table, or already there).
+    """
     from sqlalchemy import text
     from sqlalchemy.exc import SQLAlchemyError
     path = _sqlite_path(engine)
@@ -205,8 +250,9 @@ def ensure_bulk_run_cleared_at(engine):
 
 
 def ensure_invite_code(engine):
-    """Add peer_invite.code (the copyable raw invite, Ryan 2026-10-06) when the column is missing.
-    Returns True when added, None when nothing was needed."""
+    """Add peer_invite.code when the column is missing. Returns True when added,
+    None when nothing was needed.
+    """
     from sqlalchemy import text
     from sqlalchemy.exc import SQLAlchemyError
     path = _sqlite_path(engine)
@@ -282,12 +328,58 @@ def ensure_bulk_meta_band(engine):
             pass
 
 
+def ensure_genre_colors(engine):
+    """Give every genre with a NULL or empty colour a default one, in id order.
+    Idempotent: coloured genres are never touched. Returns the rows updated, or
+    None when there was nothing to do. Never raises: a missing table or a
+    locked database is logged and the app starts."""
+    from app.utils.genre_color import default_genre_color
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=rw", uri=True, timeout=_BUSY_TIMEOUT, isolation_level=None)
+    except sqlite3.Error as e:
+        log.error("schema: could not open %s to colour genres: %s", path, e)
+        return None
+    try:
+        if "color" not in {r[1] for r in con.execute("PRAGMA table_info(genre)")}:
+            return None
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            rows = con.execute("SELECT id, color FROM genre ORDER BY id").fetchall()
+            have = [c for _, c in rows if c and c.strip()]
+            todo = [i for i, c in rows if not (c and c.strip())]
+            for gid in todo:
+                c = default_genre_color(have)
+                have.append(c)
+                con.execute("UPDATE genre SET color = ? WHERE id = ?", (c, gid))
+            con.execute("COMMIT")
+        except BaseException:
+            try:
+                con.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        if todo:
+            log.warning("schema: gave %d genre(s) a default colour in %s", len(todo), path)
+        return len(todo) or None
+    except sqlite3.Error as e:
+        log.error("schema: could not colour genres in %s: %s", path, e)
+        return None
+    finally:
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def ensure_full_library_grants(engine):
-    """Give every unrevoked peer an active grant to the Full Library collection (Ryan,
-    2026-10-06: sharing is implied, so the per-peer share switch is gone and a peer created
-    before then without the grant would otherwise see nothing with no way to fix it). Idempotent.
-    Returns the grants added, or None when there was nothing to do. Never raises: a missing
-    table or a locked database is logged and the app starts."""
+    """Give every unrevoked peer an active grant to the Full Library collection.
+    Idempotent. Returns the grants added, or None when there was nothing to do.
+    Never raises: a missing table or a locked database is logged and the app
+    starts.
+    """
     path = _sqlite_path(engine)
     if path is None or not os.path.isfile(path):
         return None

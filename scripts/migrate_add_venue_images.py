@@ -1,11 +1,10 @@
-"""
-scripts/migrate_add_venue_images.py
+"""scripts/migrate_add_venue_images.py
 
-Adds `venue_image` — multiple photos per Venue with one flagged primary
-(2026-08-07). Additive and idempotent.
+Adds `venue_image` — multiple photos per Venue with one flagged primary.
+Additive and idempotent.
 
-A parallel table to `performer_image` rather than a shared polymorphic one
-(Ryan's call). The duplication is schema only: behaviour lives once in
+A parallel table to `performer_image` rather than a shared polymorphic one. The
+duplication is schema only: behaviour lives once in
 `app/utils/entity_images.py`. The reason is the foreign key — FK enforcement
 was turned on deliberately in July, and SQLite cannot enforce a polymorphic
 (entity_type, entity_id) pair at all.

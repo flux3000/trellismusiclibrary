@@ -1,19 +1,16 @@
-"""
-app/utils/recording_images.py — recording-level artwork (Studio Records spec
-v1, chunk 4).
+"""app/utils/recording_images.py — recording-level artwork.
 
-Three sources, in priority order (design spec section 3): image files sitting
-in the recording folder, pictures embedded in the audio itself (FLAC PICTURE
-blocks, ID3 APIC frames), and manual upload (upload reuses the existing
-entity_images.py machinery unchanged -- nothing here is needed for it).
+Three sources, in priority order: image files sitting in the recording folder,
+pictures embedded in the audio itself (FLAC PICTURE blocks, ID3 APIC frames),
+and manual upload (upload reuses the existing entity_images.py machinery
+unchanged -- nothing here is needed for it).
 
 Trellis never writes into the collector's folder: every function below only
 READS the recording folder. The bytes it finds are copied to
 DATA_DIR/images/recordings/<id>/ (via image_dir()), never written back.
 
 Errors are per-image and always swallowed here -- a bad JPEG or an unreadable
-FLAC picture block must not fail the ingest it rides in on (design spec
-section 3, "Cost at bulk ingest").
+FLAC picture block must not fail the ingest it rides in on.
 """
 
 import logging
@@ -102,13 +99,12 @@ def _front_sort_key(name):
     stem = os.path.splitext(name)[0].lower()
     # Front-candidate stems first (alphabetical among themselves), then
     # everything else alphabetical -- matches "ordered front first then by
-    # name" (design spec section 3 / build plan chunk 4).
+    # name".
     return (0 if stem in _FRONT_STEMS else 1, name.lower())
 
 
 def discover_folder_images(folder_abs):
-    """
-    Image files in a recording folder, per design spec section 3 rule 1.
+    """Image files in a recording folder.
 
     Returns a list of (rel_path, is_front) tuples, rel_path relative to
     folder_abs using '/' regardless of platform, front candidates first.
@@ -150,9 +146,7 @@ def discover_folder_images(folder_abs):
 
 
 def extract_embedded_pictures(track_pairs):
-    """
-    Embedded cover art from a recording's audio files, per design spec
-    section 3 rule 2.
+    """Embedded cover art from a recording's audio files.
 
     `track_pairs` is a list of (abs_path, file_path) tuples, tracks in
     track_number order -- file_path is the track's own folder-relative path
@@ -338,11 +332,9 @@ def ingest_recording_images(rec, library_root):
 
 
 def add_cover_art_if_missing(rec):
-    """
-    Cover Art Archive front cover for a recording with a matched MusicBrainz
-    release and no artwork at all (Ryan, 2026-10-01). Becomes primary, since
-    it is the only image. Returns 1 if added, else 0. Never raises; flushes,
-    does not commit.
+    """Cover Art Archive front cover for a recording with a matched MusicBrainz
+    release and no artwork at all. Becomes primary, since it is the only image.
+    Returns 1 if added, else 0. Never raises; flushes, does not commit.
     """
     from app.models.recording_image import RecordingImage
     from app.utils import musicbrainz as _mb

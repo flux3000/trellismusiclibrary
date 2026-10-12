@@ -1,10 +1,8 @@
-"""
-tests/test_ingest_utils.py — move_to_library()'s cleanup (2026-07-23): once
-a recording folder is moved into the library, its immediate parent (the
-"Artist Name" staging folder in a typical Bulk Import layout) should be
-removed too if left empty — but only ONE level up, and never anything that
-isn't unambiguously a disposable staging folder. Pure filesystem logic, no
-DB/app context needed.
+"""tests/test_ingest_utils.py — move_to_library's cleanup: once a recording folder
+is moved into the library, its immediate parent (the "Artist Name" staging
+folder in a typical Bulk Import layout) should be removed too if left empty —
+but only ONE level up, and never anything that isn't unambiguously a disposable
+staging folder. Pure filesystem logic, no DB/app context needed.
 """
 
 from pathlib import Path
@@ -97,14 +95,14 @@ def test_move_never_deletes_home_directory(tmp_path, monkeypatch):
     assert home.exists()
 
 
-# ── Fingerprint detection by CONTENT, not filename (2026-08-02) ───────────────
-# Ryan's Aoife O'Donovan folder held two .txt files: the real info file
+# ── Fingerprint detection by CONTENT, not filename ───────────────
+# The user's Aoife O'Donovan folder held two .txt files: the real info file
 # (`Aoife O'Donovan Band.txt`) and an md5 list named after the show
 # (`AoifeODonovan2012-08-19_MCE400_16bit.txt`). Nothing in the latter's NAME
 # matches FINGERPRINT_MARKERS, so it was filed as an info-file candidate — and
 # won the scoring, because _score_text_file awards +5 for a date pattern in the
-# filename and the genuine info file scored 0. A 32-hex hash landed in the
-# Venue box, and the checksums were never registered for verification.
+# filename and the genuine info file scored 0. A 32-hex hash landed in the Venue
+# box, and the checksums were never registered for verification.
 
 def _md5_list(n=14):
     return "\n".join(
@@ -186,7 +184,7 @@ def test_filename_marker_still_wins_without_reading_the_file(tmp_path):
     assert fingerprint_type_for_file(str(p)) == "st5"
 
 
-# ── Pre-ingest fingerprint audit (2026-08-02) ─────────────────────────────────
+# ── Pre-ingest fingerprint audit ─────────────────────────────────
 # The third triage tab. A checksum is the only HARD evidence on the card —
 # everything else is an estimate. Verifying before ingest is the point at which
 # a damaged tape is cheapest to reject.
@@ -208,9 +206,9 @@ def test_audit_reports_no_fingerprint_files(tmp_path):
 
 
 def test_md5_is_parsed_and_matched_but_left_pending_when_not_deep(tmp_path):
-    """Ryan's call: FFP/ST5 verify for free at triage, MD5 waits for a click.
-    'Pending' must be distinguishable from 'unmatched' — one means we have not
-    looked yet, the other means there is no checksum for that file at all."""
+    """'Pending' must be distinguishable from 'unmatched' — one means we have not
+    looked yet, the other means there is no checksum for that file at all.
+    """
     from app.utils.checksums import audit_folder_fingerprints
 
     show = tmp_path / "show"; show.mkdir()
@@ -277,7 +275,7 @@ def test_audit_scopes_a_disc_subdir_fingerprint_to_that_disc(tmp_path):
     assert f["matched_count"] == 1
 
 
-# ── Collision handling at ingest time (2026-09-01) ────────────────────────────
+# ── Collision handling at ingest time ────────────────────────────
 # move_to_library() used to do dest_folder.mkdir(parents=True, exist_ok=True)
 # unconditionally — if a folder of the same canonical name already existed
 # under the artist directory (e.g. two undated-source "Various Artists" shows
@@ -338,7 +336,7 @@ def test_move_dedupes_a_third_collision_past_the_second(tmp_path):
     assert new_rel == "Various Artists/Show (3)"
 
 
-# ── Show resolution in a library Trellis did not lay out (2026-09-17) ────────
+# ── Show resolution in a library Trellis did not lay out ────────
 #
 # A collector who points Trellis at their OWN folder gets two kinds of
 # directory mixed in with their shows: Trellis's underscore-prefixed buckets
@@ -449,13 +447,12 @@ def test_excluded_dir_predicate_has_a_negative_control(tmp_path):
         assert _is_excluded_dir(furniture), furniture
 
 
-# ── Library layout: the artist folder is a convention, not a law (2026-09-17) ─
-#
-# A collector who pointed Trellis at a library they built themselves may keep
-# every show at one flat level with the artist in the folder name. Filing new
-# material under an <Artist>/ directory there leaves them with a permanently
-# hybrid tree, so move_to_library() takes the layout as a parameter. It is read
-# from node_setting by the caller, because this function has no app context.
+# ── Library layout: the artist folder is a convention, not a law ─  A collector
+# who pointed Trellis at a library they built themselves may keep every show at
+# one flat level with the artist in the folder name. Filing new material under
+# an <Artist>/ directory there leaves them with a permanently hybrid tree, so
+# move_to_library takes the layout as a parameter. It is read from node_setting
+# by the caller, because this function has no app context.
 
 def test_new_recordings_file_under_an_artist_folder_by_default(tmp_path):
     """The default must not change: every library Trellis laid out itself
@@ -488,9 +485,10 @@ def test_layout_off_files_flat_at_the_library_root(tmp_path):
 
 
 def test_flat_layout_dedupes_against_the_root(tmp_path):
-    """Two shows with the same canonical name collide at the ROOT when flat,
-    not on one artist's shelf — so the same "(2)" convention has to apply
-    there. This is the SBD-vs-AUD case, real in Ryan's library."""
+    """Two shows with the same canonical name collide at the ROOT when flat, not
+    on one artist's shelf — so the same "(2)" convention has to apply there.
+    This is the SBD-vs-AUD case, real in the user's library.
+    """
     lib = tmp_path / "Library"
     lib.mkdir()
     name = "Grateful Dead - 1977-05-08"
@@ -551,13 +549,11 @@ def test_flatten_false_still_applies_a_rename_map_to_the_basename(tmp_path):
     assert not (dest / "CD1" / "01.flac").exists()
 
 
-# ── In-root bulk_ingest (Bulk Ingest spec section 1.1, chunk 1, 2026-09-26) ────
+# ── In-root bulk_ingest ────
 #
-# A source folder whose realpath is already inside LIBRARY_ROOT is never
-# moved, renamed, flattened or deduped -- it is ingested exactly where it
-# sits, whatever placement/flatten/audio_rename_map the caller passes in.
-# This supersedes the 2026-09-25 S1/R2 in-place branch, which still applied
-# the rename map/flatten pair in place; that behavior no longer exists.
+# A source folder whose realpath is already inside LIBRARY_ROOT is never moved,
+# renamed, flattened or deduped -- it is ingested exactly where it sits, whatever
+# placement/flatten/audio_rename_map the caller passes in.
 
 def test_in_root_nested_source_stays_exactly_where_it_is(tmp_path):
     """A show several levels deep under LIBRARY_ROOT (e.g. an ingested

@@ -66,14 +66,13 @@ def _throttle():
 
 
 def _get_json(url):
-    """
-    GET and parse one MediaWiki API response, or None.
+    """GET and parse one MediaWiki API response, or None.
 
-    IMPORTANT: MediaWiki returns HTTP 200 for parameter errors, with the problem
-    in an `error` key. Treating that as data is how a broken request became
-    "this artist has no photo" for every artist at once (2026-08-08 — the
-    wbgetclaims `property` bug below). Errors are now surfaced at WARNING, not
-    swallowed: a systematic failure has to look different from an ordinary miss.
+    IMPORTANT: MediaWiki returns HTTP 200 for parameter errors, with the
+    problem in an `error` key. Treating that as data is how a broken request
+    became "this artist has no photo" for every artist at once. Errors are now
+    surfaced at WARNING, not swallowed: a systematic failure has to look
+    different from an ordinary miss.
     """
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -123,12 +122,12 @@ def image_filenames_for_qid(qid):
     """
     if not qid:
         return []
-    # wbgetentities, NOT wbgetclaims (fixed 2026-08-08). wbgetclaims' `property`
-    # parameter takes a SINGLE property id; the pipe-joined "P18|P373" this used
-    # to send failed parameter validation, and MediaWiki reports that as HTTP 200
-    # with an `error` body and no `claims` key — which read as "no images" for
-    # every artist in the library. wbgetentities accepts many properties at once
-    # and is the right call for wanting two of them.
+    # wbgetentities, NOT wbgetclaims. wbgetclaims' `property` parameter takes a
+    # SINGLE property id; the pipe-joined "P18|P373" this used to send failed
+    # parameter validation, and MediaWiki reports that as HTTP 200 with an
+    # `error` body and no `claims` key — which read as "no images" for every
+    # artist in the library. wbgetentities accepts many properties at once and is
+    # the right call for wanting two of them.
     url = ("https://www.wikidata.org/w/api.php?action=wbgetentities"
            f"&ids={urllib.parse.quote(qid)}&props=claims&format=json")
     data = _get_json(url)

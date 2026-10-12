@@ -1,11 +1,10 @@
-"""
-Lomax core: the one Anthropic call, the usage summary, result extraction, prose cleaning,
+"""Lomax core: the one Anthropic call, the usage summary, result extraction, prose cleaning,
 and the run worker. Nothing here knows about a particular skill.
 
-Usage is TOKENS AND SEARCHES ONLY. No dollar or cent figure appears anywhere in Trellis
-(Ryan, 2026-09-07): it is BYOK, Anthropic's console is the authoritative bill, and a
-hardcoded price table rots silently. A token count is a measurement, not a claim about
-someone else's price list.
+Usage is TOKENS AND SEARCHES ONLY. No dollar or cent figure appears anywhere in
+Trellis: it is BYOK, Anthropic's console is the authoritative bill, and a
+hardcoded price table rots silently. A token count is a measurement, not a
+claim about someone else's price list.
 """
 import json
 import logging
@@ -37,13 +36,13 @@ LEVEL_ALIASES = {"read": "study"}     # accepted on input for one release
 # Search is ~95% of the token bill (~15k input tokens per search, measured) and worse than
 # linear: every result stays in the context for every later turn of the same run. 5 is the
 # default; a run carrying a question from the archivist gets 7, because a question is
-# evidence that the extra digging is wanted (Ryan, 2026-09-07).
+# evidence that the extra digging is wanted.
 MAX_SEARCHES = 5
 MAX_SEARCHES_WITH_QUESTION = 7
 _EST_TOKENS_PER_SEARCH = 15_000
 _EST_OUTPUT_TOKENS = 1_500
 
-_PROSE_KEYS = ("biography", "history", "thinking", "answer")
+_PROSE_KEYS = ("biography", "history", "thinking", "answer", "reply")
 
 
 class LomaxError(Exception):
@@ -112,7 +111,7 @@ def estimate_tokens(skill_key, level="research", question=False):
 # ── prose and extraction ─────────────────────────────────────────────────────
 
 # Citation markup the web-search tool leaves in generated prose ("<cite index=...>", "[1]").
-# Stripped server-side so what is stored is already clean (2026-08-07).
+# Stripped server-side so what is stored is already clean.
 _CITE_RE = re.compile(r"</?cite[^>]*>", re.IGNORECASE)
 _REF_RE = re.compile(r"\[\s*\d+(?:\s*[,–-]\s*\d+)*\s*\]")
 _WS_RE = re.compile(r"[ \t]{2,}")
@@ -136,6 +135,8 @@ def extract_result(resp, tool_name):
             for k in _PROSE_KEYS:
                 if isinstance(data.get(k), str):
                     data[k] = clean_prose(data[k])
+            if isinstance(data.get("reply"), str):      # the reply is UI text: no em or en dashes
+                data["reply"] = re.sub(r"\s*[\u2013\u2014]\s*", ", ", data["reply"])
             return data
     text = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", None) == "text")
     return {"thinking": clean_prose(text) or "No structured result returned.", "proposals": []}
@@ -186,6 +187,8 @@ def norm_key(path):
 def load_subject(run):
     from app.models.artist import Artist
     from app.models.recording import Recording
+    from app.models.event import Event
+    from app.models.musician import Musician
     from app.models.venue import Venue
     from app.lomax.evidence import current_from_recording
     t = run.subject_type
@@ -195,7 +198,7 @@ def load_subject(run):
         except (ValueError, TypeError):
             current = {}
         return Subject("folder", key=run.subject_key, current=current)
-    model = {"recording": Recording, "artist": Artist, "venue": Venue}[t]
+    model = {"recording": Recording, "artist": Artist, "venue": Venue, "musician": Musician, "event": Event}[t]
     obj = db.session.get(model, run.subject_id)
     if obj is None:
         raise LomaxError("The %s no longer exists." % t)

@@ -1,5 +1,4 @@
-"""
-scripts/backfill_recording_quality.py — analysis + quality for the back catalogue.
+"""scripts/backfill_recording_quality.py — analysis + quality for the back catalogue.
 
 Two backfills in one pass, because both decode the same audio off the same NAS
 and doing them separately means walking 544 folders twice:
@@ -14,11 +13,10 @@ and doing them separately means walking 544 folders twice:
   2. LISTENING QUALITY (`recording_quality`) — the 1–100 listenability score.
      The engine only ever ran at INGEST time (triage → `quality_analysis`
      staging → `promote_to_recording`), so a row exists only for recordings
-     ingested since that integration landed: 13 of 544 as of 2026-08-07.
 
 Why (2) matters beyond tidiness: the Browse view's Recommended module draws
-from `quality IN ('A','A+')` — 67 recordings Ryan graded by hand, which is a
-selection-biased pool (you grade what you already care about, so the module
+from `quality IN ('A','A+')` — 67 recordings the user graded by hand, which is
+a selection-biased pool (you grade what you already care about, so the module
 recommends your own curation back at you). A populated `recording_quality`
 widens that pool to anything the engine scores GREEN, including recordings
 nobody has listened to yet.
@@ -180,7 +178,7 @@ def main():
             pending_tracks = sum(len(t) for _, t, _ in todo)
 
         print(f"\n{'=' * 64}")
-        print("  Flux Audio — analysis + listening-quality backfill")
+        print("  Trellis — analysis + listening-quality backfill")
         print(f"{'=' * 64}")
         print(f"  Library root    : {library_root}")
         print(f"  Recordings      : {len(recordings)}")
@@ -217,7 +215,7 @@ def main():
 
             if not Path(folder_abs).is_dir():
                 # Not a failure worth alarm — a NAS that isn't mounted looks
-                # exactly like this, and so does a folder renamed outside Flux.
+                # exactly like this, and so does a folder renamed outside Trellis.
                 print("      ✗ folder not found")
                 missing_folder += 1
                 continue

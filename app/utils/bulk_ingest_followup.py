@@ -1,5 +1,4 @@
-"""
-app/utils/bulk_ingest_followup.py -- Bulk Ingest follow-up queue (spec chunk 6).
+"""app/utils/bulk_ingest_followup.py -- Bulk Ingest follow-up queue.
 
 Thin wrapper: the actual implementation lives beside the follow-up queue
 itself in app/api/ingest.py (enqueue_followups(), _enqueue(), _handle_item()
@@ -7,11 +6,11 @@ and friends), because that is where the follow-up lanes, their worker threads an
 the /api/ingest/pipeline reporting already live -- splitting the queue logic
 across two modules would only invite the two copies to drift.
 
-This module exists only so app/utils/bulk_ingest_run.py (chunk 5) has something
-to import that does not create a circular import: bulk_ingest_run is imported
-by app/api routes that themselves import app/api/ingest, so bulk_ingest_run
-cannot import app.api.ingest at module load time without risking a cycle.
-The import here is deferred into the function body for the same reason.
+This module exists only so app/utils/bulk_ingest_run.py has something to import
+that does not create a circular import: bulk_ingest_run is imported by app/api
+routes that themselves import app/api/ingest, so bulk_ingest_run cannot import
+app.api.ingest at module load time without risking a cycle. The import here is
+deferred into the function body for the same reason.
 """
 
 

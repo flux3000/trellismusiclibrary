@@ -1,5 +1,4 @@
-"""
-scripts/backfill_musicbrainz.py — MusicBrainz lookup for existing performers.
+"""scripts/backfill_musicbrainz.py — MusicBrainz lookup for existing performers.
 
 New Performers get matched at creation. The 164 that already exist have
 `mb_status = NULL` ("never looked up"), so this walks them once.
@@ -10,8 +9,8 @@ roughly 6 minutes of wall clock. A schema migration must never quietly do that.
 
 Resumable — only rows with `mb_status IS NULL` are considered, and each commits
 on its own, so a Ctrl-C loses nothing and a re-run continues where it stopped.
-Ambiguous results are recorded as 'ambiguous' and left for a human to resolve on
-the performer page; nothing is ever auto-picked (Ryan, 2026-08-07).
+Ambiguous results are recorded as 'ambiguous' and left for a human to resolve
+on the performer page; nothing is ever auto-picked.
 
     python3 scripts/backfill_musicbrainz.py --dry-run
     python3 scripts/backfill_musicbrainz.py --limit 10

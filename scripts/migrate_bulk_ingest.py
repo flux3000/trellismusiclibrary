@@ -1,5 +1,4 @@
-"""
-scripts/migrate_bulk_ingest.py -- Bulk Ingest spec chunk 2.
+"""scripts/migrate_bulk_ingest.py -- Bulk Ingest spec chunk 2.
 
 Same shape as scripts/migrate_file_handling.py: dry run by default, one
 transaction, WAL refusal + backup on --apply, assertions before commit.
@@ -132,11 +131,10 @@ def create_bulk_ingest_tables(con):
 
 
 def add_format_column(con):
-    """
-    bulk_ingest_item.format (2026-09-27 progress/log redesign): an install
-    that already ran create_bulk_ingest_tables() before this column existed
-    gets it added here; a fresh install gets it straight from the CREATE
-    TABLE above, so this is a no-op there.
+    """bulk_ingest_item.format: an install that already ran
+    create_bulk_ingest_tables before this column existed gets it added here; a
+    fresh install gets it straight from the CREATE TABLE above, so this is a
+    no-op there.
     """
     print("\nColumns")
     if "format" in columns(con, "bulk_ingest_item"):
@@ -149,10 +147,10 @@ def add_format_column(con):
 
 
 def add_meta_column(con):
+    """bulk_ingest_item.meta: the extracted
+    artist/date/venue/location/source/title fields for the log's expand panel,
+    stashed at extraction time so GET .../items never re-scans.
     """
-    bulk_ingest_item.meta (2026-09-27 progress/log redesign): the extracted
-    artist/date/venue/location/source/title fields for the log's expand
-    panel, stashed at extraction time so GET .../items never re-scans."""
     print("\nColumns")
     if "meta" in columns(con, "bulk_ingest_item"):
         print("  bulk_ingest_item.meta already present")

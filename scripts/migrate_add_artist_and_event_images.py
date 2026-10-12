@@ -1,13 +1,5 @@
-"""
-migrate_add_artist_and_event_images.py — Add the artist_image and event_image
+"""migrate_add_artist_and_event_images.py — Add the artist_image and event_image
 tables.
-
-Photos were performer-and-venue-only until 2026-09-01. Standardising the photo
-treatment across all four photographed entities (Ryan) needs one parallel table
-each, matching performer_image and venue_image column for column — see
-app/models/artist_image.py for why parallel rather than polymorphic (short
-version: SQLite cannot enforce an (entity_type, entity_id) foreign key at all,
-and FK enforcement was turned on deliberately in July).
 
 Nothing to backfill: no artist or event photo has ever existed. Files will land
 under LIBRARY_ROOT/_artists/… and LIBRARY_ROOT/_events/… as they are uploaded.

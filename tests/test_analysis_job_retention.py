@@ -1,11 +1,8 @@
-"""
-tests/test_analysis_job_retention.py — a finished analysis job stays readable.
+"""tests/test_analysis_job_retention.py — a finished analysis job stays readable.
 
-The bug (Ryan, 2026-09-03, screenshot; first reported 2026-08-29 and not
-reproduced then): a bulk scan came back with a red "unknown job" banner and
-eight rows reading "Analysis failed".  Reprocessing the very same directory
-filed every one of them, which is what proves the folders were never the
-problem.
+The bug: a bulk scan came back with a red "unknown job" banner and eight rows
+reading "Analysis failed". Reprocessing the very same directory filed every one
+of them, which is what proves the folders were never the problem.
 
 `analyze_status` popped the job from `_QUALITY_JOBS` the instant a terminal
 status was read, so a SECOND poll — ordinary, not exceptional: two poll loops

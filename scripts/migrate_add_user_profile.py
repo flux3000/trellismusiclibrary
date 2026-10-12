@@ -1,5 +1,4 @@
-"""
-scripts/migrate_add_user_profile.py — display_name + avatar_ext on user.
+"""scripts/migrate_add_user_profile.py — display_name + avatar_ext on user.
 
 Additive and idempotent; safe to run twice. Adds:
 
@@ -10,7 +9,7 @@ Both nullable on purpose. Every existing row predates them, and `User.name`
 falls back to `username`, so a database that has not run this yet still shows a
 name — it just cannot change one.
 
-Run once per node (2026-08-25):
+Run once per node:
     source .venv/bin/activate && python3 scripts/migrate_add_user_profile.py
 """
 

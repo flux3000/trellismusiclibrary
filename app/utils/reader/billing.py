@@ -1,5 +1,4 @@
-"""
-Billing assembler and field extractors (Resolver v2, chunk 3, 2026-10-03).
+"""Billing assembler and field extractors.
 
 Turns the decoder's roles into the fields a person reads off an info file:
 

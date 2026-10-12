@@ -1,5 +1,4 @@
-"""
-Calibrated confidence for resolved fields (Resolver v2, chunk 6, 2026-10-04).
+"""Calibrated confidence for resolved fields.
 
 Every field the resolver fills has candidates, each with a score in the decoder's
 log-score points (reader/weights.py), and a NONE candidate that always competes.
@@ -52,11 +51,10 @@ DATE_AGAINST_EACH = 0.75       # a usable mention in the info text that states a
 DATE_AGAINST_CAP = 1.5
 
 # Artist, venue and location: a tag every track agrees on, a folder placed under its
-# artist, and the info text (which brings the decoder's own score).
-# The tag and folder-tree values cannot be measured on G1 (it has no tags and no artist
-# folders); chunk 7 recalibrates them on G3. They are strong because someone wrote them.
-# The artist tag sits above every logit the info text produced on G1 (the highest is 18.8):
-# a tag every track agrees on is worth more than any reading of the text.
+# artist, and the info text (which brings the decoder's own score). The tag and folder-tree
+# values cannot be measured on G1 (it has no tags and no artist folders). They are strong because someone wrote them. The artist tag sits
+# above every logit the info text produced on G1 (the highest is 18.8): a tag every track
+# agrees on is worth more than any reading of the text.
 TAGS_SCORE = {"artist": 20.0, "venue": 10.0, "city": 8.0, "state": 8.0, "country": 8.0}
 FOLDER_ARTIST_SCORE = 6.0
 # A folder named in the Trellis template (reader/folder.py) corroborates what the info text
@@ -80,7 +78,7 @@ AGREE_BONUS = {"artist": 3.0, "date": 2.0, "venue": 3.0, "city": 2.0, "state": 2
 AGREE_CAP = 2
 
 # The Atlas's show index lists the act on the resolved date (real outside evidence, an independent
-# source for the agreement bonus). Measured on G1, G2 and G3 (2026-10-06).
+# source for the agreement bonus). Measured on G1, G2 and G3.
 ATLAS_SHOW_SCORE = {"artist": 6.0, "venue": 6.0, "city": 4.0}
 
 # A runner-up is kept on the field only when it is this close (log-score points).

@@ -1,18 +1,15 @@
-"""
-scripts/ingest_bgb_regular_roster.py — Blue Grass Boys "Regular" roster.
+"""scripts/ingest_bgb_regular_roster.py — Blue Grass Boys "Regular" roster.
 
 Populates Membership stints (and any new Artist rows they need) for Performer
 116, "Bill Monroe and the Bluegrass Boys," from a reviewed CSV built out of
-doodah.net/bgb/alpha.html — the "Regular" members tier only (73 people, 107
-stints; Fill-in/Studio/Unconfirmed deliberately out of scope, deferred not
-cancelled — see the 2026-08-25 meeting note).
+doodah.net/bgb/alpha.html — the "Regular" members tier only.
 
 REQUIRES: scripts/migrate_add_membership_instrument.py has already been run.
 
-The CSV is the unit of review — Ryan edits it by hand (names, instrument
-strings, date splits) before this script ever runs. This script trusts the
-CSV completely and does no independent judgment calls; every '*_if_different'
-or 'REUSE_EXISTING' decision was made at CSV-authoring time, not here.
+The CSV is the unit of review — the user edits it by hand (names, instrument
+strings, date splits) before this script ever runs. This script trusts the CSV
+completely and does no independent judgment calls; every '*_if_different' or
+'REUSE_EXISTING' decision was made at CSV-authoring time, not here.
 
 Idempotent: safe to re-run after fixing a row. Matches existing Artists by
 name (exact, case-sensitive) as well as by explicit existing_artist_id, so a

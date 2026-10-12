@@ -28,9 +28,9 @@ def _sqlite_pragmas(dbapi_connection, _connection_record):
     # OFF by default.
     cursor.execute("PRAGMA foreign_keys=ON")
 
-    # Write-Ahead Logging (2026-08-27). REQUIRED once a second process shares
-    # this database — the share node serving peers runs alongside the desktop
-    # app, against the same file.
+    # Write-Ahead Logging. REQUIRED once a second process shares this database
+    # — the share node serving peers runs alongside the desktop app, against
+    # the same file.
     #
     # In SQLite's default rollback-journal mode, a writer copies the OLD pages
     # aside and writes the NEW data into the main database file. The main file
@@ -64,7 +64,7 @@ def _sqlite_pragmas(dbapi_connection, _connection_record):
     # "memory" is the legitimate exception: in-memory databases have no journal
     # and no second process to share with.
     if mode not in ("wal", "memory"):
-        print(f"  ⚠ SQLite journal_mode is '{mode}', not WAL — concurrent "
+        print(f"  ⚠ SQLite journal_mode is '{mode}', not WAL: concurrent "
               f"readers and writers WILL block each other. Is the database "
               f"on a network volume?", flush=True)
 

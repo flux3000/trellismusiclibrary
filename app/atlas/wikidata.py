@@ -1,6 +1,5 @@
-"""
-Wikidata for the Atlas builder, in three small passes that cannot hit the 60 s query limit
-(Resolver v2, chunk 4). Wikidata data is CC0.
+"""Wikidata for the Atlas builder, in three small passes that cannot hit the 60 s
+query limit. Wikidata data is CC0.
 
   Pass 1  ids.     SPARQL, ids only: no label service, no name or alias joins, no deep
                    traversal in the same query. The subclass list of each class is its own

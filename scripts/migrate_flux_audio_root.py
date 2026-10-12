@@ -1,7 +1,4 @@
-"""
-migrate_flux_audio_root.py — 2026-08-13
-
-Repoint stored absolute paths after the Workshop/Library consolidation:
+"""Repoint stored absolute paths after the Workshop/Library consolidation:
 
     /Volumes/music/Flux Workshop/{Backlog,Download,Working}  ->  /Volumes/music/Flux Audio/{Backlog,Download,Workshop}
     /Volumes/music/Flux Library                              ->  /Volumes/music/Flux Audio/Library

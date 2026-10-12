@@ -1,5 +1,4 @@
-"""
-tests/test_release_block_api.py -- Studio Records spec v1 chunk 3: the three
+"""tests/test_release_block_api.py -- Studio Records spec v1 chunk 3: the three
 View Recording endpoints (GET .../release-candidates, POST .../release-link,
 POST .../release-unlink) that sit on top of app/utils/musicbrainz.py's
 already-tested search_release/classify_release/link_release/unlink_release.

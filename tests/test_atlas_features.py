@@ -1,5 +1,4 @@
-"""
-tests/test_atlas_features.py -- the Atlas as evidence in the role decoder (Resolver v2, chunk 4).
+"""tests/test_atlas_features.py -- the Atlas as evidence in the role decoder.
 
 The rule under test: the Atlas is weaker evidence than the library, always. It never
 speaks for a unit the library has spoken for, adds nothing of a kind the library has

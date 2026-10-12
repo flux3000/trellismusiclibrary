@@ -1,10 +1,9 @@
-"""
-probe_peer_door.py — Walk node B's peer door exactly as a peer's app will.
+"""probe_peer_door.py — Walk node B's peer door exactly as a peer's app will.
 
-The consumer side (milestone 2 step 5) doesn't exist yet, so there is no UI
-that can reach these endpoints. This script stands in for it: it enrolls with
-an invite code, then walks the whole peer experience and prints what a peer
-sees — followed by a handful of things a peer must NOT be able to see.
+The consumer side doesn't exist yet, so there is no UI that can reach these
+endpoints. This script stands in for it: it enrolls with an invite code, then
+walks the whole peer experience and prints what a peer sees — followed by a
+handful of things a peer must NOT be able to see.
 
 Stdlib only (urllib, not requests) so a dev tool doesn't add a dependency.
 
@@ -41,11 +40,11 @@ DEFAULT_BASE = "http://127.0.0.1:5758"
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Do NOT follow redirects.
 
-    This bit me on the first run (2026-08-08). The local API sets
-    `login_manager.login_view` but no `unauthorized_handler`, so an
-    unauthenticated call to /api/artists/1 answers 302 → the login page.
-    urllib follows that on GET, lands on the SPA shell, and reports 200 with
-    HTML — which reads exactly like "the peer token got into the admin API."
+    This bit me on the first run. The local API sets `login_manager.login_view`
+    but no `unauthorized_handler`, so an unauthenticated call to /api/artists/1
+    answers 302 → the login page. urllib follows that on GET, lands on the SPA
+    shell, and reports 200 with HTML — which reads exactly like "the peer token
+    got into the admin API."
 
     A probe that turns a redirect into a false security failure is worse than
     no probe. The status code we want to see is the one the endpoint actually
@@ -221,11 +220,6 @@ def probe(base, token):
     print("  WHAT THE PEER MUST NOT SEE  (all of these should fail)")
     print("═" * 70)
 
-    # As of 2026-08-08 the local door answers JSON 401 for /api/* paths
-    # (login_manager.unauthorized_handler). Before that it 302'd to a POST-only
-    # login route, fell through to the SPA catch-all, and returned 200 + HTML —
-    # which this probe read as a breach. A 302 here now means the handler
-    # didn't fire, so it is no longer accepted as a pass.
     REFUSED = (401, 403)
 
     checks = [

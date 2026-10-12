@@ -1,5 +1,4 @@
-"""
-app/utils/download_queue.py -- the archive download worker (2026-10-01).
+"""app/utils/download_queue.py -- the archive download worker.
 
 One daemon thread takes the lowest-position queued DownloadJob and fetches its
 files into <Downloads>/<identifier>/, one at a time. Shape follows
@@ -55,7 +54,7 @@ _CANCEL = set()
 _CURRENT = [None]
 # Held around the worker's makedirs of a job folder, a cancel's cleanup, and
 # the Move guard in api/quality.py (check + move), so a Move cannot interleave
-# with a job creating or removing the same folder (2026-10-02).
+# with a job creating or removing the same folder.
 FS_LOCK = threading.RLock()
 
 
@@ -269,10 +268,11 @@ def is_busy_folder(target):
 
 def downloading_here(path):
     """True when `path` is a folder directly inside Downloads that a queued or
-    active download owns. Guards Move and Ingest of a working-folder row
-    (Ryan, 2026-10-02): a folder moved mid-download is recreated by the worker
-    and the show ends up split across two places. Scoped to Downloads so a
-    same-named folder in Workshop or Backlog is never refused."""
+    active download owns. Guards Move and Ingest of a working-folder row: a
+    folder moved mid-download is recreated by the worker and the show ends up
+    split across two places. Scoped to Downloads so a same-named folder in
+    Workshop or Backlog is never refused.
+    """
     from app.utils.downloads_dir import downloads_dir
     parent = os.path.dirname(os.path.realpath(path.rstrip(os.sep)))
     if parent != os.path.realpath(downloads_dir()):
@@ -335,8 +335,9 @@ def _fetch_one(job_id, f, target, progress):
     Returns True when the file is verified (MD5 matched) or unverifiable (the
     archive gave no MD5 and the size matched), False when the MD5 still
     mismatched after every attempt. A mismatched file is KEPT under its final
-    name (Ryan, 2026-10-01): the download is complete, the checksum is not, and
-    the Downloads page says so. Network/HTTP failures raise instead."""
+    name: the download is complete, the checksum is not, and the Downloads page
+    says so. Network/HTTP failures raise instead.
+    """
     part = target + ".part"
     last = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -518,11 +519,10 @@ def _has_complete_download(dest, exclude_id):
 
 
 def _cleanup_cancelled(dest, job_id):
-    """
-    A cancel removes everything incomplete (Ryan, 2026-10-01): the job's whole
-    folder, files that had finished included. The one exception is a folder an
-    earlier job already completed, which a cancelled re-download must never
-    destroy -- there only the .part files go.
+    """A cancel removes everything incomplete: the job's whole folder, files that
+    had finished included. The one exception is a folder an earlier job already
+    completed, which a cancelled re-download must never destroy -- there only
+    the .part files go.
 
     This used to delete the folder only when THIS run had created it, so a
     folder that already existed (a restart-resume, a retry after a failure, a
@@ -574,14 +574,13 @@ def start_worker(app=None):
 
 
 def resume_on_boot(app):
-    """
-    Called from run.py (after the library/Downloads config is patched and the
-    schema exists) and from run_headless.py -- NOT from create_app(), whose
-    config is not final yet (2026-10-01 review). Never in SERVER_MODE. A job
-    left `active` when the process stopped goes back to `queued` -- its
-    finished files are skipped by MD5 on the next pass -- and the worker starts
-    if anything is waiting. A failed query just means there is nothing to
-    resume; it must never stop boot.
+    """Called from run.py (after the library/Downloads config is patched and the
+    schema exists) and from run_headless.py -- NOT from create_app, whose
+    config is not final yet. Never in SERVER_MODE. A job left `active` when the
+    process stopped goes back to `queued` -- its finished files are skipped by
+    MD5 on the next pass -- and the worker starts if anything is waiting. A
+    failed query just means there is nothing to resume; it must never stop
+    boot.
     """
     with app.app_context():
         try:

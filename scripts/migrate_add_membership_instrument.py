@@ -1,16 +1,14 @@
-"""
-scripts/migrate_add_membership_instrument.py — instrument on Membership.
+"""scripts/migrate_add_membership_instrument.py — instrument on Membership.
 
 Adds membership.instrument (nullable VARCHAR(128)), additive and idempotent.
 Run this AFTER pulling the matching model change in app/models/artist.py
 (Membership.instrument) — this script only touches the schema; the ORM
 column declaration is a separate, already-applied source edit.
 
-Context: doodah.net/bgb roster ingestion (2026-08-25) is the first Membership
-data with real stint dates in this app, and the site's richest field —
-instrument(s) played — had nowhere to land. `PerformancePersonnel` already has
-exactly this column for show-level personnel; this mirrors it one layer up,
-at the act-roster level.
+Context: doodah.net/bgb roster ingestion is the first Membership data with real
+stint dates in this app, and the site's richest field — instrument(s) played —
+had nowhere to land. `PerformancePersonnel` already has exactly this column for
+show-level personnel; this mirrors it one layer up, at the act-roster level.
 
 One column holds every instrument a person is on record playing during that
 STINT (comma-separated, e.g. "fiddle, banjo, bass, mandolin"), because the

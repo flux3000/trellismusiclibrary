@@ -1,6 +1,5 @@
-"""
-models/recording_image.py — multiple images per Recording, one designated
-primary (Studio Records spec v1, chunk 4).
+"""models/recording_image.py — multiple images per Recording, one designated
+primary.
 
 Modeled on app/models/artist_image.py: same columns, same
 "PRIMARY IS ENFORCED IN APP LOGIC, not a DB constraint" rule, same

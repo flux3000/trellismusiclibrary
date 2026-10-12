@@ -139,7 +139,7 @@ fi
 note "Step 2: resetting app state"
 
 # db/trellis.db is sometimes a real file (plain dev checkout) and sometimes a
-# symlink Ryan pointed at DATA_DIR_GUESS so a source run and a packaged
+# symlink pointed at DATA_DIR_GUESS so a source run and a packaged
 # install share one database (see config.py's DB_PATH/AVATAR_DIR comments).
 # Resolve it to find the REAL file to trash, but leave the symlink itself in
 # place: run.py recreates the target directory on its next launch, so the

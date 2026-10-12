@@ -1,6 +1,5 @@
-"""
-tests/test_bulk_ingest_resume.py -- resuming a Bulk Ingest run after a
-simulated crash (spec chunk 5b "Resume on boot").
+"""tests/test_bulk_ingest_resume.py -- resuming a Bulk Ingest run after a
+simulated crash.
 
 Real files under a temp LIBRARY_ROOT. Rather than truly killing a thread
 mid-flight, this simulates the moment a crash leaves an BulkIngestItem

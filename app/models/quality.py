@@ -1,16 +1,15 @@
-"""
-models/quality.py — Listening Quality persistence.
+"""models/quality.py — Listening Quality persistence.
 
 TWO tables, deliberately, because the score has two lifecycles:
 
   QualityAnalysis   staging, keyed by SOURCE FOLDER PATH, pre-ingest
   RecordingQuality  permanent, keyed by RECORDING, post-ingest
 
-Why not one table with a nullable recording_id (which looks tidier)?  Because
-after a **Move** ingest the source folder no longer exists — `move_to_library()`
-removes it, and the empty-parent cleanup (2026-07-22) may remove its parent too.
-A folder_path-keyed row physically cannot serve as the permanent record: its key
-ceases to exist at exactly the moment the permanent record is needed.  Splitting
+Why not one table with a nullable recording_id (which looks tidier)? Because
+after a **Move** ingest the source folder no longer exists — `move_to_library`
+removes it, and the empty-parent cleanup may remove its parent too. A
+folder_path-keyed row physically cannot serve as the permanent record: its key
+ceases to exist at exactly the moment the permanent record is needed. Splitting
 them also gives staging rows a prunable lifecycle while permanent rows live and
 die with their Recording.
 
@@ -20,8 +19,8 @@ On ingest commit the staging row's features/scores are copied across (see
 NFC WARNING: `folder_path` is ALWAYS stored NFC-normalised.  macOS hands out
 decomposed (NFD) filenames while the DB holds composed (NFC), so a raw compare
 silently fails on any accented name — this cost a whole afternoon on the Guitar
-Trio corpus (2026-07-28).  Go through the helpers in `utils/quality_store.py`
-rather than writing this column directly.
+Trio corpus. Go through the helpers in `utils/quality_store.py` rather than
+writing this column directly.
 """
 
 from app.extensions import db

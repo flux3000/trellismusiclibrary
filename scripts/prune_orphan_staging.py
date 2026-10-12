@@ -1,5 +1,4 @@
-"""
-prune_orphan_staging.py — Delete staging rows whose folder is gone from disk.
+"""prune_orphan_staging.py — Delete staging rows whose folder is gone from disk.
 
 `quality_analysis` rows are keyed by folder path and deliberately OUTLIVE the
 folder: a Move ingest relocates the source out from under its own row, and
@@ -8,11 +7,6 @@ The cost is that a row for a folder that vanished any OTHER way — ingested
 from a different path, moved by hand, a download deleted — never gets cleared.
 `list_staging` then keeps offering it on every scan of the same parent
 directory, wearing "Folder moved" and offering nothing to act on.
-
-Ryan, 2026-09-02: a Pat Metheny show from several jobs ago that would not go
-away.  `api/quality.py` now scopes each poll's results to the folders that run
-actually resolved, so nothing off-disk can reappear in the queue; this script
-is the separate, one-off cleanup of the rows already in the table.
 
 ⚠ It only ever deletes rows with `recording_id IS NULL` — a promoted row is
 the permanent record of where an ingested show came from and is not staging

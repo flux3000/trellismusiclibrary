@@ -240,9 +240,9 @@ def test_artist_history_is_one_pass_and_its_biography_auto_applies(fake, seeded_
     assert sorted(p["field"] for p in got["proposals"]) == ["member", "resource"]
 
 
-def test_only_artist_and_venue_history_auto_apply(fake, seeded_ids):
+def test_only_history_and_biography_skills_auto_apply(fake, seeded_ids):
     from app.lomax.skills import SKILLS
-    assert [k for k, s in SKILLS.items() if s.apply_auto] == ["artist", "venue"]
+    assert [k for k, s in SKILLS.items() if s.apply_auto] == ["artist", "venue", "musician", "event"]
     before = db.session.get(Recording, seeded_ids["recording_id"]).source
     run_skill("recording", "recording", seeded_ids["recording_id"])
     assert db.session.get(Recording, seeded_ids["recording_id"]).source == before

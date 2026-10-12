@@ -1,6 +1,5 @@
-"""
-tests/test_placeholder_venue.py — placeholder venue names never become a
-shared, canonical Venue row (Ryan's 2026-07-15 "Unknown Venue" bug report).
+"""tests/test_placeholder_venue.py — placeholder venue names never become a
+shared, canonical Venue row.
 
 app/utils/venues.py's is_placeholder_venue_name() is the single detector used
 by _do_confirm (backend) and the mirrored PLACEHOLDER_VENUE_NAMES/
@@ -72,9 +71,10 @@ def test_do_confirm_placeholder_venue_name_does_not_link_or_create_venue(app, db
 
 
 def test_do_confirm_two_placeholder_shows_stay_independent(app, db, tmp_path):
-    """The exact contamination scenario from Ryan's bug report: two different
+    """The exact contamination scenario from the user's bug report: two different
     shows both marked 'Unknown Venue' must NOT end up sharing one Venue row
-    (and therefore can't clobber each other's location)."""
+    (and therefore can't clobber each other's location).
+    """
     from app.api.ingest import _do_confirm
     from app.models.user import User
 

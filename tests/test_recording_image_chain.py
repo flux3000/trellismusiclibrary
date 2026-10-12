@@ -1,9 +1,8 @@
-"""
-tests/test_recording_image_chain.py -- the recording image is a chain, resolved
-server-side in one place (Ryan, 2026-10-04): the recording's own primary image,
-else its artist's primary image, else None (the client draws the artist's
-initials). Covers the serializers, the batch helper, the search index, the
-share door's prefixes, and POST /api/recordings/<id>/images/from-artist.
+"""tests/test_recording_image_chain.py -- the recording image is a chain, resolved
+server-side in one place: the recording's own primary image, else its artist's
+primary image, else None (the client draws the artist's initials). Covers the
+serializers, the batch helper, the search index, the share door's prefixes, and
+POST /api/recordings/<id>/images/from-artist.
 """
 
 import io

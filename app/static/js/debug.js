@@ -1,31 +1,29 @@
-/**
- * debug.js — Trellis debug drawer.
- *
- * Rebuilt 2026-08-23. The previous panel was a floating top-right overlay you
- * could only reach by typing a backtick, gated on DEV_MODE — which meant it did
- * not exist in the app Ryan actually runs (`python3 run.py`, no DEV_MODE), so
- * it was never there at the moment something broke.
- *
- * What changed, and why:
- *   · A persistent tab at the bottom-left. Discoverable without knowing a
- *     keystroke. The backtick still works; it is now a shortcut, not the door.
- *   · Gated on the ADMIN ROLE, not DEV_MODE. Available while testing the real
- *     app. Listeners never see it — the server refuses the endpoints too, so
- *     this is not merely a hidden button.
- *   · Bottom drawer, full width, drag to resize. Log lines and stack traces
- *     need horizontal room; the old overlay wrapped them into noise.
- *   · Three panes, no more: Errors, Network, Server. App State and the Paula
- *     breakdown were dropped (Ryan, 2026-08-23) — both were readable elsewhere
- *     and neither was what anyone opened this for.
- *   · The pop-out window and its BroadcastChannel sync went with them. The
- *     drawer is resizable and headless runs have real devtools; a second window
- *     kept in sync by hand was a lot of machinery for a rare case.
- *
- * Instrumentation is installed BEFORE the admin check, so an error thrown
- * during boot is captured even though the UI does not exist yet.
- *
- * Exports: window.trellisDebug = { open, close, toggle, refresh }
- */
+/* debug.js — Trellis debug drawer.
+
+   The previous panel was a floating top-right overlay you could only reach by
+   typing a backtick, gated on DEV_MODE — which meant it did not exist in the
+   app the user actually runs (`python3 run.py`, no DEV_MODE), so it was never
+   there at the moment something broke.
+
+   What changed, and why:
+     · A persistent tab at the bottom-left. Discoverable without knowing a
+       keystroke. The backtick still works; it is now a shortcut, not the door.
+     · Gated on the ADMIN ROLE, not DEV_MODE. Available while testing the real
+       app. Listeners never see it — the server refuses the endpoints too, so
+       this is not merely a hidden button.
+     · Bottom drawer, full width, drag to resize. Log lines and stack traces
+       need horizontal room; the old overlay wrapped them into noise.
+     · Three panes, no more: Errors, Network, Server. App State and the Paula
+       breakdown were dropped — both were readable elsewhere
+       and neither was what anyone opened this for.
+     · The pop-out window and its BroadcastChannel sync went with them. The
+       drawer is resizable and headless runs have real devtools; a second window
+       kept in sync by hand was a lot of machinery for a rare case.
+
+   Instrumentation is installed BEFORE the admin check, so an error thrown
+   during boot is captured even though the UI does not exist yet.
+
+   Exports: window.trellisDebug = { open, close, toggle, refresh } */
 
 ;(function initDebug() {
   'use strict'
@@ -360,7 +358,7 @@
   // ── Ingest pane ───────────────────────────────────────────────────────────
   // What is actually moving through ingestion right now: every in-flight
   // confirm job with the PHASE it is in, plus the track-analysis queue behind
-  // it (Ryan, 2026-08-28).
+  // it.
   //
   // The two halves answer different questions and both were previously
   // invisible. A confirm job reported only copied/total, which is meaningful

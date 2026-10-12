@@ -1,10 +1,9 @@
-"""
-tests/test_file_naming.py — app/utils/file_naming.py, the naming engine.
+"""tests/test_file_naming.py — app/utils/file_naming.py, the naming engine.
 
-Presets only (chunk 5). Custom-template grammar, modifiers, groups and
-validation get their own cases in a later chunk (spec section 12) — this
-file covers the four built-in presets, every fallback the presets exercise,
-and the token/context machinery they share with a future custom template.
+Presets only. Custom-template grammar, modifiers, groups and validation get
+their own cases in a later chunk (spec section 12) — this file covers the four
+built-in presets, every fallback the presets exercise, and the token/context
+machinery they share with a future custom template.
 
 Fixtures are plain objects (Obj below), not ORM rows: the engine is pure
 and takes no app context, so nothing here touches the database.
@@ -245,11 +244,50 @@ def test_set_token_is_none_for_encore_label():
 
 # ── Sanitization ──────────────────────────────────────────────────────────────
 
-def test_illegal_characters_become_dashes():
+def test_illegal_characters_follow_windows_rules():
     t = track(1, 'Who: What / Why?', "01.flac")
     rec = recording([t], performance(1977, 5, 8, GD))
     _, _, proposed = rename_plan(rec, "number_title")[0]
-    assert proposed == "01 - Who- What - Why-.flac"
+    assert proposed == "01 - Who - What - Why.flac"
+
+
+def test_windows_safe_rules():
+    from app.utils.file_naming import windows_safe
+    assert windows_safe("Tweezer>Light>Down with Disease") == "Tweezer - Light - Down with Disease"
+    assert windows_safe("Chicken Grease > \"What It Do\" Funk Jam") == "Chicken Grease - 'What It Do' Funk Jam"
+    assert windows_safe("Hot Sex on a Platter>What?>Lyrics to Go") == "Hot Sex on a Platter - What - Lyrics to Go"
+    assert windows_safe("Encore: Cheeseballs In Cowtown") == "Encore - Cheeseballs In Cowtown"
+    assert windows_safe("Theme from M*A*S*H*") == "Theme from MASH"
+    assert windows_safe("Dark Star >") == "Dark Star"
+    assert windows_safe("Allman Bros.") == "Allman Bros"
+    assert windows_safe("CON") == "CON_"
+    assert windows_safe("01  -  Already Legal") == "01  -  Already Legal"   # untouched
+
+
+def test_safe_name_plan_keeps_naming_and_fits_length():
+    from app.utils.file_naming import safe_name_plan, MAX_REL_PATH
+    folder = "Seldom Scene/Seldom Scene - 1978-07-29 - Shoal Creek Country Music Park - Lavonia, GA"
+    long = "07 - " + " - ".join(["Pig In A Pen", "Blue Ridge Mountain Home"] * 8) + ".flac"
+    out = safe_name_plan(folder, ["03 - Buggin' Out>Oh My God.flac", "CD1/01 - Fine.flac", long])
+    assert out[0] == "03 - Buggin' Out - Oh My God.flac"
+    assert out[1] == "CD1/01 - Fine.flac"
+    assert out[2].endswith(".flac") and len(folder) + 1 + len(out[2]) <= MAX_REL_PATH
+    assert out[2].startswith("07 - Pig In A Pen")
+
+
+def test_fit_name_drops_repeated_artist_before_cutting_title():
+    from app.utils.file_naming import fit_name
+    folder = ("Stephen Layton; Polyphony/Stephen Layton; Polyphony - 2007 - "
+              "Unknown Venue - Unknown Location")
+    f = ("01 - 01 Stephen Layton; Britten Sinfonia, Polyphony - Lauridsen- "
+         "Mid-Winter Songs - 1. Lament for Pasiphae.flac")
+    out = fit_name(f, folder, max_len=len(folder) + 1 + 70)
+    assert out == "01 - Lauridsen- Mid-Winter Songs - 1. Lament for Pasiphae.flac"
+    # A name that already fits is untouched, artist and all.
+    assert fit_name(f, folder, max_len=400) == f
+    # No repeated artist: falls back to the word-boundary cut.
+    g = "02 - " + "Long Medley Piece " * 12 + ".flac"
+    assert fit_name(g, "Miles Davis/Miles Davis - 1971", max_len=120).endswith(".flac")
 
 
 # ── Collisions within a batch ──────────────────────────────────────────────────
@@ -305,9 +343,9 @@ def test_presets_cover_the_four_keys():
 
 
 # ── Custom templates (spec sections 4 and 12): grammar, modifiers, groups and
-# validation all already live in parse_template()/render() (chunk 5); these
-# cases exercise them through a template a person would actually type into
-# the Settings field, combining a bracket group with a modifier.
+# validation all already live in parse_template/render; these cases exercise
+# them through a template a person would actually type into the Settings
+# field, combining a bracket group with a modifier.
 
 def test_custom_template_with_bracket_group_and_modifier_renders():
     t1 = track(1, "Scarlet Begonias", "01.flac")

@@ -1,9 +1,8 @@
-"""
-tests/test_resolver_eval.py -- the Resolver v2 harness (app/utils/resolver_eval.py).
+"""tests/test_resolver_eval.py -- the Resolver v2 harness (app/utils/resolver_eval.py).
 
 A smoke test on the G4 fixtures plus the judging rules. It asserts the REPORT
 SHAPE and the judge, never accuracy: accuracy is what the harness measures, and
-a gate lives in the meeting note, not in CI.
+a gate lives, not in CI.
 """
 import json
 
@@ -77,7 +76,7 @@ def test_diff_reports_changed_verdicts(tmp_path):
     first = ev.run_tier("G4", "reader", corpus_dir=tmp_path)
     ev.save_last_run(first, tmp_path)
     second = json.loads(json.dumps(first))
-    # Flip any item's verdict; G4 no longer has a wrong date to pick (2026-10-03, strict grammar).
+    # Flip any item's verdict; G4 no longer has a wrong date to pick.
     victim = second["items"][0]
     before = victim["judgments"]["date"]
     after = "wrong" if before == "right" else "right"

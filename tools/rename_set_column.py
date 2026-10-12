@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-rename_set_column.py — one-time migration: track.set -> track.set_number.
+"""rename_set_column.py — one-time migration: track.set -> track.set_number.
 
 `set` is a SQL reserved word. The ORM (SQLAlchemy) already quotes it safely
 in every query it generates, so nothing in the running app was ever broken
@@ -11,12 +10,11 @@ the failure briefly left a recording's files moved with the DB rows still
 pointing at the old path (caught in testing, never happened to a real
 recording — see repair_flatten.py's docstring).
 
-Decision (Ryan, 2026-07-28): rename the column to set_number so no future
-raw-SQL script can hit this class of bug again. The app code
-(app/models/track.py, the tracks/recordings/share API routes, the ingest
-pipeline, and the frontend) has already been updated to use set_number
-throughout — this script is only the one physical ALTER on the live
-database, which SQLAlchemy's model can't do for you.
+Decision: rename the column to set_number so no future raw-SQL script can hit
+this class of bug again. The app code (app/models/track.py, the
+tracks/recordings/share API routes, the ingest pipeline, and the frontend) has
+already been updated to use set_number throughout — this script is only the one
+physical ALTER on the live database, which SQLAlchemy's model can't do for you.
 
 Tested against a copy of the real database first: ALTER TABLE RENAME COLUMN
 preserved every row's value untouched (9011 tracks total, 28 with a set

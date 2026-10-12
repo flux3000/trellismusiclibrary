@@ -1,8 +1,7 @@
-"""
-ledger.py — the decisions, and the only hard problem in this tool.
+"""ledger.py — the decisions, and the only hard problem in this tool.
 
 Extraction is cheap and can be re-run whenever. What must survive re-running is
-Ryan's judgement, and it has to survive the code moving underneath it: a
+the user's judgement, and it has to survive the code moving underneath it: a
 function renamed, a block reindented, a section split in two. So identity is
 never file and line.
 
@@ -22,7 +21,7 @@ tool exists to prevent.
 
 Stored as committed JSON rather than SQLite because the decisions belong in
 git, next to the code they describe, and `db/*.db` is gitignored — SQLite would
-put Ryan's sign-offs outside version control. Same call as
+put the user's sign-offs outside version control. Same call as
 `tools/quality/labelled_corpus.json`.
 """
 

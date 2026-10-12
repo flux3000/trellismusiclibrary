@@ -1,21 +1,15 @@
-"""
-utils/pruning.py — Cascade cleanup of empty chain rows.
+"""utils/pruning.py — Cascade cleanup of empty chain rows.
 
-After a recording is deleted or a performance reassigned, prune the empty chain:
+After a recording is deleted or a performance reassigned, prune the empty
+chain:
   performance with 0 recordings → artist with 0 performances → orphan Musicians
   (people with no remaining memberships AND no remaining show-level personnel
-  rows — see 2026-07-18 note below).
 
 Single source of truth so the call sites (recordings.delete_recording,
 performances.update_performance) stay consistent. SQLite FK enforcement is off,
 so cascades are done here in app code, bottom-up.
 
 (Artist = the act; Musician = a person; Membership = M2M.)
-(2026-07-18 Per-Show Personnel: a Musician can now also be referenced by a
-PerformancePersonnel row with zero Memberships at all — a pure guest/sit-in,
-or someone in an 'explicit'-mode act. Orphan checks must count both, or a
-guest-only Musician gets pruned out from under the very show that references
-them.)
 """
 
 from app.extensions import db

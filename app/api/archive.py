@@ -1,5 +1,4 @@
-"""
-api/archive.py -- browse an archive's catalog (2026-10-01).
+"""api/archive.py -- browse an archive's catalog.
 
 Routes (all admin-only; this surface exists to put files on the owner's disk):
     GET /api/archive/lma/recent?page=&sort=newest|date|az

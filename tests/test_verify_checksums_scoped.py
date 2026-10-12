@@ -23,11 +23,11 @@ def api(app):
 
 
 def test_verify_checksums_scopes_per_disc_checksum_file_after_keep_ingest(app, db, api, tmp_path):
-    """A CD1/CD2 source ingested under 'keep' (nesting + original names
-    preserved -- see chunk 6) with each disc's own checksum.md5. Re-running
-    verify-checksums must still match each disc's file to its own tracks,
-    not let CD2's shared "01.flac" basename steal CD1's checksum or vice
-    versa."""
+    """A CD1/CD2 source ingested under 'keep' with each disc's own checksum.md5.
+    Re-running verify-checksums must still match each disc's file to its own
+    tracks, not let CD2's shared "01.flac" basename steal CD1's checksum or
+    vice versa.
+    """
     from app.api.ingest import _do_confirm
     from app.utils.ingest import scan_folder
 
@@ -70,7 +70,7 @@ def test_verify_checksums_scopes_per_disc_checksum_file_after_keep_ingest(app, d
     rec = _db.session.get(Recording, result["recording_id"])
     tracks = sorted(rec.tracks, key=lambda t: t.track_number)
 
-    # Ingest-time matching (already scoped, chunk 6) got it right...
+    # Ingest-time matching got it right...
     assert [t.file_path for t in tracks] == ["CD1/01.flac", "CD2/01.flac"]
     assert tracks[0].expected_checksum == md5_1
     assert tracks[1].expected_checksum == md5_2

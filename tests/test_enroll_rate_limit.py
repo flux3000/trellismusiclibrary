@@ -2,7 +2,7 @@
 tests/test_enroll_rate_limit.py — the one unauthenticated peer-door route must
 not accept unlimited attempts.
 
-Closes a TODO carried since July: `/api/share/enroll` is the only route on the
+`/api/share/enroll` is the only route on the
 share door callable with no credentials, because a peer holding an invite has
 no token yet. The invite code is unguessable, but "unguessable" assumes a
 bounded number of guesses and nothing bounded them.

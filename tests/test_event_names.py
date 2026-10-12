@@ -1,6 +1,5 @@
-"""
-tests/test_event_names.py -- event text is tidied, matched by a normalised key, and never
-created by an unattended ingest (Resolver v2, chunk 4).
+"""tests/test_event_names.py -- event text is tidied, matched by a normalised key,
+and never created by an unattended ingest.
 """
 import numpy as np
 import pytest

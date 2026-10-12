@@ -1,5 +1,4 @@
-"""
-app/utils/trash.py -- move a folder to the system Trash (Ryan, 2026-10-06).
+"""app/utils/trash.py -- move a folder to the system Trash.
 
 The working-folder pages still delete nothing outright: Move to Trash hands the
 folder to the operating system's Trash, where Finder can put it back. macOS

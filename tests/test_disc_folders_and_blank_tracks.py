@@ -1,7 +1,4 @@
-"""
-2026-10-06 (Ryan): two shapes the Queue got wrong.
-
-- Disc folders named after the show with the disc token at the end
+"""- Disc folders named after the show with the disc token at the end
   ("jdb1999-05-27d1.shnf", "...d2.shnf") are one show, not two. The token is
   trusted only when two or more siblings share the stem.
 - A numbered track line with no title ("02.") is still a track, so the list

@@ -1,13 +1,10 @@
-"""
-reset_peer_state.py — Hard-delete this node's peer-sharing state for a fresh start.
+"""reset_peer_state.py — Hard-delete this node's peer-sharing state for a fresh start.
 
 WHY THIS EXISTS
 ---------------
 `POST /api/peers/<id>/revoke` is a SOFT revoke: it stamps `revoked_at` and
 leaves the row, which is correct for a real relationship you may want a record
-of. It is wrong for test fixtures. Roy and Trevor were created on 2026-08-09 to
-prove the admin UI worked, their invites were never usable, and carrying them
-forward as revoked rows means every future query has to explain them.
+of. It is wrong for test fixtures.
 
 There is no DELETE endpoint for a peer, deliberately — deleting a real peer
 throws away the access log, which is the one record of what they streamed. This

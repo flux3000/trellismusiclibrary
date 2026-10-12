@@ -40,15 +40,14 @@ def list_venues():
     # This one WAS capped at 200 and it bit: alphabetically past "L" is
     # exactly where a 200-row cut lands once a library has more than 200
     # venues, so the Venues nav list silently stopped mid-alphabet with no
-    # sign anything was missing (Ryan, 2026-08-30).
+    # sign anything was missing.
     venues = query.order_by(Venue.name).all()
 
     # Counts and the primary-photo id come from two grouped queries rather than
-    # `len(v.performances)` per row (2026-09-01, for the Venues index page).
-    # The old shape was one lazy-load per venue and then, for the index tiles,
-    # would have been a second per venue for images — on a 500-venue library
-    # that is a thousand round trips to draw one page. Same fix as
-    # /all-recordings got on 2026-08-24, same reason.
+    # `len(v.performances)` per row. The old shape was one lazy-load per venue
+    # and then, for the index tiles, would have been a second per venue for
+    # images — on a 500-venue library that is a thousand round trips to draw
+    # one page.
     perf_counts = dict(
         db.session.query(Performance.venue_id, func.count(Performance.id))
         .filter(Performance.venue_id.isnot(None))
@@ -70,8 +69,15 @@ def list_venues():
     ):
         image_ids.setdefault(vid, iid)
 
+    # ?index=1: who played there, year span and excerpt for the Venues INDEX.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.venue_extras()
+
     return jsonify([
         {
+            **extra.get(v.id, {}),
             "id":                v.id,
             "name":              v.name,
             "city":              v.city,
@@ -117,7 +123,6 @@ def get_venue(venue_id):
     })
 
 
-# ── Photos (2026-08-07; routes moved to the shared registrar 2026-09-01) ────
 # Parallel table to artist_image, shared behaviour via utils/entity_images.
 # Files live under LIBRARY_ROOT/_venues/<sanitized name>/_images — the `_venues`
 # prefix keeps them out of the artist namespace, because a venue and an act

@@ -8,8 +8,7 @@ Entirely distinct from api/share.py, which is the peer-facing (token) door.
 
 Peer management is more sensitive than ordinary metadata editing (it hands out
 access to the outside world), so unlike the rest of the app's login_required
-CRUD, these carry an explicit admin-role gate. See "Peer Sharing — Design
-Spec v1".
+CRUD, these carry an explicit admin-role gate.
 
 Routes (url_prefix /api/peers):
   GET    /                       list peers (brief)
@@ -41,10 +40,10 @@ from app.utils.format import format_partial_date
 
 bp = Blueprint("peers", __name__)
 
-# 100 years (Ryan, 2026-08-30) -- was 7 with a 90-day cap. Invites are
-# reusable now (see PeerInvite.is_valid()), so expiry is a formality, not a
-# real access control; it exists mainly so a truly ancient, forgotten invite
-# eventually ages out of the "pending" list on its own.
+# 100 years -- was 7 with a 90-day cap. Invites are reusable now (see
+# PeerInvite.is_valid), so expiry is a formality, not a real access control;
+# it exists mainly so a truly ancient, forgotten invite eventually ages out
+# of the "pending" list on its own.
 DEFAULT_INVITE_DAYS = 36500
 
 
@@ -57,7 +56,6 @@ def _iso(dt):
 
 
 # admin_required now lives in app/utils/authz.py -- see that module for why.
-# Imported at the top of this file; this comment marks where it used to be.
 
 
 # ── Serialization ─────────────────────────────────────────────────────────────
@@ -119,7 +117,7 @@ def _peer_detail(peer):
     return d
 
 
-# ── Sharing is implied (Ryan, 2026-10-06) ────────────────────────────────────
+# ── Sharing is implied ────────────────────────────────────
 # A peer always holds the Full Library grant: there is no per-peer share switch
 # any more. Grants stay the one sharing primitive underneath, so this only
 # guarantees the row exists; revoking the peer still kills it via is_active.
@@ -202,11 +200,10 @@ def revoke_peer(peer_id):
 @bp.route("/<int:peer_id>/unrevoke", methods=["POST"])
 @admin_required
 def unrevoke_peer(peer_id):
-    """Undo a revoke (Ryan, 2026-08-30 — revoke had no way back, and an
-    accidental click was a dead end with real consequences). Clears
-    revoked_at only. Every grant and token this peer held before the revoke
-    reads as active again immediately — nothing else was touched by the
-    revoke, so nothing else needs restoring."""
+    """Undo a revoke. Clears revoked_at only. Every grant and token this peer held
+    before the revoke reads as active again immediately — nothing else was
+    touched by the revoke, so nothing else needs restoring.
+    """
     peer = db.session.get(Peer, peer_id)
     if not peer:
         return jsonify({"error": "Not found"}), 404
@@ -292,7 +289,7 @@ def mint_invite(peer_id):
     """Generate a fresh one-time invite. The raw code (and the compound
     address#code string the peer pastes) is returned HERE and nowhere else —
     only its hash is stored. `invite` is null until SHARE_BASE_URL is set
-    (the public address, configured in the infra milestone)."""
+    (the public address."""
     peer = db.session.get(Peer, peer_id)
     if not peer:
         return jsonify({"error": "Not found"}), 404
@@ -333,14 +330,12 @@ def mint_invite(peer_id):
 @bp.route("/<int:peer_id>/invites/<int:invite_id>", methods=["DELETE"])
 @admin_required
 def delete_invite(peer_id, invite_id):
-    """
-    Cancel an unused invite, or clear an expired one.
+    """Cancel an unused invite, or clear an expired one.
 
-    This is NOT "Revoke Access" and the difference matters (Ryan, 2026-08-25 —
-    revoking was the only thing on offer, and it means something else
-    entirely). Revoking kills the PEER: every device they hold stops working
-    and their library goes dark. Cancelling an invite only makes one unused
-    code stop working. Nobody who already joined is affected.
+    This is NOT "Revoke Access" and the difference matters. Revoking kills the
+    PEER: every device they hold stops working and their library goes dark.
+    Cancelling an invite only makes one unused code stop working. Nobody who
+    already joined is affected.
 
     A USED invite is never deletable. It is the record that this peer enrolled,
     and the token it minted is the thing you would actually want to kill — that

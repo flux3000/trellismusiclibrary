@@ -96,25 +96,12 @@ def get_staging(folder_path):
 
 
 def list_staging(source_dir):
-    """
-    Every NOT-YET-INGESTED staging row under one scanned directory, best
+    """Every NOT-YET-INGESTED staging row under one scanned directory, best
     score first.
 
     Rows that failed to analyse sort last rather than being hidden — a folder
     that errored is something the user needs to see, not something to quietly
     drop from the list.
-
-    Excludes rows already promoted to a Recording (`recording_id` set) —
-    Ryan, 2026-08-09: staging rows are keyed by folder path and deliberately
-    outlive the folder (a Move ingest relocates the source out from under its
-    own row), so re-triaging the SAME parent directory later — e.g. after
-    ingesting one show from it and downloading three new ones — was
-    resurfacing every old, already-ingested show right alongside the new
-    ones, each showing "Source folder no longer exists on disk". Softening
-    that to just skip the concern (same day, earlier fix) wasn't enough —
-    an ingested row has nothing left to triage and should not be IN this
-    list at all. It is still reachable from the library itself; this table's
-    job ends the moment a folder becomes a Recording.
     """
     rows = (db.session.query(QualityAnalysis)
             .filter(QualityAnalysis.source_dir == norm_path(source_dir))
@@ -127,14 +114,7 @@ def list_staging(source_dir):
 
 
 def rescore_stored(dry_run=False):
-    """
-    Re-score every stored row from its CACHED features — no audio decode.
-
-    This is the payoff of keeping extraction and scoring in separate modules,
-    and until 2026-07-31 it was only a claim: `_is_current()` documented that a
-    `score_version` bump "is handled by re-scoring stored features", but nothing
-    actually did it, so a weight change left every existing row displaying a
-    number from the old engine forever.
+    """Re-score every stored row from its CACHED features — no audio decode.
 
     Only rows whose `analysis_version` is current can be re-scored: an older
     extraction predates some feature the new scoring reads, and inventing a
@@ -319,15 +299,14 @@ def get_for_recording(recording_id):
 
 
 def upsert_for_recording(recording_id, scored, features):
-    """
-    Create or update the permanent row for an already-ingested recording,
+    """Create or update the permanent row for an already-ingested recording,
     scored directly with no staging row to promote from.
 
-    Bulk Ingest follow-up path (chunk 6): a bulk-ingested recording never
-    went through triage, so there is no QualityAnalysis row for
-    promote_to_recording() to copy -- this writes the same score columns
-    straight onto the permanent row via the same _apply_scores() helper, so
-    the two write paths can never populate a different subset of columns.
+    Bulk Ingest follow-up path: a bulk-ingested recording never went through
+    triage, so there is no QualityAnalysis row for promote_to_recording to copy
+    -- this writes the same score columns straight onto the permanent row via
+    the same _apply_scores helper, so the two write paths can never populate a
+    different subset of columns.
     """
     row = (db.session.query(RecordingQuality)
            .filter(RecordingQuality.recording_id == recording_id)

@@ -53,6 +53,13 @@ explanations about lineage go in verify_items or thinking. If the filed lineage 
 remarks in, give the chain alone. Event is a collection of performances comprising a festival or other \
 single ticketed-or-free event, never a tour, residency or billing note such as "Opened for \
 X". Stage is the stage within an event or venue.
+- 'reply' is one or two plain first-person sentences telling the archivist what you found or \
+did, in a warm, low-key voice. Never a greeting, never the archivist's name, no hedging about \
+confidence, no dashes.
+- Reputation: when a question asks about reputation or which shows are best regarded, report \
+only opinions found in sources (Reddit threads, archive.org reviews, collector forums and \
+the like), name the source for each, and say plainly when little was found rather than \
+padding the list.
 - Plain prose only: no citation markers, no markdown, no HTML. Sources go in the sources \
 field.
 - When done, call the submit tool exactly once. Keep 'thinking' to 2 to 4 concise \

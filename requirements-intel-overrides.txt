@@ -1,0 +1,8 @@
+# Pins that differ for the Intel Mac build. Everything else comes from
+# requirements-lock.txt; tools/release.py --intel writes the combined
+# requirements-lock-intel.txt (gitignored) on every run.
+#
+# Newer numba/llvmlite publish Apple Silicon wheels only. numba 0.62 needs numpy < 2.4.
+llvmlite==0.45.1
+numba==0.62.1
+numpy==2.3.5

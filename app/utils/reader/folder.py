@@ -1,5 +1,4 @@
-"""
-Folder-name template reader (Resolver v2, chunk 6, 2026-10-04).
+"""Folder-name template reader.
 
 Trellis names a folder "Artist - Date - Venue - Location (Source)" (app/utils/folder_naming.py)
 from metadata a person reviewed. A folder that already wears that name is evidence about the

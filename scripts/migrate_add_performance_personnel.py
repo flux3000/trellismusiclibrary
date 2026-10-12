@@ -1,5 +1,4 @@
-"""
-scripts/migrate_add_performance_personnel.py — Per-Show Personnel, Phase 1.
+"""scripts/migrate_add_performance_personnel.py — Per-Show Personnel, Phase 1.
 
 Adds (all additive, idempotent, safe to re-run):
   membership.start_year/start_month/start_day/end_year/end_month/end_day
@@ -9,9 +8,7 @@ Adds (all additive, idempotent, safe to re-run):
   performance.personnel_mode        VARCHAR(16) NOT NULL DEFAULT 'inherit'
   performance_personnel table (new) — show-level lineup rows.
 
-Nothing is backfilled and no existing row changes meaning. See
-"Context Library/2026-07-17 - Per-Show Personnel — Design Plan (DRAFT).md" §4 ("Why the
-migration is safe") and §7 (decisions).
+Nothing is backfilled and no existing row changes meaning.
 
 Run once from the repo root:
     python3 scripts/migrate_add_performance_personnel.py

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""
-tools/design/make_icon.py — build the Trellis app icon.
+"""tools/design/make_icon.py — build the Trellis app icon.
 
-The mark is Ryan's (2026-08-25): a trellis of cream slats on a rounded square.
-The detail that makes it a trellis rather than a window grid is that the slats
-STOP SHORT of the edge and float in the field — keep that.
+The mark is the user's: a trellis of cream slats on a rounded square. The
+detail that makes it a trellis rather than a window grid is that the slats STOP
+SHORT of the edge and float in the field — keep that.
 
 Recoloured into the app's own palette the same day: near-black ground, copper
 slats, straight out of main.css. Switching scheme is the PALETTE constant

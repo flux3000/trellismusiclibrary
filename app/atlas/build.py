@@ -1,8 +1,5 @@
-"""
-Atlas builder (Resolver v2, chunk 4, 2026-10-03).
-
-Builds assets/atlas/atlas.sqlite, the shipped reference database the reader
-consults for venues, artists and events. Runs on Ryan's Mac, with a network
+"""Builds assets/atlas/atlas.sqlite, the shipped reference database the reader
+consults for venues, artists and events. Runs on the user's Mac, with a network
 connection, in the project's .venv, before a release:
 
     python3 -m app.atlas.build                 # the full build
@@ -42,12 +39,12 @@ SOURCES AND LICENCES (each filtered to what its licence allows)
 
 WHICH ACTS (the Act subset)
 
-  An MB artist enters the Atlas when it is a person, group, orchestra, choir or
+An MB artist enters the Atlas when it is a person, group, orchestra, choir or
   of no stated type (never a character, Various Artists or a "[unknown]"
   placeholder) AND at least one of:
       - it performs at any MB event, or
       - --min-release-groups N is above 0 and it appears in the artist credit of at
-        least N release groups (default 0: events only; measured on Ryan's library
+        least N release groups (default 0: events only; measured on the user's library
         the release-group tail of 320,000 acts changed the result for one recording
         and cost 135 MB. Release groups are still counted, for the popularity score).
   --musicians members (default for the API) brings each qualifying group's members as

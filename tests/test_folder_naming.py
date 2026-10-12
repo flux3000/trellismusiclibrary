@@ -1,15 +1,7 @@
-"""
-tests/test_folder_naming.py — unique_folder_name() and the two callers that
+"""tests/test_folder_naming.py — unique_folder_name() and the two callers that
 share it: move_to_library() at ingest time (see test_ingest_utils.py for the
 filesystem-level ingest cases) and rename_recording_folder() when metadata is
 edited post-ingest.
-
-2026-09-01: unique_folder_name() was extracted out of rename_recording_folder()
-so BOTH paths dedupe an on-disk name collision the same way — before this,
-only the rename path did, and ingest would silently merge a second recording's
-files into an existing folder of the same canonical name (Ryman Auditorium
-1964 bug report: two "Various Artists" shows, same date, same venue, no
-Source to distinguish them).
 
 rename_recording_folder() only touches attributes via dot-access (never an
 ORM-specific method), so it's exercised here with plain duck-typed stand-ins
@@ -35,7 +27,7 @@ def test_unique_folder_name_first_collision_appends_bare_2(tmp_path):
 
 def test_unique_folder_name_appends_inside_existing_parens(tmp_path):
     """"... (SBD)" colliding gets "... (SBD 2)", not a second trailing
-    paren group — matches Ryan's existing manual naming practice."""
+    paren group — matches existing manual naming practice."""
     (tmp_path / "Show (SBD)").mkdir()
     assert unique_folder_name(str(tmp_path), "Show (SBD)") == "Show (SBD 2)"
 
@@ -135,8 +127,8 @@ def test_rename_no_op_when_name_already_matches_metadata(tmp_path):
     assert correct.exists()
 
 
-# ── S10 (re-review, 2026-09-25): the rename_folders gate must fail CLOSED
-# with no app/DB context and no explicit mode, never fail open. ─────────────
+# ── S10: the rename_folders gate must fail CLOSED with no app/DB context and
+# no explicit mode, never fail open. ─────────────
 
 def test_no_app_context_and_no_explicit_mode_fails_closed(tmp_path):
     """No app context (this file's whole point -- pure duck-typed stand-ins)
@@ -182,10 +174,8 @@ def test_explicit_rename_folders_false_is_a_no_op(tmp_path):
 
 
 def test_an_album_is_named_artist_dash_title():
-    # Ryan, 2026-10-06: albums were named like shows ("Ahmad Jamal - 1973 -
-    # Unknown Venue - Unknown Location").
     from app.utils.folder_naming import build_folder_name
     assert build_folder_name("Ahmad Jamal", start_year=1973, kind="studio",
                              title="Ahmad Jamal '73") == "Ahmad Jamal - Ahmad Jamal '73"
-    assert build_folder_name("Ahmad Jamal", kind="studio", title="A/B: C") == "Ahmad Jamal - A-B- C"
+    assert build_folder_name("Ahmad Jamal", kind="studio", title="A/B: C") == "Ahmad Jamal - A-B - C"
     assert build_folder_name("Ahmad Jamal", start_year=1973, kind="live").startswith("Ahmad Jamal - 1973 - ")

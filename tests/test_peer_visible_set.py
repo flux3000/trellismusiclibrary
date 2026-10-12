@@ -1,5 +1,4 @@
-"""
-tests/test_peer_visible_set.py — the visible set (peer sharing milestone 2).
+"""tests/test_peer_visible_set.py — the visible set.
 
 Milestone 1 proved a peer can only STREAM what was granted. Milestone 2 gives
 peers real entity pages — artist, venue, musician, genre, search, Browse — and
@@ -181,11 +180,9 @@ def test_visible_performances_exclude_ungranted(two_halves):
 # ── Consistency between the two access paths ──────────────────────────────────
 
 def test_per_recording_check_agrees_with_visible_set(two_halves):
-    """
-    `peer_can_access_recording_id` (milestone 1, used by stream) and
-    `peer_visible_recording_ids` (milestone 2, used by browse) are separate
-    implementations of the same question. If they ever disagree, a peer either
-    sees something unplayable or plays something unlisted.
+    """`peer_can_access_recording_id` and `peer_visible_recording_ids` are
+    separate implementations of the same question. If they ever disagree, a
+    peer either sees something unplayable or plays something unlisted.
 
     Asserted over EVERY recording in the database, not a sample.
     """

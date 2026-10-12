@@ -6,7 +6,7 @@ via ffmpeg and writes the result to a cache directory (default: <repo>/cache/
 transcodes, overridable via TRANSCODE_CACHE_DIR); every subsequent play serves
 straight from cache. The cache is disposable — deleting it just forces a
 re-transcode on next play. It is deliberately NOT inside the library folder,
-so the pristine originals are never touched. See Design Spec v1.
+so the pristine originals are never touched.
 
 Notes:
 - Source FLAC is read from the library (on the Mac Mini that means over the LAN
@@ -46,16 +46,15 @@ _FFMPEG_FALLBACKS = (
 
 
 def resolve_ffmpeg():
-    """
-    Find ffmpeg, without assuming a login shell's PATH.
+    """Find ffmpeg, without assuming a login shell's PATH.
 
-    This matters specifically because of packaging (2026-08-25). An app launched
-    by double-clicking does NOT inherit the PATH from your terminal — macOS gives
-    it a minimal one, typically /usr/bin:/bin:/usr/sbin:/sbin. Homebrew installs
-    to /opt/homebrew/bin, which is not on that list. So `ffmpeg` resolves
-    perfectly from a terminal and not at all from the Dock, and the symptom is
-    every track failing to play with "Transcoder unavailable" — which reads like
-    a network or sharing fault, not a missing program.
+    This matters specifically because of packaging. An app launched by
+    double-clicking does NOT inherit the PATH from your terminal — macOS gives
+    it a minimal one, typically /usr/bin:/bin:/usr/sbin:/sbin. Homebrew
+    installs to /opt/homebrew/bin, which is not on that list. So `ffmpeg`
+    resolves perfectly from a terminal and not at all from the Dock, and the
+    symptom is every track failing to play with "Transcoder unavailable" —
+    which reads like a network or sharing fault, not a missing program.
 
     Order: an explicit setting wins (including a wrong one, so a typo fails
     loudly rather than being silently corrected), then PATH, then the usual

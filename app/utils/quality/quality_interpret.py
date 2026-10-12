@@ -174,8 +174,7 @@ METRICS = [
         "label": "Crowd / room noise", "unit": " dB",
         "about": "How far the music sits above the noise floor in 250–2500 Hz, "
                  "the band an audience occupies, chatter, shouting, applause. "
-                 "Added 2026-07-31 because the engine was blind within audience "
-                 "tapes; this is the best AUD predictor found (r = +0.32).",
+                 "The best predictor found for audience tapes (r = +0.32).",
         "scale": [(15, "bad",  "Audience competing with the band"),
                   (18, "poor", "Audience clearly present"),
                   (22, "ok",   "Some room noise"),
@@ -211,16 +210,14 @@ METRICS = [
                   (99,   "good", "Very dry and close")],
     }),
     ("presence_balance_db", {
-        # DEMOTED 2026-07-31 — display only, zero weight. r = +0.057 against
-        # 113 grades. Retained because it is a true measurement and useful to
-        # eyeball; it is simply not evidence of quality.
+        # Retained because it is a true measurement and useful to eyeball; it
+        # is simply not evidence of quality.
         "label": "Presence balance", "unit": " dB",
         "about": "How loud the 2–6 kHz presence region is versus the low mids. "
                  "Human hearing peaks around 2–5 kHz, so an excess here reads "
                  "as tinny and fatiguing. NOTE: measured but NOT scored, "
                  "against 113 graded recordings this correlates +0.06 with "
-                 "listening quality, and its old curve caused the 2026-07-30 "
-                 "Danny Gatton inversion.",
+                 "listening quality.",
         "scale": [(-26, "ok",   "Very dark"),
                   (-20, "good", "Dark"),
                   (-8,  "good", "Natural"),
@@ -229,21 +226,12 @@ METRICS = [
                   (99,  "bad",  "Harsh, tinny")],
     }),
     ("midrange_scoop_db", {
-        # DEMOTED 2026-07-31 alongside presence balance — display only, zero
-        # weight. r = -0.016 against 113 graded recordings, essentially no
-        # signal. The "about" text below used to call this "the single
-        # strongest predictor of a poor grade in testing", which was true of
-        # the v1 fit it was written for and became actively false the day
-        # this was pulled from scoring — caught 2026-08-09 (Ryan: contradicted
-        # its own zero-weight marker, and the panel's footnote promises the
-        # tooltip explains why every unscored row is unscored).
         "label": "Midrange scoop", "unit": " dB",
         "about": "Whether the 250–800 Hz body sits below both its neighbours. "
                  "A scoop can make a recording sound hollow and boxy. NOTE: "
                  "measured but NOT scored, against 113 graded recordings "
                  "this correlates -0.02 with listening quality, essentially "
-                 "no signal, so it was removed from Tone in the 2026-07-31 "
-                 "rework alongside presence balance.",
+                 "no signal, so it is not scored.",
         "scale": [(-6, "bad",  "Severely hollow"),
                   (-4, "poor", "Hollow"),
                   (-2, "poor", "Scooped"),
@@ -263,11 +251,6 @@ METRICS = [
                   (99,  "poor", "Thin, no bass")],
     }),
     ("hf_energy_ratio_db", {
-        # Added to the display 2026-08-02. It has been 50% of the Tone score
-        # since the 07-31 rework but appeared in no panel, so Tone showed one
-        # of its two real inputs — invisible until metrics were nested under
-        # their group and the hole became obvious.
-        #
         # Rungs are drawn from the 110-recording labelled corpus
         # (tools/quality/labelled_corpus.json) and aligned to the knees of the
         # HF_RATIO curve in quality_scoring.py, so the words and the score
@@ -280,10 +263,9 @@ METRICS = [
         "label": "HF energy ratio", "unit": " dB",
         "about": "Energy above 8 kHz relative to the whole signal, whether "
                  "there is any top end at all, as opposed to where it stops "
-                 "(that is Frequency cutoff). Half the Tone score. Restored to "
-                 "scoring 2026-07-28 after the engine proved unable to see "
-                 "'this recording has no treble': the 1992 Danny Gatton tape "
-                 "Ryan calls 'made inside a cigar box' reads -48.5 dB here.",
+                 "(that is Frequency cutoff). Half the Tone score. It is what lets "
+                 "the score see 'this recording has no treble': the 1992 "
+                 "Danny Gatton tape reads -48.5 dB here.",
         "scale": [(-50, "bad",  "Almost no top end"),
                   (-40, "poor", "Little treble"),
                   (-32, "ok",   "Modest treble"),
@@ -365,29 +347,20 @@ METRICS = [
     }),
 ]
 
-# Mains frequency (50 vs 60 Hz) was displayed here briefly and removed
-# 2026-07-28. It told you which electrical grid the hum sat on, which is a
-# geographic curiosity and not a listening-quality fact — nothing about it
-# helps decide whether to play a recording. The value is still computed and
-# stored (it falls out of the hum measurement for free) but nothing reads it.
 
 
 # Which group each metric belongs under, and whether it actually MOVES that
-# group's score (2026-08-02, Ryan: "are these groupable into the three
-# categories?"). Mostly yes — with two honest exceptions kept in "other",
+# group's score. Mostly yes — with two honest exceptions kept in "other",
 # because filing them under a group would imply they contribute to it.
 #
 #   scored=True   this feature is an input to score_<group>() — see
 #                 quality_scoring.py, which is the authority here
 #   scored=False  measured and displayed, weight 0
 #
-# The zero-weight ones are not filler. Presence balance and midrange scoop were
-# 60% of Tone until 2026-07-31, when 113 graded recordings showed they carry no
-# signal (r = +0.057 / −0.016) and that presence was the cause of the Gatton
-# inversion. Hum was 35% of Noise on the same evidence (r = −0.038). They stay
-# visible because they are true measurements — they are simply not evidence of
-# quality, and the panel now says which is which rather than showing eleven
-# numbers of apparently equal standing.
+# The zero-weight ones are not filler. Hum was 35% of Noise on the same
+# evidence (r = −0.038). They stay visible because they are true measurements —
+# they are simply not evidence of quality, and the panel now says which is
+# which rather than showing eleven numbers of apparently equal standing.
 METRIC_GROUP = {
     "spectral_tilt_db_oct":     ("tone", True),
     "hf_energy_ratio_db":       ("tone", True),
@@ -401,11 +374,11 @@ METRIC_GROUP = {
     "hum_ratio_db":             ("noise", False),
     "crest_factor_db":          ("dynamics", True),
     "lufs_integrated":          ("dynamics", False),
-    # Filed under Dynamics rather than left ungrouped (Ryan, 2026-08-02: group
-    # them all). It is the honest closest fit — DC offset is a level-domain
-    # fault that eats headroom, which is Dynamics' territory — but it is a
-    # converter/preamp defect rather than a musical reading, and it never
-    # affects the score. The "not scored" marker on the row carries that.
+    # Filed under Dynamics rather than left ungrouped. It is the honest
+    # closest fit — DC offset is a level-domain fault that eats headroom,
+    # which is Dynamics' territory — but it is a converter/preamp defect
+    # rather than a musical reading, and it never affects the score. The "not
+    # scored" marker on the row carries that.
     "dc_offset":                ("dynamics", False),
 }
 
@@ -414,14 +387,13 @@ METRIC_GROUP = {
 # authority on what a reading is worth; the "scale" ladders above are only the
 # authority on what to CALL it.
 #
-# Until 2026-08-28 the two were independent and disagreed. A recording measuring
-# 24.7 dB mid-band SNR was labelled "Clean" in green — the ladder's second-from-
-# top rung, and its top two rungs are BOTH "good" — while MID_SNR put the same
-# reading at 80.8/100, and 23.3 dB crowd SNR read "Quiet room" in green while
-# CROWD_SNR put it at 73.4, which is amber on the app's own bands. Their Noise
-# meter came out at 77.8 (amber) under two green readings, with nothing on
-# screen to explain it (Ryan, 2026-08-28). Colour now comes from the curve, so
-# a reading can never be a different colour from the meter it feeds.
+# A recording measuring 24.7 dB mid-band SNR was labelled "Clean" in green — the
+# ladder's second-from- top rung, and its top two rungs are BOTH "good" — while
+# MID_SNR put the same reading at 80.8/100, and 23.3 dB crowd SNR read "Quiet
+# room" in green while CROWD_SNR put it at 73.4, which is amber on the app's own
+# bands. Their Noise meter came out at 77.8 (amber) under two green readings,
+# with nothing on screen to explain it. Colour now comes from the curve, so a
+# reading can never be a different colour from the meter it feeds.
 def _metric_curves():
     """
     (curve_fn, {metric_key: anchors}) — imported lazily because quality_scoring
@@ -479,15 +451,12 @@ def _state_from_subscore(sub):
 
 
 def metric_rows(f, scored_only=False):
-    """
-    Build display rows for the Advanced Metrics panel.
+    """Build display rows for the Advanced Metrics panel.
 
     `scored_only=True` drops every zero-weight reading. Triage passes it: a
     number on the triage page is there to justify a meter, and five of the
-    eleven justify nothing (Ryan, 2026-08-28, "if something does not
-    contribute to the score, remove that metric from view here"). View
-    Recording still shows the full set, where the question is "what IS this
-    recording" rather than "why this score".
+    eleven justify nothing. View Recording still shows the full set, where the
+    question is "what IS this recording" rather than "why this score".
     """
     curve_fn, curves = None, None
     rows = []

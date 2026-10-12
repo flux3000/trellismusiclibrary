@@ -1,5 +1,4 @@
-"""
-app/utils/peer_access.py — peer AUTHORIZATION (what a peer may see).
+"""app/utils/peer_access.py — peer AUTHORIZATION (what a peer may see).
 
 Separate from peer_auth.py (which answers "who is this peer?"). Everything a
 peer can reach is derived, on every request, from their live CollectionGrants
@@ -7,12 +6,12 @@ intersected with the collections a recording belongs to. There is no other
 path to access — browse and stream both funnel through the same helpers here,
 so they can never disagree.
 
-Reminder (Design Spec v1): a recording visible in ANY granted collection is
+Reminder: a recording visible in ANY granted collection is
 accessible, even if it also sits in collections the peer wasn't granted —
 sharing a collection shares every recording in it. That's intended.
 
-SYSTEM COLLECTIONS (2026-08-24): a granted collection may be dynamic — its
-membership resolved by query rather than by `collection_recording` rows (see
+SYSTEM COLLECTIONS: a granted collection may be dynamic — its membership
+resolved by query rather than by `collection_recording` rows (see
 models/collection.py). Whole-library sharing is exactly this: a "Full Library"
 collection covering every published recording. Both authorization paths below
 therefore have to understand them, and both are taught SEPARATELY on purpose —
@@ -23,6 +22,7 @@ from flask import g, has_request_context
 
 from app.extensions import db
 from app.models.collection import CollectionRecording
+from app.utils.share_policy import is_shareable, shareable_recording_ids
 
 
 def peer_granted_collection_ids(peer):
@@ -37,12 +37,11 @@ def _system_collection_ids_containing(recording_id):
     the collection's predicate?" — rather than resolving each system
     collection's whole set and testing for membership.
 
-    Why it matters: this is the milestone-1 authorization path. A test asserts
-    it agrees with `peer_visible_recording_ids` (the milestone-2 path) on every
-    recording in the database. That test is only worth having while the two
-    remain INDEPENDENT implementations; routing this one through the other's
-    helper would make it agree by construction and quietly stop checking
-    anything.
+    Why it matters: this is the streaming authorization path. A test asserts
+    it agrees with `peer_visible_recording_ids` on every recording in the
+    database. That test is only worth having while the two remain INDEPENDENT
+    implementations; routing this one through the other's helper would make it
+    agree by construction and quietly stop checking anything.
 
     An unrecognised system_key grants nothing — fail closed. The equivalence
     test is what surfaces the resulting divergence.
@@ -57,6 +56,9 @@ def _system_collection_ids_containing(recording_id):
 
     rec = db.session.get(Recording, recording_id)
     if rec is None:
+        return set()
+
+    if not is_shareable(rec):
         return set()
 
     out = set()
@@ -82,6 +84,12 @@ def peer_can_access_recording_id(peer, recording_id):
     granted = peer_granted_collection_ids(peer)
     if not granted:
         return False
+    # The share policy gates junction-backed collections too, which
+    # _system_collection_ids_containing alone does not cover.
+    from app.extensions import db as _db
+    from app.models.recording import Recording
+    if not is_shareable(_db.session.get(Recording, recording_id)):
+        return False
     return bool(granted & recording_collection_ids(recording_id))
 
 
@@ -95,13 +103,13 @@ def peer_can_access_track(peer, track):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# THE VISIBLE SET  (milestone 2, 2026-08-08)
+# THE VISIBLE SET
 # ══════════════════════════════════════════════════════════════════════════════
 #
 # Everything above answers "may this peer reach recording X?" — enough for
-# milestone 1, whose whole job was streaming what was granted.
+# streaming what was granted.
 #
-# Milestone 2 gives peers real entity pages (artist, venue, musician, genre,
+# Peers also get real entity pages (artist, venue, musician, genre,
 # search, Browse). Those need the INVERSE question: "what is this peer's entire
 # world?" — because an artist is only visible by virtue of a visible
 # recording pointing at it, and every count rendered on such a page has to be
@@ -113,7 +121,7 @@ def peer_can_access_track(peer, track):
 #
 # Why counts specifically: the recording lists are the obvious leak and will be
 # got right. The subtle leak is a genre chip reading "41" when the peer can see
-# 3, which publishes the size of a collection Ryan never shared.
+# 3, which publishes the size of a collection the user never shared.
 
 
 def peer_visible_recording_ids(peer):
@@ -158,6 +166,11 @@ def peer_visible_recording_ids(peer):
                     .filter(CollectionRecording.collection_id.in_(junction_ids))
                     .distinct().all())
             result |= {rid for (rid,) in rows}
+
+        # Share policy: official and studio records never reach a peer, whatever
+        # the grants say. Applied to the root set, so every derived set (performances,
+        # artists, venues, musicians, genres) and every count inherits it.
+        result &= shareable_recording_ids()
 
     if has_request_context():
         setattr(g, cache_key, result)
@@ -221,8 +234,7 @@ def peer_visible_venue_ids(peer):
     """Venues where at least one visible recording was performed.
 
     Note the null-venue case is simply absent rather than special-cased: a
-    performance with no venue contributes no venue id. Placeholder venues were
-    eliminated as a concept on 2026-07-15, so there is no sentinel row to skip.
+    performance with no venue contributes no venue id.
     """
     from app.models.performance import Performance
     perf_ids = peer_visible_performance_ids(peer)

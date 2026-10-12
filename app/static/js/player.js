@@ -30,8 +30,8 @@ const Player = (() => {
 
   // Set by whichever page is currently showing a recording with nothing
   // loaded in the player yet — pressing the bar's play button with an empty
-  // queue then plays that recording's first track instead of no-op'ing
-  // (Ryan, 2026-07-15). Cleared on every navigation (see App.setMainHTML).
+  // queue then plays that recording's first track instead of no-op'ing.
+  // Cleared on every navigation (see App.setMainHTML).
   let fallbackPlay = null
   function setFallbackPlay(fn) { fallbackPlay = fn }
 
@@ -83,7 +83,7 @@ const Player = (() => {
     // Peer libraries stream from the remote node, so their queue is unaffected
     // by our drive — API.getLibraryContext() being non-null means hands off.
     if (API.getLibraryContext() == null && App.libraryDrive.isOffline()) {
-      alert(App.libraryDrive.message())
+      Notify.error(App.libraryDrive.message())
       return
     }
 
@@ -164,7 +164,7 @@ const Player = (() => {
   // Bottom-bar icon is local state; the recording-view row icons live in
   // App and must be told explicitly — they don't listen to this element
   // themselves. Fires on every play/pause, not just on track load, which is
-  // the piece that was missing (Ryan, 2026-08-27).
+  // the piece that was missing.
   audio.addEventListener('play',  () => { iconPlay.style.display = 'none'; iconPause.style.display = ''; if (typeof App !== 'undefined') App.syncPlayButtons() })
   audio.addEventListener('pause', () => { iconPlay.style.display = '';     iconPause.style.display = 'none'; if (typeof App !== 'undefined') App.syncPlayButtons() })
 

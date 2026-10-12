@@ -28,7 +28,8 @@ def apply_proposal(prop: LomaxProposal, run: LomaxRun, user_id=None):
     if run.skill == "album" and run.subject_type == "recording":
         _apply_album(prop, run, user_id)
         return
-    handler = {"recording": _apply_recording, "artist": _apply_artist, "venue": _apply_venue}.get(run.subject_type)
+    handler = {"recording": _apply_recording, "artist": _apply_artist, "venue": _apply_venue,
+               "event": _apply_event}.get(run.subject_type)
     if handler is None:
         return
     handler(prop, run, user_id)
@@ -311,3 +312,26 @@ def _add_venue_alias(venue, prop):
     db.session.add(VenueAlias(venue_id=venue.id, alias=name[:255], alias_key=key[:255]))
     db.session.commit()
     invalidate_library_cache()
+
+
+# ── event ────────────────────────────────────────────────────────────────────
+
+def _apply_event(prop, run, user_id):
+    from app.models.event import Event
+    event = db.session.get(Event, run.subject_id)
+    if event is None:
+        raise ApplyError("The event no longer exists.")
+    f, v = prop.field, (prop.proposed or "").strip()
+    if f in ("start_date", "end_date"):
+        ymd = split_iso(v)
+        if not ymd:
+            raise ApplyError("%r is not an ISO date." % v)
+        p = f.split("_")[0]
+        setattr(event, p + "_year", ymd[0])
+        setattr(event, p + "_month", ymd[1])
+        setattr(event, p + "_day", ymd[2])
+    elif f in ("city", "state", "country"):
+        setattr(event, f, (filters.state_code(v, event.country) if f == "state" else v) or None)
+    else:
+        raise ApplyError("Lomax cannot apply a %r proposal to an event." % f)
+    db.session.commit()

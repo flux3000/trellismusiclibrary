@@ -1,16 +1,13 @@
-"""
-quality_scoring.py — Listening Quality score, v2.
+"""quality_scoring.py — Listening Quality score, v2.
 
 A PURE FUNCTION over the raw features produced by quality_features.py. No audio
 decode happens here, which is the point: retuning any curve or weight below is a
 fast re-score pass over stored feature values.
 
-Spec: Context Library/2026-07-27 - Recording Quality Score — v2 Build Brief (HANDOFF).md
-
 ──────────────────────────────────────────────────────────────────────────────
 WHAT THIS IS FOR
 ──────────────────────────────────────────────────────────────────────────────
-Ryan's design brief, which overrides any instinct toward technical
+The user's design brief, which overrides any instinct toward technical
 completeness:
 
     "The primary use case of this entire system is to LISTEN TO THE MUSIC that
@@ -102,17 +99,16 @@ def _geo(parts):
 # Strongly ASYMMETRIC on purpose — nearly flat on the dark side, steep on the
 # bright side. Justified twice over: perceptually harshness drives a listener
 # away far faster than dullness does, and empirically this feature correlates
-# NEGATIVELY with Ryan's grades (r = -0.42), i.e. darker reads as better.
+# NEGATIVELY with the user's grades (r = -0.42), i.e. darker reads as better.
 #
 # The decisive evidence was a controlled listen. Hammersmith (-19.9 dB) against
-# Denver (-13.7 dB) on headphones: Ryan confirmed Hammersmith is audibly
-# "muddier" — so the measurement is TRUE — and graded it an A anyway. The
-# feature was right and the curve was wrong.
-# v2 re-anchored on AUDIBILITY rather than corpus position. The previous curve
-# mapped +2.7 dB to 10/100 — implying "about as bad as a recording can sound" —
-# and that was drawn back when bandwidth metrics were still in this group
-# propping the 1970 Georgia Tech tape up. With those removed it overshot wildly:
-# Georgia Tech scored 36.6 against Ryan's C (63).
+# Denver (-13.7 dB) on headphones:  — so the measurement is TRUE — and graded it
+# an A anyway. The feature was right and the curve was wrong. v2 re-anchored on
+# AUDIBILITY rather than corpus position. The previous curve mapped +2.7 dB to
+# 10/100 — implying "about as bad as a recording can sound" — and that was drawn
+# back when bandwidth metrics were still in this group propping the 1970 Georgia
+# Tech tape up. With those removed it overshot wildly: Georgia Tech scored 36.6
+# against the user's C (63).
 #
 # +2.7 dB is "noticeably bright and thin", not unlistenable. The bottom of the
 # scale is now reserved for balances that would genuinely be brutal (+10 dB and
@@ -132,12 +128,11 @@ TILT = [(-20, 0), (-18, 5), (-15, 22), (-12, 45), (-9, 70), (-7, 90),
 
 # Energy above 8 kHz relative to total — is there any top end at all.
 #
-# RESTORED to the Tone group 2026-07-28. The v2 simplification dropped every
-# bandwidth measure because they correlated poorly (r = +0.106) with the
-# original 20 grades. That left Tone unable to see "this recording has no
-# treble", and it showed: the 1992 Danny Gatton tape measures 6.4 kHz cutoff
-# and -48.5 dB above 8 kHz — Ryan calls it "made inside a cigar box" — yet
-# scored 77.2, ABOVE the 1988 recording he grades an A.
+# The v2 simplification dropped every bandwidth measure because they
+# correlated poorly (r = +0.106) with the original 20 grades. That left Tone
+# unable to see "this recording has no treble", and it showed: the 1992
+# Danny Gatton tape measures 6.4 kHz cutoff and -48.5 dB above 8 kHz —  —
+# yet scored 77.2, ABOVE the 1988 recording he grades an A.
 #
 # The original 20 simply had nothing that dark except Watkins Glen, so the
 # correlation test could not see the metric's value. Restoring it fixed the
@@ -156,20 +151,16 @@ HF_RATIO = [(-70, 0), (-60, 12), (-52, 28), (-45, 45), (-40, 58), (-35, 72),
 # band-limited to 8 kHz has neither music NOR much noise up there, so the ratio
 # collapsed and it scored as hissy. We were measuring silence and calling it
 # noise. The 1981 Bushnell tape read 13.0 dB that way; its real 1-8 kHz SNR is
-# 27.0, the cleanest in its corpus, and Ryan graded it an A.
+# 27.0, the cleanest in its corpus, and the user graded it an A.
 MID_SNR = [(6, 3), (10, 15), (13, 28), (16, 42), (19, 57), (22, 70), (25, 82),
            (28, 92), (32, 100), (40, 100)]
 
 # Mains hum: dB above the local spectral median at 50/60 Hz and harmonics.
-# DISPLAY ONLY as of 2026-07-31 (r = -0.038 against 113 grades). Curve retained
-# so the Advanced Metrics row can still be colour-coded.
+# Curve retained so the Advanced Metrics row can still be colour-coded.
 HUM = [(0, 100), (6, 100), (12, 80), (20, 50), (30, 20), (40, 0)]
 
-# Crowd SNR: programme against the noise floor in 250-2500 Hz, the band where
-# an audience actually lives (chatter, shouting, applause). Added 2026-07-31 to
-# close the audience-tape blind spot — within AUD recordings this is the best
-# predictor we have (r = +0.318) while bandwidth measures are flat or even
-# non-monotonic across AUD grades.
+# Crowd SNR: programme against the noise floor in 250-2500 Hz, the band where an
+# audience actually lives (chatter, shouting, applause).
 #
 # Anchors are set to the observed corpus range (14.5-31.4 dB) read as audibility
 # rather than as percentile position: below ~15 dB the room is competing with
@@ -195,27 +186,18 @@ CREST = [(4, 0), (6, 10), (9, 30), (13, 75), (16, 95), (19, 100), (22, 100),
 # ═════════════════════════════════════════════════════════════════════════════
 # Group scoring
 # ═════════════════════════════════════════════════════════════════════════════
-# Reweighted 2026-07-28 from 50/30/20 after Ryan suggested dynamics was being
-# undervalued. He was right, and by a wide margin — 40/20/40 gave the lowest
-# average error of any combination tested against the n=20 fit (4.14 vs 5.35),
-# tied the best correlation (0.860), and was the only weighting that put his
-# stated best and worst Danny Gatton recordings first and last respectively.
 #
 # Noise dropping to 20% fit what the data had been saying independently: since
 # the hum fix, hum barely varies across recordings, and mid-band SNR has been
-# the metric most often at odds with what Ryan actually hears.
+# the metric most often at odds with what the user actually hears.
 #
-# Reweighted AGAIN 2026-07-30 to Dynamics 50 / Tone 35 / Noise 15 — Ryan's
-# explicit call as the new default, made while discussing the Gatton labels
-# (1/25/79 = B, 12/3/88 = A) rather than a re-run of the n=20/n=24 fit. Treat
-# as the current default until re-verified against the fit — flag to Ryan
-# rather than reverting unilaterally if a re-run says otherwise.
+# Treat as the current default until re-verified against the fit — flag to the
+# user rather than reverting unilaterally if a re-run says otherwise.
 GROUP_WEIGHTS = {"tone": 0.35, "noise": 0.15, "dynamics": 0.50}
 
 
 def _arith(parts):
-    """
-    Weighted ARITHMETIC mean, used WITHIN a group.
+    """Weighted ARITHMETIC mean, used WITHIN a group.
 
     Groups combine geometrically (worst problem gates the score) but their
     sub-metrics combine arithmetically, and the distinction is deliberate.
@@ -228,7 +210,7 @@ def _arith(parts):
     excellent HF extension was averaging away its harsh balance. That reason is
     gone: bandwidth metrics are no longer in the Tone group, so all three
     members now measure the same thing and cannot mask each other. Keeping
-    geometric here made Georgia Tech 26 points harsher than Ryan's grade.
+    geometric here made Georgia Tech 26 points harsher than the user's grade.
     """
     live = [(s, w) for s, w in parts if s is not None]
     if not live:
@@ -237,10 +219,7 @@ def _arith(parts):
 
 
 def score_tone(f):
-    """
-    Presence balance and midrange scoop REMOVED from scoring 2026-07-31.
-
-    They held 60% of this group (0.35 + 0.25) on the strength of correlations
+    """They held 60% of this group (0.35 + 0.25) on the strength of correlations
     measured at n=13 and n=20. Against the full 113 graded recordings in the
     library they carry no signal at all:
 
@@ -250,14 +229,6 @@ def score_tone(f):
     and cross-validated together as a two-feature model they score r = -0.223,
     i.e. worse than predicting the mean. The earlier r = +0.60 for scoop and
     r = -0.42 for presence were small-sample artefacts.
-
-    This is also the whole explanation of the Danny Gatton inversion that
-    tabled the score on 2026-07-30. The PRESENCE curve slopes negative — darker
-    reads as better — but for soundboards the true relationship is POSITIVE
-    (r = +0.41): brighter grades better. Gatton's recordings are SBDs, so the
-    curve was rewarding exactly the wrong direction, scoring his worst tape 100
-    and his A-grade shows 43 and 21. No interaction term is needed and none
-    should be attempted: there is no signal in these two inputs to interact.
 
     Both remain in quality_features.py and are still shown under Advanced
     Metrics. They are measurements; they are simply not evidence of quality.
@@ -272,12 +243,7 @@ def score_tone(f):
 
 
 def score_noise(f):
-    """
-    Hum dropped from 0.35 to display-only 2026-07-31; crowd SNR takes its place.
-
-    Hum correlates r = -0.038 with grade across 113 recordings — nothing. It
-    barely varies between recordings anyway once the 2026-07-28 fix stopped it
-    counting sustained bass notes, so it was 35% of this group doing no work.
+    """Hum correlates r = -0.038 with grade across 113 recordings — nothing.
 
     Crowd SNR (250-2500 Hz, the voice band) correlates +0.286 overall and
     +0.318 within audience tapes, where it is the single best predictor
@@ -362,21 +328,18 @@ def informational_flags(f):
 # Composite
 # ═════════════════════════════════════════════════════════════════════════════
 # ═════════════════════════════════════════════════════════════════════════════
-# Source adjustment + band verdict  (2026-07-31)
+# Source adjustment + band verdict
 # ═════════════════════════════════════════════════════════════════════════════
-# Recording source is the single strongest predictor of Ryan's grade that we
-# have. On its own it cross-validates at r = +0.314 — better than any individual
-# acoustic feature — and adding it to the feature set lifts CV correlation from
-# +0.431 to +0.512, the largest single improvement measured on 2026-07-31.
+# Recording source is the single strongest predictor of the user's grade that we
+# have.
 #
 # Mean grade points by source across 113 recordings:
 #     MTX 96.0 · FM 94.2 · SBD 91.7 · AUD 83.2
 #
 # IMPORTANT — this is one shared model with source as an input, NOT a separate
-# scale per source. Separate per-source models were tested and are worse:
-# SBD +0.484 but AUD -0.015 and FM +0.043, because splitting an already thin
-# corpus starves each bucket. Ryan raised the separate-scale idea directly; the
-# data says adjust, do not fork.
+# scale per source. Separate per-source models were tested and are worse: SBD
+# +0.484 but AUD -0.015 and FM +0.043, because splitting an already thin corpus
+# starves each bucket.
 #
 # Offsets are expressed against the SBD baseline and are deliberately SMALL
 # relative to the raw grade differences above — most of the AUD/SBD gap is real
@@ -430,15 +393,11 @@ def guess_source_from_name(name):
 #     listening_quality  raw composite, criterion-referenced, meaning unchanged
 #     predicted_grade    the composite mapped onto grade points, for banding
 #
-# The map is a plain 2-parameter least-squares fit over 113 graded recordings
-# (2026-07-31): grade = 0.5956 * composite + 40.592, giving MAE 6.95 against
-# 8.21 for the v2 engine. Two parameters over 113 points is not something that
-# can meaningfully overfit — unlike the per-metric curve shapes, which is where
-# the earlier overfitting actually happened.
-#
-# REFIT THIS when the labelled corpus grows materially (Ryan is adding grades).
-# tools/quality/labelled_corpus_2026-07-31.json + the standalone app are the
-# place to do it; rescoring needs no audio decode.
+# The map is a plain 2-parameter least-squares fit over 113 graded recordings:
+# grade = 0.5956 * composite + 40.592, giving MAE 6.95 against 8.21 for the v2
+# engine. Two parameters over 113 points is not something that can meaningfully
+# overfit — unlike the per-metric curve shapes, which is where the earlier
+# overfitting actually happened.
 CALIBRATION_SLOPE = 0.5956
 CALIBRATION_INTERCEPT = 40.592
 
@@ -463,10 +422,7 @@ def predicted_grade(lq):
 # supports, and triage (worth my time or not) was always the real decision at
 # ingest.
 #
-# The engine still RETURNS the number. The standalone tool at tools/quality/
-# remains the development surface where the quantitative score keeps being
-# worked on, per Ryan 2026-07-31 — this restriction is a presentation choice in
-# the app, not a capability removed from the engine.
+# The engine still RETURNS the number.
 BAND_GREEN, BAND_YELLOW = 85.0, 70.0
 
 
@@ -480,10 +436,10 @@ def verdict_band(lq):
     return "yellow" if pg >= BAND_YELLOW else "red"
 
 
-# Deliberately neutral, non-prescriptive labels (Ryan, 2026-08-02). The earlier
-# set ("Worth ingesting" / "Probably not worth the time") made a judgement the
-# engine is not entitled to make: every recording here is worth ingesting to
-# somebody, and the band is a DETECTION of measured audio character, not a
+# Deliberately neutral, non-prescriptive labels. The earlier set ("Worth
+# ingesting" / "Probably not worth the time") made a judgement the engine is
+# not entitled to make: every recording here is worth ingesting to somebody,
+# and the band is a DETECTION of measured audio character, not a
 # recommendation. High/Medium/Low describes what was measured and leaves the
 # decision where it belongs — with the archivist.
 BAND_LABEL = {"green": "High", "yellow": "Medium", "red": "Low"}

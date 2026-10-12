@@ -1,5 +1,4 @@
-"""
-tests/test_archive_downloads.py -- Archive Downloads server half (2026-10-01).
+"""tests/test_archive_downloads.py -- Archive Downloads server half.
 
 No network anywhere: LmaSource gets a fake JSON getter, the worker gets a fake
 FETCHER, and the real defaults refuse under TESTING.
@@ -593,7 +592,7 @@ def test_get_working_folders_reports_effective(runmod, app, tmp_path, monkeypatc
                         lambda: {"mode": "imported", "library_root": str(tmp_path)})
     runmod._apply_imported_library(tmp_path)
     out = runmod.FluxAPI().get_working_folders()
-    # Unset folders report their effective path (2026-10-01, every library).
+    # Unset folders report their effective path.
     want = str(tmp_path / "Downloads" / "Trellis")
     assert out["import_dir"] == want
     assert out["effective_import_dir"] == want
@@ -610,8 +609,8 @@ def test_add_recordings_browse_opens_at_downloads(dl, app, tmp_path, monkeypatch
     r = dl.client.get("/api/quality/browse")
     assert r.status_code == 200
     assert r.get_json()["path"] == str(want) and want.is_dir()
-    # The admin is not bound by IMPORT_ROOTS (2026-10-02), so "Up" reaches the
-    # folder holding Downloads/Trellis, as it does for a created library.
+    # The admin is not bound by IMPORT_ROOTS, so "Up" reaches the folder
+    # holding Downloads/Trellis, as it does for a created library.
     assert r.get_json()["nav_root"] == str(want.parent)
 
 
@@ -628,7 +627,6 @@ def test_browse_reports_in_library(dl, app, tmp_path):
     assert dl.client.get(f"/api/quality/browse?path={out}").get_json()["in_library"] is False
 
 
-# -- review fixes (2026-10-01) -----------------------------------------------
 
 def test_set_working_folder_rejects_library_overlap(runmod, app, tmp_path, monkeypatch):
     lib = tmp_path / "lib"
@@ -722,7 +720,7 @@ def test_failure_commit_error_does_not_strand_job(dl, monkeypatch):
     assert _db.session.get(DownloadJob, jid).status in ("queued", "failed")
 
 
-# -- Move / Ingest refuse a folder still downloading (2026-10-02) -------------
+# -- Move / Ingest refuse a folder still downloading -------------
 
 def test_move_refuses_folder_still_downloading(dl):
     _login(dl.client)

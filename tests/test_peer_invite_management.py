@@ -1,10 +1,5 @@
-"""
-tests/test_peer_invite_management.py — cancelling an unused invite is NOT
+"""tests/test_peer_invite_management.py — cancelling an unused invite is NOT
 revoking a peer, and the two must never be confusable.
-
-Added 2026-08-25. Until now the Peers page offered exactly one destructive
-control — "Revoke access" — and old unused invites could neither be seen nor
-cancelled. Those are different blast radii:
 
     revoke peer      → every device dies, their library goes dark
     cancel invite    → one unused code stops working, nobody in-flight is hit
@@ -142,8 +137,6 @@ def test_deleting_an_invite_requires_an_admin_session(app, peer):
 
 
 # ── Unrevoke ─────────────────────────────────────────────────────────────────
-# Added 2026-08-30: "Revoke access" had no way back, and an accidental click
-# was a dead end with real consequences. See feedback that day.
 
 def test_unrevoke_restores_an_accidentally_revoked_peer(app, peer):
     peer.revoked_at = _utcnow()

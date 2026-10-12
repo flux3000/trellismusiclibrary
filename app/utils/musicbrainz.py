@@ -1,10 +1,8 @@
-"""
-app/utils/musicbrainz.py — MusicBrainz artist lookup.
+"""app/utils/musicbrainz.py — MusicBrainz artist lookup.
 
 Fetches the structured facts that make an Artist page read like a music site
 rather than a file listing: type (Group/Person), origin, active years, a
-disambiguation phrase, and external links. Runs once when an Artist is
-created (Ryan, 2026-08-07).
+disambiguation phrase, and external links. Runs once when an Artist is created.
 
 WHY THIS IS NOT "AI Assist"
 ---------------------------
@@ -17,7 +15,7 @@ features with separate rules.
 The risk here is different, and it is WRONG-ENTITY, not wrong-fact: several
 real acts share a name. So the confidence gate below is strict, and anything
 short of a clear winner is flagged for a human rather than guessed
-(`mb_status='ambiguous'`). Ryan's rule: never auto-pick the top match.
+(`mb_status='ambiguous'`).
 
 MEMBERS ARE NEVER WRITTEN. MusicBrainz carries band membership with date
 ranges that maps almost exactly onto our Membership stints — and that is
@@ -26,7 +24,7 @@ personnel resolution, and a silent write there is the exact failure mode fixed
 in July (the Auto-Ingest members wipe). The member list is returned for display
 with an explicit per-person Add; nothing here touches the DB.
 
-OFFLINE IS A SUPPORTED STATE. Flux runs in a PyWebView shell on a single Mac
+OFFLINE IS A SUPPORTED STATE. Trellis runs in a PyWebView shell on a single Mac
 and is expected to work with no network. Every function here fails soft —
 returns None or an empty result, never raises into a caller — so a lookup
 failure can never block an ingest or a manual Artist create.
@@ -75,7 +73,7 @@ _MARGIN = 12
 # job waiting on DNS that is never going to answer. After this many consecutive
 # failures the module stops trying for the life of the process; any success
 # resets it. Deliberately process-scoped and not persisted: restarting the app
-# is the natural "try again", and nothing should have to remember that Flux was
+# is the natural "try again", and nothing should have to remember that the app was
 # once offline.
 _MAX_CONSECUTIVE_FAILURES = 3
 _failures = [0]
@@ -244,21 +242,17 @@ _ARTIST_REL_LABELS = {
 
 
 def lookup_details(mbid):
-    """
-    Full detail for a known MBID — external links, band members, related acts.
+    """Full detail for a known MBID — external links, band members, related acts.
 
-    LINKS ARE THE POINT. Aliases, community tags and gender were fetched here
-    briefly on 2026-08-07 and cut the same day: none of it was interesting on
-    the page, and fetching data nothing displays is pure cost. If alias-based
-    name reconciliation ever becomes a feature, add `+aliases` back to `inc`
-    then — not speculatively now.
+    LINKS ARE THE POINT. If alias-based name reconciliation ever becomes a
+    feature, add `+aliases` back to `inc` then — not speculatively now.
 
     `members` and `related` are returned FOR DISPLAY ONLY. See the module
     docstring: nothing in this file may write to Membership.
     """
     if not mbid:
         return None
-    # +genres rides the same request (Ryan, 2026-10-05): fills an empty genre on match.
+    # +genres rides the same request: fills an empty genre on match.
     data = _get(f"artist/{mbid}", {"inc": "url-rels+artist-rels+genres"})
     if not data:
         return None
@@ -302,8 +296,7 @@ def lookup_details(mbid):
 
 
 def apply_to_artist(artist, summary, links=None, status="matched"):
-    """
-    Copy a resolved MusicBrainz summary onto an Artist.
+    """Copy a resolved MusicBrainz summary onto an Artist.
 
     `status` records HOW the link happened and must stay honest:
         'matched' — the confidence gate picked it with no human involved
@@ -313,11 +306,10 @@ def apply_to_artist(artist, summary, links=None, status="matched"):
     that makes every other automatic claim less believable.
 
     Does NOT commit — the caller owns the transaction, matching every other
-    mutation helper in the app. Does not touch name, bio or members: those
-    are Ryan's fields, and MusicBrainz is not allowed to overwrite a human's
+    mutation helper in the app. Does not touch name, bio or members: those are
+    the user's fields, and MusicBrainz is not allowed to overwrite a human's
     curation. Genre is filled only when EMPTY, from the artist's MusicBrainz
-    genres, matching an existing genre or else creating one (Ryan,
-    2026-10-05, extending the 2026-10-01 album rule to live acts).
+    genres, matching an existing genre or else creating one.
     """
     from datetime import datetime, timezone
     artist.mbid              = summary.get("mbid")
@@ -327,17 +319,17 @@ def apply_to_artist(artist, summary, links=None, status="matched"):
     artist.mb_end            = summary.get("end")
     artist.mb_disambiguation = summary.get("disambiguation")
     artist.mb_links_json     = json.dumps(links or summary.get("links") or {})
-    # Trimmed 2026-08-07 to what the page actually shows. Aliases, community
-    # tags and gender were fetched, stored and displayed for one afternoon;
-    # Ryan cut the display, so fetching them was pure cost. `related` is kept
-    # only because it costs nothing extra (same artist-rels call as members).
-    # `name` is MusicBrainz's spelling of the act, kept because the panel shows
-    # WHICH entry we linked to — ours may differ ("Meters" vs "The Meters") and
-    # that difference is the whole point of showing it.
+    # Aliases, community tags and gender were fetched, stored and displayed for
+    # one afternoon; the user cut the display, so fetching them was pure cost.
+    # `related` is kept only because it costs nothing extra (same artist-rels
+    # call as members). `name` is MusicBrainz's spelling of the act, kept
+    # because the panel shows WHICH entry we linked to — ours may differ
+    # ("Meters" vs "The Meters") and that difference is the whole point of
+    # showing it.
     #
-    # `links` stay STORED but are no longer displayed (Ryan, 2026-08-07): their
-    # job is telling future ingest/enrichment jobs where to look for information
-    # about this act, not giving the user a list to read.
+    # `links` stay STORED but are no longer displayed: their job is telling
+    # future ingest/enrichment jobs where to look for information about this
+    # act, not giving the user a list to read.
     extra = {"name": summary.get("name"), "related": summary.get("related") or []}
     if "genres" in summary:                 # lookup_details() fetched them
         extra["genres_checked"] = True
@@ -382,7 +374,6 @@ def try_match_artist(artist):
 
 
 # ─────────────────────────────────────────────────────────────────────────
-# Release lookup (Studio Records spec v1, section 2)
 #
 # A studio recording's ALBUM tag (Recording.title) plus its artist name is
 # searched against MusicBrainz's release/ endpoint, the SAME confidence gate
@@ -463,8 +454,8 @@ def search_release(artist_name, title, limit=8):
 
     # A multi-artist credit ("Al Di Meola, John McLaughlin, Paco De Lucia")
     # almost never matches MusicBrainz's credit as one phrase: order,
-    # joiners ("&") and accents differ (2026-10-01, The Guitar Trio). The
-    # next two tiers only run for a name that splits into two or more.
+    # joiners ("&") and accents differ. The next two tiers only run for a
+    # name that splits into two or more.
     names = _split_artist_names(artist_name)
     if len(names) < 2:
         return []
@@ -571,17 +562,14 @@ def classify_release(candidates, track_count=None):
 
 
 def lookup_release(mbid):
-    """
-    Full detail for a known release MBID -- track titles and positions, so
+    """Full detail for a known release MBID -- track titles and positions, so
     apply_to_recording() can fill untitled tracks.
 
     `inc=recordings+media+labels+release-groups` pulls the medium/track
     structure (recordings gives each track's title), label-info and the
-    release-group's primary type in one call. Track position is
-    renumbered CONTINUOUSLY across media in the order MusicBrainz returns
-    them, matching Recording.tracks' own continuous track_number (a
-    disc lives in a subfolder or a filename here, never a separate
-    numbering scheme -- see project_multi_disc_detection.md).
+    release-group's primary type in one call. Track position is renumbered
+    CONTINUOUSLY across media in the order MusicBrainz returns them, matching
+    Recording.tracks' own continuous track_number.
     """
     if not mbid:
         return None
@@ -591,7 +579,7 @@ def lookup_release(mbid):
         return None
 
     summary = _summarise_release(data)
-    # What the Add Recording MusicBrainz tab shows about the release (2026-10-06).
+    # What the Add Recording MusicBrainz tab shows about the release.
     media = data.get("media") or []
     formats = [m.get("format") for m in media if m.get("format")]
     if formats:
@@ -664,7 +652,8 @@ def apply_to_recording(rec, release, status="matched"):
         by CONTINUOUS position across media, and only when the release's
         total track count equals the recording's own track count -- a
         mismatch means the position mapping cannot be trusted.
-      - The eight mb_release_* columns and `mb_release_status = status`,
+      - The mb_release_* columns (including mb_release_db_status, MusicBrainz's
+        own Official/Bootleg/... status, which gates peer sharing) and `mb_release_status = status`,
         always (this is Trellis's own bookkeeping, not the collector's
         data).
 
@@ -680,13 +669,13 @@ def apply_to_recording(rec, release, status="matched"):
     perf = rec.performance
     if perf is not None:
         year, month, day = _parse_partial_date(release.get("date"))
-        # A studio ingest always creates its own Performance (Ryan,
-        # 2026-09-27) -- but apply_to_recording() is also called from
-        # scripts and tests against older data, so guard against a
-        # Performance that is still shared by more than one studio
-        # recording: writing this release's date onto it would leak onto
-        # every other recording that shares the row (B1). scripts/
-        # migrate_studio_records.py splits these apart for existing data.
+        # A studio ingest always creates its own Performance -- but
+        # apply_to_recording is also called from scripts and tests
+        # against older data, so guard against a Performance that is
+        # still shared by more than one studio recording: writing this
+        # release's date onto it would leak onto every other recording
+        # that shares the row (B1). scripts/ migrate_studio_records.py
+        # splits these apart for existing data.
         studio_siblings = [r for r in (perf.recordings or []) if r.kind == "studio"]
         shared = len(studio_siblings) > 1
         if shared:
@@ -720,8 +709,7 @@ def apply_to_recording(rec, release, status="matched"):
         titles_by_position = {t["position"]: t.get("title") for t in release_tracks}
         for position, track in enumerate(rec_tracks, start=1):
             # "Track 3" is the resolver's placeholder for an untitled file,
-            # not a title anyone chose, so it counts as empty (2026-10-01:
-            # without this, no release title ever landed).
+            # not a title anyone chose, so it counts as empty.
             if track.title and track.title.strip() and not _PLACEHOLDER_TITLE.match(track.title):
                 continue
             new_title = titles_by_position.get(position)
@@ -742,6 +730,7 @@ def apply_to_recording(rec, release, status="matched"):
     rec.mb_release_group_id   = release.get("release_group_id")
     rec.mb_release_status     = status
     rec.mb_release_type       = release.get("release_type")
+    rec.mb_release_db_status  = release.get("status")
     rec.mb_label              = release.get("label")
     rec.mb_catalog_number     = release.get("catalog_number")
     rec.mb_release_country    = release.get("country")
@@ -765,19 +754,12 @@ def apply_to_recording(rec, release, status="matched"):
     return rec
 
 
-# ── Genre and cover art from a matched release (Ryan, 2026-10-01) ────────
+# ── Genre and cover art from a matched release ────────
 #
-# Genre: REVERSES the 2026-08-02 "nothing creates a genre implicitly" rule,
-# for this one path only, at Ryan's call: a matched studio release fills its
-# artist's EMPTY genre. Any MusicBrainz genre that matches an existing Trellis
-# genre wins (vote order); only when none matches is the top-voted one
-# created. Fill-if-null on the artist, so a genre a person set is never
-# replaced, and one genre per act still holds.
-#
-# Cover art: REVERSES the 2026-09-27 "Cover Art Archive is never fetched"
-# rule, at Ryan's call. Fetched only for a matched release and only when the
-# recording has no artwork of its own after the folder/embedded scan, so the
-# collector's own art always wins.
+# Any MusicBrainz genre that matches an existing Trellis genre wins (vote
+# order); only when none matches is the top-voted one created. Fill-if-null on
+# the artist, so a genre a person set is never replaced, and one genre per act
+# still holds.
 
 _CAA_BASE = "https://coverartarchive.org"
 _CAA_TIMEOUT = 15.0
@@ -799,10 +781,9 @@ def release_genres(release_group_id, artist_mbid=None):
     return []
 
 
-# An artist matched before 2026-10-05 was matched without fetching genres.
 # `genres_checked` in mb_extra_json records that a genre fetch happened, so the
-# mb_artist follow-up does it once per artist and never again (Ryan,
-# 2026-10-05). No column and no date: the flag is part of the MusicBrainz blob.
+# mb_artist follow-up does it once per artist and never again. No column and no
+# date: the flag is part of the MusicBrainz blob.
 def _extra(artist):
     try:
         return json.loads(artist.mb_extra_json or "{}") or {}
@@ -896,7 +877,8 @@ def apply_genre_to_artist(artist, names):
     from app.models.genre import Genre
     g, new_name = pick_genre(names)
     if g is None and new_name:
-        g = Genre(name=new_name)
+        from app.utils.genre_color import next_genre_color
+        g = Genre(name=new_name, color=next_genre_color(db.session))
         db.session.add(g)
         db.session.flush()
     if g is None:
@@ -1072,6 +1054,7 @@ def unlink_release(rec):
     rec.mb_release_id         = None
     rec.mb_release_group_id   = None
     rec.mb_release_type       = None
+    rec.mb_release_db_status  = None
     rec.mb_label               = None
     rec.mb_catalog_number      = None
     rec.mb_release_country     = None

@@ -1,6 +1,5 @@
-"""
-Role decoder (Resolver v2, chunk 3, 2026-10-03): approach A2 of the design
-proposal, a Viterbi search over the file's units.
+"""Role decoder: approach A2 of the design proposal, a Viterbi search over the
+file's units.
 
 Every unit gets one role; the labelling that scores best over the whole file
 wins. A unit's emission score is the sum of weight * feature value for the role

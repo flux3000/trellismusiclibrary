@@ -1,10 +1,6 @@
-"""
-tests/test_studio_sharing.py -- Studio Records spec v1, section 1 (sharing
-policy) -- REVERSED 2026-09-27 (Ryan): the share_override switch is gone and
-a studio recording now shares exactly like a live one. No per-recording
-opt-in, no PUT field, no migration column.
+"""tests/test_studio_sharing.py -- Studio Records spec v1, section 1 (sharing
+policy). The share_override switch is gone.
 
-Covers:
   * both authorization paths (`peer_visible_recording_ids`, the visible set,
     and `peer_can_access_recording_id`, the milestone-1 per-recording check)
     treating a studio recording exactly like a live one -- no special-casing
@@ -138,10 +134,10 @@ def _login_as(client, username="admin"):
 
 # -- the two authorization paths, individually --------------------------------
 
-def test_studio_recording_visible_on_the_visible_set_path(app):
+def test_studio_recording_hidden_on_the_visible_set_path(app):
     rec = _recording("Alpha", kind="studio")
     col, peer, raw = _peer_granted_junction(rec)
-    assert rec.id in peer_visible_recording_ids(peer)
+    assert rec.id not in peer_visible_recording_ids(peer)
 
 
 def test_live_recording_visible_on_the_visible_set_path(app):
@@ -150,10 +146,10 @@ def test_live_recording_visible_on_the_visible_set_path(app):
     assert rec.id in peer_visible_recording_ids(peer)
 
 
-def test_studio_recording_visible_on_the_milestone1_path(app):
+def test_studio_recording_hidden_on_the_milestone1_path(app):
     rec = _recording("Charlie", kind="studio")
     col, peer, raw = _peer_granted_junction(rec)
-    assert peer_can_access_recording_id(peer, rec.id) is True
+    assert peer_can_access_recording_id(peer, rec.id) is False
 
 
 def test_live_recording_visible_on_the_milestone1_path(app):
@@ -177,20 +173,19 @@ def test_unpublished_live_recording_hidden_via_full_library(app):
     assert rec.id not in peer_visible_recording_ids(peer)
 
 
-def test_published_studio_recording_visible_via_full_library(app):
+def test_published_studio_recording_hidden_via_full_library(app):
     rec = _recording("Golf", kind="studio", published=True)
     col, peer, raw = _peer_granted_full_library()
-    assert rec.id in peer_visible_recording_ids(peer)
+    assert rec.id not in peer_visible_recording_ids(peer)
 
 
 # -- the equivalence test, still covering studio cases -------------------------
 
 def test_both_paths_agree_including_studio_cases(app):
-    """`peer_can_access_recording_id` (milestone 1) and
-    `peer_visible_recording_ids` (milestone 2) are separate implementations.
-    Disagreement here means a peer either sees something unplayable or plays
-    something unlisted -- checked here for both a studio and a live
-    recording, granted and unpublished-and-hidden alike.
+    """`peer_can_access_recording_id` and `peer_visible_recording_ids` are
+    separate implementations. Disagreement here means a peer either sees
+    something unplayable or plays something unlisted -- checked here for both a
+    studio and a live recording, granted and unpublished-and-hidden alike.
     """
     studio       = _recording("Hotel",  kind="studio")
     live         = _recording("India",  kind="live")
@@ -207,7 +202,7 @@ def test_both_paths_agree_including_studio_cases(app):
     _db.session.commit()
 
     visible = peer_visible_recording_ids(peer)
-    assert studio.id in visible
+    assert studio.id not in visible
     assert live.id in visible
     assert unpublished.id not in visible
 
@@ -218,7 +213,7 @@ def test_both_paths_agree_including_studio_cases(app):
 
 # -- the share door: every list/detail route derives from the visible set -----
 
-def test_studio_recording_present_in_artist_recordings_over_share_door(app):
+def test_studio_recording_absent_from_artist_recordings_over_share_door(app):
     rec = _recording("Kilo", kind="studio")
     sibling = _second_recording_same_artist(rec, "Kilo", kind="live")
     col, peer, raw = _peer_granted_junction(rec, also=(sibling,))
@@ -229,15 +224,15 @@ def test_studio_recording_present_in_artist_recordings_over_share_door(app):
     assert res.status_code == 200
     ids = [r["id"] for perf in res.get_json() for r in perf["recordings"]]
     assert sibling.id in ids
-    assert rec.id in ids
+    assert rec.id not in ids
 
 
-def test_studio_recording_detail_200s_over_share_door(app):
+def test_studio_recording_detail_403s_over_share_door(app):
     rec = _recording("Lima", kind="studio")
     col, peer, raw = _peer_granted_junction(rec)
     client = app.test_client()
     assert client.get(f"/api/share/recordings/{rec.id}",
-                      headers=_auth(raw)).status_code == 200
+                      headers=_auth(raw)).status_code == 403
 
 
 # -- PUT /api/recordings/<id>: a share_override field is simply ignored -------

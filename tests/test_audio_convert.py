@@ -200,8 +200,8 @@ def test_convert_is_allowed_for_a_library_folder(app, client, tmp_path, monkeypa
 # The endpoint's guards
 # ═════════════════════════════════════════════════════════════════════════════
 def test_convert_outside_the_import_roots_is_allowed_for_the_admin(app, client, tmp_path):
-    # Ryan, 2026-10-02: IMPORT_ROOTS no longer binds the admin. The answer may
-    # still be 400 (no ffmpeg in the test env) but never a roots refusal.
+    # The answer may still be 400 (no ffmpeg in the test env) but never a
+    # roots refusal.
     d = _folder(tmp_path, "01.shn")
     r = client.post("/api/quality/convert", json={"folder_path": d})
     assert r.status_code != 403

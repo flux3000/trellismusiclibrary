@@ -1,7 +1,4 @@
-"""
-Place peeler (Resolver v2, chunk 2, 2026-10-03).
-
-Peels a place off the RIGHT end of a line or segment run, in this order:
+"""Peels a place off the RIGHT end of a line or segment run, in this order:
 
   1. country  (aliases: U.K., UK, USA, U.S.A., United States, ...)
   2. region   (US states and DC; Canadian provinces; Australian states; the UK
@@ -188,8 +185,9 @@ class PlaceResult:
 
     @property
     def state(self):
-        """State as ingest stores it: the code for a US state, Canadian province or
-        Australian state ("ON", "NSW"). Other countries leave it empty (decision 2026-10-03)."""
+        """State as ingest stores it: the code for a US state, Canadian province
+        or Australian state ("ON", "NSW"). Other countries leave it empty.
+        """
         return self.region_code
 
     def venue_candidate(self):

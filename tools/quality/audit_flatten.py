@@ -1,10 +1,4 @@
-"""
-audit_flatten.py — which recordings still have audio in subdirectories?
-
-The always-flatten policy landed 2026-07-14. Anything ingested before that may
-still carry CD1/ CD2/ disc subdirs. This reports the scale of that, and — more
-importantly — whether any recording ingested AFTER the policy is un-flattened,
-which would mean a live bug rather than a historical artefact.
+"""audit_flatten.py — which recordings still have audio in subdirectories?
 
 Resumable: writes after each batch so it can run under a short timeout.
 

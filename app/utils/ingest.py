@@ -26,6 +26,7 @@ import geonamescache as _geonamescache
 log = logging.getLogger(__name__)
 
 from app.utils.format import format_partial_date
+from app.utils import track_flag_lexicon as _FLAG_LEXICON
 from app.utils.reader.dates import best_show_date as _best_show_date, date_evidence as _date_evidence
 from app.utils.reader.place import peel as _peel_place
 from app.utils.health import compute_health
@@ -36,20 +37,15 @@ from app.utils.file_naming import rename_plan, flattens
 
 # ── File classification ────────────────────────────────────────────────────────
 
-# Only FLAC and MP3 are ever imported (Ryan, 2026-10-02). WAV, AIFF, SHN, APE
-# and WV classify as unsupported (see UNSUPPORTED_AUDIO_EXTENSIONS below) and
-# are offered Convert to FLAC instead.
+# Only FLAC and MP3 are ever imported. WAV, AIFF, SHN, APE and WV classify as
+# unsupported (see UNSUPPORTED_AUDIO_EXTENSIONS below) and are offered
+# Convert to FLAC instead.
 AUDIO_EXTENSIONS    = {".flac", ".mp3"}
 FINGERPRINT_MARKERS = {"ffp", "md5", "eac", "shntool", "fingerprint", "st5"}
 TEXT_EXTENSION      = ".txt"
 
 # Subdir names that indicate multi-set/disc folder structure. Matched
 # case-insensitively against the subdir basename, in two forms.
-#
-# Traders spell the number as often as they digit it — Ryan hit `del01-09-22`
-# with `disc one` / `disc two` subdirs (2026-08-12), which matched nothing, so
-# the folder was read as a GROUPING folder and each disc queued as its own
-# recording. Hence the word form.
 _SET_NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
     "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
@@ -86,8 +82,7 @@ _DISC_PREFIXES = {"D", "CD", "DISC", "DISK", "VOL", "VOLUME", "PART", "TAPE", "S
 # Disc folders named after the show, the disc token at the END of the name
 # ("jdb1999-05-27d1.shnf", "gd77-05-08 cd2"): taper conventions do this all the
 # time. The token is only trusted when two or more SIBLINGS carry the same stem
-# with different numbers, so a lone folder ending in a digit is never a disc
-# (Ryan, 2026-10-06, Jerry Douglas 1999-05-27 queued as two recordings).
+# with different numbers, so a lone folder ending in a digit is never a disc.
 _SIBLING_DISC_RE = re.compile(r"^(.*?)(?:cd|disc|disk|d)\s*[-_]?\s*(\d{1,2})$", re.IGNORECASE)
 _DIR_SUFFIX_RE = re.compile(r"\.[A-Za-z][A-Za-z0-9]{1,4}$")
 
@@ -160,13 +155,7 @@ _TEXT_PREFER_WORDS = {
 
 
 # Broader than AUDIO_EXTENSIONS above (which governs what gets ingested as a
-# track). Show RESOLUTION needs to recognise a folder as "containing audio" even
-# for formats the ingest pipeline itself won't take, or a folder of .ape files
-# looks like an empty grouping folder and gets silently walked past.
-# .shn added 2026-08-26 (Ryan — a Shorten-sourced show from gdarchive.net):
-# without it, a folder of nothing but .shn was completely invisible rather
-# than recognised-but-unsupported, and "Add Recordings" reported a bare
-# "no audio folders found" with nothing pointing at why.
+# track).
 RESOLVE_AUDIO_EXTS = {".flac", ".mp3", ".wav", ".aiff", ".aif",
                       ".m4a", ".ogg", ".ape", ".wv", ".shn"}
 
@@ -179,9 +168,6 @@ UNSUPPORTED_AUDIO_EXTENSIONS = RESOLVE_AUDIO_EXTS - AUDIO_EXTENSIONS
 
 
 # Directory-name prefixes that are never a show and never part of one.
-#
-# Two families, both of which surfaced as red "no audio here" rows on every
-# scan before 2026-09-17:
 #
 #   - Trellis's own namespaces under LIBRARY_ROOT: _musicians/, _venues/,
 #     _events/, and the per-artist _images/ folder (app/api/artists.py).
@@ -226,7 +212,7 @@ def _audio_subdirs(path, unreadable=None):
     `unreadable`, when given a list, collects (path, message) for any
     directory os.walk could not even scandir while descending through `path`
     -- a show folder nested below a perfectly readable artist/year folder
-    (R2-1). Without this, os.walk's default onerror=None means a subdir
+   . Without this, os.walk's default onerror=None means a subdir
     that is itself unreadable (or that became so mid-walk) simply yields no
     files and looks identical to one that is genuinely empty of audio.
     """
@@ -271,14 +257,7 @@ def is_show_root(path):
 
 
 def resolve_shows(path, include_empty=True, unreadable=None):
-    """
-    Recursively resolve a directory to its actual show-level paths.
-
-    Hoisted out of `api/ingest.py::batch_scan`'s closure on 2026-07-30 so the
-    Listening Quality analyser can resolve shows the SAME way batch scanning
-    does. Two implementations of "what counts as a show" would drift, and the
-    triage list disagreeing with the metadata list about which folders exist
-    would be a genuinely confusing bug.
+    """Recursively resolve a directory to its actual show-level paths.
 
     Logic:
       - Has root audio → it's a show, return it.
@@ -293,7 +272,7 @@ def resolve_shows(path, include_empty=True, unreadable=None):
     `unreadable`, when given a list, is threaded down into every recursive
     call and into _audio_subdirs() so a show-shaped folder that is itself
     unreadable, however many readable ancestors sit above it, is collected
-    rather than silently read as "no audio here" (R2-1).
+    rather than silently read as "no audio here".
     """
     if _root_audio_count(path) > 0:
         return [path]
@@ -305,9 +284,8 @@ def resolve_shows(path, include_empty=True, unreadable=None):
 
     # A multi-disc show is ONE show, not a grouping folder. When 2+ of the
     # audio-bearing subdirs are named for a disc/set, the parent is the show
-    # and scan_folder() will flatten the discs into it with continuous track
-    # numbering. Expanding here instead queues each disc as its own recording
-    # — Ryan's `del01-09-22` report, 2026-08-12.
+    # and scan_folder will flatten the discs into it with continuous track
+    # numbering.
     #
     # The threshold is deliberately identical to scan_folder's own
     # `len(set_dirs) >= 2`, and both count only audio-bearing subdirs, so the
@@ -325,15 +303,13 @@ def resolve_shows(path, include_empty=True, unreadable=None):
 
 
 def resolve_shows_in_dir(source_dir, skipped=None, unreadable=None):
-    """
-    Every show folder under one scanned directory.
+    """Every show folder under one scanned directory.
 
     The top-level loop both `batch_scan` and the quality analyser run: each
     immediate subdirectory is resolved to its real show paths, handling
     arbitrary nesting (artist -> year -> show).
 
-    Two kinds of directory are dropped rather than returned (2026-09-17, for
-    libraries Trellis did not lay out itself):
+    Two kinds of directory are dropped rather than returned:
 
       - Excluded names (see _is_excluded_dir) — Trellis's own _musicians/,
         _venues/ and _events/ buckets, and dot-prefixed metadata.
@@ -395,9 +371,7 @@ def _auto_set_label(subdir_name):
 # subdir — the etree convention `d01t01.`, `cd1t05`, `s2t03`, `cd1-04`. The
 # subdir pass above sees one flat folder, reports sets_detected=False, and the
 # pipeline then trusts each file's TRACKNUMBER tag — which resets per disc,
-# producing two tracks numbered 1, two numbered 2, and so on. Same symptom as
-# the 2026-07-14 CD1/CD2 bug, different carrier for the disc number.
-# (Ryan, 2026-08-12 — Pat Metheny 1979-06-14, D01T01..D01T09 + D02T01..D02T07.)
+# producing two tracks numbered 1, two numbered 2, and so on.
 #
 # Anchored at the START of the basename, and _apply_filename_sets requires
 # EVERY audio file to match plus 2+ distinct disc numbers: a partial match
@@ -610,7 +584,7 @@ def _natural_key(name):
     Sort key that splits digit runs out as numbers rather than characters,
     so an unpadded, hand-ripped folder ('t1.flac' .. 't10.flac') orders
     1, 2, ..., 10 instead of the lexical 1, 10, 2, ... 9 a bare sorted()
-    gives it (R2-5). A zero-padded folder ('t01'..'t10') already sorted
+    gives it. A zero-padded folder ('t01'..'t10') already sorted
     correctly either way and is unaffected. Used for every audio-file
     ordering scan_folder() produces, so a folder's track order is the same
     whichever door (interactive Add Recording or Bulk Ingest) it comes
@@ -681,11 +655,6 @@ def scan_folder(folder_path):
     # match nothing) don't count. Ordered by the number in the name ("CD 2"
     # before "CD 10"), not alphabetically, so file/track order downstream is
     # deterministic regardless of filesystem listing order.
-    # (2026-07-14: this detection previously computed a label via
-    # _auto_set_label() but never actually used it — every file got
-    # set=None regardless of folder structure, which is how a CD1/CD2 source
-    # ended up with two tracks numbered 1-5 each: nothing here ever told the
-    # rest of the pipeline the FLAC TRACKNUMBER tags reset per disc.)
     set_dirs = []   # [(abs_dirpath, label, number, kind)]
     for e in subdirs:
         parsed = _parse_set_dir_among(e, subdirs)
@@ -747,8 +716,6 @@ def scan_folder(folder_path):
                 "set_number":        set_number,
             })
         elif ext == TEXT_EXTENSION:
-            # Content-aware since 2026-08-02 — a checksum list named after the
-            # show used to be scored as an info-file candidate and win.
             fp_type = fingerprint_type_for_file(full, low)
             if fp_type:
                 result["fingerprints"].append({
@@ -885,13 +852,11 @@ def _detect_fp_type(filename_lower):
     return "other"
 
 
-# A checksum file is not obliged to announce itself in its filename. Ryan hit
-# a show whose md5 list was named `AoifeODonovan2012-08-19_MCE400_16bit.txt`,
-# sitting beside the real info file `Aoife O'Donovan Band.txt` (2026-08-02).
-# Nothing in that name matches FINGERPRINT_MARKERS, so it was filed as a text
-# candidate — and then WON the info-file scoring, because _score_text_file
-# awards +5 for a date pattern in the name and the genuine info file scored 0.
-# The ingest form came up with a 32-hex hash in the Venue box.
+# A checksum file is not obliged to announce itself in its filename. Nothing in
+# that name matches FINGERPRINT_MARKERS, so it was filed as a text candidate —
+# and then WON the info-file scoring, because _score_text_file awards +5 for a
+# date pattern in the name and the genuine info file scored 0. The ingest form
+# came up with a 32-hex hash in the Venue box.
 #
 # Two bugs in one: the wrong file was read for metadata, AND the checksums were
 # never registered, so that recording would have ingested unverified.
@@ -941,7 +906,7 @@ def _sniff_fingerprint_type(path):
     # md5sum puts it FIRST ("abc123… *track.flac"). Never guess st5 from
     # content — st5 is byte-identical to ffp, and it is the lowest-priority
     # type (see FINGERPRINT_TYPE_PRIORITY), so guessing it would demote a
-    # perfectly good ffp. Ryan's standing preference: trust ffp and md5.
+    # perfectly good ffp.
     trailing = sum(1 for ln in lines if _HEX32_AT_END.search(ln))
     return "ffp" if trailing >= len(entries) * 0.5 else "md5"
 
@@ -966,9 +931,7 @@ def fingerprint_type_for_file(path, filename_lower=None):
 
 # ── FLAC tag reading ───────────────────────────────────────────────────────────
 
-# FLAC tag keys → our container field names. The current key comes first; the
-# retired keys follow because every file tagged before 2026-09-16 carries them
-# and other collectors use some of them. First non-empty value wins.
+# FLAC tag keys → our container field names. First non-empty value wins.
 _CONTAINER_TAG_KEYS = {
     "artist":   ("ARTIST", "ALBUMARTIST"),
     "album":    ("ALBUM",),
@@ -977,8 +940,6 @@ _CONTAINER_TAG_KEYS = {
     "source":   ("SOURCE", "RECORDINGSOURCE"),
     "lineage":  ("LINEAGE",),
 }
-# DATE held only the year until 2026-09-16 and CONCERTDATE the full date; now
-# DATE holds the full date. Both are read and the more precise value wins.
 _DATE_TAG_KEYS = ("DATE", "CONCERTDATE")
 
 _ISO_PARTIAL_RE  = re.compile(r"^\s*(\d{4})(?:[-./](\d{1,2})(?:[-./](\d{1,2}))?)?\s*$")
@@ -1000,8 +961,8 @@ def _loose_tag_date(value):
         if d and not 1 <= d <= 31:
             return None
         return format_partial_date(y, mo, d)
-    # Routed through the strict grammar (2026-10-03): a tag that writes only a
-    # month and year stays "YYYY-MM"; nothing is filled from today's date.
+    # Routed through the strict grammar: a tag that writes only a month and
+    # year stays "YYYY-MM"; nothing is filled from today's date.
     best, _ = _best_show_date(str(value))
     return format_partial_date(best.year, best.month, best.day) if best else None
 
@@ -1231,7 +1192,7 @@ def read_flac_tags(audio_files):
         except (MutagenError, Exception) as e:
             # Unreadable file — add placeholder so index stays consistent.
             # "raw": None (never {}) marks a file that could not even be
-            # opened (R2-N3) -- bulk_ingest.py's extract() reads this instead
+            # opened -- bulk_ingest.py's extract() reads this instead
             # of opening every readable file a second time itself just to
             # find out the same thing.
             tracks.append({
@@ -1379,16 +1340,15 @@ def desired_track_tags(recording):
 
 
 def write_flac_tags(recording, library_root):
-    """
-    Write Vorbis comments from DB records to every FLAC file in a recording.
+    """Write Vorbis comments from DB records to every FLAC file in a recording.
 
-    Builds container-level tags via build_recording_tags(), then per-track
+    Builds container-level tags via build_recording_tags, then per-track
     TITLE/TRACKNUMBER/TRACKTOTAL for each Track. Existing Vorbis comments are
-    replaced entirely (clean write, Ryan 2026-09-16). A track's note becomes
-    COMMENT. DISCNUMBER/DISCTOTAL are written whenever any track carries a
-    disc_number (DISCNUMBER = that track's disc_number, DISCTOTAL =
-    max(disc_number) across the recording); a single-disc recording gets
-    neither. Anything else we do not write is removed.
+    replaced entirely. A track's note becomes COMMENT. DISCNUMBER/DISCTOTAL are
+    written whenever any track carries a disc_number (DISCNUMBER = that track's
+    disc_number, DISCTOTAL = max(disc_number) across the recording); a
+    single-disc recording gets neither. Anything else we do not write is
+    removed.
 
     Args:
         recording:    Recording ORM object with relationships loaded
@@ -1461,19 +1421,16 @@ _BLANK_TRACK_RE = re.compile(r"^\s*(\d{1,3})\s*[.)]$")
 # A bare "H:MM:SS" or "M:SS" value with nothing else on the line — almost
 # always a stated total running time in the header ("1:46:28"), never a
 # track. _TRACK_PATTERN alone can't tell these apart: it reads "1:46:28" as
-# track 1 titled "46:28", which displaces every real track number by one
-# (Ryan, 2026-08-30, from a Gary Burton Quintet info file whose 4th line was
-# the recording's total length). Checked before a line is ever offered to
-# _TRACK_PATTERN, so a bare duration line never becomes a track candidate in
-# the first place — real track lines always carry a title too, so they never
-# collide with this.
+# track 1 titled "46:28", which displaces every real track number by one.
+# Checked before a line is ever offered to _TRACK_PATTERN, so a bare
+# duration line never becomes a track candidate in the first place — real
+# track lines always carry a title too, so they never collide with this.
 _TOTAL_DURATION_RE = re.compile(r"^\d{1,2}:\d{2}(:\d{2})?$")
 
 # A standalone heading (nothing else on the line) that marks the end of the
 # track list — trailing "Notes:"/"Comments:" sections often contain their own
 # numbered lines (e.g. "1 - Noise at 2:51 from the guys goofing around.")
-# which look exactly like track lines to _TRACK_PATTERN but are not tracks
-# (Ryan, 2026-07-16).
+# which look exactly like track lines to _TRACK_PATTERN but are not tracks.
 _TRACKLIST_END_RE = re.compile(
     r"^(notes?|comments?|credits?|lineage|taping\s*notes?|equipment|thanks|acknowledge?ments?)\s*:?\s*$",
     re.IGNORECASE,
@@ -1485,7 +1442,7 @@ _TRAILING_TS_RE = re.compile(r'\s+\d*:[\d:]+$')
 # Trailing timestamp given in PARENTHESES instead — just as common a taper
 # habit: "Carry On (4:59)". Only strips when the parens hold nothing but a
 # time (digits and colons), so a genuine credit like "(Carla Bley)" is left
-# alone (Ryan, 2026-08-30).
+# alone.
 _TRAILING_PAREN_TS_RE = re.compile(r'\s*\(\d{1,2}:\d{2}(?::\d{2})?\)\s*$')
 
 # Words kept lowercase in title case (unless first word)
@@ -1567,53 +1524,23 @@ def title_case(s):
 #   "Title //"  -> trailing "//" = end_truncated
 #   "Title (x)" -> trailing "(x)" (any case) = incomplete
 #
-# Keyword segments: a title is split on " and "/","/"/"/"&" (after stripping
-# one trailing parenthetical, e.g. "(Bobby)") so compound titles like
-# "tuning and banter (Bobby)" resolve to both ['tuning', 'banter'].
+# Keyword segments: see the lexicon module. Compound titles like
+# "tuning and banter (Bobby)" resolve to both ['banter', 'tuning'].
 
 _FLAG_START_TRUNC = re.compile(r'^\s*//')
 _FLAG_END_TRUNC   = re.compile(r'//\s*$')
 _FLAG_INCOMPLETE  = re.compile(r'\(\s*x\s*\)\s*$', re.IGNORECASE)
-_FLAG_TRAILING_PAREN = re.compile(r'^(.*?)\s*\([^)]*\)\s*$')
-_FLAG_SEGMENT_SPLIT  = re.compile(r'\s*(?:,|/|&|\band\b)\s*', re.IGNORECASE)
 
-# Whole-segment thesaurus — canonical flag key -> synonym words/phrases that
-# should match the ENTIRE segment (not a substring), so a musical segue like
-# "Piano Intro >" or "Dark Star Intro -> Fields of Gray" is never mistaken for
-# a spoken "Intro" track. Adding a synonym (Ryan, 2026-08-08: "Chatter" wasn't
-# recognized as "Banter") is a one-line edit here rather than a new regex —
-# _segment_pattern() below handles the optional trailing "s"/"." tolerance
-# every entry already had.
-_FLAG_SEGMENT_SYNONYMS = {
-    'tuning':       ['tuning'],
-    'banter':       ['banter', 'dialogue', 'chatter', 'crosstalk'],
-    'audience':     ['audience', 'crowd'],
-    'band_intros':  ['band intro', 'band introduction'],
-    'introduction': ['intro', 'introduction'],
-}
-
-
-def _segment_pattern(words):
-    alts = '|'.join(re.escape(w) for w in words)
-    return re.compile(rf'^(?:{alts})s?\.?$', re.IGNORECASE)
-
-
-_FLAG_SEGMENT_PATTERNS = [
-    (key, _segment_pattern(words)) for key, words in _FLAG_SEGMENT_SYNONYMS.items()
-]
-
-# Whole-word/anywhere-in-segment patterns — safe as substrings because these
-# words essentially never appear inside real song titles.
-_FLAG_WORD_PATTERNS = [
-    ('announcement', re.compile(r'\bannouncements?\b', re.IGNORECASE)),
-    ('interview',    re.compile(r'\binterviews?\b',    re.IGNORECASE)),
-]
+# Keyword flags (tuning, banter, outro, ...) come from the thesaurus in
+# app/utils/track_flag_lexicon.py, which matches normalized whole segments so a
+# musical segue like "Piano Intro >" is never mistaken for a spoken "Intro".
+# Adding a synonym is an edit to its phrase tables, not a new regex here.
 
 # ── Songwriter credit in a trailing parenthetical ───────────────────────────
 #
 # Just as common a taper habit as the timestamp above: "Carry On (Stephen
-# Stills)", "Ictus / Syndrome (Carla Bley)" (Ryan, 2026-08-30). Split off and
-# filed as the track's songwriter rather than left sitting in the title.
+# Stills)", "Ictus / Syndrome (Carla Bley)". Split off and filed as the
+# track's songwriter rather than left sitting in the title.
 #
 # Deliberately narrow, on the same reasoning as _is_track_noise() and
 # detect_track_flags() above: a false NEGATIVE just leaves the credit in the
@@ -1623,12 +1550,9 @@ _FLAG_WORD_PATTERNS = [
 # Case, letters/apostrophe/hyphen/period only, no digits) AND none of them is
 # a common non-name annotation that happens to share the same shape — "(Alt
 # Take)" and "(Steve Swallow)" are both two Title-Case words, and only a
-# blocklist tells them apart. Reuses the same annotation vocabulary
-# _FLAG_SEGMENT_SYNONYMS/_FLAG_WORD_PATTERNS already curate above, so a word
-# added there for flag detection is automatically excluded here too.
-_PAREN_NON_NAME_WORDS = frozenset({
-    w for words in _FLAG_SEGMENT_SYNONYMS.values() for w in words
-} | {
+# blocklist tells them apart. Reuses the flag lexicon's single-word phrases,
+# so a word added there for flag detection is automatically excluded here too.
+_PAREN_NON_NAME_WORDS = frozenset(_FLAG_LEXICON.SINGLE_WORDS | {
     'announcement', 'announcements', 'interview', 'interviews',
     'live', 'reprise', 'instrumental', 'acoustic', 'electric', 'unplugged',
     'outro', 'interlude', 'jam', 'improv', 'improvisation',
@@ -1668,9 +1592,8 @@ def _extract_trailing_songwriter(title):
     # "Tuning (Bobby)" is a taper crediting WHO was tuning, not a song called
     # "Tuning" written by someone named Bobby — the word-shape check above
     # only looks at the parens, so a segment label left behind as the base
-    # needs its own veto. Reuses the same whole-segment patterns
-    # detect_track_flags() matches against ("tuning", "banter", "intro", …).
-    if any(pattern.match(base) for _, pattern in _FLAG_SEGMENT_PATTERNS):
+    # needs its own veto, using the flag lexicon's whole-segment matching.
+    if _FLAG_LEXICON.match_flags(base):
         return title, None
     return base, ' '.join(words)
 
@@ -1695,59 +1618,17 @@ def detect_track_flags(title):
     if _FLAG_INCOMPLETE.search(raw):
         flags.add('incomplete')
 
-    # Strip one trailing parenthetical (usually an attribution, e.g. "(Bobby)")
-    # before splitting into segments, so it doesn't get treated as its own
-    # segment or block a match on the segment before it.
-    # One trailing parenthetical is stripped, on the theory that it is an
-    # attribution ("(Bobby)") rather than the subject.
-    #
-    # ⚠ Unless stripping leaves NOTHING. "(Chatter)", "(Introduction)",
-    # "(Announcements)", "(Cox Family Intro)" are titles that are entirely a
-    # parenthetical, and the strip reduced them to "" so nothing could ever
-    # match. Measured over 1,499 real track titles: this single case accounted
-    # for 9 of the 53 missed non-music tracks (Ryan, 2026-08-28).
-    m = _FLAG_TRAILING_PAREN.match(raw)
-    base = m.group(1).strip() if m else raw
-    if m and not base:
-        inner = re.match(r'^\s*\((.*)\)\s*$', raw)
-        base = inner.group(1).strip() if inner else raw
-
-    for segment in _FLAG_SEGMENT_SPLIT.split(base):
-        segment = segment.strip()
-        if not segment:
-            continue
-        for key, pattern in _FLAG_SEGMENT_PATTERNS:
-            if pattern.match(segment):
-                flags.add(key)
-
-    for key, pattern in _FLAG_WORD_PATTERNS:
-        if pattern.search(base):
-            flags.add(key)
+    flags |= _FLAG_LEXICON.match_flags(raw)
 
     return sorted(flags)
 
-# Source type keywords (scan full file text)
 # ── Source detection ──────────────────────────────────────────────────────────
-# ⚠ REWRITTEN 2026-08-28. The previous version was a plain substring scan over
-# the whole lowercased file, first hit wins:
 #
-#     for kw, val in _SOURCE_KEYWORDS.items():
-#         if kw in full_low: ...
-#
-# "aud" is a substring of audio, audiophile, inaudible, Claude and Audley.
-# Measured across 44 real info files in the library: 28 were assigned a source
-# and 9 of those (32%) fired on a substring inside another word. One was an
-# outright misclassification — abb2001-08-03.txt was tagged AUD because the
-# file contains the surname "Audley".
-#
-# Dict order made it worse: "aud" was tested before "mtx"/"matrix", so any
-# matrix recording whose info file contains the word "audio" — which is nearly
-# all of them — came out AUD. Source is the strongest single predictor of grade
-# in the quality model (CV r = +0.314, see quality_scoring.py), so this fed a
-# wrong answer into the score as well as the metadata.
-#
-# Three changes: word-boundary matching, a labelled line beats free text, and
-# longest keyword first so "soundboard" is never pre-empted by a shorter token.
+# Keywords match on word boundaries: "aud" is a substring of audio, audiophile,
+# inaudible, Claude and Audley, so a plain substring scan tagged recordings AUD
+# whenever an info file said "audio" or contained "Audley". A labelled line
+# beats free text, and the longest keyword is tried first so "soundboard" is
+# never pre-empted by a shorter token.
 _SOURCE_KEYWORDS = {
     "sbd": "SBD", "soundboard": "SBD", "sound board": "SBD",
     "aud": "AUD", "audience":   "AUD",
@@ -1797,7 +1678,7 @@ def detect_source_from_name(folder_name):
     return hits[-1].upper() if hits else None
 
 
-# ── Equipment named in a folder name (2026-09-17) ────────────────────────────
+# ── Equipment named in a folder name ────────────────────────────
 #
 # Tapers put their rig in the folder name as routinely as they put the source
 # in it: "gd1977-05-08.aud.schoeps.nak700.t01". detect_source_from_name()
@@ -1893,17 +1774,16 @@ def detect_source_tag_from_name(name):
     return m.group(1) if m else None
 
 
-# A date embedded in a folder name ("gd1988-05-01", "pat.metheny-2026-06-07")
-# — used only to keep detect_shnid_from_name() from mistaking the date's own
-# year for an LMA/etree shnid. Deliberately narrow (4-digit year, delimited
-# month/day): the goal is recognising a date that's THERE, not parsing every
-# date shape a folder name might use.
+# A date embedded in a folder name — used only to keep detect_shnid_from_name
+# from mistaking the date's own year for an LMA/etree shnid. Deliberately
+# narrow (4-digit year, delimited month/day): the goal is recognising a date
+# that's THERE, not parsing every date shape a folder name might use.
 _DATE_IN_NAME_RE = re.compile(r"((?:19|20)\d{2})[._-]\d{1,2}[._-]\d{1,2}")
 
 # Full YYYY-MM-DD (or ./_ delimited) date inside a folder name -- the single
-# canonical source for this pattern (Ingest Field Resolver spec v1, section
-# 10 build order). Previously duplicated between app/api/ingest.py and
-# app/utils/bulk_ingest.py; both now import this one instead.
+# canonical source for this pattern. Previously duplicated between
+# app/api/ingest.py and app/utils/bulk_ingest.py; both now import this one
+# instead.
 FOLDER_DATE_RE = re.compile(
     r'\b(19|20)\d{2}[-._](0[1-9]|1[0-2])[-._](0[1-9]|[12]\d|3[01])\b')
 
@@ -1913,17 +1793,14 @@ _SHNID_SEGMENT_RE = re.compile(r"(?:^|[._-])(\d{3,7})(?:[._-]|$)")
 
 
 def detect_shnid_from_name(name):
-    """
-    Best-guess Recording.etree_shnid (the LMA/etree source id) from a folder
+    """Best-guess Recording.etree_shnid (the LMA/etree source id) from a folder
     name: the LAST dot-, underscore- or hyphen-delimited all-digit segment of
     3 to 7 digits that is not the year of a matched date and not itself in
     1900..2099 (a plausible year even without a full date match).
 
-    'gd1988-05-01.ec7.bowen.foster.118671.flac16' -> 118671 ("flac16" is
-    glued to letters, not a segment, so it never competes).
+    'gd1988-05-01.ec7.bowen.foster.118671.flac16' -> 118671 ("flac16" is glued
+    to letters, not a segment, so it never competes).
     'gd1969-01-25.sbd.kaplan.7923.sbeok.shnf' -> 7923.
-    'pat.metheny-2026-06-07_24.96_tr.16' -> None (every digit run left after
-    excluding the date's year and other 1900..2099 look-alikes is 2 digits).
 
     Never written without the form — see suggestions.from_info_file's
     shnid_from_folder_name flag (spec section 5).
@@ -2027,11 +1904,10 @@ def _looks_like_date_line(line):
 
 
 def _parse_date(line):
-    """
-    Extract a date from a block of header text with the strict grammar.
-    Returns (year, month, day, raw_str) or None. A component the text did not
-    write is None -- the old dateutil fuzzy path filled it from today's date
-    (2026-10-03). raw_str is the line the leading mention sits on.
+    """Extract a date from a block of header text with the strict grammar. Returns
+    (year, month, day, raw_str) or None. A component the text did not write is
+    None -- the old dateutil fuzzy path filled it from today's date. raw_str is
+    the line the leading mention sits on.
     """
     best, _ = _best_show_date(line)
     if not best or best.year is None:
@@ -2043,10 +1919,9 @@ def _parse_date(line):
 
 
 def _parse_location_plain(line):
-    """
-    Extract (city, state, country) from a location line, positionally.
+    """Extract (city, state, country) from a location line, positionally.
 
-    A wrapper over reader.place.peel(): country, then region, then city are
+    A wrapper over reader.place.peel: country, then region, then city are
     peeled from the RIGHT of the line (see that module). Handles:
         "New York, NY"                  -> ("New York", "NY", "US")
         "New York, NY, USA"             -> ("New York", "NY", "US")
@@ -2055,7 +1930,7 @@ def _parse_location_plain(line):
         "Ann Arbor MI"                  -> ("Ann Arbor", "MI", "US")   (no comma)
         "Toronto, ON"                   -> ("Toronto", "ON", "Canada")
     state is the code for a US state, Canadian province or Australian state
-    (other countries leave it None; decision 2026-10-03). Returns
+    . Returns
     (None, None, None) when no region or country is recognised, i.e. the line
     is not a location; a bare city is not enough here.
     """
@@ -2304,15 +2179,13 @@ def _read_text_auto(file_path):
 
 def parse_info_file(file_path, known_artists=None, known_venues=None, text=None, *,
                     library=None, n_audio=None, durations=None, hints=None, atlas=None):
-    """
-    Parse a ROIO info/text file and extract structured metadata suggestions.
+    """Parse a ROIO info/text file and extract structured metadata suggestions.
 
-    Args:
         file_path:      path to .txt info file. May be None when `text` is given.
         known_artists:  list of artist name strings for fuzzy matching (optional)
         known_venues:   list of venue name strings for fuzzy matching (optional)
         text:           parse THIS string instead of reading `file_path`
-                        (2026-09-01, for the Rescan button on Add Recording).
+    .
         library:        a reader.library.LibraryIndex (the user's own acts, musicians,
                         venues and events) for the role decoder; None reads with an
                         empty library, so this function stays pure.
@@ -2396,8 +2269,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
 
         # A numbered line with no title, inside a track list ("02."): the track
         # exists, its title is unknown. Kept, so the list still lines up with
-        # the audio files by position (Ryan, 2026-10-06, Jerry Douglas
-        # 2003-07-18, whose list names only 4 of 16 tracks).
+        # the audio files by position.
         mb = _BLANK_TRACK_RE.match(stripped) if in_tracks else None
         if mb:
             num = int(mb.group(1))
@@ -2417,7 +2289,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
             # Split off a trailing "(Composer Name)" credit BEFORE title-
             # casing — a name should keep its own capitalisation, not run
             # through the "on"/"of"/"in"-stay-lowercase rule meant for
-            # titles (Ryan, 2026-08-30).
+            # titles.
             raw_title, songwriter = _extract_trailing_songwriter(raw_title)
             title = title_case(raw_title)
             if not _is_track_noise(title) and (in_tracks or len(header_lines) >= 2 or after_heading):
@@ -2425,9 +2297,7 @@ def parse_info_file(file_path, known_artists=None, known_venues=None, text=None,
                 # Multi-disc listings restart numbering at 1 each disc — e.g.
                 # "*** Disc Two ***" followed by "1. Song". Detect the restart
                 # (this number <= the last one seen) and carry a running
-                # offset so the combined list comes out sequential (Ryan,
-                # 2026-07-16: "23 tracks... just split out by disc, the
-                # numbering restarts").
+                # offset so the combined list comes out sequential.
                 if last_raw_num is not None and num <= last_raw_num:
                     disc_offset += last_raw_num
                 last_raw_num = num
@@ -2730,8 +2600,7 @@ def _titlecase(s):
 
 
 def build_scan_payload(folder_path, info_override=None):
-    """
-    Non-destructive scan of a source folder — the single shared foundation for
+    """Non-destructive scan of a source folder — the single shared foundation for
     every "what's in this folder" question in the app: the Add Recording scan
     step (POST /api/recordings/scan) AND batch import (POST /api/ingest/batch-scan)
     both build their metadata suggestions and health score from this, so a
@@ -2747,12 +2616,12 @@ def build_scan_payload(folder_path, info_override=None):
     the shared foundation for both the interactive Review scan and batch
     import, so instrumenting it here covers both for free.
 
-    `info_override` (2026-09-01) is {"filename": str|None, "content": str} and
-    means "parse THIS text for that candidate instead of the bytes on disk".
-    It exists for Add Recording's Rescan button, which re-runs the inference
-    over an info file the reviewer has edited but not necessarily saved.
-    Defaults to None, in which case every code path below is byte-identical to
-    what it was — batch import passes nothing and is unaffected.
+    `info_override` is {"filename": str|None, "content": str} and means "parse
+    THIS text for that candidate instead of the bytes on disk". It exists for
+    Add Recording's Rescan button, which re-runs the inference over an info
+    file the reviewer has edited but not necessarily saved. Defaults to None,
+    in which case every code path below is byte-identical to what it was —
+    batch import passes nothing and is unaffected.
     """
     from app.utils.debug_log import log_step
     job = f"scan:{folder_path}"
@@ -2932,7 +2801,7 @@ def build_scan_payload(folder_path, info_override=None):
                         "duration":     t["duration"],
                         # None (not {}) means read_flac_tags could not open
                         # this file at all -- distinct from an opened file
-                        # with no tags, which is {} (R2-N3). Do not default
+                        # with no tags, which is {}. Do not default
                         # this away; bulk_ingest.py's extract() relies on the
                         # distinction to spot an all-corrupt folder without
                         # opening every file a second time.
@@ -2980,11 +2849,11 @@ def build_scan_payload(folder_path, info_override=None):
             resp["suggestions"]["from_info_file"]["source"] = from_folder
             resp["source_from_folder_name"] = True
 
-    # Lineage, same last-resort rule and the same reason (2026-09-17). A taper
-    # who writes "gd1977-05-08.aud.schoeps.nak700" has named their rig, and for
-    # a folder with no info file that is the ONLY place the rig is recorded —
-    # which is exactly the folder a collector ingesting an existing library is
-    # looking at.
+    # Lineage, same last-resort rule and the same reason. A taper who writes
+    # "gd1977-05-08.aud.schoeps.nak700" has named their rig, and for a folder
+    # with no info file that is the ONLY place the rig is recorded — which is
+    # exactly the folder a collector ingesting an existing library is looking
+    # at.
     #
     # Joined with ", " and never ">": the folder named some gear, it did not
     # state a signal chain. Writing "schoeps > nak700" would assert an order
@@ -3015,13 +2884,13 @@ def build_scan_payload(folder_path, info_override=None):
     resp["health"] = compute_health(resp)
     log_step(job, "done", f"health {resp['health']['score']} ({resp['health']['band']})")
 
-    # Resolved fields + verdict (Ingest Field Resolver spec v1, chunk 6):
-    # every consumer of build_scan_payload() gets the resolver's answer for
-    # free, so the wizard's prefill and Review & Ingest never need their own
-    # copy of these merge rules. Best-effort -- library_root/placement come
-    # from app context, which some pure callers of this function (tests,
-    # scripts) don't have, and a scan payload must still be usable without
-    # them; resolved is simply None in that case rather than failing the scan.
+    # Resolved fields + verdict: every consumer of build_scan_payload gets the
+    # resolver's answer for free, so the wizard's prefill and Review & Ingest
+    # never need their own copy of these merge rules. Best-effort --
+    # library_root/placement come from app context, which some pure callers of
+    # this function (tests, scripts) don't have, and a scan payload must still
+    # be usable without them; resolved is simply None in that case rather than
+    # failing the scan.
     try:
         from app.utils.resolve import resolve as _resolve_scan
         _library_root = None
@@ -3052,6 +2921,30 @@ def build_scan_payload(folder_path, info_override=None):
 
 
 # ── File system operations ─────────────────────────────────────────────────────
+
+def _move_file(src, target):
+    """Move one file. A rename when both sit on one volume; across volumes (a Mac folder to an SMB library)
+    copy, then delete the source. When the copy or the delete fails (a permission error on the SOURCE after
+    a good copy is the real case) the copy at `target` is removed so nothing is orphaned in the library, but
+    only while the source still exists: the only copy is never deleted. Re-raises the OSError."""
+    import errno
+    try:
+        os.rename(src, target)
+        return
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+    try:
+        shutil.copy2(src, target)
+        os.unlink(src)
+    except OSError:
+        if os.path.exists(src):
+            try:
+                os.unlink(target)
+            except OSError:
+                pass
+        raise
+
 
 def _undo_transfer(moved, dest_folder):
     """
@@ -3119,22 +3012,20 @@ def resolve_ingest_file_path(orig_rel_path, audio_rename_map, flatten):
 def move_to_library(source_folder, library_root, artist_name, folder_name,
                     progress_cb=None, audio_rename_map=None,
                     cancel_cb=None, under_artist_folder=True, flatten=True):
-    """
-    Move a source folder into the library. A source outside LIBRARY_ROOT is
+    """Move a source folder into the library. A source outside LIBRARY_ROOT is
     always moved; there is no copy behavior.
 
     Audio files are renamed per `audio_rename_map` (original rel_path → new
-    filename) and, when `flatten` is true, moved into the destination
-    folder's ROOT regardless of how deeply nested they were in the source
-    (CD1/, Disc 2/, flac/, ...) — this keeps Track.file_path free of subdir
-    prefixes and guarantees continuous, collision-free filenames even when a
-    multi-disc source reset filenames independently per disc (the CD1/CD2
-    bug this replaced — 2026-07-14). When `flatten` is false, an audio file
-    keeps its original subdir prefix too (spec section 1.1: "Off: names and
-    nesting preserved" under rename_files) — see resolve_ingest_file_path(),
-    the one place this decision is made, shared with the caller's Track.file_path.
-    Non-audio content (art, text files, etc.) always keeps its original
-    relative structure under dest_folder.
+    filename) and, when `flatten` is true, moved into the destination folder's
+    ROOT regardless of how deeply nested they were in the source (CD1/, Disc
+    2/, flac/, ...) — this keeps Track.file_path free of subdir prefixes and
+    guarantees continuous, collision-free filenames even when a multi-disc
+    source reset filenames independently per disc. When `flatten` is false, an
+    audio file keeps its original subdir prefix too (spec section 1.1: "Off:
+    names and nesting preserved" under rename_files) — see
+    resolve_ingest_file_path, the one place this decision is made, shared with
+    the caller's Track.file_path. Non-audio content (art, text files, etc.)
+    always keeps its original relative structure under dest_folder.
 
     Renaming does not affect fingerprint verification: FFP/MD5/ST5 are
     content hashes, independent of filename. Fingerprint-file matching is
@@ -3179,14 +3070,13 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
                               original subdir prefix (False). See
                               resolve_ingest_file_path().
 
-    In-root bulk_ingest (spec section 1.1, Bulk Ingest chunk 1, 2026-09-26,
-    supersedes the 2026-09-25 S1/R2 notes above): a source folder whose
-    realpath already sits inside LIBRARY_ROOT is never moved, renamed,
-    flattened or deduped, in either file_handling mode or placement -- it is
-    ingested exactly where it is, however deeply nested (e.g.
-    "Grateful Dead/1977/gd77-05-08"), and its stored folder_path is simply
-    that path relative to LIBRARY_ROOT. Placement (under_artist_folder) only
-    governs where a source arriving from OUTSIDE the root gets filed.
+    In-root bulk_ingest: a source folder whose realpath already sits inside
+    LIBRARY_ROOT is never moved, renamed, flattened or deduped, in either
+    file_handling mode or placement -- it is ingested exactly where it is,
+    however deeply nested (e.g. "Grateful Dead/1977/gd77-05-08"), and its
+    stored folder_path is simply that path relative to LIBRARY_ROOT. Placement
+    (under_artist_folder) only governs where a source arriving from OUTSIDE the
+    root gets filed.
 
     Cancellation is handled HERE rather than by the caller because this is the
     only place that knows what has been written where — it means putting the
@@ -3205,7 +3095,7 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         except ValueError:
             in_root = False
     if in_root:
-        # R2-2: the on-disk relative path can be NFD bytes (an rsync from an
+        # the on-disk relative path can be NFD bytes (an rsync from an
         # HFS+-era source, or a byte-exact Linux filesystem) even though
         # every other identity key for this folder (BulkIngestItem.rel_path,
         # the QualityAnalysis staging row) is NFC -- Recording.folder_path
@@ -3213,21 +3103,29 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         rel = str(src.resolve().relative_to(Path(library_root).resolve())).replace(os.sep, "/")
         return unicodedata.normalize("NFC", rel)
 
-    # The artist directory is a CONVENTION, not a law (2026-09-17). When it is
-    # off, the show lands directly at the library root and dedupe happens
-    # against every folder there instead of that one artist's shelf.
+    # The artist directory is a CONVENTION, not a law. When it is off, the
+    # show lands directly at the library root and dedupe happens against every
+    # folder there instead of that one artist's shelf.
     dest_dir = (Path(library_root) / _sanitize_path(artist_name)
                 if under_artist_folder else Path(library_root))
+    made_dest_dir = under_artist_folder and not dest_dir.exists()
     dest_dir.mkdir(parents=True, exist_ok=True)
+
+    def _unwind(moved_so_far):
+        _undo_transfer(moved_so_far, dest_folder)
+        if made_dest_dir:      # the artist folder this call created, left empty
+            try:
+                dest_dir.rmdir()
+            except OSError:
+                pass
 
     # Guard against silently merging into an already-existing folder of the
     # same canonical name — e.g. two undated-source "Various Artists" shows
     # at the same venue. Without this, mkdir(..., exist_ok=True) below would
     # happily reuse the OTHER recording's folder and both recordings' files
-    # would land in one directory (2026-09-01, Ryman Auditorium 1964 bug
-    # report). Collisions get the same "(2)", "(3)", ... suffix
-    # rename_recording_folder() already applies post-ingest, via the shared
-    # unique_folder_name() helper — see its docstring.
+    # would land in one directory. Collisions get the same "(2)", "(3)", ...
+    # suffix rename_recording_folder already applies post-ingest, via the
+    # shared unique_folder_name helper — see its docstring.
     folder_name = unique_folder_name(str(dest_dir), folder_name, keep_abs=str(src))
     dest_folder = dest_dir / folder_name
     dest_folder.mkdir(parents=True, exist_ok=True)
@@ -3248,7 +3146,7 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
         # Poll BETWEEN files, never mid-file: a partially written file is the one
         # thing that would be genuinely hard to clean up.
         if cancel_cb is not None and cancel_cb():
-            _undo_transfer(moved, dest_folder)
+            _unwind(moved)
             raise IngestCancelled("ingest cancelled by user")
 
         rel  = str(p.relative_to(src)).replace(os.sep, "/")
@@ -3267,12 +3165,12 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
             target = dest_folder / p.relative_to(src)
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.move(str(p), str(target))
+            _move_file(str(p), str(target))
         except OSError as e:
             if is_audio:
                 # Put back everything already moved, as a cancel does, so a failed import
                 # never leaves the show split between the source and the library.
-                _undo_transfer(moved, dest_folder)
+                _unwind(moved)
                 raise
             # A non-audio file the OS will not let us move (permissions, a locked flag)
             # must not fail the import: the audio, info text and checksums are already
@@ -3301,10 +3199,9 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     # empty-of-anything-useful) directory tree that's left behind.
     shutil.rmtree(str(src), ignore_errors=True)
     # The recording folder itself is gone — now check whether ITS parent
-    # (typically the "Artist Name" staging folder in a Bulk Import
-    # layout, e.g. Import/Artist Name/Show Folder/) is left empty too,
-    # and remove it if so (Ryan, 2026-07-23 — applies to every ingest; see
-    # _cleanup_empty_parent's own docstring for the safety guards).
+    # (typically the "Artist Name" staging folder in a Bulk Import layout,
+    # e.g. Import/Artist Name/Show Folder/) is left empty too, and remove
+    # it if so.
     _cleanup_empty_parent(src)
 
     # Return path relative to library_root for storage in DB
@@ -3318,16 +3215,15 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
 _JUNK_FILENAMES = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized"}
 
 # macOS's SMB client renames a file to ".smbdelete<hex>" when a delete over a
-# network share doesn't fully land, instead of just removing it (Ryan hit
-# this directly, 2026-08-22 — Synology share, Finder refused with "locked"
-# even though nothing was actually locked). The hex suffix is per-occurrence,
-# so this can't be an exact-name match like the set above.
+# network share doesn't fully land, instead of just removing it. The hex
+# suffix is per-occurrence, so this can't be an exact-name match like the set
+# above.
 _JUNK_NAME_PREFIXES = (".smbdelete",)
 
 
 def _is_junk_name(name):
     # .ico is a Windows folder icon (the file a desktop.ini points at), never library
-    # content. Ryan's 2026-10-05 import failed on one macOS would not let Trellis move.
+    # content.
     return (name in _JUNK_FILENAMES or name.startswith(_JUNK_NAME_PREFIXES)
             or name.lower().endswith(".ico"))
 
@@ -3339,29 +3235,20 @@ _PROTECTED_DIR_NAMES = {
     "Desktop", "Downloads", "Documents", "Music", "Movies",
     "Pictures", "Public", "Applications", "Library",
 
-    # Flux's own top-level siblings under Flux Audio/ — IMPORT_DIR and
-    # TRIAGE_DIRS in config.py, plus Training (Ryan's dev-only BAD-label
-    # corpus folder — deliberately NOT wired into config.py per the
-    # 2026-08-13 folder-structure decision, but still a real sibling on disk
-    # that must never vanish; this name-only safety exclusion doesn't couple
-    # the app to it functionally, so it doesn't reopen that decision).
-    # Explicit ask (Ryan, 2026-08-23): these must never be removed even if
-    # briefly empty between imports — unlike a "Artist Name" staging
-    # folder, they are permanent structure, not disposable. NOTE: Trellis's
-    # working folder is "Downloads" (2026-10-01, was "Download") and is
-    # covered by the macOS "Downloads" entry above.
+    # Trellis's own top-level folders beside the Library (IMPORT_DIR and
+    # TRIAGE_DIRS in config.py, plus Training). They must never be removed even
+    # if briefly empty between imports: unlike an "Artist Name" staging folder
+    # they are permanent structure. The working folder "Downloads" is covered
+    # by the macOS "Downloads" entry above.
     "Backlog", "Training", "Workshop",
 }
 
 
 def _cleanup_empty_parent(folder):
-    """
-    After a MOVE ingest empties out and removes `folder` (the source show
-    folder itself — already gone by the time this runs, see the rmtree
-    above), remove ITS parent too if that parent is now empty. One level
-    only — never walks further up the tree (Ryan's ask was specifically
-    "the Artist Name source directory," singular, not an arbitrary climb
-    toward the filesystem root).
+    """After a MOVE ingest empties out and removes `folder` (the source show
+    folder itself — already gone by the time this runs, see the rmtree above),
+    remove ITS parent too if that parent is now empty. One level only — never
+    walks further up the tree.
 
     Best-effort and silent: this is a courtesy cleanup, not something that
     should ever fail — or even be noticed to fail — an otherwise-successful
@@ -3507,18 +3394,23 @@ def compute_audio_rename_map(tracks, scheme="number_title", template=None,
     plan = rename_plan(rec_like, scheme, template)
     rename_map = {}
     for track_like, _current, proposed in plan:
-        # R1 (review, 2026-09-25): rename_plan() now returns a full proposed
-        # REL PATH (B2's fix -- it carries the current directory prefix when
-        # the scheme doesn't flatten, so its own dedupe never collides two
-        # discs' same-named files). resolve_ingest_file_path() is what
-        # decides the destination directory at ingest time (prepending the
-        # ORIGINAL parent for a non-flattening scheme) -- storing the full
-        # path here as well double-prepends it ("CD1/CD1/Dark Star.flac").
-        # The map's job is only ever the FILENAME.
+        # R1: rename_plan now returns a full proposed REL PATH (B2's fix --
+        # it carries the current directory prefix when the scheme doesn't
+        # flatten, so its own dedupe never collides two discs' same-named
+        # files). resolve_ingest_file_path is what decides the destination
+        # directory at ingest time (prepending the ORIGINAL parent for a
+        # non-flattening scheme) -- storing the full path here as well
+        # double-prepends it ("CD1/CD1/Dark Star.flac"). The map's job is
+        # only ever the FILENAME.
         rename_map[track_like.original_file_path] = os.path.basename(proposed)
     return rename_map
 
 
 def _sanitize_path(name):
-    """Strip characters illegal in macOS directory names."""
+    """Make a directory name legal on Windows and macOS (file_naming.windows_safe)."""
+    from app.utils.file_naming import windows_safe
+    return windows_safe(name).strip()
+
+
+def _legacy_sanitize_path(name):
     return re.sub(r'[:/\x00]', '-', name).strip()

@@ -50,15 +50,11 @@ _QUALITY_JOBS = {}
 
 # How long a FINISHED job stays readable, and how many are kept.
 #
-# ⚠ 2026-09-03: this used to be zero — `analyze_status` popped the job the
-# instant a terminal status was read, so the very next poll answered
-# `{"error": "unknown job"}` with a 404. The client reads that as "the job
-# died", clears the queue's progress and marks every folder it had not reached
-# yet as "Analysis failed", so a scan that COMPLETED could present as a page of
-# failures under a red "unknown job" banner (Ryan, screenshot 2026-09-03;
-# first reported 2026-08-29 and not reproduced then). Reprocessing the same
-# folder worked first time, which is what says the folders were never the
-# problem.
+# The client reads that as "the job died", clears the queue's progress and
+# marks every folder it had not reached yet as "Analysis failed", so a scan
+# that COMPLETED could present as a page of failures under a red "unknown job"
+# banner. Reprocessing the same folder worked first time, which is what says
+# the folders were never the problem.
 #
 # A second poll is not an error condition, it is ordinary: two poll loops can
 # overlap for one tick when a scan is restarted (the client-side half of this
@@ -110,10 +106,8 @@ def _analyse_one(folder_path, source_dir):
                               error=str(features["error"]))
             return
         # Source is read off the folder name because this runs at TRIAGE time —
-        # there is no Recording row yet. It matters: source is the strongest
-        # single predictor of grade in the whole model (CV r = +0.314 on its
-        # own), so skipping it here would throw away the largest accuracy gain
-        # of the 2026-07-31 rework. Unreadable source is neutral, not a penalty.
+        # there is no Recording row yet. Unreadable source is neutral, not a
+        # penalty.
         scored = score_recording(features,
                                  source=guess_source_from_name(name))
         qs.upsert_staging(folder_path, source_dir=source_dir, name=name,
@@ -158,8 +152,7 @@ def _run_quality_job(job_id, app, source_dir, folders, reanalyze):
 
 
 def _reuse_into_scan(folder_path, source_dir):
-    """
-    Repoint an already-analysed row at the directory being scanned NOW.
+    """Repoint an already-analysed row at the directory being scanned NOW.
 
     Staging rows are keyed by FOLDER PATH, but the triage list is fetched by
     SOURCE DIR (`qs.list_staging`).  The same show is reachable from several
@@ -167,13 +160,8 @@ def _reuse_into_scan(folder_path, source_dir):
     folder itself — so a row first written under one of them is invisible to a
     scan of another.
 
-    Until 2026-08-25 the skip path above returned without touching the row, so
-    re-scanning at a different level returned ZERO rows from a job that
-    reported "done": the UI's placeholder cards were never replaced and every
-    recording sat on "Analysing…" forever, with no error anywhere to explain it
-    (Ryan, 2026-08-25 — "Review and Ingest just stalls out").  Re-analysis
-    already repoints `source_dir` (see `qs.upsert_staging`); the skip path
-    simply never did, and that asymmetry WAS the bug.
+    Re-analysis already repoints `source_dir` (see `qs.upsert_staging`); the
+    skip path simply never did, and that asymmetry WAS the bug.
 
     Writes only when the value actually changes.  The common case is re-scanning
     the same directory, and that must not cost a commit per folder.
@@ -290,16 +278,12 @@ def analyze_status(job_id):
     #
     # `list_staging` answers "every unpromoted row recorded under this source
     # dir", which is a superset of "what is in this directory now" and drifts
-    # further from it with every run.  A row outlives its folder on purpose
-    # (a Move ingest relocates the source out from under it), so a show
-    # ingested from a DIFFERENT path leaves its second, never-promoted row
-    # behind — and that row then reappeared in the queue on every later scan
-    # of the same parent, wearing "Folder moved" and offering nothing to do.
-    # Ryan, 2026-09-02: a Pat Metheny show from several jobs ago that would
-    # not go away.  It was row 127, `.../Trellis/Download/Pat Metheny Group
-    # 1979-06-14 Philadelphia, PA`; the same show had been ingested as
-    # recording 571 under its old Flux Workshop path, so the row under
-    # Download was never marked promoted and nothing else would ever clear it.
+    # further from it with every run. A row outlives its folder on purpose (a
+    # Move ingest relocates the source out from under it), so a show ingested
+    # from a DIFFERENT path leaves its second, never-promoted row behind — and
+    # that row then reappeared in the queue on every later scan of the same
+    # parent, wearing "Folder moved" and offering nothing to do: it was never
+    # marked promoted, so nothing else would ever clear it.
     #
     # The job already knows the answer — `resolve_shows()` produced it before
     # the first byte was decoded — so the review list is scoped to that,
@@ -424,15 +408,15 @@ def _scan_metadata(folder_path):
         except Exception:
             folder_format_str = None
 
-        # One resolver, every ingest path (Ingest Field Resolver spec v1) --
-        # this used to be its own fourth hand-rolled field merge (tags.get(x)
-        # or sug.get(x), including a since-fixed date bug where from_tags has
-        # no "year"/"month"/"day" keys at all -- the FLAC date tag lands in
-        # "concert_date"). resolve() is now the only place that logic lives;
-        # Triage and Review & Ingest read its answer instead of re-deriving
-        # one, so they can no longer silently disagree with Add Recording or
-        # Bulk Ingest about a folder's fields the way Art Blakey and the Jazz
-        # Messengers 1981-07-11 once did (2026-08-09).
+        # One resolver, every ingest path -- this used to be its own fourth
+        # hand-rolled field merge (tags.get(x) or sug.get(x), including a
+        # since-fixed date bug where from_tags has no "year"/"month"/"day"
+        # keys at all -- the FLAC date tag lands in "concert_date"). resolve
+        # is now the only place that logic lives; Triage and Review & Ingest
+        # read its answer instead of re-deriving one, so they can no longer
+        # silently disagree with Add Recording or Bulk Ingest about a
+        # folder's fields the way Art Blakey and the Jazz Messengers
+        # 1981-07-11 once did.
         from app.utils import node_settings as _node_settings
         placement = _node_settings.get_file_handling().get("placement")
         resolved = resolve(scan, library_root=current_app.config.get("LIBRARY_ROOT"),
@@ -455,9 +439,9 @@ def _scan_metadata(folder_path):
                 "source":  resolved.source.value,
                 "lineage": resolved.lineage.value,
                 "track_count": len(scan.get("audio_files") or []),
-                # The titles themselves, not just how many are populated
-                # (2026-08-02). A ratio says the fields are filled; it cannot
-                # show that they are filled with "Jam >" and "Unknown".
+                # The titles themselves, not just how many are populated. A
+                # ratio says the fields are filled; it cannot show that they
+                # are filled with "Jam >" and "Unknown".
                 "track_titles": _proposed_track_titles(scan, tags, sug),
                 # Format + Type -- format needs scan_folder()'s
                 # unsupported_audio (SHN) that build_scan_payload() does not
@@ -498,9 +482,9 @@ def _attach_interpretation(results):
             # Rows arrive serialized WITH features (include_features=True); the
             # raw dict is popped again below — the interpretation supersedes it.
             # scored_only: the triage panel shows ONLY readings that move the
-            # meter above them (Ryan, 2026-08-28). The five zero-weight
-            # measurements stay available on View Recording, where the question
-            # is what the recording IS rather than why it scored what it did.
+            # meter above them. The five zero-weight measurements stay available
+            # on View Recording, where the question is what the recording IS
+            # rather than why it scored what it did.
             r["interp"] = interpret_full(r, r.get("features") or {},
                                          scored_only=True)
         except Exception:  # noqa: BLE001
@@ -529,8 +513,7 @@ def _attach_metadata(results):
         # a MOVE ingest relocates the source into the library, so the row is
         # still here but the directory is not. Without this flag the UI offered
         # to ingest a folder that no longer existed, showed a blank metadata
-        # score, and failed with "artist_name is required" when clicked
-        # (2026-07-31).
+        # score, and failed with "artist_name is required" when clicked.
         r["exists"] = bool(r.get("folder_path")) and os.path.isdir(r["folder_path"])
         if r.get("error") or not r["exists"]:
             continue
@@ -590,8 +573,7 @@ def _attach_fingerprints(results):
 
 
 def _attach_concerns(results):
-    """
-    The MAJOR-ISSUE line under each card title (Ryan, 2026-08-02).
+    """The MAJOR-ISSUE line under each card title.
 
     That space used to hold a prose description of how the recording sounds
     ("A listenable recording with obvious character…"), which restated the
@@ -624,12 +606,10 @@ def _attach_concerns(results):
         # problem. Staging rows outlive the folder on purpose (list_staging
         # matches on the scanned source_dir, so re-triaging the same parent
         # folder later resurfaces old, already-ingested rows right alongside
-        # new ones) — this used to flag that expected state as a red error
-        # (Ryan, 2026-08-09: "Source folder no longer exists on disk" showing
-        # on a recording already marked Ingested, reproduced on Danny Gatton
-        # and Charles Mingus folders). Only warn when the folder is ACTUALLY
-        # missing for a row nothing has ingested yet — that's the case where
-        # someone renamed/deleted a folder out from under a pending triage.
+        # new ones) — this used to flag that expected state as a red error.
+        # Only warn when the folder is ACTUALLY missing for a row nothing has
+        # ingested yet — that's the case where someone renamed/deleted a
+        # folder out from under a pending triage.
         if r.get("exists") is False and not r.get("recording_id"):
             concerns.append({"level": "error", "kind": "missing",
                              "text": "Source folder no longer exists on disk"})
@@ -654,9 +634,7 @@ def _attach_concerns(results):
         # above ever counted it. Left alone, that file's tracks silently fall
         # back to "unverified" — the same badge as "we just haven't run the
         # deep check yet" — and the actual read failure is visible only if
-        # you open the Fingerprints tab and read that one file's row (Ryan,
-        # 2026-08-27: "a failed fingerprint scan" must be exposed at
-        # ingestion prep, not buried a click away).
+        # you open the Fingerprints tab and read that one file's row.
         errored_fp_files = [f["filename"] for f in (fp.get("files") or []) if f.get("error")]
         if errored_fp_files:
             n = len(errored_fp_files)
@@ -701,19 +679,18 @@ def _attach_concerns(results):
             except Exception:  # noqa: BLE001
                 _tb.print_exc()   # never let a duplicate check break a card
 
-        # Bulk Ingest / auto-confirm review rows (spec chunk 7d, and the
-        # Ingest Field Resolver spec's verdict() reasons): a folder the
-        # resolver sent to review -- missing artist/date, a date with only
-        # some of its precision, a conflict between sources, or an
-        # unsupported container format -- staged itself here with
-        # listening_quality left null (bulk_ingest_run.py's _write_review_
-        # staging) rather than a scored one. Surface WHY it needs a look by
-        # matching this row's folder_path back to that BulkIngestItem. One
-        # folder can carry several reasons at once (verdict() returns a
-        # list); each gets its own line. unsupported_format gets no concern
-        # line here at all -- the existing convert affordance
-        # (_attach_convertible) already covers it, and spec chunk 7d is
-        # explicit that this card must not say anything extra about it.
+        # Bulk Ingest / auto-confirm review rows: a folder the resolver
+        # sent to review -- missing artist/date, a date with only some of
+        # its precision, a conflict between sources, or an unsupported
+        # container format -- staged itself here with listening_quality
+        # left null (bulk_ingest_run.py's _write_review_ staging) rather
+        # than a scored one. Surface WHY it needs a look by matching this
+        # row's folder_path back to that BulkIngestItem. One folder can
+        # carry several reasons at once (verdict returns a list); each gets
+        # its own line. unsupported_format gets no concern line here at all
+        # -- the existing convert affordance (_attach_convertible) already
+        # covers it, and spec chunk 7d is explicit that this card must not
+        # say anything extra about it.
         reasons = bulk_ingest_review_reasons.get(qs.norm_path(r.get("folder_path") or "")) or []
         for reason in reasons:
             if reason == "needs_artist":
@@ -771,15 +748,11 @@ def _bulk_ingest_review_reasons():
 
 
 def _attach_convertible(results):
-    """
-    Mark rows whose folder is Shorten or WAV and holds no FLAC (2026-09-02).
+    """Mark rows whose folder is Shorten or WAV and holds no FLAC.
 
-    Two different situations wearing one mechanism.  A `.shn` folder is
-    BROKEN from the ingest's point of view — `.shn` has been in
-    RESOLVE_AUDIO_EXTS since 2026-08-26 only so the folder is visible enough
-    to be explained, and `_analyse_one` has nothing it can decode, so the row
-    arrives with an error and a blank score.  A `.wav` folder, by contrast,
-    works perfectly; converting it is an offer about disk, not a repair.
+    Two different situations wearing one mechanism. A `.wav` folder, by
+    contrast, works perfectly; converting it is an offer about disk, not a
+    repair.
 
     The row carries the same field either way and the UI decides the wording,
     because the ACTION is identical and splitting it into two payload shapes
@@ -856,8 +829,8 @@ def _run_convert_job(job_id, app, folder, ffmpeg, exts):
             job["status"] = "cancelled" if res["cancelled"] else "done"
             # A run where every single file failed is a FAILURE, not a
             # completed job with a footnote. Saying "done" over 20 errors is
-            # the "never report a failure as a different failure" rule from
-            # CONTEXT.md, pointed the other way.
+            # the "never report a failure as a different failure" rule,
+            # pointed the other way.
             if res["failed"] and not res["converted"]:
                 job["status"] = "error"
                 job["error"] = res["failed"][0].get("error") or "Every file failed to convert."
@@ -1009,10 +982,8 @@ def _within_import_roots(path):
 @bp.route("/fingerprints", methods=["GET"])
 @admin_required
 def fingerprints():
-    """
-    The FFP check for a folder before it is imported (Add Recording's Checksums
-    tab, Ryan 2026-10-06): header reads only, so it is quick. MD5 lists are not
-    reported; only a failed FFP matters.
+    """The FFP check for a folder before it is imported: header reads only, so it
+    is quick. MD5 lists are not reported; only a failed FFP matters.
     """
     folder = request.args.get("path") or ""
     if not folder or not os.path.isdir(folder) or not _within_import_roots(folder):
@@ -1025,15 +996,12 @@ def fingerprints():
 @bp.route("/browse", methods=["GET"])
 @login_required
 def browse():
-    """
-    List sub-folders of a path so the UI can offer a real directory picker.
+    """List sub-folders of a path so the UI can offer a real directory picker.
 
-    Originally ported from the standalone harness (tools/quality/quality_app.py).
-    The in-app picker has since diverged (2026-08-22: the shortcut row and
-    "audio" tag were dropped from the UI, and PyWebView's native folder dialog
-    — long unused — is now wired to a Browse button), but this endpoint still
-    returns `shortcuts` and `audio` for compatibility; nothing client-side
-    reads them anymore.
+    Originally ported from the standalone harness
+    (tools/quality/quality_app.py). The in-app picker has since diverged, but
+    this endpoint still returns `shortcuts` and `audio` for compatibility;
+    nothing client-side reads them anymore.
 
     Read-only, and constrained to IMPORT_ROOTS like every other filesystem
     endpoint here.
@@ -1042,9 +1010,9 @@ def browse():
                  ".ape", ".wv")
 
     raw = (request.args.get("path") or "").strip()
-    # Add Recordings opens at the Downloads folder, so make sure it exists
-    # (2026-10-01). Best effort: an unmounted share just falls through to the
-    # existing walk-up-to-an-ancestor handling below.
+    # Add Recordings opens at the Downloads folder, so make sure it exists.
+    # Best effort: an unmounted share just falls through to the existing
+    # walk-up-to-an-ancestor handling below.
     try:
         from app.utils.downloads_dir import ensure_downloads_dir
         ensure_downloads_dir()
@@ -1058,25 +1026,24 @@ def browse():
     # the ancestors of an import root were allowed through the guard below
     # precisely so that would work. It was a mistake twice over: nobody adds
     # recordings from "/", and one stray click on /Volumes/music landed on a
-    # 2,233-folder iTunes library that took the picker 45 seconds to describe
-    # (Ryan, 2026-08-28 — "it's not stopping").
+    # 2,233-folder iTunes library that took the picker 45 seconds to describe.
     #
     # Browsing now starts at IMPORT_DIR and cannot go above it. A folder the
     # user chose deliberately in the NATIVE dialog is still honoured — that is
     # an explicit choice made outside this endpoint, and `root` comes back with
     # every response so the client knows where "up" stops.
     #
-    # IMPORT_ROOTS is unchanged and still the security boundary underneath
-    # this; this is a usability clamp inside it, not a replacement for it.
-    # One level ABOVE the download folder (Ryan, 2026-08-28). Browsing STARTS in
-    # Download, but Up reaches the app folder that holds it — "Trellis" here,
-    # "Trellis Music Library" in a real install — because Backlog and Workshop
-    # are its siblings and a user putting material in one of them has nowhere
-    # else to go. It stops there: above the app folder is the whole disk, which
-    # is what made this a filesystem browser.
+    # IMPORT_ROOTS is unchanged and still the security boundary underneath this;
+    # this is a usability clamp inside it, not a replacement for it. One level
+    # ABOVE the download folder. Browsing STARTS in Download, but Up reaches the
+    # app folder that holds it — "Trellis" here, "Trellis Music Library" in a
+    # real install — because Backlog and Workshop are its siblings and a user
+    # putting material in one of them has nowhere else to go. It stops there:
+    # above the app folder is the whole disk, which is what made this a
+    # filesystem browser.
     app_root = os.path.dirname(import_dir.rstrip(os.sep)) or import_dir
-    # ~/Downloads/Trellis (2026-10-01) has ~/Downloads above it, which is not
-    # an import root; stop "Up" at the folder itself rather than offering a 403.
+    # ~/Downloads/Trellis has ~/Downloads above it, which is not an import root;
+    # stop "Up" at the folder itself rather than offering a 403.
     _ra = os.path.realpath(app_root)
     if not within_import_roots(_ra):
         app_root = import_dir
@@ -1084,12 +1051,12 @@ def browse():
     real = os.path.realpath(path)
     if not within_import_roots(real):
         return jsonify({"error": "Outside the permitted import roots"}), 403
-    # WALK UP RATHER THAN FAIL (2026-08-07). A remembered path routinely stops
-    # existing: ingesting the last show of an act moves its folder into the
-    # library and the empty-parent cleanup removes the act folder behind it. A
-    # 400 here stranded the picker on a path it could never load. Climbing to
-    # the nearest surviving ancestor puts the user somewhere useful instead,
-    # and `redirected_from` lets the UI say why it moved.
+    # WALK UP RATHER THAN FAIL. A remembered path routinely stops existing:
+    # ingesting the last show of an act moves its folder into the library and
+    # the empty-parent cleanup removes the act folder behind it. A 400 here
+    # stranded the picker on a path it could never load. Climbing to the
+    # nearest surviving ancestor puts the user somewhere useful instead, and
+    # `redirected_from` lets the UI say why it moved.
     redirected_from = None
     if not os.path.isdir(path):
         redirected_from = path
@@ -1112,10 +1079,10 @@ def browse():
 
     # A folder holding one recording has no sub-folders at all — just audio
     # plus its FFP/MD5/TXT paperwork sitting right there — and the picker
-    # used to have nothing to show for that but "No sub-folders here",
-    # which reads as an empty folder rather than the one you're looking at
-    # (Ryan, 2026-08-27). List files alongside dirs so landing on that folder
-    # shows what's actually in it.
+    # used to have nothing to show for that but "No sub-folders here", which
+    # reads as an empty folder rather than the one you're looking at. List
+    # files alongside dirs so landing on that folder shows what's actually in
+    # it.
     dirs, files = [], []
     for name in entries:
         if name.startswith("."):
@@ -1183,8 +1150,7 @@ def _in_library(path):
 
 
 def _artist_status_map(names):
-    """
-    {folder_name: "existing"|"new"} — same match rule as
+    """{folder_name: "existing"|"new"} — same match rule as
     resolve_or_create_artist() and the duplicate-name guard in
     api/artists.py (case-insensitive on Artist.name), so "does this
     artist already exist" means the same thing everywhere in the app.
@@ -1193,11 +1159,11 @@ def _artist_status_map(names):
     inside the ingest background job it was written for, a landmine if
     called from a read-only endpoint that runs on every folder browse.
 
-    Folder names are NFC-normalised before matching: macOS hands out
-    decomposed (NFD) filenames, the DB stores composed (NFC), and comparing
-    the two directly is exactly the "Lucía" bug in CONTEXT.md's traps
-    section. Batched into one query rather than one per row — a Bulk Import
-    root can list a hundred act folders.
+    Folder names are NFC-normalised before matching: macOS hands out decomposed
+    (NFD) filenames, the DB stores composed (NFC), and comparing the two
+    directly is exactly the "Lucía" bug's traps section. Batched into one query
+    rather than one per row — a Bulk Import root can list a hundred act
+    folders.
     """
     if not names:
         return {}
@@ -1226,17 +1192,15 @@ _PROBE_MAX_SUBDIRS = 8
 
 
 def _probe_folder(full, audio_ext):
-    """
-    (has_audio, has_subdirs, subdir_count, size_bytes) for one folder — the
+    """(has_audio, has_subdirs, subdir_count, size_bytes) for one folder — the
     facts the picker's row shows.
 
-    Uses os.scandir, NOT os.listdir + os.path.isdir (2026-08-02). scandir's
-    DirEntry carries the directory type from the readdir call itself, so
-    entry.is_dir() answers from cached d_type with no extra syscall; the old
-    code paid a separate stat() per child. On a NAS mount at a few ms per stat,
-    an artist folder holding twenty shows cost twenty round trips, and a
-    hundred-artist directory cost thousands — which is why Browse sat there
-    doing nothing for seconds.
+    Uses os.scandir, NOT os.listdir + os.path.isdir. scandir's DirEntry carries
+    the directory type from the readdir call itself, so entry.is_dir answers
+    from cached d_type with no extra syscall; the old code paid a separate stat
+    per child. On a NAS mount at a few ms per stat, an artist folder holding
+    twenty shows cost twenty round trips, and a hundred-artist directory cost
+    thousands — which is why Browse sat there doing nothing for seconds.
 
     Still looks ONE level deeper before declaring a folder audio-free: a
     recording that keeps its CD1/CD2 subdirs has no audio at its own root, and
@@ -1244,13 +1208,13 @@ def _probe_folder(full, audio_ext):
     That descent stops at the first subfolder containing audio.
 
     `size_bytes` is DELIBERATELY SHALLOW — the sum of files sitting directly in
-    `full`, not a recursive walk of everything beneath it (Ryan, 2026-08-22).
-    A full recursive size is exactly the per-child-stat cost the scandir
-    rewrite above exists to avoid; a twenty-show artist folder would pay twenty
-    subfolder walks just to paint one row of the picker. One extra stat() per
-    direct child (already-cached DirEntry, so no extra syscall to know it's a
-    file) is the same order of magnitude as the has_audio/subdirs check this
-    function already did, so it rides along for free.
+    `full`, not a recursive walk of everything beneath it. A full recursive
+    size is exactly the per-child-stat cost the scandir rewrite above exists to
+    avoid; a twenty-show artist folder would pay twenty subfolder walks just to
+    paint one row of the picker. One extra stat per direct child
+    (already-cached DirEntry, so no extra syscall to know it's a file) is the
+    same order of magnitude as the has_audio/subdirs check this function
+    already did, so it rides along for free.
     """
     try:
         mtime = os.stat(full).st_mtime
@@ -1278,11 +1242,11 @@ def _probe_folder(full, audio_ext):
     except (PermissionError, OSError):
         pass
 
-    # ⚠ BOUNDED (Ryan, 2026-08-28). This loop used to walk EVERY subfolder, and
-    # on a big tree that is a scandir per child over SMB. Clicking
-    # /Volumes/music put the picker on a folder holding `iTunes Media` (2,233
-    # subdirectories) and `FLAC` (331) — roughly 2,600 round trips at a few ms
-    # each, which is the 45-second spinner that never stopped.
+    # ⚠ BOUNDED. This loop used to walk EVERY subfolder, and on a big tree that
+    # is a scandir per child over SMB. Clicking /Volumes/music put the picker
+    # on a folder holding `iTunes Media` (2,233 subdirectories) and `FLAC`
+    # (331) — roughly 2,600 round trips at a few ms each, which is the
+    # 45-second spinner that never stopped.
     #
     # The descent exists for ONE case: a recording that keeps its audio in
     # CD1/CD2 subdirs rather than at its own root. Those have two to four
@@ -1350,7 +1314,7 @@ def move_folder_to_triage(folder_path, destination):
     import shutil
     from app.utils import download_queue as dq
     # Check and move under one lock, so the download worker cannot create
-    # the folder between the two (2026-10-02).
+    # the folder between the two.
     with dq.FS_LOCK:
         if dq.downloading_here(src):
             return {"error": "This folder is still downloading."}, 409
@@ -1442,9 +1406,9 @@ def staging_features():
     from app.utils.quality import interpret_full
     payload = qs.serialize(row, include_features=True)
     try:
-        # NOT filtered to scored metrics (Ryan, 2026-10-04): this endpoint feeds
-        # the Quality pane on Add Recording, which must list the same metrics as
-        # View Recording's. Only the triage card's poll above keeps scored_only.
+        # NOT filtered to scored metrics: this endpoint feeds the Quality pane
+        # on Add Recording, which must list the same metrics as View
+        # Recording's. Only the triage card's poll above keeps scored_only.
         payload["interpretation"] = interpret_full(payload, payload.get("features") or {})
     except Exception:  # noqa: BLE001
         # Plain-English rendering must never take down the metrics panel.

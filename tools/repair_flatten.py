@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""
-repair_flatten.py — bring pre-2026-07-14 recordings up to the flatten policy.
-
-The always-flatten-on-ingest policy landed 2026-07-14. An audit of all 531
-recordings found 5 that predate it and still have audio below their folder
-root. Zero recordings ingested AFTER the policy are affected, so this is a
-one-off historical cleanup, not a recurring bug.
-
-Those 5 are NOT all the same problem, and treating them alike would destroy
+"""Those 5 are NOT all the same problem, and treating them alike would destroy
 data. Three distinct shapes:
 
-  disc_subdirs      CD1/ + CD2/ holding the two halves of one show.
+disc_subdirs      CD1/ + CD2/ holding the two halves of one show.
                     -> flatten, renumber continuously, set disc labels
-                    (track.set_number — renamed 2026-07-28 from `set`,
                     a SQL reserved word; see note below).
                     Track numbers in the DB currently restart per disc
                     (1,1,2,2,3,3...) because multi-disc detection did not exist

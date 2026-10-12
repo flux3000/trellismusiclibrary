@@ -1,9 +1,7 @@
-"""
-utils/audio_convert.py -- unsupported audio (SHN, WAV, AIFF, APE, WV) to FLAC.
+"""utils/audio_convert.py -- unsupported audio (SHN, WAV, AIFF, APE, WV) to FLAC.
 
-Only FLAC and MP3 are ever imported (Ryan, 2026-10-02), so every other
-lossless container is "unsupported" and Convert to FLAC is how it becomes
-importable.
+Only FLAC and MP3 are ever imported, so every other lossless container is
+"unsupported" and Convert to FLAC is how it becomes importable.
 
 ## The rules that are not obvious
 
@@ -12,8 +10,8 @@ to "FLAC 16-bit" has quietly lost a third of its resolution, and FLAC is
 lossless at either depth.  ffmpeg keeps the source's sample format for FLAC
 output, so the encode passes no `-sample_fmt` at all.
 
-**Compression level 8**, fixed (Ryan, 2026-10-02): smallest files, and the
-encode time is irrelevant next to reading the source.
+**Compression level 8**, fixed: smallest files, and the encode time is
+irrelevant next to reading the source.
 
 **Originals are deleted, but only once their FLAC is proven.**  Each file is
 encoded to a `.part` name, checked (ffmpeg exited cleanly and the output is

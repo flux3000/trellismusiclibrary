@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
-"""
-tools/repair_stale_fk_ddl.py — Repair stale FOREIGN KEY clauses baked into
+"""tools/repair_stale_fk_ddl.py — Repair stale FOREIGN KEY clauses baked into
 the on-disk schema of trellis.db.
 
 Background
 ----------
-The 2026-07-11 Performer/Artist remodel renamed/dropped several tables
-(`_artist_acts_old`, `canonical_artist`). FK enforcement was OFF at the time
-(SQLite only checks `PRAGMA foreign_keys` at runtime; it's not persisted in
-the file, and defaults to OFF), so SQLite's ALTER/RENAME machinery never
-rewrote the FK clauses embedded in other tables' stored CREATE TABLE SQL.
-The ORM models (app/models/performance.py, app/models/user.py) have always
-declared these FKs correctly against `performer.id` — only the physical
-schema text on disk is stale. A comprehensive audit (PRAGMA foreign_key_list
-on every table + PRAGMA foreign_key_check) found exactly two affected
-tables:
+FK enforcement was OFF at the time (SQLite only checks `PRAGMA foreign_keys` at
+runtime; it's not persisted in the file, and defaults to OFF), so SQLite's
+ALTER/RENAME machinery never rewrote the FK clauses embedded in other tables'
+stored CREATE TABLE SQL. The ORM models (app/models/performance.py,
+app/models/user.py) have always declared these FKs correctly against
+`performer.id` — only the physical schema text on disk is stale. A
+comprehensive audit (PRAGMA foreign_key_list on every table + PRAGMA
+foreign_key_check) found exactly two affected tables:
 
     performance.performer_id            -> stale: "_artist_acts_old"(id)
                                             correct: performer(id)
@@ -51,12 +48,9 @@ derivation, any future model change to these two tables' columns must be
 re-dumped into REPAIR_SPECS by hand, or this script will silently rebuild
 against a stale shape.
 
-2026-07-22 update: `app/models/performance.py` now declares
-`server_default="inherit"` on `personnel_mode` (alongside the existing
-Python-side `default="inherit"`), so model and DB agree again. The DDL
-below was re-dumped to include `DEFAULT 'inherit'`, matching the physical
-default a past raw ALTER TABLE had baked in. Previously this script would
-have silently dropped that DB-level default on rebuild — that gap is now
+The DDL below was re-dumped to include `DEFAULT 'inherit'`, matching the
+physical default a past raw ALTER TABLE had baked in. Previously this script
+would have silently dropped that DB-level default on rebuild — that gap is now
 closed.
 
 Usage
@@ -84,10 +78,10 @@ from pathlib import Path
 # list in old-table order, list of CREATE INDEX statements to reapply).
 #
 # DDL and index lists below were dumped verbatim from a fresh DB created via
-# `db.create_all()` against the live SQLAlchemy models (2026-07-22). Neither
-# table had any indexes beyond the implicit PRIMARY KEY index, so the index
-# list is empty for both — kept as a list (not hardcoded away) so this
-# script stays correct if a future model adds one.
+# `db.create_all` against the live SQLAlchemy models. Neither table had any
+# indexes beyond the implicit PRIMARY KEY index, so the index list is empty
+# for both — kept as a list (not hardcoded away) so this script stays correct
+# if a future model adds one.
 
 REPAIR_SPECS = {
     "performance": {
@@ -148,10 +142,7 @@ CREATE TABLE user_artist_permission (
 
 def refuse_if_live_db(db_path: Path):
     """Hard stop if pointed at the live DB file, even with --yes."""
-    # Both names on purpose. This is a REFUSAL list, so a stale entry is
-    # harmless and a missing one is not: db/fluxaudio.db was a symlink to
-    # the live file until 2026-09-04, and any copy of this repo that still
-    # has one must still be refused.
+    # Both names on purpose.
     if db_path.name in {"trellis.db", "fluxaudio.db"} and db_path.parent.name == "db":
         print(
             "REFUSING TO RUN: this looks like the live DB "

@@ -154,11 +154,9 @@ def compute_health(scan):
     # ── Final ratio ───────────────────────────────────────────────────────────
     if n_audio == 0 or total == 0:
         score = 0
-        # Say WHY there's no audio when we can (2026-08-26 — a .shn-only
-        # folder used to just score 0 with an empty factors list, no
-        # different from a genuinely empty directory). Not ai_recoverable:
-        # this is a file-format problem, nothing the AI Research Assistant
-        # can fill in.
+        # Say WHY there's no audio when we can. Not ai_recoverable: this
+        # is a file-format problem, nothing the AI Research Assistant can
+        # fill in.
         unsupported = scan.get("unsupported_audio") or []
         if unsupported:
             exts = sorted({u.get("ext", "") for u in unsupported if u.get("ext")})
@@ -172,13 +170,12 @@ def compute_health(scan):
     else:
         score = max(0, min(100, round(100 * populated / total)))
     band = "green" if score >= 85 else "yellow" if score >= 60 else "red"
-    # Ryan, 2026-08-28: "I don't like the numerical score for metadata."
     # A 0-100 completeness number invites a precision it does not have — it is
-    # a count of populated fields over expected fields, so 79 and 82 mean
-    # "a couple of things missing" and nothing more. The three bands were
-    # already the only distinction anyone acted on; naming them is what the
-    # display now shows. The score stays in the payload for the factor list and
-    # for anything that wants to sort.
+    # a count of populated fields over expected fields, so 79 and 82 mean "a
+    # couple of things missing" and nothing more. The three bands were already
+    # the only distinction anyone acted on; naming them is what the display now
+    # shows. The score stays in the payload for the factor list and for
+    # anything that wants to sort.
     rating = RATING[band]
 
     factors.sort(key=lambda x: x["delta"])
@@ -186,7 +183,7 @@ def compute_health(scan):
             "populated": round(populated, 2), "total": total,
             # Exposed so the Metadata Quality panel can state the track-title
             # position directly ("18 of 20 named") instead of re-deriving it by
-            # parsing the factor message string (2026-08-02).
+            # parsing the factor message string.
             "tracks_named": named, "tracks_total": n_audio,
             # 3=Y-M-D, 2=Y-M, 1=Y, 0=none. Same reason: the panel grades the
             # Date row by precision exactly as the score does.

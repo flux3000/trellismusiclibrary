@@ -1,13 +1,10 @@
-"""
-tests/test_user_profile.py — display name and picture.
+"""tests/test_user_profile.py — display name and picture.
 
-Two names on purpose (Ryan, 2026-08-25): `username` is the credential,
-`display_name` is what a human sees. Ryan's collecting partner signed
-everything "oldindian" and was called Jeff.
+Two names on purpose: `username` is the credential, `display_name` is what a
+human sees.  and was called Jeff.
 
-The credential became editable on 2026-08-28 — see the last section. It had
-been fixed for the life of the account, which meant a name typed once on the
-first-run setup page could never be corrected.
+It had been fixed for the life of the account, which meant a name typed once on
+the first-run setup page could never be corrected.
 
 Both travel: the name a peer sees on a library they joined comes from the
 owner's display name, and the picture is served through the share door.
@@ -146,13 +143,7 @@ def test_the_profile_endpoints_require_a_session(app):
         assert r.status_code in (401, 403), f"{method.upper()} {path} → {r.status_code}"
 
 
-# ── Changing the sign-in name (2026-08-28) ───────────────────────────────────
-#
-# Ryan set up a second install, typed "jeff" on the setup page, and got
-# `ryanfbaker` — his macOS account name. Two separate faults: the setup page
-# discarded the answer when a database already existed (run.py, covered by
-# test_first_run_owner_account.py), and once wrong there was no way to fix it.
-# This section covers the second half.
+# ── Changing the sign-in name ───────────────────────────────────
 
 
 def test_the_signin_name_can_be_changed(client):

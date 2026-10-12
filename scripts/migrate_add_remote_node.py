@@ -1,8 +1,7 @@
-"""
-scripts/migrate_add_remote_node.py
+"""scripts/migrate_add_remote_node.py
 
-Adds the `remote_node` table — outbound peer sharing (milestone 2, 2026-08-08).
-Libraries I have joined as a peer, the mirror of the inbound `peer` table.
+Adds the `remote_node` table — outbound peer sharing. Libraries I have joined
+as a peer, the mirror of the inbound `peer` table.
 
 Additive and idempotent: one new table, no FKs, no changes to any existing
 table. Nothing references it and it references nothing, so this does NOT touch

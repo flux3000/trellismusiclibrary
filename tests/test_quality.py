@@ -24,10 +24,9 @@ from app.utils.quality import score_recording, GROUP_WEIGHTS
 # Fixtures — feature dicts, not audio
 # ═════════════════════════════════════════════════════════════════════════════
 def _features(**over):
-    """
-    A clean, mid-range recording.  Values are real measurements taken from the
-    Danny Gatton 1988-06-10 Birchmere tape (Ryan grades it an A), so the numbers
-    are plausible rather than invented.
+    """A clean, mid-range recording. Values are real measurements taken from the
+    Danny Gatton 1988-06-10 Birchmere tape, so the numbers are plausible rather
+    than invented.
     """
     base = {
         # presence_balance_db and midrange_scoop_db are still MEASURED and still
@@ -46,10 +45,6 @@ def _features(**over):
         "channel_rms_min_db":  -20.07,
         "phase_correlation":     0.51,
         "dropout_count":         0.0,
-        # Must track QUALITY_ANALYSIS_VERSION — bumped to "2" on 2026-07-31 when
-        # the audience/room features were added. A fixture pinned to an older
-        # version reads as "extracted by a previous analyser" and gets skipped
-        # by rescore_stored(), which would make these tests quietly vacuous.
         "analysis_version":     "2",
         "sampled": [{"track": "Track05.flac", "duration_s": 278.7,
                      "offsets": [91.2, 167.4]}],
@@ -116,7 +111,7 @@ def test_scoring_is_pure_over_features():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# v3 (2026-07-31) — dead metrics, source adjustment, band verdict
+# v3 — dead metrics, source adjustment, band verdict
 # ═════════════════════════════════════════════════════════════════════════════
 def test_presence_and_scoop_do_not_affect_the_score():
     """
@@ -207,10 +202,9 @@ def test_norm_path_composes_and_strips_slash():
 
 
 def test_nfd_and_nfc_paths_resolve_to_one_row(app):
-    """
-    The bug this prevents: macOS hands out decomposed filenames, the DB holds
-    composed ones, so "Lucía" != "Lucía" byte-for-byte and every lookup silently
-    misses.  This cost an afternoon on the Guitar Trio corpus (2026-07-28).
+    """The bug this prevents: macOS hands out decomposed filenames, the DB holds
+    composed ones, so "Lucía" != "Lucía" byte-for-byte and every lookup
+    silently misses. This cost an afternoon on the Guitar Trio corpus.
     """
     nfd = unicodedata.normalize("NFD", ACCENTED)
     nfc = unicodedata.normalize("NFC", ACCENTED)
@@ -501,12 +495,9 @@ def test_serialize_none_is_none():
     assert qs.serialize(None) is None
 
 
-# ── Advanced Metrics grouping (2026-08-02) ────────────────────────────────────
+# ── Advanced Metrics grouping ────────────────────────────────────
 # Metrics are now displayed UNDER the group they belong to, marked scored vs
-# measured-only. That mapping lives in quality_interpret.METRIC_GROUP but the
-# AUTHORITY is score_tone/score_noise/score_dynamics — if the two drift, the
-# panel starts claiming a dead input moves the number, which is exactly the
-# misreading that made presence balance look like a scoring bug on 2026-07-30.
+# measured-only.
 
 def _features_consumed_by(func):
     """Feature keys a scoring function reads, straight out of its source."""
@@ -553,11 +544,8 @@ def test_zero_weight_metrics_are_still_displayed():
 
 
 def test_every_scored_feature_is_actually_displayed():
-    """
-    The gap this catches, found 2026-08-02: hf_energy_ratio_db had been 50% of
-    the Tone score since the 07-31 rework and appeared in no panel, so the Tone
-    meter showed one of its two real inputs. A feature that moves the number
-    must be visible, or the breakdown is not a breakdown.
+    """A feature that moves the number must be visible, or the breakdown is not a
+    breakdown.
     """
     from app.utils.quality.quality_interpret import METRIC_GROUP
     from app.utils.quality.quality_scoring import (

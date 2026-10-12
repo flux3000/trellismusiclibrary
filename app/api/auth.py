@@ -47,9 +47,6 @@ def logout():
 
 
 # ── Profile ───────────────────────────────────────────────────────────────────
-# Added 2026-08-25. `username` is the credential and does not change here;
-# `display_name` and the picture are what a human sees, and both travel to
-# anyone this person shares a library with (see api/share.py:_node_identity).
 
 _AVATAR_MAX_BYTES = 4 * 1024 * 1024        # a face, not a photograph library
 
@@ -70,7 +67,7 @@ def _avatar_path(user):
 def profile_payload(user):
     return {
         "id":           user.id,
-        "username":     user.username,          # the credential — editable since 2026-08-28
+        "username":     user.username,
         "display_name": user.display_name,      # may be None
         "name":         user.name,              # what to SHOW; never blank
         "has_avatar":   bool(user.avatar_ext),
@@ -83,17 +80,7 @@ def profile_payload(user):
 @bp.route("/me", methods=["PATCH"])
 @login_required
 def update_me():
-    """
-    Both names, in one request or either alone.
-
-    `username` became editable here on 2026-08-28. It had been fixed for the
-    life of the account, which meant the one name a person types on the
-    first-run setup page was the one name the app gave them no way to
-    correct -- and that page had a bug that could put the wrong name there
-    (see FluxAPI._create_owner_account in run.py). Safe to change: the
-    username is read by the login lookup, this payload and User.name's
-    fallback, and nothing keys off it. Flask-Login carries the row id, so a
-    rename does not end the session.
+    """Both names, in one request or either alone.
 
     Every field is VALIDATED before any of them is APPLIED. A patch that
     sets both names must not leave the first one changed when the second is

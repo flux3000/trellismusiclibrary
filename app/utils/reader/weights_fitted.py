@@ -1,5 +1,4 @@
-"""
-Weights for the role decoder (Resolver v2, chunk 7b, 2026-10-05): FITTED.
+"""Weights for the role decoder: FITTED.
 
 Every number the decoder uses is in this file, as readable rows:
 
@@ -11,12 +10,13 @@ role's BIAS. The decoder then picks the best whole-file labelling (Viterbi), so 
 follows "with" is a MEMBER because the transition CONNECTOR -> MEMBER is strong, not because
 a special rule says so. Units are log-score points: +3 is "clearly", +6 "decisively".
 
-The rows are the chunk 3 hand-set table (weights_handset.py) with the ARTIST emission rows
-moved by an averaged perceptron fitted on the evaluation corpora G1 and G3 (reader/fit.py).
-A weight moves little when few rows touched it and never more than 3 points from its
-hand-set value. Every other row is still hand-set: fitting them as well made the venue field
-worse on held-out acts (see the module docstring of fit.py). Refit after any change to the
-features, then recalibrate: python3 -m app.utils.resolver_eval --fit-weights --write
+The rows are the hand-set table (weights_handset.py) with the ARTIST
+emission rows moved by an averaged perceptron fitted on the evaluation corpora
+G1 and G3 (reader/fit.py). A weight moves little when few rows touched it and
+never more than 3 points from its hand-set value. Every other row is still
+hand-set: fitting them as well made the venue field worse on held-out acts (see
+the module docstring of fit.py). Refit after any change to the features, then
+recalibrate: python3 -m app.utils.resolver_eval --fit-weights --write
 """
 
 ROLES = ("TITLE", "ARTIST", "CONNECTOR", "MEMBER", "VENUE", "EVENT", "STAGE", "PLACE",
@@ -199,7 +199,7 @@ EMISSION = [
 
     # ── EVENT ─────────────────────────────────────────────────────────────
     ("event_word",        "EVENT",   5.0),
-    ("not_event",         "EVENT",  -8.0),   # added 2026-10-05 with the hand-set row; not fitted
+    ("not_event",         "EVENT",  -8.0),
     ("lib_event",         "EVENT",   5.0),
     ("label_event",       "EVENT",   5.0),
     ("w8p",               "EVENT",  -2.0),

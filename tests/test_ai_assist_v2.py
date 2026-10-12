@@ -1,9 +1,3 @@
-"""
-tests/test_ai_assist_v2.py -- what is left of the 2026-09-07 AI Assist tests after Lomax
-(2026-10-05) replaced app/utils/ai_assist.py and artist_research.py: the lineup_json
-migration script, and the artist payload before any research has run. The search budget, caching,
-info-file cap, recap, grounding and modes are covered by tests/test_lomax_*.py.
-"""
 
 import pytest
 
@@ -16,7 +10,7 @@ def api(app):
 
 def test_migrate_add_performer_lineup_is_idempotent(tmp_path):
     # Exercises a one-off migration against the schema of its day, so it keeps
-    # that day's names (not renamed 2026-09-16).
+    # that day's names.
     import sqlite3
     from scripts import migrate_add_performer_lineup as mod
 

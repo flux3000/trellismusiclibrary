@@ -1,6 +1,5 @@
-"""
-tests/test_resolve_event_stage.py -- event and stage as resolver fields, learned-alias tables
-(Resolver v2, chunk 4).
+"""tests/test_resolve_event_stage.py -- event and stage as resolver fields,
+learned-alias tables.
 
 The festival is an Event, "Hillside Stage" is the performance's Stage, neither is the venue.
 Resolved carries both; auto_confirm, _do_confirm and apply_blanket_values pass them to the

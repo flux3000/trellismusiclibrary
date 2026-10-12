@@ -1,6 +1,5 @@
-"""
-tests/test_dimension_media_and_events.py — Musician + Event photos, and the Event
-dimension's newly-complete CRUD (2026-09-01).
+"""tests/test_dimension_media_and_events.py — Musician + Event photos, and the
+Event dimension's newly-complete CRUD.
 
 Two things are under test here, and they share a file because they landed
 together:
@@ -18,7 +17,6 @@ together:
 
 2. EVENT CRUD. Event had no delete and a detail endpoint that raised
    AttributeError the moment a performance was attached to it (`p.musician`,
-   a survivor of the 2026-07-11 Artist remodel). Nothing caught it because
    nothing called it — there was no Event page. There is one now.
 """
 
@@ -74,8 +72,8 @@ def test_musician_upload_list_serve_delete(api, app, person, tmp_path):
 
     # The `musicians` bucket is the point: a PERSON and an ACT share a name
     # constantly in this corpus. Files live under DATA_DIR/images/, not
-    # LIBRARY_ROOT (Bulk Ingest spec chunk 2), and musicians/artists are
-    # separate buckets so without it they would write to one folder.
+    # LIBRARY_ROOT, and musicians/artists are separate buckets so without
+    # it they would write to one folder.
     images_dir = tmp_path / "data" / "images" / "musicians" / "Danny Gatton"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
     assert not (tmp_path / "data" / "images" / "artists" / "Danny Gatton").exists()
@@ -152,8 +150,7 @@ def test_event_upload_list_serve_delete(api, app, event, tmp_path):
     assert img["is_primary"] is True
     assert img["url"] == f"/api/events/images/{img['id']}"
 
-    # Files live under DATA_DIR/images/events/, not LIBRARY_ROOT (Bulk
-    # BulkIngest spec chunk 2 -- image store moved out of the library).
+    # Files live under DATA_DIR/images/events/, not LIBRARY_ROOT.
     images_dir = tmp_path / "data" / "images" / "events" / "Bonnaroo 2009"
     assert len(list(images_dir.glob("img_*.jpg"))) == 1
 
@@ -229,10 +226,8 @@ def test_generated_routes_match_the_handwritten_shape(app):
 # ── Event CRUD ───────────────────────────────────────────────────────────────
 
 def test_event_detail_with_a_performance_attached(api, app, event):
-    """
-    Regression: get_event() read `p.musician.name`, a name Performance has not
-    had since the 2026-07-11 remodel. Any event with a performance on it
-    raised AttributeError — invisible because nothing called the endpoint.
+    """Any event with a performance on it raised AttributeError — invisible
+    because nothing called the endpoint.
     """
     from app.extensions import db as _db
     from app.models.performance import Performance
@@ -325,11 +320,9 @@ def test_event_duplicate_name_is_409_with_the_existing_id(api, app, event):
 #
 # The five dimension index pages are built from the LIST endpoints, and every
 # tile reads fields that were added for them (image_id, recording_count, the
-# artist's genre_color). A missing field is not an error anywhere — it
-# renders as a tile with no photo and no counts, which looks exactly like a
-# dimension that genuinely has none. That is CONTEXT.md's standing trap: a
-# failure disguised as an ordinary empty state. So the contract is pinned here
-# rather than trusted.
+# artist's genre_color). A missing field is not an error anywhere — it renders
+# as a tile with no photo and no counts, which looks exactly like a dimension
+# that genuinely has none. So the contract is pinned here rather than trusted.
 
 def test_list_endpoints_carry_the_index_tile_fields(api, app, person, event):
     from app.extensions import db as _db
@@ -350,7 +343,7 @@ def test_list_endpoints_carry_the_index_tile_fields(api, app, person, event):
         "/api/artists/": {"id", "name", "sort_name", "recording_count", "members",
                              "genre_id", "genre_name", "genre_color", "image_id"},
         "/api/musicians/":    {"id", "name", "sort_name", "recording_count",
-                             "artist_count", "image_id"},
+                             "artist_count"},
         "/api/genres/":     {"id", "name", "description", "color",
                              "artist_count", "recording_count"},
         "/api/events/":     {"id", "name", "city", "state", "country", "venue_id",

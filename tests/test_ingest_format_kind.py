@@ -1,10 +1,8 @@
-"""
-tests/test_ingest_format_kind.py -- FORMAT and TYPE (2026-09-27) reach
-batch_scan() (Bulk Import, #/batch) and the Review & Ingest staging payload
-(app/api/quality.py's _scan_metadata) the same way bulk_ingest.py's
-extract()/classify() compute them for Bulk Ingest, so all three ingest
-queue tables show matching pills for the same folder. See
-app/utils/bulk_ingest.py's folder_format()/classify_kind().
+"""tests/test_ingest_format_kind.py -- FORMAT and TYPE reach batch_scan (Bulk
+Import, #/batch) and the Review & Ingest staging payload (app/api/quality.py's
+_scan_metadata) the same way bulk_ingest.py's extract/classify compute them for
+Bulk Ingest, so all three ingest queue tables show matching pills for the same
+folder. See app/utils/bulk_ingest.py's folder_format/classify_kind.
 """
 import numpy as np
 import soundfile as sf
@@ -25,11 +23,11 @@ def _flac_with_tags(path, **tags):
 # -- Staging payload (Review & Ingest) ---------------------------------------
 
 def test_scan_metadata_yields_format_and_kind_for_a_studio_album(app, tmp_path):
-    # _scan_metadata now sources its fields from resolve() (Ingest Field
-    # Resolver spec v1, Fix 2) instead of a standalone tag/info merge, and
-    # resolve()'s artist rule reads LIBRARY_ROOT / node_settings, both of
-    # which need a real app + DB context -- the same context every one of
-    # its real callers (Review & Ingest's own route) already has.
+    # _scan_metadata now sources its fields from resolve instead of a
+    # standalone tag/info merge, and resolve's artist rule reads
+    # LIBRARY_ROOT / node_settings, both of which need a real app + DB
+    # context -- the same context every one of its real callers (Review &
+    # Ingest's own route) already has.
     show = tmp_path / "show"
     _flac_with_tags(show / "01.flac", ARTIST="Phish", ALBUM="A Picture of Nectar")
     _flac_with_tags(show / "02.flac", ARTIST="Phish", ALBUM="A Picture of Nectar")

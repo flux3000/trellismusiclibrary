@@ -36,7 +36,7 @@ def _run(fake, rid, **reply):
 
 # ── agreements ───────────────────────────────────────────────────────────────
 
-def test_agreeing_proposals_are_stored_flagged_and_cannot_be_decided(api, fake, seeded_ids):
+def test_agreeing_proposals_are_stored_flagged_and_a_decision_clears_the_flag(api, fake, seeded_ids):
     rid = seeded_ids["recording_id"]
     run = _run(fake, rid, proposals=[
         {"field": "artist", "proposed": "Bill Evans", "confidence": "high", "source": "db_match", "agrees": True},
@@ -45,10 +45,11 @@ def test_agreeing_proposals_are_stored_flagged_and_cannot_be_decided(api, fake, 
     props = {p.field: p for p in db.session.get(LomaxRun, run.id).proposals}
     assert props["artist"].agrees is True and props["lineage"].agrees is False
     assert props["artist"].challenge is False
-    r = api.post("/api/lomax/proposals/%d" % props["artist"].id, json={"decision": "accepted"})
-    assert r.status_code >= 400 and db.session.get(LomaxProposal, props["artist"].id).decision is None
     got = {p["field"]: p for p in lomax.get_run(run.id)["result"]["proposals"]}
     assert got["artist"]["agrees"] is True
+    # The page offers a decision on an agreeing row only once the live value differs, so one is recorded.
+    r = api.post("/api/lomax/proposals/%d" % props["artist"].id, json={"decision": "rejected"})
+    assert r.status_code == 200 and db.session.get(LomaxProposal, props["artist"].id).decision == "rejected"
 
 
 def test_a_value_equal_to_the_filed_one_counts_as_agreeing_without_the_flag(fake, seeded_ids):
@@ -130,7 +131,7 @@ def test_the_instructions_ask_for_every_field_and_every_track():
     from app.lomax.skills import SKILLS
     ins = SKILLS["recording"].instructions
     assert "agrees=true" in ins and "EVERY track" in ins and "Segue notation" in ins
-    assert sorted(SKILLS) == ["album", "artist", "recording", "venue"]
+    assert sorted(SKILLS) == ["album", "artist", "event", "musician", "recording", "venue"]
     assert "—" not in ins
 
 

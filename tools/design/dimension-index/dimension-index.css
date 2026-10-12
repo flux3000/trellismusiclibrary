@@ -1,0 +1,116 @@
+/* Proposed additions for the five dimension index pages. Loaded AFTER main.css.
+   Everything is built from existing tokens; nothing here sets a colour of its
+   own except the genre colour passed in as --dx-fg. Corners: --r-img on images,
+   --r-sm elsewhere, never larger. */
+
+/* mock-only: main.css makes body a fixed-height flex shell */
+html, body.dx-mock { height: auto; overflow: auto; }
+body.dx-mock { display: block; background: var(--bg-0); color: var(--t0); font-family: var(--font-ui); font-size: var(--fs-body); }
+.dx-mockbar { position: fixed; top: 10px; right: 14px; z-index: 5; }
+.dx-mockbar select { font: inherit; font-size: 11px; background: var(--bg-2); color: var(--t1); border: 1px solid var(--bd-1); border-radius: var(--r-sm); padding: 3px 6px; }
+
+.dx-page { padding: 28px 32px 90px; max-width: 1120px; }
+.dx-title { font-family: var(--font-display); font-size: 26px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 18px; color: var(--t0); }
+.dx-select { font: inherit; font-size: 12px; padding: 6px 8px; background: var(--bg-2); color: var(--t1); border: 1px solid var(--bd-1); border-radius: var(--r-sm); }
+
+/* ── Row ─────────────────────────────────────────────────────────────────── */
+.dx-list { border-top: 1px solid var(--bd-1); }
+.dx-row, .dx-row:visited {
+  display: grid; align-items: start; column-gap: 22px; padding: 16px 6px;
+  grid-template-columns: var(--dx-art, 128px) minmax(0, 1fr) var(--dx-side, 140px);
+  border-bottom: 1px solid var(--bd-0); color: inherit; text-decoration: none;
+}
+.dx-row:hover { background: var(--bg-2); color: inherit; }
+.dx-row:hover .dx-name { color: var(--accent-lit); }
+
+.dx-art {
+  position: relative; width: var(--dx-art, 128px); aspect-ratio: 1; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--dx-fg, var(--bg-4)); border-radius: var(--r-img);
+}
+.dx-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.dx-ini { font-family: var(--font-display); font-weight: 700; letter-spacing: .02em;
+  font-size: calc(var(--dx-art, 128px) * .32); color: rgba(255,255,255,.62); }
+/* no genre colour: neutral field, quieter initials */
+.dx-art:not([style]) .dx-ini { color: var(--t3); }
+
+.dx-body { min-width: 0; }
+.dx-name { font-family: var(--font-display); font-size: 20px; font-weight: 600; line-height: 1.2; color: var(--t0); }
+.dx-sub  { font-size: 12px; color: var(--t2); margin-top: 4px; }
+.dx-sw   { display: inline-block; width: 8px; height: 8px; border-radius: 1px; margin-right: 6px; background: var(--dx-fg, var(--t3)); }
+.dx-text { font-size: var(--fs-body); line-height: 1.6; color: var(--t1); margin-top: 9px; max-width: 70ch;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.dx-with { font-size: 11.5px; color: var(--t2); margin-top: 9px; line-height: 1.5; }
+.dx-with b { font-weight: 500; color: var(--t1); }
+
+.dx-side { text-align: right; font-variant-numeric: tabular-nums; }
+.dx-n  { font-family: var(--font-display); font-size: 22px; font-weight: 600; color: var(--t0); line-height: 1; }
+.dx-nl { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--t3); margin-top: 5px; }
+.dx-span { font-size: 11.5px; color: var(--t2); margin-top: 9px; }
+
+/* ── Grouped list: a gutter label beside each run of rows ─────────────────── */
+.dx-group { display: grid; grid-template-columns: 76px minmax(0, 1fr); column-gap: 8px; }
+.dx-group + .dx-group .dx-list { border-top: 0; }
+.dx-gutter { position: sticky; top: 12px; align-self: start; padding-top: 14px;
+  font-family: var(--font-display); font-size: 30px; font-weight: 600; line-height: 1; color: var(--t3); }
+
+/* ── Artists: large square, genre colour behind the initials ──────────────── */
+.dx-row--artist { --dx-art: 128px; }
+
+/* ── Musicians: small and quiet; most have no picture ─────────────────────── */
+.dx-row--musician { --dx-art: 52px; --dx-side: 120px; padding: 12px 6px; }
+.dx-row--musician .dx-name { font-size: 16px; }
+.dx-row--musician .dx-art { border-radius: var(--r-img); }
+
+/* ── Venues and events: text first; a picture, when there is one, rides right */
+.dx-row--venue, .dx-row--event { grid-template-columns: minmax(0, 1fr) auto; }
+.dx-end { display: flex; align-items: flex-start; gap: 18px; justify-content: flex-end; }
+.dx-end .dx-side { width: 110px; flex: none; }
+.dx-photo { flex: none; width: 150px; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--r-img); background: var(--bg-4); }
+.dx-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Events: the date is the headline, the way it is on a handbill */
+.dx-date { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--t1); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+.dx-row--event .dx-name { font-size: 22px; }
+
+/* ── Genres ──────────────────────────────────────────────────────────────── */
+.dx-opt { margin: 46px 0 10px; font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--t3); font-weight: 600; }
+.dx-opt:first-of-type { margin-top: 8px; }
+
+/* A: composition strip + ledger */
+.gx-strip { display: flex; height: 38px; gap: 2px; margin-bottom: 6px; }
+.gx-strip i { display: block; background: var(--dx-fg, var(--bg-5)); border-radius: 1px; min-width: 2px; }
+.gx-row, .gx-row:visited { display: grid; grid-template-columns: 14px minmax(0, 1fr) 90px 110px; column-gap: 18px; align-items: center;
+  padding: 14px 6px; border-bottom: 1px solid var(--bd-0); color: inherit; text-decoration: none; }
+.gx-row:hover { background: var(--bg-2); color: inherit; }
+.gx-row .dx-sw { width: 14px; height: 14px; margin: 0; }
+.gx-row .dx-name { font-size: 22px; }
+
+/* B: roster of faces */
+.gb-row, .gb-row:visited { display: grid; grid-template-columns: 96px minmax(0, 1fr); column-gap: 20px; align-items: center;
+  padding: 14px 6px; border-bottom: 1px solid var(--bd-0); color: inherit; text-decoration: none; }
+.gb-row:hover { background: var(--bg-2); color: inherit; }
+.gb-key { width: 96px; height: 96px; border-radius: var(--r-img); background: var(--dx-fg, var(--bg-4)); display: flex; align-items: flex-end; padding: 8px 10px;
+  font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.gb-faces { display: flex; gap: 6px; margin-top: 10px; }
+.gb-faces .dx-art { --dx-art: 44px; }
+
+/* C: decades. One shared column grid so every genre lines up. */
+.gc-head, .gc-row, .gc-row:visited { display: grid; grid-template-columns: 200px minmax(0, 1fr) 90px; column-gap: 18px; align-items: center; }
+.gc-row, .gc-row:visited { padding: 12px 6px; border-bottom: 1px solid var(--bd-0); color: inherit; text-decoration: none; }
+.gc-row:hover { background: var(--bg-2); color: inherit; }
+.gc-head { padding: 0 6px 8px; font-size: 10.5px; letter-spacing: .12em; color: var(--t3); font-variant-numeric: tabular-nums; }
+.gc-dec { display: grid; grid-template-columns: repeat(var(--cols), 1fr); gap: 2px; }
+.gc-dec i { display: block; height: 26px; border-radius: 1px; background: var(--bg-3); }
+.gc-dec i[style] { background: color-mix(in srgb, var(--dx-fg) var(--p), var(--bg-3)); }
+.gc-head .gc-dec span { text-align: left; }
+.gc-row .dx-name { font-size: 18px; }
+.gc-row .dx-name .dx-sw { width: 10px; height: 10px; }
+
+@media (max-width: 760px) {
+  .dx-page { padding: 20px 16px 60px; }
+  .dx-row--artist { --dx-art: 84px; grid-template-columns: 84px minmax(0, 1fr); }
+  .dx-row--artist .dx-side, .dx-row--musician .dx-side { grid-column: 2; text-align: left; display: flex; gap: 10px; align-items: baseline; }
+  .dx-group { grid-template-columns: 1fr; } .dx-gutter { position: static; }
+  .dx-photo { display: none; }
+}

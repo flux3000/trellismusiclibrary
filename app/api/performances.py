@@ -77,7 +77,7 @@ def get_performance(performance_id):
         "artist_id": p.artist_id,
         "artist":    p.artist.name,
         "artist_image_id":   _primary_image_id(p.artist),
-        # The venue's face, offered in the recording image picker (2026-10-04).
+        # The venue's face, offered in the recording image picker.
         "venue_image_id":    v.images[0].id if (v and v.images) else None,
         "artist_genre_color": _perf_genre.color if _perf_genre else None,
         # The act's genre name: the Genre row of the Resolver table shows only while the act has none.
@@ -177,17 +177,17 @@ def update_performance(performance_id):
 
     # SHOW-level personnel — who played THIS performance. Distinct from the
     # act roster (which is edited only via PUT /api/artists/<id> on the
-    # Artist page). This used to call set_artist_members(p.artist,
-    # ...), silently rewriting the act's GLOBAL roster from a single show's
-    # pill-row edit — that was the actual bug the Per-Show Personnel design
-    # doc set out to fix. Now it only ever touches performance_personnel rows
-    # scoped to this performance; see utils/personnel.py.
+    # Artist page). This used to call set_artist_members(p.artist, ...),
+    # silently rewriting the act's GLOBAL roster from a single show's
+    # pill-row edit — that was the actual bug the Per-Show Personnel set out
+    # to fix. Now it only ever touches performance_personnel rows scoped to
+    # this performance; see utils/personnel.py.
     #
-    # Members/Guests two-row UI (2026-07-22): 'members' and 'guests' are two
-    # independent name lists, not one list with guest-vs-member inferred by
-    # diffing. Either key can be omitted (not sent) to leave that row
-    # untouched — the frontend always sends both together on any edit, so in
-    # practice this only matters for API callers that don't.
+    # Members/Guests two-row UI: 'members' and 'guests' are two independent
+    # name lists, not one list with guest-vs-member inferred by diffing.
+    # Either key can be omitted (not sent) to leave that row untouched — the
+    # frontend always sends both together on any edit, so in practice this
+    # only matters for API callers that don't.
     if "members" in data or "guests" in data:
         sync_performance_personnel(p, data.get("members"), data.get("guests"))
 
@@ -211,15 +211,14 @@ def update_performance(performance_id):
     if "event_id" in data and old_event_id != p.event_id:
         prune_event_if_orphaned(old_event_id)
 
-    # Folder name follows the metadata (decided 2026-07-25, built 2026-08-09)
-    # — date, venue, location and an artist reassignment all feed
-    # build_folder_name(), and a Performance can hold several Recordings
-    # (SBD + AUD of the same show), each with its own folder to keep in sync.
-    # Non-fatal per-recording: one folder rename failing (e.g. its directory
-    # already moved out from under it) must not stop the others or block the
-    # metadata commit below.
-    # rename_folders governs this (spec section 1.1): off means a metadata
-    # save never touches any of this performance's recordings' folders.
+    # Folder name follows the metadata — date, venue, location and an artist
+    # reassignment all feed build_folder_name, and a Performance can hold
+    # several Recordings (SBD + AUD of the same show), each with its own
+    # folder to keep in sync. Non-fatal per-recording: one folder rename
+    # failing (e.g. its directory already moved out from under it) must not
+    # stop the others or block the metadata commit below. rename_folders
+    # governs this (spec section 1.1): off means a metadata save never
+    # touches any of this performance's recordings' folders.
     library_root   = current_app.config.get("LIBRARY_ROOT", "")
     rename_errors  = []
     if node_settings.get_file_handling()["rename_folders"]:

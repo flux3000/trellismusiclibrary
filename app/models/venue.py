@@ -27,8 +27,8 @@ class Venue(db.Model):
     # Relationships
     performances = db.relationship("Performance",  back_populates="venue")
     events       = db.relationship("Event",        back_populates="venue")
-    # Photos (2026-08-07) — many, one flagged primary. Ordered primary-first so
-    # `images[0]` is always the card face, matching Artist.images.
+    # Photos — many, one flagged primary. Ordered primary-first so `images[0]`
+    # is always the card face, matching Artist.images.
     images       = db.relationship("VenueImage", back_populates="venue",
                                    cascade="all, delete-orphan",
                                    order_by="desc(VenueImage.is_primary), "

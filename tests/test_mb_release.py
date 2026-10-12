@@ -1,8 +1,7 @@
-"""
-tests/test_mb_release.py -- MusicBrainz RELEASE lookup (Studio Records spec
-v1, section 2): search_release(), classify_release(), lookup_release(),
-apply_to_recording(), try_match_release(), link_release(), unlink_release(),
-the mb_release follow-up kind, and the migration's new columns.
+"""tests/test_mb_release.py -- MusicBrainz RELEASE lookup: search_release,
+classify_release, lookup_release, apply_to_recording, try_match_release,
+link_release, unlink_release, the mb_release follow-up kind, and the
+migration's new columns.
 
 Every test here is NETWORK-FREE, same discipline as tests/test_musicbrainz.py:
 _get() is monkeypatched wherever a network round-trip would otherwise happen,

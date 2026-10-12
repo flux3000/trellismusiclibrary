@@ -1,5 +1,4 @@
-"""
-tests/test_bulk_ingest_api.py -- /api/bulk-ingest/* control surface (spec chunk 5d).
+"""tests/test_bulk_ingest_api.py -- /api/bulk-ingest/* control surface.
 
 The worker thread itself is exercised directly against pure functions in
 test_bulk_ingest_run.py/test_bulk_ingest_resume.py/test_bulk_ingest_dedup.py; here
@@ -86,9 +85,6 @@ def test_current_counts_match_item_statuses(api):
 
 
 def test_current_reports_reason_and_kind_breakdowns(api):
-    """The 2026-09-27 bulk_ingest page redesign needs WHY a review/skipped item
-    is what it is, and how many ingested items were studio recordings --
-    all grouped queries, no per-item loop."""
     _login_as(api, "admin")
     run_id = api.post("/api/bulk-ingest/start").get_json()["id"]
 
@@ -152,8 +148,9 @@ def test_current_reports_scored_and_scorable(api):
 
 
 def test_current_scorable_excludes_studio(api):
-    """Studio recordings are never scored (2026-09-27) -- scorable/scored
-    must count only ingested items with kind == 'live'."""
+    """Studio recordings are never scored -- scorable/scored must count only
+    ingested items with kind == 'live'.
+    """
     from app.models.artist import Artist
     from app.models.performance import Performance
     from app.models.recording import Recording
@@ -186,11 +183,6 @@ def test_current_scorable_excludes_studio(api):
 
 
 def test_current_reports_now_upcoming_and_recent(api, seeded_ids):
-    """The 2026-09-27 progress-view redesign: /current also reports the
-    in-progress folder (`now`), the next 8 pending folders in id order
-    (`upcoming`), and the last 12 ingested recordings newest-first
-    (`recent`), each recent entry carrying enough to render "Artist  <date>"
-    without the client fetching anything else."""
     from app.models.recording import Recording
     from app.models.performance import Performance
 
@@ -267,10 +259,6 @@ def test_items_format_column_round_trips(api):
 
 
 def test_items_meta_fields_round_trip(api):
-    """The 2026-09-27 expand panel's fields -- artist/date_text/venue/
-    location/source/title -- come off BulkIngestItem.meta (a small JSON
-    blob written at extraction time), flattened server-side. Location is
-    joined from city/state/country the same way app.js's fmtLocation does."""
     import json
     _login_as(api, "admin")
     run_id = api.post("/api/bulk-ingest/start").get_json()["id"]
@@ -333,7 +321,7 @@ def test_current_readable_by_non_admin(api):
 
 
 def test_current_hides_last_error_from_non_admin(api):
-    """R2-N1: last_error is a full Python traceback with absolute filesystem
+    """last_error is a full Python traceback with absolute filesystem
     paths -- an admin still sees it, a non-admin caller (GET /current is
     login_required, not admin_required -- N3) does not."""
     _make_non_admin()

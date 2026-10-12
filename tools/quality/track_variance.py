@@ -18,7 +18,6 @@ import json
 import numpy as np
 import soundfile as sf
 
-# Engine lives in app/utils/quality/ since 2026-07-30 — repo root on sys.path.
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")))
 from app.utils.quality import (                            # noqa: E402

@@ -1,11 +1,10 @@
-"""
-utils/personnel.py — resolve who played a given Performance.
+"""utils/personnel.py — resolve who played a given Performance.
 
-Single source of truth for inherit vs. explicit personnel resolution (see
-Context Library/Per-Show Personnel — Design Plan §3). Every endpoint/view
-that needs a show's lineup must go through resolve_performance_personnel()
-rather than querying Membership or PerformancePersonnel directly, so display
-and any future authorization/aggregation logic can never disagree.
+Single source of truth for inherit vs. explicit personnel resolution. Every
+endpoint/view that needs a show's lineup must go through
+resolve_performance_personnel rather than querying Membership or
+PerformancePersonnel directly, so display and any future
+authorization/aggregation logic can never disagree.
 """
 
 import calendar
@@ -75,8 +74,7 @@ def _row_dict(row, source):
 
 
 def resolve_performance_personnel(performance):
-    """
-    Resolve the ordered lineup for a Performance according to its
+    """Resolve the ordered lineup for a Performance according to its
     personnel_mode. Returns a list of dicts:
         {musician_id, name, instrument, order, is_guest, note, source}
     `source` is one of:
@@ -87,7 +85,6 @@ def resolve_performance_personnel(performance):
         'added'     — a PerformancePersonnel row layered on top of an
                       inherited lineup (mode='inherit'), is_guest=False —
                       someone added as a full member for just this show
-                      without being on the act's roster (2026-07-22, Members/
                       Guests two-row UI)
         'explicit'  — a PerformancePersonnel row in mode='explicit'; the act
                       roster is not consulted at all (may be is_guest True or
@@ -99,13 +96,10 @@ def resolve_performance_personnel(performance):
     splits on, not `source`. `source` exists for the case-5 "was this a
     roster member or an addition" distinction inside sync_performance_personnel.
 
-    'explicit' mode ignores the act roster entirely (e.g. Acoustic All-Stars,
-    where the roster is just a pick-list of usual suspects, not a truth
-    source — see design doc §3A "Refinement").
+    'explicit' mode ignores the act roster entirely.
 
-    The return value is always deduped by musician_id (Ryan, 2026-07-23 bug
-    report — see _dedupe_by_musician below): the same person must never appear
-    twice, however the duplication arose.
+    The return value is always deduped by musician_id: the same person must
+    never appear twice, however the duplication arose.
     """
     if performance.personnel_mode == "explicit":
         rows = sorted(performance.personnel, key=lambda r: r.order)
@@ -140,12 +134,12 @@ def resolve_performance_personnel(performance):
 
     # Any performance_personnel row on top of the inherited roster — in inherit
     # mode these are always ADDITIONS (case 4/5), but "addition" isn't the same
-    # as "guest": the Members/Guests two-row UI (2026-07-22) can add a real
-    # is_guest=False row here too (someone subbing in as a full member for
-    # just this show, not on the act's roster). Label source by the row's own
-    # is_guest flag rather than hardcoding "guest" for everything, so `source`
-    # stays trustworthy for anyone reading it — the two-row UI itself splits
-    # purely on `is_guest`, not on this label, but it should still be accurate.
+    # as "guest": the Members/Guests two-row UI can add a real is_guest=False
+    # row here too (someone subbing in as a full member for just this show, not
+    # on the act's roster). Label source by the row's own is_guest flag rather
+    # than hardcoding "guest" for everything, so `source` stays trustworthy for
+    # anyone reading it — the two-row UI itself splits purely on `is_guest`,
+    # not on this label, but it should still be accurate.
     added_rows = sorted(performance.personnel, key=lambda r: r.order)
     added = [_row_dict(r, "guest" if r.is_guest else "added") for r in added_rows]
 
@@ -153,27 +147,24 @@ def resolve_performance_personnel(performance):
 
 
 def _dedupe_by_musician(rows):
-    """
-    Collapse to one entry per musician_id, first occurrence wins.
+    """Collapse to one entry per musician_id, first occurrence wins.
 
-    Bug this fixes (Ryan, 2026-07-23 — JD Crowe & the New South, recording
-    #239): a Performance's own performance_personnel row (added via the
-    recording page's Members/Guests widget, source 'added'/'guest') persists
-    independently of the act's Membership roster. If that SAME person is
-    later added to the act's roster too — a completely reasonable, separate
-    action on the Artist page — resolve_performance_personnel would
-    previously return them TWICE: once as the new 'inherited' roster entry,
-    once as the now-redundant leftover 'added' row. The UI showed two
-    identical pills, and removing either one silently failed — the
-    name-based diffing in sync_performance_personnel couldn't tell them
-    apart, since as long as the OTHER duplicate still carried that name, the
-    set-membership check never saw the name as "dropped."
-    Since `inherited` is always built before `added`/explicit rows are
-    appended, first-occurrence-wins means a roster (inherited) entry always
-    takes priority over a redundant added/guest row for the same musician —
-    correct, because it makes removing that pill go through the normal
-    "drop an inherited member from this one show" flow (case 5 in
-    sync_performance_personnel), which also sweeps up the stale leftover
+    Bug this fixes: a Performance's own performance_personnel row (added via
+    the recording page's Members/Guests widget, source 'added'/'guest')
+    persists independently of the act's Membership roster. If that SAME person
+    is later added to the act's roster too — a completely reasonable, separate
+    action on the Artist page — resolve_performance_personnel would previously
+    return them TWICE: once as the new 'inherited' roster entry, once as the
+    now-redundant leftover 'added' row. The UI showed two identical pills, and
+    removing either one silently failed — the name-based diffing in
+    sync_performance_personnel couldn't tell them apart, since as long as the
+    OTHER duplicate still carried that name, the set-membership check never saw
+    the name as "dropped." Since `inherited` is always built before
+    `added`/explicit rows are appended, first-occurrence-wins means a roster
+    (inherited) entry always takes priority over a redundant added/guest row
+    for the same musician — correct, because it makes removing that pill go
+    through the normal "drop an inherited member from this one show" flow (case
+    5 in sync_performance_personnel), which also sweeps up the stale leftover
     row as a side effect of that flip's full-rewrite semantics.
     """
     seen = set()
@@ -197,28 +188,25 @@ def _clean_names(names):
 
 
 def sync_performance_personnel(performance, member_names=None, guest_names=None):
-    """
-    Reconcile a Performance's resolved lineup against two SEPARATE lists —
-    the write side of the Members/Guests two-row UI (2026-07-22, replacing
-    the old single ambiguous list + guest-vs-member inference by diffing).
-    `is_guest` on each row is now simply which list the frontend put the
-    name in, not an inference — that ambiguity is gone because the UI no
-    longer has one row to be ambiguous about.
+    """Reconcile a Performance's resolved lineup against two SEPARATE lists — the
+    write side of the Members/Guests two-row UI. `is_guest` on each row is now
+    simply which list the frontend put the name in, not an inference — that
+    ambiguity is gone because the UI no longer has one row to be ambiguous
+    about.
 
     Either list may be omitted (None, not just empty) to mean "leave that
     bucket exactly as currently resolved" — distinct from an empty list,
     which means "clear this bucket." Callers that only care about one row
     (e.g. removing a single guest pill) can pass just that list.
 
-    Members are still the tricky bucket, because a 'member' pill may be
-    virtual (an 'inherited' row from the act's Membership stints — no
-    performance_personnel row of its own) or a real row (an 'explicit' row
-    with is_guest=False). Dropping an EXPLICIT member is a plain row delete.
+    Members are still the tricky bucket, because a 'member' pill may be virtual
+    (an 'inherited' row from the act's Membership stints — no
+    performance_personnel row of its own) or a real row (an 'explicit' row with
+    is_guest=False). Dropping an EXPLICIT member is a plain row delete.
     Dropping an INHERITED member can't edit the act's global stint dates away
-    from one show's form — per the design doc's case 5, it instead switches
-    THIS performance to 'explicit' mode and snapshots the rest of the
-    surviving lineup (members and guests both) so nobody visually vanishes
-    or reappears from the flip itself.
+    from one show's form, it instead switches THIS performance to 'explicit'
+    mode and snapshots the rest of the surviving lineup (members and guests
+    both) so nobody visually vanishes or reappears from the flip itself.
 
     Guests are always real rows regardless of mode (the inherit-mode
     resolver never marks a Membership-derived row as a guest), so they're

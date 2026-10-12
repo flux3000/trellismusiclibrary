@@ -1,6 +1,5 @@
-"""
-Chunk 7b driver (Resolver v2, 2026-10-05): fit the decoder weights on G1 and G3, then
-recalibrate the confidence thresholds, with every reported number held out.
+"""Chunk 7b driver: fit the decoder weights on G1 and G3, then recalibrate the
+confidence thresholds, with every reported number held out.
 
     python3 -m app.utils.resolver_eval --fit-weights [--folds 10] [--out DIR] [--write]
 

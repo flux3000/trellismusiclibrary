@@ -1,17 +1,15 @@
-"""
-scripts/repair_wiped_inherited_personnel.py
+"""scripts/repair_wiped_inherited_personnel.py
 
-One-time repair for a bug in _do_confirm (app/api/ingest.py, fixed
-2026-07-23): Batch Import's "Auto-Ingest" path never sends "members"/
-"guests" in its confirm payload at all (no review wizard, no pre-fill). That
-None got collapsed to [] before reaching sync_performance_personnel(), which
-reads [] as "the user just cleared every member" — tripping its case-5
-safeguard (an act-roster member disappearing from one show flips that show to
-personnel_mode='explicit' and snapshots the surviving lineup). With nothing
-in the list to keep, the snapshot was empty: the performance flipped to
-'explicit' with zero performance_personnel rows, and its Members row on View
-Recording came out blank even though the performer's own roster was intact.
-(Ryan, 2026-07-23 — "Bela Fleck & Tony Trischka" ingested via Bulk Import.)
+One-time repair for a bug in _do_confirm: Batch Import's "Auto-Ingest" path
+never sends "members"/ "guests" in its confirm payload at all (no review
+wizard, no pre-fill). That None got collapsed to [] before reaching
+sync_performance_personnel, which reads [] as "the user just cleared every
+member" — tripping its case-5 safeguard (an act-roster member disappearing from
+one show flips that show to personnel_mode='explicit' and snapshots the
+surviving lineup). With nothing in the list to keep, the snapshot was empty:
+the performance flipped to 'explicit' with zero performance_personnel rows, and
+its Members row on View Recording came out blank even though the performer's
+own roster was intact.
 
 This finds every performance matching that exact signature — mode='explicit',
 zero performance_personnel rows, AND the performer has at least one

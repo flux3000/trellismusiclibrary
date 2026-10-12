@@ -1,6 +1,5 @@
-"""
-tests/test_bulk_ingest_dedup.py -- re-run discovery and FFP/ST5 duplicate
-detection (spec chunk 5b "Dedup flag" / "Re-run").
+"""tests/test_bulk_ingest_dedup.py -- re-run discovery and FFP/ST5 duplicate
+detection.
 """
 
 import numpy as np
@@ -76,17 +75,15 @@ def test_rerun_skips_already_ingested_and_reoffers_review(app, tmp_path):
     run2_rels = {it.rel_path for it in
                 _db.session.query(BulkIngestItem).filter_by(run_id=run2.id).all()}
     # ShowA (already ingested in run1) is never re-offered; ShowReview is still
-    # waiting in the one Queue (Ryan, 2026-10-06), so it is not queued twice;
-    # the new ShowB is.
+    # waiting in the one Queue, so it is not queued twice; the new ShowB is.
     assert run2_rels == {"ShowB"}
 
 
 def test_ffp_hash_match_skips_exact_duplicate(app, tmp_path):
-    """
-    Ingest Field Resolver spec v1, section 9 (resolved question 1): an EXACT
+    """Ingest Field Resolver spec v1, section 9 (resolved question 1): an EXACT
     content duplicate -- every track's FFP/ST5 hash already belongs to one
-    existing recording -- is skipped before ingest, not ingested a second
-    time and flagged after the fact the way it used to be.
+    existing recording -- is skipped before ingest, not ingested a second time
+    and flagged after the fact the way it used to be.
     """
     root = tmp_path / "Library"
     root.mkdir()

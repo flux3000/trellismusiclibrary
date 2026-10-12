@@ -1,14 +1,11 @@
-"""
-tests/test_triage_rescan.py — the triage list must survive a re-scan at a
+"""tests/test_triage_rescan.py — the triage list must survive a re-scan at a
 different directory level.
 
-Regression cover for the 2026-08-25 stall ("Review and Ingest just stalls out —
-all of the recordings just stick at Analyzing"). Staging rows are keyed by
-folder path but FETCHED by source_dir, and the analysis job's skip-if-current
-path never repointed source_dir. Scanning an act folder after previously
-scanning its parent therefore produced a job that reported "done" while
-`list_staging()` returned nothing, so the UI's placeholder cards were never
-replaced and no error was raised anywhere.
+Staging rows are keyed by folder path but FETCHED by source_dir, and the
+analysis job's skip-if-current path never repointed source_dir. Scanning an act
+folder after previously scanning its parent therefore produced a job that
+reported "done" while `list_staging` returned nothing, so the UI's placeholder
+cards were never replaced and no error was raised anywhere.
 
 No audio is decoded here: every folder is already "current", which is precisely
 the path under test.

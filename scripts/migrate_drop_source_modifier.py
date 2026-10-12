@@ -1,9 +1,7 @@
-"""
-scripts/migrate_drop_source_modifier.py
-Drop `recording.source_modifier` ("Source Detail" in the UI) — its role has
-been folded into `recording.lineage`. Per Ryan's call (2026-07-13): existing
-rows just lose whatever was in source_modifier, no merge into lineage. If a
-recording needs to keep that info, add it to Lineage or Notes by hand.
+"""scripts/migrate_drop_source_modifier.py Drop `recording.source_modifier`
+("Source Detail" in the UI) — its role has been folded into
+`recording.lineage`. If a recording needs to keep that info, add it to Lineage
+or Notes by hand.
 
 This is destructive (drops a column, taking its data with it) — back up
 db/fluxaudio.db first if you want a copy of the old source_modifier values.

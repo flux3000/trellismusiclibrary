@@ -72,10 +72,9 @@ def health():
 
 
 # resolve_similar_artist_ids / _act_key / _ARTIST_SIMILARITY / _ACT_NOISE_WORDS
-# moved to app/utils/artists.py (Ingest Field Resolver spec v1 section 6 --
-# the route layer imports utils, not the other way round). Re-imported here
-# so every existing call site in this file (and `from app.api.ingest import
-# resolve_similar_artist_ids` elsewhere) keeps working unchanged.
+# moved to app/utils/artists.py. Re-imported here so every existing call site
+# in this file (and `from app.api.ingest import resolve_similar_artist_ids`
+# elsewhere) keeps working unchanged.
 from app.utils.artists import (resolve_similar_artist_ids, _act_key,
                                _ARTIST_SIMILARITY, _ACT_NOISE_WORDS)
 
@@ -83,14 +82,13 @@ from app.utils.artists import (resolve_similar_artist_ids, _act_key,
 @bp.route("/check-existing", methods=["GET"])
 @login_required
 def check_existing():
-    """
-    GET /api/ingest/check-existing?artist_name=...&year=...&month=...&day=...
+    """GET /api/ingest/check-existing?artist_name=...&year=...&month=...&day=...
     Read-only lookup (no creation) — the Add Recording form calls this once
-    artist + date are known, to WARN (not block) when the library already
-    has a performance for that artist/date. Multiple recordings per
-    performance are legitimate (SBD + AUD of the same show), so this never
-    prevents Confirm — it just surfaces what's already there so an archivist
-    doesn't accidentally re-ingest a tape they already have. Ryan, 2026-07-14.
+    artist + date are known, to WARN (not block) when the library already has a
+    performance for that artist/date. Multiple recordings per performance are
+    legitimate (SBD + AUD of the same show), so this never prevents Confirm —
+    it just surfaces what's already there so an archivist doesn't accidentally
+    re-ingest a tape they already have.
 
     Matches on artist name the same way resolve_or_create_artist does
     (case-insensitive exact match) so this never disagrees with what Confirm
@@ -283,8 +281,7 @@ _INGEST_JOBS = {}  # job_id -> {status, phase, copied, total, result, error}
 # (resolving the act, venue, event and performance) and everything after it
 # (checksum verification, which reads every track when the folder ships .md5)
 # showed as a motionless 0/0, so a slow ingest was indistinguishable from a
-# hung one (Ryan, 2026-08-28: "help me and the user understand what may be
-# taking a while").
+# hung one.
 #
 # Labels are user-facing and deliberately name the WORK, not the code.
 PHASES = {
@@ -293,10 +290,9 @@ PHASES = {
     "moving":     "Moving files into the library",
     "cataloging": "Cataloging tracks",
     "checksums":  "Verifying checksums",
-    # Deliberately vague (Ryan, 2026-08-28: "don't be that specific"). The
-    # phase measures each track to decide whether it looks like music, but
-    # naming the heuristic in a progress line tells the user about our
-    # internals rather than about their ingest.
+    # Deliberately vague. The phase measures each track to decide whether
+    # it looks like music, but naming the heuristic in a progress line
+    # tells the user about our internals rather than about their ingest.
     "signals":    "Analyzing tracks",
     "saving":     "Saving to the library",
     "tags":       "Writing tags to files",
@@ -318,23 +314,23 @@ PHASES = {
 # is 106 MB as float32) and each competing for the same CPU and the same NAS
 # spindle as the copy still running for the NEXT show.
 #
-# Measured on one such track (2026-08-28): librosa.load 19.6 s, beat_track
-# 29.1 s, full-track STFT + centroid 5.9 s — 57.7 s per track, roughly 16
-# minutes for that 8-track show. Seventeen of those at once is the thing that
-# actually made ingestion feel slow; the listening-quality pass everyone
-# suspects costs about 3 seconds a show.
+# Measured on one such track: librosa.load 19.6 s, beat_track 29.1 s, full-track
+# STFT + centroid 5.9 s — 57.7 s per track, roughly 16 minutes for that 8-track
+# show. Seventeen of those at once is the thing that actually made ingestion
+# feel slow; the listening-quality pass everyone suspects costs about 3 seconds
+# a show.
 #
 # A single worker does not make the analysis faster. It makes it FINITE, keeps
 # it off the critical path of the next copy, and — because the queue is now a
 # real object — makes it reportable, which is what the debug pane needs.
 # Follow-up kinds. The queue is in memory (every kind is re-derived from DB
-# state by enqueue_followups(), so nothing needs to survive a restart).
+# state by enqueue_followups, so nothing needs to survive a restart).
 #   "audio"      ONE audio pass for a recording: Listening Quality score +
 #                non-music signal + Full (librosa) analysis. Live only when
 #                enqueued automatically; see run_audio_pass().
 #   "mb_artist"  a MusicBrainz lookup for one artist still at "never looked
 #                up", deferred off the interactive ingest path; or, for a
-#                matched artist with no genre, one genre fetch (2026-10-05).
+#                matched artist with no genre, one genre fetch.
 #   "mb_release" a MusicBrainz release lookup for one studio recording
 #                still at "never looked up" (mb_release_status IS NULL).
 #                Never enqueued for a live recording.
@@ -675,7 +671,7 @@ def _handle_images(recording_id):
         ingest_recording_images(rec, library_root)
     rec.images_checked_at = datetime.now(timezone.utc)
     # Release already matched before this scan ran: fetch the cover now if
-    # the folder had none (2026-10-01). No-op without a release or with art.
+    # the folder had none. No-op without a release or with art.
     if rec.mb_release_id:
         from app.utils.recording_images import add_cover_art_if_missing
         add_cover_art_if_missing(rec)
@@ -882,20 +878,17 @@ def _run_ingest_job(job_id, app, data, user_id):
 
 
 def _apply_artist_genre(artist, data):
-    """
-    Set the act's genre from an ingest payload. Does not commit.
+    """Set the act's genre from an ingest payload. Does not commit.
 
     Genre lives on the ACT, not the recording — an act's genre is the same on
     every night it played, which is why there is no genre column on Recording
     and should not be. So the Add Recording form's Genre field writes through
     to the Artist row, and this is where that happens.
 
-    ⚠ This is the only place outside api/genres.py that can CREATE a Genre, and
-    it exists because Ryan asked for it (2026-09-01). The Genre design spec's
-    rule — nothing creates a genre implicitly — is kept where it was actually
-    protecting something: the client only sends `genre_name` when the user
-    clicked an explicit "+ Create genre: …" row in the dropdown, never for text
-    merely typed into the box. A near-miss spelling cannot mint a second
+    The Genre rule — nothing creates a genre implicitly — is kept where it was
+    actually protecting something: the client only sends `genre_name` when the
+    user clicked an explicit "+ Create genre: …" row in the dropdown, never for
+    text merely typed into the box. A near-miss spelling cannot mint a second
     vocabulary entry by accident, which is the placeholder-venue contamination
     story in another costume.
 
@@ -930,7 +923,8 @@ def _apply_artist_genre(artist, data):
         genre = db.session.query(Genre).filter(
             func.lower(Genre.name) == genre_name_in.lower()).first()
         if not genre:
-            genre = Genre(name=genre_name_in)
+            from app.utils.genre_color import next_genre_color
+            genre = Genre(name=genre_name_in, color=next_genre_color(db.session))
             db.session.add(genre)
             db.session.flush()
 
@@ -1155,10 +1149,10 @@ def confirm_ingest():
         return jsonify({"error": "This folder is still downloading."}), 409
     if not artist_name:
         return jsonify({"error": "artist_name is required"}), 400
-    # R3 (review, 2026-09-25): the Add Recording shnid field is free text.
-    # etree_shnid used to be coerced to int only when building Recording()
-    # in step 7 of _do_confirm, AFTER step 6 had already moved the source
-    # into the library -- a stray non-digit character there failed the job
+    # R3: the Add Recording shnid field is free text. etree_shnid used to
+    # be coerced to int only when building Recording in step 7 of
+    # _do_confirm, AFTER step 6 had already moved the source into the
+    # library -- a stray non-digit character there failed the job
     # post-move, with the files relocated and no row to show for it. Reject
     # here, before the background job (and its file move) ever starts.
     raw_shnid = data.get("etree_shnid")
@@ -1213,10 +1207,8 @@ def confirm_status(job_id):
 @bp.route("/pipeline", methods=["GET"])
 @login_required
 def pipeline_status():
-    """
-    Everything currently moving through ingestion, for the debug drawer's
-    Ingest pane (Ryan, 2026-08-28: "add info to the debug window that
-    characterizes and prints the status of the ingestion job").
+    """Everything currently moving through ingestion, for the debug drawer's
+    Ingest pane.
 
     Reads live in-memory state — no DB, no filesystem — so it is safe to poll
     while a copy is saturating the disk. Confirm jobs are removed from
@@ -1333,8 +1325,7 @@ def _find_event(name):
 
 
 def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
-    """
-    Resolve or create the full object chain, then ingest the recording.
+    """Resolve or create the full object chain, then ingest the recording.
     Runs inside an app context (background thread). Returns a result dict;
     raises on failure.
 
@@ -1374,16 +1365,14 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     "images").
     The tag write (step 12) follows write_tags_on_ingest for a source brought
     in from outside, bulk or not, and is skipped whenever the source is in-root
-    (R2-N7) -- since an in-root source's files are the collector's own,
+    -- since an in-root source's files are the collector's own,
     wherever the confirm call came from.
 
-    MD5 checksum verification (a full re-hash per file) is NEVER run here,
-    bulk or interactive alike (Ryan, 2026-09-27: "MD5 never automatic" --
-    it runs only from the manual Re-validate / verify-checksums action on
-    View Recording). FFP/ST5 header verification still runs at confirm, and
-    every fingerprint file is still parsed, matched and stored regardless
-    of type; only the MD5 recompute-and-compare step is skipped, leaving
-    those entries `unverified`.
+    MD5 checksum verification (a full re-hash per file) is NEVER run here, bulk
+    or interactive alike. FFP/ST5 header verification still runs at confirm,
+    and every fingerprint file is still parsed, matched and stored regardless
+    of type; only the MD5 recompute-and-compare step is skipped, leaving those
+    entries `unverified`.
 
     Everything else -- the move, the Recording/Track rows, tag reads --
     is identical to an interactive confirm.
@@ -1393,11 +1382,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         if phase_cb:
             phase_cb(key, detail)
 
-    # R3 (review, 2026-09-25): validated again here, before ANYTHING else in
-    # this function (including step 6's move), for a direct caller that
-    # skips the /confirm route's own check above (tests, or a future
-    # caller). A stray non-digit in the free-text shnid field must never
-    # surface only after the source folder is already gone.
+    # R3: validated again here, before ANYTHING else in this function
+    # (including step 6's move), for a direct caller that skips the /confirm
+    # route's own check above (tests, or a future caller). A stray non-digit
+    # in the free-text shnid field must never surface only after the source
+    # folder is already gone.
     _raw_shnid = data.get("etree_shnid")
     if _raw_shnid not in (None, ""):
         try:
@@ -1425,13 +1414,12 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     end_month   = data.get("end_month")
     end_day     = data.get("end_day")
 
-    # title/kind (Bulk Ingest chunk 5): Recording has carried both columns
-    # since before this function existed. kind defaults to "live" and is
-    # validated against the column's two known values so a bad payload fails
-    # loudly here rather than writing a third, silently-unrecognised kind.
-    # Resolved this early (rather than just before Recording() below) because
-    # step 4's Performance lookup also needs to know it (B1, immediately
-    # below).
+    # title/kind: Recording has carried both columns since before this
+    # function existed. kind defaults to "live" and is validated against the
+    # column's two known values so a bad payload fails loudly here rather
+    # than writing a third, silently-unrecognised kind. Resolved this early
+    # (rather than just before Recording below) because step 4's Performance
+    # lookup also needs to know it (B1, immediately below).
     rec_kind = data.get("kind") or "live"
     if rec_kind not in ("live", "studio"):
         raise ValueError(f"kind must be 'live' or 'studio': {rec_kind!r}")
@@ -1443,12 +1431,11 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # seed/overwrite the act's ROSTER via set_artist_members, unconditionally,
     # for an existing Artist too — that's the same act-roster-corruption bug
     # Phase 1 already fixed for the recording page's PUT endpoint, just never
-    # ported to ingest (flagged as an open gap in the design doc's ripple list,
-    # item 5). resolve_or_create_artist(name, member_names) already has the
-    # correct behavior baked in — it only seeds member_names as the roster when
-    # the Artist is BRAND NEW, and leaves an existing act's roster alone —
-    # so passing member_names straight through here fixes it with no new code.
-    # Two different needs for the same payload key, so two variables:
+    # ported to ingest. resolve_or_create_artist(name, member_names) already
+    # has the correct behavior baked in — it only seeds member_names as the
+    # roster when the Artist is BRAND NEW, and leaves an existing act's roster
+    # alone — so passing member_names straight through here fixes it with no
+    # new code. Two different needs for the same payload key, so two variables:
     #  - member_names/guest_names (never None) for resolve_or_create_artist,
     #    which just wants "what to seed a BRAND NEW artist's roster with,
     #    if anything."
@@ -1463,7 +1450,6 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     #    case-5 safeguard: flip to 'explicit' and snapshot nothing, since
     #    nothing was in the list to keep. Net effect: the recording's
     #    Members row came out blank even though the artist's own roster
-    #    was intact (Ryan, 2026-07-23 bug report — Bela Fleck & Tony
     #    Trischka). Only the manual Add Recording/Batch Review form pre-fills
     #    and always sends both keys (even an intentionally-emptied one), so
     #    that path's behavior is unchanged by this fix.
@@ -1475,17 +1461,16 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     if not data.get("unattended"):
         mark_artist_confirmed(artist)       # a person's save (wizard, review, "Ingest anyway") confirms the act
 
-    # ── 2. Genre, on the ARTIST (2026-09-01) ───────────────────────────────
+    # ── 2. Genre, on the ARTIST ───────────────────────────────
     _apply_artist_genre(artist, data)
 
     # ── 3. Find or create Venue (optional) ────────────────────────────────────
-    # Placeholder names ("Unknown Venue", "TBD", ...) are never linked as a
-    # real Venue — they aren't one canonical physical place, they're a
-    # stand-in every show without a known venue reuses. Linking them shares
-    # one row's city/state/country across unrelated shows (Ryan's 2026-07-15
-    # bug report; confirmed contamination in scripts/audit_placeholder_venues.py).
-    # Treat exactly like no venue was given: venue stays None, and city/state/
-    # country fall through to the Performance's own fallback fields below.
+    # Placeholder names ("Unknown Venue", "TBD", ...) are never linked as a real
+    # Venue — they aren't one canonical physical place, they're a stand-in every
+    # show without a known venue reuses. Linking them shares one row's
+    # city/state/country across unrelated shows. Treat exactly like no venue was
+    # given: venue stays None, and city/state/ country fall through to the
+    # Performance's own fallback fields below.
     venue = None
     venue_id_in = data.get("venue_id")
     if venue_id_in:
@@ -1517,8 +1502,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     elif event_name:
         event = _find_event(event_name)
         # A person reviewed the wizard form, so it may create. An unattended ingest
-        # (auto_confirm) only links to an Event that exists until chunk 6 gives the
-        # reader a confidence to gate creation on.
+        # (auto_confirm) only links to an Event that exists, until the reader has a
+        # confidence to gate creation on.
         if not event and data.get("event_create", True) and clean_event_name(event_name):
             event = Event(
                 name    = clean_event_name(event_name),
@@ -1529,22 +1514,21 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             db.session.add(event)
             db.session.flush()
 
-    # ── 3.6. Learned aliases (Resolver v2, chunk 8) ──────────────────────────
+    # ── 3.6. Learned aliases ──────────────────────────
     # A person's save that differs from what the resolver read teaches the library
     # the text it quoted. Written in this transaction; never fails the save.
     from app.utils.aliases import learn_aliases
     learn_aliases(data, artist, venue)
 
     # ── 4. Find or create Performance ─────────────────────────────────────────
-    # A studio recording always gets its OWN Performance (Ryan, 2026-09-27):
-    # never reuse one found by artist/date, unlike a live show, where sharing
-    # a Performance across recordings of the same night is the whole point.
-    # Reusing one here is exactly how B1 happened -- two studio albums by one
-    # artist tagged the same year, no month, share a Performance whose date
-    # fields then get filled from whichever album's release lookup runs
-    # first, so the second album silently inherits the first one's release
-    # day. scripts/migrate_studio_records.py splits apart any Performance an
-    # earlier build already shared this way.
+    # A studio recording always gets its OWN Performance: never reuse one found
+    # by artist/date, unlike a live show, where sharing a Performance across
+    # recordings of the same night is the whole point. Reusing one here is
+    # exactly how B1 happened -- two studio albums by one artist tagged the same
+    # year, no month, share a Performance whose date fields then get filled from
+    # whichever album's release lookup runs first, so the second album silently
+    # inherits the first one's release day. scripts/migrate_studio_records.py
+    # splits apart any Performance an earlier build already shared this way.
     performance = None
     if rec_kind != "studio":
         perf_q = db.session.query(Performance).filter(
@@ -1614,24 +1598,20 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         folder_name = os.path.basename(source_folder.rstrip("/\\")) or "Untitled"
 
     # ── 6. Move folder into library ─────────────────────────────────────────
-    # Copy behavior removed 2026-09-25 (spec section 3.3): a source outside
-    # LIBRARY_ROOT is always moved. Move makes re-ingesting the same files
-    # structurally impossible, and the source is still recoverable from the
-    # library itself.
     library_root = str(current_app.config["LIBRARY_ROOT"])
     # Library LAYOUT is an install-level setting, read here rather than inside
-    # move_to_library(), which has no app context (2026-09-17). Off means the
-    # show lands flat at the library root -- for a collector who pointed
-    # Trellis at a library they built themselves.
+    # move_to_library, which has no app context. Off means the show lands flat
+    # at the library root -- for a collector who pointed Trellis at a library
+    # they built themselves.
     under_artist = node_settings.file_under_artist_folder()
 
-    # Bulk Ingest spec section 1.1, chunk 1 (2026-09-26): a source whose
-    # realpath is already inside LIBRARY_ROOT is ingested exactly as it sits
-    # on disk -- never moved, renamed, flattened or deduped, in either
-    # file_handling mode or placement. move_to_library() enforces the
-    # move/rename/dedupe half of that; this flag makes the Track.file_path
-    # computation below match it, forcing the identity map + no-flatten
-    # regardless of rename_files/naming_scheme.
+    # A source whose realpath is
+    # already inside LIBRARY_ROOT is ingested exactly as it sits on disk --
+    # never moved, renamed, flattened or deduped, in either file_handling
+    # mode or placement. move_to_library enforces the move/rename/dedupe
+    # half of that; this flag makes the Track.file_path computation below
+    # match it, forcing the identity map + no-flatten regardless of
+    # rename_files/naming_scheme.
     try:
         in_root_source = Path(source_folder).resolve().is_relative_to(
             Path(library_root).resolve())
@@ -1713,8 +1693,8 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # page's copy, filed only when no run on this folder was found.
     ai_result = data.get("ai_result")
     # etree_shnid was already validated/coerced to int-or-None at the top of
-    # this function (R3, review 2026-09-25) -- reads straight through here.
-    # rec_kind was resolved and validated earlier (step 4 needs it too).
+    # this function -- reads straight through here. rec_kind was resolved
+    # and validated earlier (step 4 needs it too).
     rec = Recording(
         performance_id       = performance.id,
         source               = data.get("source"),
@@ -1850,17 +1830,14 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
                 track.checksum_type        = fp_type
                 track.expected_checksum    = expected
                 # MD5 is NEVER computed automatically at confirm, bulk or
-                # interactive alike (Ryan, 2026-09-27: "MD5 never automatic"
-                # -- it runs only from the manual Re-validate / verify-
-                # checksums action on View Recording). A full re-hash of
-                # every byte of every file is minutes rather than seconds
-                # across a whole-library pass, and even for one interactive
-                # ingest it is unasked-for work the confirm click never
-                # promised. FFP/ST5 still verify here -- both only read a
-                # FLAC header and cost nothing extra. The fingerprint file
-                # itself is still parsed, matched and stored above
-                # regardless of type -- only the recompute-and-compare step
-                # is conditional.
+                # interactive alike. A full re-hash of every byte of every
+                # file is minutes rather than seconds across a whole-library
+                # pass, and even for one interactive ingest it is
+                # unasked-for work the confirm click never promised. FFP/ST5
+                # still verify here -- both only read a FLAC header and cost
+                # nothing extra. The fingerprint file itself is still
+                # parsed, matched and stored above regardless of type --
+                # only the recompute-and-compare step is conditional.
                 if fp_type == "md5":
                     track.checksum_status = "unverified"
                 else:
@@ -1933,19 +1910,19 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # rolled back; the ingest itself already succeeded. Step 9's stored
     # checksum status is not recomputed.
     tag_errors = []
-    # Unified import (2026-10-02): bulk no longer suppresses this. A source
-    # brought in from outside is ours to tag (when write_tags_on_ingest);
-    # only an in-root source, cataloged in place, is never touched.
-    # R2-N7: any in-root source skips the ingest tag write, not only a bulk
-    # (bulk=True) bulk_ingest run. in_root_source already means "this folder
-    # sits inside the collector's own library, exactly where discover()
-    # found it" (spec section 1.1) -- Review & Ingest's Accept action reaches
-    # here with bulk=False for an in-root show too (it is a deliberate click,
-    # not an unattended pass), but the page it's clicked from says "Your
-    # files are not moved or changed," and step 12 writing tags into the
-    # collector's own file directly contradicts that. A source arriving from
-    # OUTSIDE the root still follows the write_tags_on_ingest switch exactly
-    # as before, whether bulk or not.
+    # Unified import: bulk no longer suppresses this. A source brought in
+    # from outside is ours to tag (when write_tags_on_ingest); only an
+    # in-root source, cataloged in place, is never touched. Any
+    # in-root source skips the ingest tag write, not only a bulk (bulk=True)
+    # bulk_ingest run. in_root_source already means "this folder sits inside
+    # the collector's own library, exactly where discover found it" (spec
+    # section 1.1) -- Review & Ingest's Accept action reaches here with
+    # bulk=False for an in-root show too (it is a deliberate click, not an
+    # unattended pass), but the page it's clicked from says "Your files are
+    # not moved or changed," and step 12 writing tags into the collector's
+    # own file directly contradicts that. A source arriving from OUTSIDE the
+    # root still follows the write_tags_on_ingest switch exactly as before,
+    # whether bulk or not.
     if file_handling["write_tags_on_ingest"] and not in_root_source:
         _phase("tags", f"{len(created_tracks)} tracks")
         n_written, tag_errors = write_flac_tags(rec, library_root)
@@ -1961,7 +1938,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             ))
             db.session.commit()
 
-    # ── 13. Recording artwork (Studio Records spec v1, chunk 4) ─────────────
+    # ── 13. Recording artwork ─────────────
     # After the recording/tracks are committed and after step 12's (skipped
     # or not) tag write, so it reads the tracks' FINAL on-disk names exactly
     # like step 12 does. Runs for both doors -- bulk_ingest_run.process()
@@ -1984,7 +1961,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         image_errors.append(str(e))
 
     # A person has settled this act, venue and event: the other review rows of the same
-    # import run that quote the same reading are looked at again (Resolver v2, chunk 8).
+    # import run that quote the same reading are looked at again.
     if not data.get("unattended"):
         try:
             from app.utils.aliases import confirmed_keys
@@ -2014,8 +1991,7 @@ from collections import Counter as _Counter
 _TEXT_EXTS   = {'.txt', '.nfo', '.md', '.text', '.log'}
 _LOSSY_EXTS  = {'.mp3', '.aac', '.ogg', '.m4a'}
 _LOSSLESS_EXTS = {'.flac', '.wav', '.aiff', '.aif', '.ape', '.wv'}
-# Canonical home is app/utils/ingest.py (FOLDER_DATE_RE) -- Ingest Field
-# Resolver spec v1 section 10. Aliased here so _audit_incoming_folder and
+# Canonical home is app/utils/ingest.py (FOLDER_DATE_RE). Aliased here so _audit_incoming_folder and
 # batch_scan's date fallback below keep their existing spelling.
 from app.utils.ingest import FOLDER_DATE_RE as _DATE_RE
 _TRACK_NUM_RE = _re.compile(r'^(?:track\s*)?(\d{1,3})[.\s\-_]', _re.IGNORECASE)
@@ -2129,8 +2105,7 @@ def _audit_incoming_folder(folder_path):
 @bp.route("/batch-scan", methods=["POST"])
 @login_required
 def batch_scan():
-    """
-    POST /api/ingest/batch-scan
+    """POST /api/ingest/batch-scan
     Walk a source directory, scan every show subfolder, and return a
     confidence-tiered list of candidates for batch ingest.
 
@@ -2144,7 +2119,6 @@ def batch_scan():
       - tier: "green" | "yellow" | "red" — literally health["band"]. Used to be
               a second, independently-derived heuristic off conf_artist/
               conf_date/conf_tracks, which could disagree with the visible
-              score (Ryan hit this 2026-07-16: a 94-scoring row still bucketed
               under "yellow"). Now it's just an alias so the pill counts and
               the "Auto-Ingest All ___" filters always match what's on screen.
       - confidence: { artist, date, tracks, venue }  — per-field scores, still
@@ -2153,12 +2127,12 @@ def batch_scan():
       - extracted: { artist, year, month, day, venue, city, state, country,
                      source, lineage, track_count, tracks_titled, format, kind }
                      format/kind computed the same way bulk_ingest.py's
-                     extract()/classify() do (2026-09-27), so this table's
+                     extract()/classify() do, so this table's
                      FORMAT/TYPE pills match the other two ingest surfaces.
       - paula: compute_paula_score() result, or None (empty/unreadable folder).
                Purple-border source-of-truth in Add Recording's field-level
                confidence highlighting — no longer rendered as its own
-               narrative/avatar anywhere in the UI (removed 2026-07-16).
+               narrative/avatar anywhere in the UI.
       - already_ingested: bool  (folder path already in DB)
     """
     from app.utils.ingest import build_scan_payload, scan_folder
@@ -2181,8 +2155,7 @@ def batch_scan():
     log_step(batch_job, "start", "POST /api/ingest/batch-scan")
 
     # Known artist/venue records — same lookups the interactive Add Recording
-    # scan uses, so Paula's per-item confidence scoring here (added 2026-07-15,
-    # Ryan: "let's get her pulled into that experience") matches exactly.
+    # scan uses, so Paula's per-item confidence scoring here matches exactly.
     known_artists = [p.name for p in db.session.query(Artist.name).all()]
     known_venues = [
         {"name": v.name, "city": v.city, "state": v.state, "country": v.country}
@@ -2199,10 +2172,6 @@ def batch_scan():
 
     # Resolve every top-level entry to its actual show paths before scanning.
     # Handles arbitrary nesting depth (artist → year → show, etc.).
-    #
-    # Hoisted into utils/ingest.py on 2026-07-30 — the Listening Quality
-    # analyser resolves shows through the SAME function, so the triage list and
-    # the metadata list can never disagree about which folders are shows.
     from app.utils.ingest import resolve_shows_in_dir
     show_paths = resolve_shows_in_dir(source_dir)
     log_step(batch_job, "resolved shows", f"{len(show_paths)} folder(s) to scan")
@@ -2265,9 +2234,8 @@ def batch_scan():
                 resolved = None
 
         # Paula's per-item confidence read — same engine as the interactive
-        # scan endpoint (app/api/recordings.py). Frontend aggregates these
-        # into a single batch-level narrative rather than showing per-row
-        # scores (Ryan didn't want per-item Paula numbers cluttering the list).
+        # scan endpoint (app/api/recordings.py). Frontend aggregates these into
+        # a single batch-level narrative rather than showing per-row scores.
         paula_result = None
         if scan:
             try:
@@ -2426,6 +2394,4 @@ def batch_scan():
     })
 
 
-# NOTE: the standalone _incoming/ queue was removed — per-recording health is now
-# surfaced in the Add Recording review step (see compute_health). _audit_incoming_folder
-# is retained (used by batch-scan's filesystem audit).
+# _audit_incoming_folder is used by batch-scan's filesystem audit.

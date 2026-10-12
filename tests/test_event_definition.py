@@ -1,7 +1,7 @@
-"""
-What an Event is (Ryan, 2026-10-05): a collection of performances comprising a festival or
-other single ticketed-or-free event. A tour, a residency or a billing note ("Opened for
-The Strokes") is not one. One test, counts_as_event(), serves Atlas events and text alike.
+"""What an Event is: a collection of performances comprising a festival or other
+single ticketed-or-free event. A tour, a residency or a billing note ("Opened
+for The Strokes") is not one. One test, counts_as_event, serves Atlas events
+and text alike.
 """
 import pathlib
 

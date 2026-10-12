@@ -1,7 +1,6 @@
-"""
-setup_consumer_node.py — Build an EMPTY second node: a listener's machine.
+"""setup_consumer_node.py — Build an EMPTY second node: a listener's machine.
 
-WHY THIS EXISTS (2026-08-24)
+WHY THIS EXISTS
 ----------------------------
 `setup_node_b.py` builds the other kind of second node: a COPY of this library,
 which is right for testing Archivist↔Archivist trading (UC3), where both sides
@@ -9,8 +8,7 @@ genuinely own collections.
 
 It is wrong for the Streamer (UC1). Matt does not collect. He owns nothing,
 runs no archive, and wants only to listen to what someone shared with him. A
-node seeded from a clone of Ryan's database gives "Matt" 580 local recordings,
-which:
+node seeded from a clone of  580 local recordings, which:
 
   1. contradicts the persona outright;
   2. makes remote and local data indistinguishable on screen — the reason

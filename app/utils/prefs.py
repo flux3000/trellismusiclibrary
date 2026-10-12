@@ -15,11 +15,6 @@ try:
 except ImportError:
     _HAS_KEYRING = False
 
-# Renamed from "flux_audio" 2026-09-04, with no migration by Ryan's call.
-# ⚠ Every credential stored under the old service name becomes invisible the
-# moment this line changes: peer tokens and the Anthropic API key both. They
-# are not deleted, they are orphaned, and nothing will ever clean them up.
-# Re-join any peer and re-enter the API key once.
 _SERVICE = "trellis"
 
 
@@ -68,9 +63,9 @@ def delete_api_key(user_id):
 
 
 # ── Remote-node tokens (OS keychain) ──────────────────────────────────────────
-# Outbound peer sharing (milestone 2, 2026-08-08). The token a remote Flux node
-# issued me at enrollment. Same reasoning as the BYOK key above: the DB records
-# that a remote exists, never the credential to reach it.
+# Outbound peer sharing. The token a remote Trellis node issued me at enrollment.
+# Same reasoning as the BYOK key above: the DB records that a remote exists,
+# never the credential to reach it.
 #
 # Unlike the inbound peer_token, this CANNOT be hashed — it has to be replayed
 # verbatim on every proxied request. Keychain or plaintext were the only two

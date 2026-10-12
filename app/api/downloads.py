@@ -1,5 +1,4 @@
-"""
-api/downloads.py -- the download queue and the Downloads folder (2026-10-01).
+"""api/downloads.py -- the download queue and the Downloads folder.
 
 Routes (admin-only; never registered in SERVER_MODE):
     GET    /api/downloads/queue
@@ -221,8 +220,7 @@ def _fingerprints(full, job_result):
 @bp.route("/folder", methods=["GET"])
 @admin_required
 def get_folder():
-    # ?which=backlog|workshop lists a working folder with the same row shape
-    # (Ryan, 2026-10-01: Backlog and Workshop get the Downloads page design).
+    # ?which=backlog|workshop lists a working folder with the same row shape.
     # Those are never created here; an unset one is a 404.
     which = request.args.get("which") or "downloads"
     triage = current_app.config.get("TRIAGE_DIRS") or {}
@@ -291,10 +289,10 @@ def get_folder():
 @bp.route("/trash", methods=["POST"])
 @admin_required
 def trash_folder():
-    """Move one working-folder row to the system Trash (Ryan, 2026-10-06).
-    The client names the folder and the row; the path is resolved here and
-    must be a direct child of that working folder. A folder still downloading
-    is refused."""
+    """Move one working-folder row to the system Trash. The client names the
+    folder and the row; the path is resolved here and must be a direct child of
+    that working folder. A folder still downloading is refused.
+    """
     from app.utils.trash import move_to_trash, TrashUnavailable
     data = request.get_json(silent=True) or {}
     which = data.get("which") or "downloads"

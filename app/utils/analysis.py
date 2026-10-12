@@ -27,9 +27,9 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-# "3" (2026-08-28): BPM removed. Bumped so analyse_and_store_track's
-# reanalyze=False skip-path re-runs stale rows rather than leaving a library
-# half on the old shape — the same version gate the quality engine uses.
+# "3": BPM removed. Bumped so analyse_and_store_track's reanalyze=False
+# skip-path re-runs stale rows rather than leaving a library half on the old
+# shape — the same version gate the quality engine uses.
 ANALYSIS_VERSION = "3"
 
 # Marker written by the ingest's cheap non-music pass (api/ingest.py::
@@ -61,7 +61,7 @@ def analyse_track(abs_path):
     try:
         import librosa
     except ImportError:
-        log.error("librosa not installed — pip install librosa soundfile")
+        log.error("librosa not installed: pip install librosa soundfile")
         return None
 
     # ── Header metadata (mutagen — no decode) ────────────────────────────────
@@ -131,7 +131,7 @@ def analyse_track(abs_path):
     centroid = librosa.feature.spectral_centroid(S=S, sr=sr)
     spectral_centroid_hz = round(float(np.mean(centroid)), 1)
 
-    # ── Spectral flatness — the non-music signal (2026-08-28) ────────────────
+    # ── Spectral flatness — the non-music signal ────────────────
     # Wiener entropy: how evenly energy is spread across the spectrum. Speech
     # and applause are flat; sustained instrumental tones are peaky. Free here
     # because S is already computed, and the raw value is stored rather than a
@@ -154,7 +154,6 @@ def analyse_track(abs_path):
     active_bins = np.where(avg_power > threshold)[0]
     spectral_cutoff_hz = round(float(freqs[active_bins[-1]])) if len(active_bins) else None
 
-    # ── BPM — REMOVED 2026-08-28 (Ryan: "BPM is meaningless, remove") ─────────
     # It was also, by a wide margin, the most expensive thing in this function:
     # librosa.beat.beat_track measured 29.1 s on a single 4.6-minute 24/96
     # track, against 57.7 s for the whole of analyse_track. Half the cost of
@@ -205,14 +204,7 @@ def analyse_track(abs_path):
 
 
 def store_track_analysis(track, result, db_session, *, commit=True):
-    """
-    Upsert one analyse_track() result onto the track's `track_analysis` row.
-
-    Extracted 2026-08-07. This block previously existed in three places —
-    `analyse_recording()` below, `scripts/batch_analyze.py`, and (nearly) the
-    quality backfill — which is exactly the drift risk the project's
-    define-once rule exists to prevent: `spectral_cutoff_hz` was added to the
-    schema and one copy could easily have missed it.
+    """Upsert one analyse_track() result onto the track's `track_analysis` row.
 
     Commits per track by default: long analysis runs must not hold a SQLite
     write lock open across the whole batch.

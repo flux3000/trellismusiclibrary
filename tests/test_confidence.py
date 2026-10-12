@@ -1,6 +1,5 @@
-"""
-tests/test_confidence.py -- Resolver v2 chunk 6: calibrated confidence, the verdict's
-tentative reasons, and resolver_json carrying evidence.
+"""tests/test_confidence.py -- Resolver v2 chunk 6: calibrated confidence, the
+verdict's tentative reasons, and resolver_json carrying evidence.
 
 No audio, no database, no network: scans are hand-built dicts, the fitting runs on
 synthetic samples.
@@ -281,7 +280,6 @@ def test_an_older_resolver_json_without_the_new_keys_is_still_a_plain_dict():
     assert json.loads(resolver_json_for_storage(old))["date"]["conflict"] is True
 
 
-# ── 2026-10-04: variants, agreement, folder dates, parent artist folder ──────
 
 def test_ensemble_and_billing_variants_are_not_wrong():
     from app.utils import resolver_eval as ev
@@ -491,7 +489,6 @@ def test_folder_lead(name, lead):
 
 
 def test_any_folder_name_naming_the_artist_is_a_full_source():
-    # Ryan, 2026-10-06: any naming scheme, not only Trellis's or artist-first.
     lead = resolve(_artist_scan(info="Boxcars", folder_name="Boxcars July 25, 2014 Bicentennial Park Pavilion"))
     inside = resolve(_artist_scan(info="Boxcars", folder_name="2014-07-25 Bicentennial Park Boxcars"))
     billing = resolve(_artist_scan(info="Tony Allen",
@@ -673,7 +670,7 @@ def test_a_lead_that_is_not_an_act_shows_nothing(folder):
     assert not [e for e in r.artist.evidence if e["source"] == "folder"]
 
 
-# ── Cross-checks between the sources (2026-10-06) ───────────────────────────────────
+# ── Cross-checks between the sources ───────────────────────────────────
 
 class _ActAtlas:
     """An Atlas that knows some acts (exactly) and, optionally, which shows an act played."""

@@ -1,13 +1,11 @@
-"""
-tests/test_server_mode_surface.py — SERVER_MODE must serve the share door and
+"""tests/test_server_mode_surface.py — SERVER_MODE must serve the share door and
 nothing else.
 
-Decided 2026-08-25. Exposure is via a Cloudflare Tunnel, and a tunnel points at
-a PORT: every route this process registers is on the public internet. The peer
-door (`/api/share/*`) is safe to expose because it is structurally read-only —
-there are no write endpoints in that blueprint to find a bug in. The front door
-is not: it holds login, delete-with-files, folder moves and the BYOK AI
-endpoints.
+Exposure is via a Cloudflare Tunnel, and a tunnel points at a PORT: every route
+this process registers is on the public internet. The peer door
+(`/api/share/*`) is safe to expose because it is structurally read-only — there
+are no write endpoints in that blueprint to find a bug in. The front door is
+not: it holds login, delete-with-files, folder moves and the BYOK AI endpoints.
 
 The guarantee under test is ABSENCE, not refusal. `/api/auth/login` must 404
 because Flask never heard of it — not 401, not 302, and above all not 200 with

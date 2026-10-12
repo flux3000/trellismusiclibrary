@@ -1,7 +1,4 @@
-"""
-migrate_rename_artist_performer.py — 2026-07-09 data-model rename.
-
-Renames the existing schema to match the renamed ORM models:
+"""Renames the existing schema to match the renamed ORM models:
   table  artist            -> canonical_artist
   table  performer         -> artist
   table  performer_artist  -> artist_canonical

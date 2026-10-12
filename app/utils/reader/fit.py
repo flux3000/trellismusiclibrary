@@ -1,5 +1,4 @@
-"""
-Fitting the decoder weights (Resolver v2, chunk 7b, 2026-10-05).
+"""Fitting the decoder weights.
 
 An averaged structured perceptron over the Viterbi decoder of reader/decode.py. The
 parameters are exactly the rows of reader/weights.py: every (feature, role) emission
@@ -587,7 +586,7 @@ def render_weights(model, template_text, note):
 
 
 NOTE = '''
-Weights for the role decoder (Resolver v2, chunk 7b, 2026-10-05): FITTED.
+Weights for the role decoder: FITTED.
 
 Every number the decoder uses is in this file, as readable rows:
 
@@ -599,14 +598,14 @@ role's BIAS. The decoder then picks the best whole-file labelling (Viterbi), so 
 follows "with" is a MEMBER because the transition CONNECTOR -> MEMBER is strong, not because
 a special rule says so. Units are log-score points: +3 is "clearly", +6 "decisively".
 
-The rows are the chunk 3 hand-set table (weights_handset.py) with the ARTIST emission rows
+The rows are the hand-set table (weights_handset.py) with the ARTIST emission rows
 moved by an averaged perceptron fitted on the evaluation corpora G1 and G3 (reader/fit.py).
 A weight moves little when few rows touched it and never more than 3 points from its
 hand-set value. Every other row is still hand-set: fitting them as well made the venue field
 worse on held-out acts (see the module docstring of fit.py). Refit after any change to the
 features, then recalibrate: python3 -m app.utils.resolver_eval --fit-weights --write
 This file is the FITTED table kept for comparison (--weights fitted). The table that ships is
-weights.py, the hand-set one: Ryan chose it because the fit gained little on held-out acts.
+weights.py, the hand-set one, because the fit gained little on held-out acts.
 '''
 
 

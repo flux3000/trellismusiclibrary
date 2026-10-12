@@ -3,10 +3,10 @@
 quality_app.py — Listening Quality, standalone.
 
 A self-contained mini-app: point it at a folder, press Analyse, read the
-result. Runs entirely independently of Flux — its own server, its own UI, no
+result. Runs entirely independently of Trellis — its own server, its own UI, no
 database, no config. The scoring engine is imported unchanged from
 quality_features.py / quality_scoring.py, so results are identical to the CLI
-and to whatever eventually ships inside Flux.
+and to whatever eventually ships inside Trellis.
 
     python3 quality_app.py                 # serve on http://127.0.0.1:5055
     python3 quality_app.py --port 8080
@@ -16,7 +16,7 @@ Requires: flask, numpy, scipy, soundfile, pyloudnorm
 
 Design note: the whole point of a standalone build is that the analysis engine
 has to stand on its own before it is welded into the app. Anything this needs
-that Flux would supply (track flags, DB rows, library root) is a dependency we
+that Trellis would supply (track flags, DB rows, library root) is a dependency we
 do not want the engine to have.
 """
 
@@ -29,10 +29,6 @@ import threading
 import unicodedata
 from flask import Flask, request, jsonify, Response, send_file
 
-# The engine now lives in the app (app/utils/quality/) so there is exactly one
-# copy — moved 2026-07-30 when Listening Quality was integrated into ingestion.
-# This harness is a thin client of it. Repo root goes on sys.path so
-# `app.utils.quality` resolves when running this file directly.
 _REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 sys.path.insert(0, _REPO_ROOT)
@@ -51,7 +47,7 @@ _lock = threading.Lock()
 
 AUDIO_EXT = (".flac", ".wav", ".aiff", ".aif")
 
-# Where the folder picker opens. Matches config.IMPORT_DIR in the Flux app —
+# Where the folder picker opens. Matches config.IMPORT_DIR in the Trellis app —
 # new material lands here before ingest, so it is what you almost always want
 # to analyse. Falls back to the library, then home, if it doesn't exist.
 DEFAULT_DIRS = [
@@ -162,9 +158,7 @@ def run_job(job_id, root):
                     "sampled": feats.get("sampled", []),
                     "flags": scored.get("flags", []),
                     # RAW FEATURES are exposed here and deliberately NOT in the
-                    # Flux app. Per Ryan 2026-07-31 this harness is the
-                    # development surface for the quantitative score, so it
-                    # needs everything the engine saw, not just the verdict.
+                    # Trellis app.
                     "features": {k: v for k, v in feats.items()
                                  if isinstance(v, (int, float, bool)) or v is None},
                 }

@@ -1,8 +1,6 @@
-"""
-tests/test_parse_info_file.py — regression tests for parse_info_file's
+"""tests/test_parse_info_file.py — regression tests for parse_info_file's
 track-listing extraction (app/utils/ingest.py).
 
-Covers two bugs Ryan reported 2026-07-16 from a real CSNY info file:
 1. A trailing "Notes:" section with its own numbered lines (e.g. "1 - Noise
    at 2:51 from the guys goofing around.") was being misparsed as tracks,
    clobbering the real tracks 1-4.
@@ -11,14 +9,13 @@ Covers two bugs Ryan reported 2026-07-16 from a real CSNY info file:
    sequential across the whole recording.
 3. A bare total-running-time line in the header ("1:46:28") was read by
    _TRACK_PATTERN as track 1 titled "46:28", displacing every real track
-   number by one (Ryan, 2026-08-30, from a real Gary Burton Quintet info
    file).
 4. A trailing timestamp given in parentheses ("Carry On (4:59)") was left
    in the title instead of being recognized as a taper's duration note and
-   stripped (Ryan, 2026-08-30).
+   stripped.
 5. A trailing "(Composer Name)" credit ("Ictus / Syndrome (Carla Bley)") is
    now split off into the track's songwriter field rather than left in the
-   title (Ryan, 2026-08-30) — deliberately conservative, so an annotation
+   title — deliberately conservative, so an annotation
    that happens to share the same shape ("(Alternate Take)", "(Live)",
    "(Tuning)") is never mistaken for a composer credit.
 """
@@ -222,7 +219,7 @@ Some Venue
     assert [t["title"] for t in tracks] == ["First Song", "Second Song", "Third Song"]
 
 
-# ── invisible characters in the info text (Ryan, 2026-10-05) ─────────────────
+# ── invisible characters in the info text ─────────────────
 
 _Z = "﻿"
 _SETLIST = (

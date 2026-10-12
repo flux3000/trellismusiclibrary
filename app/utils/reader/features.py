@@ -1,5 +1,4 @@
-"""
-Units and named features for the role decoder (Resolver v2, chunk 3, 2026-10-03).
+"""Units and named features for the role decoder.
 
 build_doc(text, library, ...) turns info text into a Doc: lines classified, split
 into units (the decoder's segments), each unit carrying its position, and the
@@ -385,10 +384,10 @@ def is_festival_like(text):
     return False
 
 
-# What an Event is (Ryan, 2026-10-05): a collection of performances comprising a festival
-# or other single ticketed-or-free event. Its purpose is the historical context of the
-# night: where, with whom, what the experience was. A tour ("Fall Tour 2019"), a
-# residency or a billing note ("Opened for The Strokes") is not an event.
+# What an Event is: a collection of performances comprising a festival or other single
+# ticketed-or-free event. Its purpose is the historical context of the night: where, with
+# whom, what the experience was. A tour ("Fall Tour 2019"), a residency or a billing note
+# ("Opened for The Strokes") is not an event.
 _NOT_EVENT_RE = re.compile(r"\btours?\b|\bresidency\b|\bopen(?:ed|ing|er|s)?\s+for\b"
                            r"|\bsupporting\b|\bsupport\s+(?:for|slot|act)\b", re.I)
 _EVENT_KINDS = {"festival", "convention/expo"}     # MusicBrainz event types that are events

@@ -1,5 +1,4 @@
-"""
-migrate_add_system_collections.py — Add collection.system_key and create the
+"""migrate_add_system_collections.py — Add collection.system_key and create the
 "Full Library" system collection.
 
 WHY
@@ -7,7 +6,7 @@ WHY
 Peer sharing has exactly one primitive: the Collection grant. Whole-library
 sharing therefore needs a Collection that MEANS "everything" rather than a
 second sharing mechanism with a second authorization path — a second path is
-how a leak gets written (Ryan, 2026-08-24).
+how a leak gets written.
 
 A system collection is a real Collection row whose membership is resolved by
 QUERY rather than by `collection_recording` junction rows. `system_key` is NULL

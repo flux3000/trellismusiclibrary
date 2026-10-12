@@ -1,9 +1,8 @@
-"""
-app/sources/lma.py -- Internet Archive Live Music Archive (collection `etree`).
+"""app/sources/lma.py -- Internet Archive Live Music Archive (collection `etree`).
 
-Lists come from advancedsearch.php, one item's detail from /metadata/<id>.
-NOT the Changes API (Ryan, 2026-10-01): a browsable catalog needs sorting and
-paging, which the change feed does not give.
+Lists come from advancedsearch.php, one item's detail from /metadata/<id>. NOT
+the Changes API: a browsable catalog needs sorting and paging, which the change
+feed does not give.
 
 Everything goes through app/utils/net.py (certifi context, shared User-Agent).
 Under TESTING the default HTTP functions refuse, same rule as musicbrainz.py:

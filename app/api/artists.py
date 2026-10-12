@@ -45,13 +45,10 @@ _ALLOWED_IMAGE_EXTS = ei.ALLOWED_IMAGE_EXTS
 
 
 def _artist_images_dir(artist):
-    """
-    DATA_DIR/images/artists/<sanitized name> (Bulk Ingest spec chunk 2 --
-    moved out of the library; see app/utils/entity_images.py::image_dir).
-    NOTE: derived from the Artist's CURRENT name at request time, not a
-    stored path — see Artist.image_ext's docstring for the rename-orphan
-    caveat this carries (matches how existing recording folders already
-    behave on a rename: nothing moves those either).
+    """DATA_DIR/images/artists/<sanitized name>. NOTE: derived from the Artist's
+    CURRENT name at request time, not a stored path — see Artist.image_ext's
+    docstring for the rename-orphan caveat this carries (matches how existing
+    recording folders already behave on a rename: nothing moves those either).
     """
     return ei.image_dir("artists", artist.name)
 
@@ -109,11 +106,11 @@ def list_artists():
         .order_by(func.coalesce(Artist.sort_name, Artist.name))
         .all()
     )
-    # Primary photo id per artist, for the Artists index tiles
-    # (2026-09-01). One grouped query, not `p.images[0]` per row — this endpoint
-    # is called on every sidebar render, and on a 184-artist library that
-    # would be 184 extra round trips to draw a nav list that shows no photos at
-    # all. Primary first, oldest as the fallback, matching primary_for().
+    # Primary photo id per artist, for the Artists index tiles. One grouped
+    # query, not `p.images[0]` per row — this endpoint is called on every
+    # sidebar render, and on a 184-artist library that would be 184 extra round
+    # trips to draw a nav list that shows no photos at all. Primary first,
+    # oldest as the fallback, matching primary_for.
     image_ids = {}
     for pid, iid, _pr in (
         db.session.query(ArtistImage.artist_id, ArtistImage.id,
@@ -123,21 +120,26 @@ def list_artists():
     ):
         image_ids.setdefault(pid, iid)
 
+    # ?index=1: the extra fields the Artists INDEX page reads (excerpt, area,
+    # year span). Opt-in so the sidebar's every-render call stays as light as
+    # before. See app/utils/dim_index.py.
+    extra = {}
+    if request.args.get("index"):
+        from app.utils import dim_index
+        extra = dim_index.artist_extras()
+
     return jsonify([
         {
+            **extra.get(p.id, {}),
             "id":              p.id,
             "name":            p.name,
             "sort_name":       p.sort_name,
             "recording_count": rc,
             "members":         [a.name for a in p.musicians],
-            # Genre (2026-08-02) — id + name only, powers the bulk assignment
-            # screen's "unassigned only" filter and pre-fill.
+            # Genre — id + name only, powers the bulk assignment screen's
+            # "unassigned only" filter and pre-fill.
             "genre_id":        p.genre_id,
             "genre_name":      p.genre.name if p.genre else None,
-            # Colour added 2026-09-01 for the index tiles. May be None even when
-            # a genre exists — colour is nullable and NULL is a supported state
-            # that renders neutral. Never substitute a default here; the
-            # fallback belongs in one place, in the frontend.
             "genre_color":     p.genre.color if p.genre else None,
             "image_id":        image_ids.get(p.id),
         }
@@ -148,32 +150,11 @@ def list_artists():
 @bp.route("/all-recordings")
 @login_required
 def all_recordings():
-    """
-    Every artist (alpha) with their performances (oldest first). Library
+    """Every artist (alpha) with their performances (oldest first). Library
     view — feeds Browse's flat list, so this is a full-catalog dump.
-
-    2026-08-24 (Ryan, "loads more quickly" / Browse's endless scroll): this
-    used to run a query PER ARTIST for performances, then lazy-load each
-    performance's venue, artist (redundant — already have it as `pf`),
-    and recordings, and each recording's tracks and quality_score — on a
-    ~184-artist / ~580-recording library that's 2000+ separate DB round
-    trips for one page load, which is what "loads all records at the
-    outset" was actually slow at (the client-side row count was never the
-    bottleneck; the fetch was). Rewritten as ONE root query with
-    selectinload chains for every relationship walked below — SQLAlchemy
-    batches each level into a single `WHERE ... IN (...)`, so this is now a
-    small constant number of queries (one per relationship level) regardless
-    of library size, not one per row. Sort order (was a SQL ORDER BY per
-    artist) moves to Python since selectinload doesn't preserve a
-    per-parent order across the whole call — same nullslast-ascending
-    semantics, just computed once each on the already-fetched list.
     """
-    # Primary photo id per artist, for Browse's row avatars (2026-09-02).
-    # ONE grouped query, deliberately, not `selectinload(Artist.images)` —
-    # this endpoint is the full-catalog dump and eager-loading every image row
-    # for 184 artists to read one id off each is the same shape of waste the
-    # 2026-08-24 rewrite existed to remove. Primary first, oldest as the
-    # fallback, matching `primary_for()` and `list_artists()` above.
+    # Primary photo id per artist, for Browse's row avatars. Primary first,
+    # oldest as the fallback, matching `primary_for` and `list_artists` above.
     image_ids = {}
     for pid, iid, _pr in (
         db.session.query(ArtistImage.artist_id, ArtistImage.id,
@@ -199,11 +180,6 @@ def all_recordings():
         .all()
     )
 
-    # Recording-level artwork (Studio Records spec v1, chunk 5) -- one
-    # grouped query for the whole catalog dump, same reasoning as image_ids
-    # above (ArtistImage): eager-loading every RecordingImage row to read one
-    # url off each would be the same waste this endpoint's 2026-08-24 rewrite
-    # already removed once for tracks/quality_score.
     all_rec_ids = [r.id for pf in artists for p in pf.performances for r in p.recordings]
     rec_image_urls = batch_recording_image_urls(all_rec_ids)
 
@@ -240,11 +216,8 @@ def all_recordings():
                 "country":        v.country if v else p.country,
                 "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id)) for r in p.recordings],
             })
-        # Genre rides along per ARTIST, not per recording — the model is
-        # one genre per act (see the Genre dimension work, 2026-08-02). Added
-        # 2026-08-23 for Browse's genre filter and the colour spine on every
-        # row: without it the Library view would need a second request just to
-        # colour a list it already has.
+        # Genre rides along per ARTIST, not per recording — the model is one
+        # genre per act.
         g = pf.genre
         result.append({
             "artist_id":      pf.id,
@@ -252,10 +225,10 @@ def all_recordings():
             "genre":             g.name  if g else None,
             "genre_color":       g.color if g else None,
             # Browse's flat list draws a photo where there is one and the
-            # genre-coloured initials square where there is not (2026-09-02).
-            # It had only ever had the initials — not because the photos were
-            # missing (103 of 184 artists have one) but because this payload
-            # never carried the id to fetch them with.
+            # genre-coloured initials square where there is not. It had only
+            # ever had the initials — not because the photos were missing
+            # (103 of 184 artists have one) but because this payload never
+            # carried the id to fetch them with.
             "image_id":          image_ids.get(pf.id),
             "performance_count": len(perf_list),
             "recording_count":   sum(len(p["recordings"]) for p in perf_list),
@@ -282,27 +255,23 @@ def get_artist(artist_id):
         # list the Artist page's stint editor uses.
         "members":   _serialize_roster(p),
         "resources": [{"id": r.id, "label": r.label, "url": r.url} for r in p.resources],
-        # Multi-image as of 2026-08-07. `has_image` is retained (existing
-        # callers read it) but now derives from the images relationship, not
-        # the legacy image_ext column.
         "has_image": bool(p.images),
         "images":    [_image_payload(i) for i in p.images],
         "dossier":   lomax.latest_result("artist", p.id, ("artist",), not_mode="lineup"),
-        # The last lineup-research pass, so it survives navigating away
-        # (Ryan, 2026-09-07). Deliberately NOT added to app/api/share.py: a
-        # roster proposal awaiting review is the owner's working state, not
-        # catalog metadata a peer has any use for — and every field added to
-        # the peer surface is another way THE THREE LISTS drift apart.
+        # The last lineup-research pass, so it survives navigating away.
+        # Deliberately NOT added to app/api/share.py: a roster proposal
+        # awaiting review is the owner's working state, not catalog metadata
+        # a peer has any use for — and every field added to the peer surface
+        # is another way THE THREE LISTS drift apart.
         "lineup":    lomax.latest_result("artist", p.id, ("artist",), not_mode="bio"),
-        # Genre (2026-08-02) — a proper dimension, one FK, nullable. null
-        # until Ryan assigns one by hand (no AI suggestion for this field).
-        # `color` (2026-08-07) drives the Browse cards' colour flair.
+        # Genre — a proper dimension, one FK, nullable. null until the user
+        # assigns one by hand (no AI suggestion for this field). `color`
+        # drives the Browse cards' colour flair.
         "genre":     {"id": p.genre.id, "name": p.genre.name,
                       "color": p.genre.color} if p.genre else None,
-        # MusicBrainz facts (2026-08-07). `status` is sent even when null so
-        # the page can distinguish "never looked up" from "looked, found
-        # nothing" — only the former and 'ambiguous' should offer a Match
-        # prompt.
+        # MusicBrainz facts. `status` is sent even when null so the page can
+        # distinguish "never looked up" from "looked, found nothing" — only
+        # the former and 'ambiguous' should offer a Match prompt.
         "musicbrainz": {
             "mbid":           p.mbid,
             "status":         p.mb_status,
@@ -312,10 +281,7 @@ def get_artist(artist_id):
             "end":            p.mb_end,
             "disambiguation": p.mb_disambiguation,
             "links":          json.loads(p.mb_links_json) if p.mb_links_json else {},
-            # Related acts — a list, so JSON rather than a column. Aliases,
-            # tags and gender were dropped 2026-08-07 (the panel shows links
-            # only); the default keeps the shape stable for rows written
-            # before that.
+            # Related acts — a list, so JSON rather than a column.
             **(json.loads(p.mb_extra_json) if p.mb_extra_json else {"related": []}),
             "checked_at":     p.mb_checked_at.isoformat() if p.mb_checked_at else None,
         },
@@ -424,23 +390,19 @@ def ai_estimate():
     return jsonify(lomax.estimate("artist", "research"))
 
 
-# ── MusicBrainz match resolution (2026-08-07) ────────────────────────────────
+# ── MusicBrainz match resolution ────────────────────────────────
 # Automatic matching runs at Artist creation and either succeeds outright or
-# records `mb_status='ambiguous'`. It NEVER auto-picks a top match (Ryan's
-# call), so these endpoints are how a human finishes the job.
+# records `mb_status='ambiguous'`. It NEVER auto-picks a top match, so these
+# endpoints are how a human finishes the job.
 
 @bp.route("/<int:artist_id>/musicbrainz/lookup", methods=["POST"])
 @login_required
 def musicbrainz_lookup(artist_id):
-    """
-    Run a lookup and LINK IT IF THE ANSWER IS OBVIOUS.
+    """Run a lookup and LINK IT IF THE ANSWER IS OBVIOUS.
 
-    Ryan, 2026-08-07: making someone click through a candidate list to confirm a
-    single 100-scoring result is busywork — if it's obvious, just do it. So this
-    applies the same confidence gate as the creation-time pass. Only a genuinely
-    unclear result hands back candidates for a human to choose from, and that
-    choice is recorded as 'linked' rather than 'matched' so the page never
-    claims credit for work a person did.
+    Only a genuinely unclear result hands back candidates for a human to choose
+    from, and that choice is recorded as 'linked' rather than 'matched' so the
+    page never claims credit for work a person did.
     """
     p = db.session.get(Artist, artist_id)
     if not p:
@@ -552,7 +514,6 @@ def musicbrainz_members(artist_id):
     return jsonify({"members": (details or {}).get("members") or []})
 
 
-# ── Profile pictures (2026-07-22; multi-image 2026-08-07) ────────────────────
 # Files live on disk (never in the DB) at
 # LIBRARY_ROOT/<sanitized name>/_images/<filename> — see
 # _artist_images_dir() and app/models/artist_image.py.
@@ -587,14 +548,12 @@ def list_artist_images(artist_id):
 @bp.route("/<int:artist_id>/images", methods=["POST"])
 @login_required
 def upload_artist_images(artist_id):
-    """
-    Upload one or more images. Accepts repeated `image` parts so drag-and-drop
+    """Upload one or more images. Accepts repeated `image` parts so drag-and-drop
     can send a whole dropped selection in a single request.
 
-    Body lives in app/utils/entity_images.py (2026-08-07) so Artist and Venue
-    photo management cannot drift apart in behaviour — first-image-becomes-
-    primary, partial-success reporting and random basenames are all decided
-    there, once.
+    Body lives in app/utils/entity_images.py so Artist and Venue photo
+    management cannot drift apart in behaviour — first-image-becomes- primary,
+    partial-success reporting and random basenames are all decided there, once.
     """
     p = db.session.get(Artist, artist_id)
     if not p:

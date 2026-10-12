@@ -1,17 +1,10 @@
-"""
-scripts/migrate_add_genre.py
+"""scripts/migrate_add_genre.py
 
 Adds the Genre dimension: a new `genre` table plus a nullable
 `performer.genre_id` FK. Additive and idempotent — safe to re-run. Seeds the
-20-genre starting vocabulary from the Genre design spec (2026-08-02); admins
-can add more later through the normal CRUD — the seed is a starting point,
-not a closed vocabulary.
-
-FK enforcement is ON as of 2026-07-22, so this FK is live immediately. SQLite
-permits ADD COLUMN ... REFERENCES as long as there is no non-NULL default —
-genre_id is nullable, so this is a clean additive migration. This touches
-neither `performance` nor `user_artist_permission`, so the hardcoded DDL
-snapshots in tools/repair_stale_fk_ddl.py do not need re-dumping.
+20-genre starting vocabulary from the Genre design spec; admins can add more
+later through the normal CRUD — the seed is a starting point, not a closed
+vocabulary.
 
     python3 scripts/migrate_add_genre.py
 """

@@ -1,6 +1,6 @@
-"""
-tests/test_learned_aliases.py -- Resolver v2 chunk 8: learned aliases, the matcher reading
-them at once, the importer's queue re-check and the review queue's order.
+"""tests/test_learned_aliases.py -- Resolver v2 chunk 8: learned aliases, the
+matcher reading them at once, the importer's queue re-check and the review
+queue's order.
 
 Real FLACs under tmp dirs, discover()/process() driven directly (no worker thread), as in
 test_bulk_ingest_review_first.py.

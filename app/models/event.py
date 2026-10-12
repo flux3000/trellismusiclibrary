@@ -36,6 +36,7 @@ class Event(db.Model):
     end_day     = db.Column(db.Integer, nullable=True)
 
     notes      = db.Column(db.Text, nullable=True)
+    history    = db.Column(db.Text, nullable=True)   # Lomax Event History (auto-applied)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                            onupdate=lambda: datetime.now(timezone.utc))
@@ -43,7 +44,7 @@ class Event(db.Model):
     # Relationships
     venue        = db.relationship("Venue",       back_populates="events")
     performances = db.relationship("Performance", back_populates="event")
-    # Photos (2026-09-01) — many, one flagged primary, ordered primary-first.
+    # Photos — many, one flagged primary, ordered primary-first.
     images       = db.relationship("EventImage", back_populates="event",
                                    cascade="all, delete-orphan",
                                    order_by="desc(EventImage.is_primary), "

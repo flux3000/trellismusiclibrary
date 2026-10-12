@@ -1,9 +1,7 @@
-"""
-models/performance_personnel.py — show-level personnel (2026-07-18).
+"""models/performance_personnel.py — show-level personnel.
 
-Layer 2 of the Per-Show Personnel model (see Context Library/Per-Show
-Personnel - Design Plan). A PerformancePersonnel row says "this Musician
-played this specific Performance," independent of the act's Membership
+Layer 2 of the Per-Show Personnel model. A PerformancePersonnel row says "this
+Musician played this specific Performance," independent of the act's Membership
 roster. What it means depends on the parent Performance's personnel_mode:
 
   'inherit'  — these rows are ADDITIONS to the resolved act roster (guests,

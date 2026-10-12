@@ -34,11 +34,8 @@ _PLURAL = re.compile(r"\?\s*(['\"])([^'\"]{0,4})\1\s*:\s*(['\"])([^'\"]{0,4})\3\
 _SUBSTITUTION = re.compile(r"^\$\{(.*)\}$", re.S)
 
 # The right-hand side of a comparison that reads as user input rather than as
-# internal state. Measured 2026-09-17: Trellis has NO typed-confirmation guard
-# — the plan's assumption that `'DELETE'` × 16 was one turned out to be the
-# HTTP method in api.js, and deletes are confirmed with confirm() dialogs. The
-# check stays because the hazard is real if one is ever added; it just finds
-# nothing today, which is the correct answer.
+# internal state. The check stays because the hazard is real if one is ever
+# added; it just finds nothing today, which is the correct answer.
 _TYPED_INPUT = re.compile(r"\.value\b|\btrim\(\)|\binput\b|\bprompt\b|\btyped\b")
 _MAX_VARIANTS = 4
 
@@ -125,7 +122,7 @@ class Extraction:
         """The queue: strings that speak to a user.
 
         The rest are extracted and kept so they can be filtered back in, but
-        they are not what Ryan signed up to read.
+        they are not what the user signed up to read.
         """
         return [u for u in self.units if u.user_facing]
 

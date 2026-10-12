@@ -1,7 +1,6 @@
-"""
-tests/test_recording_images_ui.py -- Studio Records spec v1 chunk 5: the UI
+"""tests/test_recording_images_ui.py -- Studio Records spec v1 chunk 5: the UI
 surface on top of the artwork ingestion chunk 4 already covers --
-register_image_routes() for recordings, image_url on recording_summary/
+register_image_routes for recordings, image_url on recording_summary/
 recording_row/search, and the share-door serve route's visibility check.
 """
 
@@ -191,12 +190,8 @@ def _peer_granted_junction(rec, name="Matt"):
     return peer, raw
 
 
-def test_share_door_image_200_for_visible_studio_recording(app, seeded_ids, tmp_path):
-    # REVERSED 2026-09-27 (Ryan): a studio recording's artwork reaches peers
-    # the same as a live recording's -- there is no per-recording sharing
-    # switch any more, so a studio recording visible to a peer at all (via
-    # an ordinary collection grant) shows its artwork too.
-    app.config["DATA_DIR"] = str(tmp_path / "data_test_share_door_image_200_for_visible_studio_recording")
+def test_share_door_image_403_for_studio_recording(app, seeded_ids, tmp_path):
+    app.config["DATA_DIR"] = str(tmp_path / "data_test_share_door_image_403_for_studio_recording")
     rec = _recording("Hotel", kind="studio")
     client = app.test_client()
     _login_as(client)
@@ -208,5 +203,4 @@ def test_share_door_image_200_for_visible_studio_recording(app, seeded_ids, tmp_
     _peer, raw = _peer_granted_junction(rec)
     res = client.get(f"/api/share/recordings/images/{image_id}",
                      headers={"Authorization": f"Bearer {raw}"})
-    assert res.status_code == 200
-    assert res.data == _JPEG_BYTES
+    assert res.status_code in (403, 404)

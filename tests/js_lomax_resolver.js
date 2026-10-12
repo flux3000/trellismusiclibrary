@@ -60,22 +60,23 @@ chk(count(h, /data-lx-ids="3"/g) === 2, 'songwriter has its own accept and dismi
 chk(count(h, /data-lx-ids="4"/g) === 2, 'note has its own accept and dismiss')
 chk(!/data-lx-act="(accept|dismiss)" data-lx-ids="[^"]*,/.test(h), 'no row shares one action across pieces')
 chk(/>Title<\/th>/.test(h) && />Songwriter<\/th>/.test(h) && />Notes<\/th>/.test(h), 'each piece is labelled')
-chk(h.includes('<th>Trellis</th><th>Lomax</th>'), 'track table has Trellis and Lomax columns')
+chk(/<th>Trellis<\/th><th>[^]*?Lomax[^]*?<\/th>/.test(h), 'track table has Trellis and Lomax columns')
 chk(h.includes('data-lx-tp="1:title"') && h.includes('data-lx-tp="2:songwriter"'), 'Trellis values have their own cells')
 chk(h.includes('Miles Davis') && h.includes('Bill Evans'), 'Lomax values shown')
 chk(!/Songwriter: |Note: /.test(h), 'the labelled rows replace the prefixes')
 // A "Tracks" header above the table; the column header row stays; a track's pieces share one # cell.
 chk(h.includes('<div class="lx-h">Tracks</div><table class="lx-tbl lx-tracks">'), 'Tracks header above the track table')
-chk(h.includes('<th>#</th><th>Track</th><th>Trellis</th><th>Lomax</th><th class="lx-act-td">'), 'the column header row is kept')
+chk(/<th>#<\/th><th>Track<\/th><th>Trellis<\/th><th>[^]*?Lomax[^]*?<\/th><th class="lx-act-td">/.test(h), 'the column header row is kept')
 chk(/<td class="lx-n" rowspan="3">01<\/td>/.test(h) && !/<td class="lx-n"><\/td>/.test(h), 'a track\'s Title, Songwriter and Notes share its # cell')
 // Accept all: titles and songwriters, never notes.
-const all = /data-lx-act="accept-all" data-lx-ids="([^"]*)"/.exec(h)
-chk(all && all[1] === '2,3', 'Accept all takes title and songwriter ids only, got ' + (all && all[1]))
+const all = /data-lx-act="accept-all" data-lx-ids="([^"]*)"/g
+const alls = []; for (let m; (m = all.exec(h));) alls.push(m[1])
+chk(alls.join('|') === '1,6|2,3', 'fields Accept all (state, genre) then tracks Accept all (title and songwriter only), got ' + alls.join('|'))
 // An empty Trellis songwriter/notes with no Lomax value gets no row; track 2 has a songwriter, so it does.
 chk(count(h, /data-lx-tp="2:notes"/g) === 0, 'an empty pair is not a row')
 chk(count(h, /data-lx-tp="2:songwriter"/g) === 1, 'a filled Trellis value is a row')
 // Agreeing value is quiet and has no buttons.
-chk(/<td data-lx-tp="2:songwriter">Bill Evans<\/td><td><span class="lx-same">Bill Evans<\/span><\/td><td class="lx-act-td"><\/td>/.test(h), 'agreement is quiet with no actions')
+chk(/<td data-lx-tp="2:songwriter">Bill Evans<\/td><td><span class="lx-same">Bill Evans<\/span><\/td><td class="lx-act-td"><span class="lx-done">OK<\/span><\/td>/.test(h), 'agreement is quiet and says OK')
 // Lomax values stay blue (lx-val); no confidence shown anywhere.
 chk(h.includes('<span class="lx-val">Nardis</span>'), 'Lomax value in the Lomax class')
 chk(!/confidence|high|medium/i.test(h), 'no confidence shown')
@@ -84,9 +85,28 @@ chk(/<th scope="row">Genre<\/th>[\s\S]*?<span class="lx-val">Jazz<\/span>/.test(
 // Decide Title and Songwriter, dismiss Notes: states render independently.
 const run2 = JSON.parse(JSON.stringify(run))
 run2.result.proposals[1].decision = 'accepted'; run2.result.proposals[2].decision = 'accepted'; run2.result.proposals[3].decision = 'rejected'
-h = api.lomaxResolverHtml(ctl(run2), opts({}))
+const held = [{ track_number: 1, title: 'Nardis', songwriter: 'Miles Davis', notes: '' }, tracks[1]]
+h = api.lomaxResolverHtml(ctl(run2), opts({ tracks: held }))
 chk(count(h, /Accepted<\/span>/g) === 2 && !h.includes('pedal steel'), 'accepted pieces say Accepted; the dismissed note is gone')
-chk(!/data-lx-act="accept-all"/.test(h), 'no Accept all once nothing is open')
+chk(!/data-lx-act="accept-all" data-lx-ids="2/.test(h), 'no tracks Accept all once nothing is open')
+// Accepted but the form no longer holds the value (a reopened folder): the controls come back.
+h = api.lomaxResolverHtml(ctl(run2), opts({}))
+chk(count(h, /data-lx-act="accept" data-lx-ids="2"/g) === 1 && count(h, /Accepted<\/span>/g) === 0, 'accepted but not applied is open again')
+h = api.lomaxResolverHtml(ctl(run2), opts({ tracks: held, saved: true }))
+chk(count(h, /Accepted<\/span>/g) === 2, 'a saved recording reads Accepted')
+
+// "agrees" is only true while the live value matches: Lomax says Ahmad Jamal and agreed when the run was
+// made, but the form now reads "Ahmad Jamal- P". That row is an open proposal, with controls and no OK.
+const run3 = { id: 3, status: 'done', level: 'study', finished_at: '2026-10-05T10:00:00Z', result: { proposals: [
+  P(11, 'artist', 'Ahmad Jamal', { agrees: true }), P(12, 'track.2.songwriter', 'Bill Evans', { agrees: true }),
+] } }
+h = api.lomaxResolverHtml(ctl(run3), opts({ value: k => ({ artist: 'Ahmad Jamal- P' })[k] || '', tracks: [tracks[0], Object.assign({}, tracks[1], { songwriter: 'B. Evans' })] }))
+chk(count(h, /data-lx-act="accept" data-lx-ids="11"/g) === 1 && count(h, /data-lx-act="dismiss" data-lx-ids="11"/g) === 1, 'agrees but the live artist differs: controls shown')
+chk(h.includes('<span class="lx-val">Ahmad Jamal</span>'), 'agrees but differs: the proposal is bright')
+chk(count(h, /data-lx-act="accept" data-lx-ids="12"/g) === 1, 'agrees but the live track value differs: controls shown')
+chk(!/lx-done">OK/.test(h), 'agrees but differs: no OK')
+h = api.lomaxResolverHtml(ctl(run3), opts({ value: k => ({ artist: 'Ahmad Jamal' })[k] || '', tracks }))
+chk(/lx-done">OK/.test(h) && !/data-lx-ids="11"/.test(h), 'agrees and the live value matches: still OK, no controls')
 
 // No genre row unless the act needs one; MusicBrainz suggestion shown neutral with its own icons.
 h = api.lomaxResolverHtml(ctl(null), opts({}))
@@ -145,7 +165,7 @@ chk(/oninput = ev =>/.test(src) && /_ingestMarkDirty\(`track\.\$\{ingest\.tracks
 
 // ── Ask Lomax button: no accent class, one dedicated token class ─────────────
 const bar = api.lomaxAskBar({})
-chk(/class="btn btn-sm lx-go"/.test(bar) && !/btn-primary/.test(bar), 'Ask Lomax uses the Lomax token class only')
+chk(/class="btn lx-go lx-go--ask"/.test(bar) && !/btn-primary/.test(bar), 'Ask Lomax uses the Lomax token class only')
 
 // ── 9a billing comparison ────────────────────────────────────────────────────
 chk(normBilling('Bela Fleck and Edgar Meyer') === normBilling('Bela Fleck & Edgar Meyer'), '& and "and" read the same')
@@ -203,14 +223,14 @@ async function members(name, billing, opts) {
   chk(ro.value('date') === '1971-10-26' && ro.value('artist') === 'Miles Davis' && ro.value('lineage') === 'DAT > FLAC', 'saved values')
   chk(ro.value('event') === '' && ro.genreRow === true && ro.tracks === tracks, 'empty values, genre row for an act with none')
   let v = api.lomaxResolverHtml(ctl(run), ro)
-  chk(count(v, /<th scope="row">/g) >= 11 && v.includes('Tentative') && v.includes('data-lx-ask'), 'same table, tentative mark, ask bar')
+  chk(count(v, /<th scope="row">/g) >= 11 && v.includes('Tentative') && !v.includes('data-lx-ask'), 'same table, tentative mark, no ask bar (asking lives in the chat)')
   chk(v.includes('Nardis') && v.includes('lx-val'), 'Lomax column from the run on the recording')
   api.setEdit(false)
   v = api.lomaxResolverHtml(ctl(run), ro)
   chk(!v.includes('data-lx-ask') && !/data-lx-act="(accept|dismiss)"/.test(v), 'read-only: no ask bar, no actions')
   api.setEdit(true)
   v = api.lomaxResolverHtml(ctl(null), api.lxRecordingResolverOpts({ tracks: [] }, null))
-  chk(v.includes('Field') && v.includes('data-lx-ask') && !v.includes('lx-tent'), 'no run, no resolver_json, no perf: empty columns, ask bar present')
+  chk(v.includes('Field') && !v.includes('data-lx-ask') && !v.includes('lx-tent'), 'no run, no resolver_json, no perf: empty columns, no ask bar')
 }
 // The MusicBrainz Genre row looks up the act the form will save: the Artist field now, debounced, cached.
 chk(/name = \(getFormField\('artist'\) \|\| f\.artist_name \|\| ''\)\.trim\(\)/.test(src), 'genre lookup reads the Artist field')

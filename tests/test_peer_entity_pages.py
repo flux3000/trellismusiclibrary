@@ -1,5 +1,4 @@
-"""
-tests/test_peer_entity_pages.py — the peer-facing entity pages (milestone 2).
+"""tests/test_peer_entity_pages.py — the peer-facing entity pages.
 
 test_peer_visible_set.py proves the visible SET is computed correctly. This
 file proves the ENDPOINTS honour it — which is a separate failure mode: a

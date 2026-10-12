@@ -1,9 +1,7 @@
-"""
-tests/test_recording_images.py — recording-level artwork (Studio Records
-spec v1, chunk 4): app/utils/recording_images.py and the new ingest step
-(_do_confirm step 13) that calls it, for both the interactive and bulk doors.
+"""tests/test_recording_images.py — recording-level artwork:
+app/utils/recording_images.py and the new ingest step (_do_confirm step 13)
+that calls it, for both the interactive and bulk doors.
 
-Fixtures (design spec build plan chunk 4):
   (a) a folder image cover.jpg plus back.png
   (b) a FLAC with an embedded front PICTURE and no folder image
   (c) an MP3 with an embedded APIC and no folder image
@@ -11,14 +9,13 @@ Fixtures (design spec build plan chunk 4):
   (e) no images at all
 
 Every fixture is ingested through the real _do_confirm -- (a) through both
-bulk=False and bulk=True. Each source folder is placed INSIDE LIBRARY_ROOT
-(an "in-root source", Bulk Ingest spec section 1.1): move_to_library() never
-moves, renames or flattens a source that already sits under LIBRARY_ROOT --
-it is cataloged exactly where it is -- so a real end-to-end _do_confirm call
-can be hashed before and after without the unrelated fact that an
-OUTSIDE-root source gets physically relocated (this codebase has no
-copy-only path) getting in the way of proving that the artwork step itself
-only reads the folder, never writes into it.
+bulk=False and bulk=True. Each source folder is placed INSIDE LIBRARY_ROOT:
+move_to_library never moves, renames or flattens a source that already sits
+under LIBRARY_ROOT -- it is cataloged exactly where it is -- so a real
+end-to-end _do_confirm call can be hashed before and after without the
+unrelated fact that an OUTSIDE-root source gets physically relocated (this
+codebase has no copy-only path) getting in the way of proving that the artwork
+step itself only reads the folder, never writes into it.
 """
 
 import base64
@@ -130,8 +127,8 @@ def test_folder_images_ingested_and_cover_is_primary(app, db, tmp_path, bulk):
 
     lib = tmp_path / f"lib_folder_{bulk}"
     lib.mkdir()
-    # In-root source (Bulk Ingest spec 1.1): sits inside LIBRARY_ROOT, so
-    # move_to_library() catalogs it in place instead of relocating it.
+    # In-root source: sits inside LIBRARY_ROOT, so move_to_library
+    # catalogs it in place instead of relocating it.
     src = lib / f"Folder Image Act {bulk}" / "Show1"
     src.mkdir(parents=True)
     _silent_flac(src / "t01.flac")
@@ -406,13 +403,11 @@ def test_extract_embedded_pictures_stops_after_first_hit(tmp_path):
 
 
 def test_extract_embedded_pictures_source_ref_uses_nested_file_path(tmp_path):
-    """
-    Fix from chunk 4 (Studio Records spec v1): source_ref must be
-    "embedded:<track file_path>" using the track's own folder-relative
-    file_path, which can be nested for a multi-disc show ("CD1/01.flac"),
-    NOT the abs path's basename ("01.flac") -- two discs' track 1 share a
-    basename but never a file_path, so basename-keyed dedupe would conflate
-    them.
+    """Fix from chunk 4: source_ref must be "embedded:<track file_path>" using the
+    track's own folder-relative file_path, which can be nested for a multi-disc
+    show ("CD1/01.flac"), NOT the abs path's basename ("01.flac") -- two discs'
+    track 1 share a basename but never a file_path, so basename-keyed dedupe
+    would conflate them.
     """
     from app.utils.recording_images import extract_embedded_pictures
 
@@ -431,7 +426,6 @@ def test_extract_embedded_pictures_source_ref_uses_nested_file_path(tmp_path):
     assert source_ref == "embedded:CD2/01.flac"
 
 
-# ── Independent review v1, 2026-09-27: S3 (re-scan primary) / S4 (dot-files
 #    and bad-magic bytes) ────────────────────────────────────────────────────
 
 def test_appledouble_and_dotfile_never_discovered_s4(tmp_path):

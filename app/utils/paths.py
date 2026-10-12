@@ -21,8 +21,8 @@ def within_import_roots(path):
     IMPORT_ROOTS -- the filesystem allowlist every browse/stream/ingest
     endpoint is gated on."""
     # The admin is the owner of this Mac: their music can live anywhere, so
-    # the allowlist does not apply to them (Ryan, 2026-10-02). It still
-    # binds every other role (viewer/listener on a LAN or headless node).
+    # the allowlist does not apply to them. It still binds every other role
+    # (viewer/listener on a LAN or headless node).
     from flask import has_request_context
     if has_request_context():
         from flask_login import current_user

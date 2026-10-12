@@ -1,5 +1,4 @@
-"""
-Metadata completeness band for the import queue (2026-10-05).
+"""Metadata completeness band for the import queue.
 
 A band read off the resolver's Resolved: is the recording described, whatever the sources
 that described it. (Paula's score measures corroboration, so an untagged collection read

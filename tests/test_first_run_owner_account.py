@@ -1,23 +1,15 @@
-"""
-tests/test_first_run_owner_account.py — the name typed on the setup page.
-
-Ryan set up a second install on 2026-08-28, typed "jeff" into "What should we
-call you?", and got `ryanfbaker` — his macOS account name. The page had asked
-a question and thrown the answer away: `_create_owner_account()` opened with
-`if db.session.query(User).first() is not None: return`, and a `trellis.db`
-left in Application Support from an earlier run still held the first account
-that machine ever made. Deleting the library folder does not reset an install.
+"""tests/test_first_run_owner_account.py — the name typed on the setup page.
 
 `run.py` builds a Flask app at import time and opens a PyWebView window at
 `__main__`. Neither is wanted here: `webview` is stubbed so the import works
 on a headless box, and `run.app` is repointed at the throwaway test app so
 every write in these tests lands in the temp database, never a real one.
 
-`_apply_file_handling_choice()` (chunk 10, file-handling spec section 6.1) is
-tested the same direct way as `_create_owner_account()` above it: the setup
-page's two confirm_* methods create real folders and patch global Config,
-which the rest of this file deliberately does not exercise, so the choice it
-hands off is tested at the same unit boundary the file already uses.
+`_apply_file_handling_choice` is tested the same direct way as
+`_create_owner_account` above it: the setup page's two confirm_* methods create
+real folders and patch global Config, which the rest of this file deliberately
+does not exercise, so the choice it hands off is tested at the same unit
+boundary the file already uses.
 """
 
 import sys
@@ -149,7 +141,7 @@ def test_an_unrecognized_choice_falls_back_to_the_safe_default(api, app):
     assert fh["placement"] == "artist"
 
 
-# ── Mode default follows the welcome-screen answer (2026-10-02) ─────────────
+# ── Mode default follows the welcome-screen answer ─────────────
 
 def test_a_new_library_defaults_to_organize(api, app, tmp_path, monkeypatch):
     import run
@@ -178,7 +170,7 @@ def test_an_existing_library_defaults_to_keep(api, app, tmp_path, monkeypatch):
     assert node_settings.get_file_handling()["file_handling_mode"] == "keep"
 
 
-# ── Bulk Ingest on first run (spec 1.9/4, chunk 7a) ─────────────────────────
+# ── Bulk Ingest on first run ─────────────────────────
 
 def test_marker_with_ingest_existing_starts_one_running_run(api, app, tmp_path, monkeypatch):
     """confirm_existing_library()'s "Use a folder I already have" answer
@@ -231,11 +223,6 @@ def test_no_marker_at_all_starts_no_run(api, app, monkeypatch):
 
 
 def test_a_reachable_default_root_no_longer_skips_first_run(api, app, tmp_path, monkeypatch):
-    """
-    2026-09-27: with no marker and no LIBRARY_ROOT env var, first-run setup
-    runs even when the hardcoded default library root is reachable. The old
-    bypass hid onboarding on the one machine onboarding is tested on.
-    """
     import run
     monkeypatch.delenv("LIBRARY_ROOT", raising=False)
     monkeypatch.setattr(run, "_read_trellis_root_marker", lambda: None)
@@ -246,7 +233,6 @@ def test_a_reachable_default_root_no_longer_skips_first_run(api, app, tmp_path, 
     assert run.resolve_trellis_root_and_patch_config() is False
 
 
-# ── Welcome screen (2026-10-02 redesign) ────────────────────────────────────
 
 def test_welcome_page_markup(api):
     import run

@@ -7,7 +7,7 @@ from datetime import date
 from app.lomax import evidence as ev
 from app.lomax import filters
 from app.lomax.prompts import EvidenceSection
-from app.lomax.skills.base import Skill
+from app.lomax.skills.base import REPLY_PROP, Skill
 from app.lomax.sources import artist_links
 
 FIELDS = ("title", "year", "notes")
@@ -52,6 +52,7 @@ SUBMIT = {
         "properties": {
             "thinking": {"type": "string"},
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
+            "reply": REPLY_PROP,
             "proposals": {"type": "array", "items": {"type": "object", "properties": {
                 "field": {"type": "string", "enum": list(FIELDS)},
                 "current": {"type": "string"},
@@ -228,7 +229,7 @@ def normalize(raw, subject):
     thinking = raw.get("thinking", "")
     if not asked:
         thinking = filters.drop_absent_question_sentences(thinking)
-    result = {"skill": "album", "thinking": thinking, "answer": answer, "proposals": props, "tracks": tracks,
+    result = {"skill": "album", "thinking": thinking, "answer": answer, "reply": raw.get("reply", ""), "proposals": props, "tracks": tracks,
               "track_titles": [{"number": t["number"], "title": t["title"]} for t in tracks if t["title"]],
               "verify_items": raw.get("verify_items") or [], "sources": raw.get("sources") or []}
     return result, props

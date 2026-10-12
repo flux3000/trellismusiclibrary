@@ -37,8 +37,7 @@
   --accent-dim:rgba(196,149,106,0.14); --accent-dim2:rgba(196,149,106,0.24);
   --green:#6ab880; --amber:#c89b50; --red:#d96055; --blue:#6898c8; --purple:#a07dc8;
   --sidebar-w:300px; --header-h:46px;
-  /* Running text — the base paragraph size (Ryan, 2026-08-23: "paragraph text
-     should be based at 12.5px instead of 11.5"). Everything that is prose
+  /* Running text — the base paragraph size . Everything that is prose
      rather than a label or a data cell reads this. */
   --fs-body:12.5px;
   --r-sm:4px; --r-md:8px; --r-lg:12px;
@@ -100,12 +99,12 @@ body.zones .wm, body.zones .rec-card-performer, body.zones .rec-title, body.zone
 .rec-card-spine { position:absolute; top:0; left:0; right:0; height:3px; background:var(--genre-fg,var(--t2)); }
 .rec-card-photo { width:52px; height:52px; border-radius:50%; object-fit:cover; margin:2px auto 10px; display:block; border:2px solid var(--genre-fg,var(--bd-1)); background:var(--bg-2); }
 .rec-card-photo--initials { display:flex; align-items:center; justify-content:center; color:var(--t2); font-weight:500; letter-spacing:.02em; background:var(--bg-2); font-size:17px; }
-/* Standard date form, standard tracking (Ryan, 2026-08-23): "Apr 22, 1974".
+/* Standard date form, standard tracking: "Apr 22, 1974".
    Tabular numerals stay — a column of cards has to align. */
 .rec-card-date { font-size:14px; font-weight:600; color:var(--t0); letter-spacing:normal; font-variant-numeric:tabular-nums; }
 .rec-card-rule { height:1px; background:var(--genre-fg,var(--bd-1)); opacity:.45; margin:9px 0; }
 /* Database casing, default tracking. The -.005em was tuned for all-caps and
-   went with it (Ryan, 2026-08-23). */
+   went with it. */
 .rec-card-performer { font-family:var(--font-display); font-size:15px; font-weight:var(--display-weight); line-height:1.15; color:var(--t0); letter-spacing:normal; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .rec-card-venue { font-size:var(--fs-body); font-style:normal; color:var(--t1); line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .rec-card-loc { font-size:10.5px; letter-spacing:.02em; color:var(--t2); margin-top:5px; }
@@ -135,7 +134,7 @@ body.zones .wm, body.zones .rec-card-performer, body.zones .rec-title, body.zone
 .nav-fav-avatar { width:20px; height:20px; border-radius:50%; flex-shrink:0; background:var(--bg-3); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:600; color:var(--t2); }
 .nav-fav-title { font-size:var(--nav-item-fs); color:var(--t0); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nav-dims-foot { border-top:1px solid var(--bd-0); padding:6px 8px 4px; margin-top:10px; }
-/* Collections rows: indented, NOT shrunk. Was 10px — Ryan: "too small". */
+/* Collections rows: indented, NOT shrunk. Was 10px, too small. */
 .nav-item.nav-sub { padding-left:38px; }
 
 .rec-pane { background:var(--bg-2); padding:22px 26px; }

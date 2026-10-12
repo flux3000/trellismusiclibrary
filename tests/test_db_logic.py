@@ -1,8 +1,5 @@
-"""
-tests/test_db_logic.py — serializer, tag builder, and cascade-prune behavior
+"""tests/test_db_logic.py — serializer, tag builder, and cascade-prune behavior
 against the seeded temp DB.
-
-(2026-07-11 remodel: Artist = act; Musician = person; Membership = M2M.)
 """
 
 import json as _json
@@ -40,21 +37,10 @@ def test_recording_summary_shape(app, seeded_ids):
     # `quality` (the manual letter grade covering performance too). Two fields
     # on purpose — neither replaces the other. None until analysed.
     assert s["listening_quality"] is None
-    # `is_favorite` is the third independent signal (2026-07-31): a one-click
-    # human highlight, owing nothing to either the letter grade or the automated
+    # `is_favorite` is the third independent signal: a one-click human
+    # highlight, owing nothing to either the letter grade or the automated
     # score. Defaults off and analysis never sets it.
     assert s["is_favorite"] is False
-    # "rating" left this set 2026-08-18 — the 0-100 manual score is retired from
-    # every payload (the DB column survives unread). Three quality signals is the
-    # design: the letter grade, the automated score, and the favourite flag.
-    # "image_url" joined this set 2026-09-27 (chunk 5) -- recording-level
-    # artwork's primary image, or null. "share_override" briefly joined it
-    # the same day (Studio Records spec v1) and was reversed later that day:
-    # a studio recording shares like any other, no per-recording switch.
-    # "title" joined this set in the Studio Records v1 contract build --
-    # an album's name, None for a live show (see the field's own docstring).
-    # "mb_label"/"mb_catalog_number" joined 2026-10-01 for the Albums list's
-    # release column (null for anything without a matched release).
     assert set(s.keys()) == {"id", "source", "quality", "listening_quality",
                              "is_favorite", "is_complete",
                              "is_official", "kind", "title",
@@ -75,8 +61,8 @@ def test_build_recording_tags(app, seeded_ids):
 
 def test_performance_event_association(api, seeded_ids):
     """GET /api/performances/<id> surfaces event_id/event_name, and PUT accepts
-    event_id (2026-07-13 addition — needed so the recording page can link a
-    show to a Festival/Event the same way Add Recording already does)."""
+    event_id.
+    """
     perf_id = seeded_ids["performance_id"]
 
     resp = api.get(f"/api/performances/{perf_id}")
@@ -213,9 +199,8 @@ def test_musician_edit_and_delete_when_orphan(api):
 
 def test_do_confirm_copies_files_and_reports_progress(app, db, tmp_path):
     """The background ingest worker copies the folder, creates the chain, and
-    reports copy progress ending at 100%. Audio lands flattened + renamed
-    ("NN - Title.ext") per the 2026-07-14 always-flatten-and-rename policy;
-    non-audio extras (cover.jpg) keep their original name."""
+    reports copy progress ending at 100%.
+    """
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils import node_settings
@@ -248,13 +233,14 @@ def test_do_confirm_copies_files_and_reports_progress(app, db, tmp_path):
 
 
 def test_do_confirm_does_not_corrupt_existing_roster(app, db, tmp_path):
-    """Regression test for the ingest-time act-roster-corruption bug
-    (2026-07-22 fix): confirming a recording for an EXISTING Artist with
-    'members' set to (a subset of) its already-resolved lineup must NOT call
-    set_artist_members and rewrite the act roster — that was the same
-    Phase-1 bug, just never ported to the ingest confirm path. Membership
-    stint history must survive untouched, and a 'guests' name must attach as
-    performance-level personnel only, never touching the roster."""
+    """Regression test for the ingest-time act-roster-corruption bug: confirming a
+    recording for an EXISTING Artist with 'members' set to (a subset of) its
+    already-resolved lineup must NOT call set_artist_members and rewrite the
+    act roster — that was the same Phase-1 bug, just never ported to the ingest
+    confirm path. Membership stint history must survive untouched, and a
+    'guests' name must attach as performance-level personnel only, never
+    touching the roster.
+    """
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils.artists import resolve_or_create_artist, add_membership_stint
@@ -331,20 +317,19 @@ def test_do_confirm_seeds_roster_for_brand_new_artist(app, db, tmp_path):
 
 
 def test_do_confirm_omitted_members_key_does_not_wipe_inherited_roster(app, db, tmp_path):
-    """Regression test for the Batch Import Auto-Ingest bug (2026-07-23 fix):
-    that path never sends "members"/"guests" in its confirm payload at all
-    (no review wizard, no pre-fill) — data.get("members") is None, not [].
-    _do_confirm used to collapse that None to [] before ever reaching
-    sync_performance_personnel(), which reads [] as "the user just cleared
-    every member," tripping the case-5 safeguard: flip to personnel_mode=
-    'explicit' and snapshot the (empty) surviving lineup. Net effect: an
-    existing act's Members row on View Recording came out blank even though
-    the artist's own roster was fully intact (Ryan's report — "Bela Fleck
-    & Tony Trischka" ingested via Bulk Import's Auto-Ingest button).
-    The fix preserves the None/[] distinction through to
+    """Regression test for the Batch Import Auto-Ingest bug: that path never sends
+    "members"/"guests" in its confirm payload at all (no review wizard, no
+    pre-fill) — data.get("members") is None, not []. _do_confirm used to
+    collapse that None to [] before ever reaching sync_performance_personnel,
+    which reads [] as "the user just cleared every member," tripping the case-5
+    safeguard: flip to personnel_mode= 'explicit' and snapshot the (empty)
+    surviving lineup. Net effect: an existing act's Members row on View
+    Recording came out blank even though the artist's own roster was fully
+    intact. The fix preserves the None/[] distinction through to
     sync_performance_personnel, so an omitted key means "leave the resolved
     lineup exactly as it is" — a true no-op for a brand-new inherit-mode
-    performance, since the resolved lineup IS the roster already."""
+    performance, since the resolved lineup IS the roster already.
+    """
     from app.api.ingest import _do_confirm
     from app.models.user import User
     from app.utils.artists import resolve_or_create_artist, add_membership_stint
@@ -380,11 +365,11 @@ def test_do_confirm_omitted_members_key_does_not_wipe_inherited_roster(app, db, 
 
 
 def test_do_confirm_persists_pre_save_ai_result(app, db, tmp_path):
-    """A recording ingested after running AI Assist pre-confirm (Add
-    Recording's own button, before the row exists) should land with
-    a done Lomax run already on it — it was previously dropped on the floor because the
-    confirm payload never carried it (Ryan, 2026-07-14: 'the result was not saved with the
-    database submission')."""
+    """A recording ingested after running AI Assist pre-confirm (Add Recording's
+    own button, before the row exists) should land with a done Lomax run
+    already on it — it was previously dropped on the floor because the confirm
+    payload never carried it.
+    """
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
@@ -450,8 +435,8 @@ def test_check_existing_no_artist_match(api):
 
 def test_check_existing_finds_recording_for_artist_and_date(app, db, api, tmp_path):
     """The core case: a recording already exists for this artist+date —
-    Add Recording's duplicate-warning check should surface it (non-blocking,
-    per Ryan's 2026-07-14 call — this only warns, never blocks Confirm)."""
+    Add Recording's duplicate-warning check should surface it (non-blocking:
+    this only warns, never blocks Confirm)."""
     from app.api.ingest import _do_confirm
     from app.models.user import User
 
@@ -513,8 +498,9 @@ def test_check_existing_excludes_performance_with_no_recordings(db, api):
 def test_do_confirm_parses_and_stores_md5_but_leaves_unverified(app, db, tmp_path):
     """A .md5 fingerprint file sitting alongside the audio gets archived and
     matched to the track by filename, but MD5 is never automatically
-    recomputed-and-compared at confirm (Ryan, 2026-09-27: "MD5 never
-    automatic") -- the entry is stored `unverified`, not `match`."""
+    recomputed-and-compared at confirm -- the entry is stored `unverified`, not
+    `match`.
+    """
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
@@ -581,16 +567,6 @@ def test_do_confirm_md5_content_stored_but_not_recomputed(app, db, tmp_path):
 
 
 def test_verify_checksums_discovers_and_verifies_backfill(app, db, api, tmp_path):
-    """A fingerprint file that wasn't sent at confirm time gets discovered
-    from the library folder, parsed, and verified by the endpoint alone —
-    covers Ryan's 'go back and re-process' ask, 2026-07-13.
-
-    The checksum file is written against the track's post-ingest filename
-    (its stored file_path) rather than the pre-ingest one — a real backfill
-    checksum file is generated by re-running shntool/flac against what's
-    actually sitting in the library folder today, and since 2026-07-14 that's
-    always the flattened+renamed name (see compute_audio_rename_map), not
-    whatever the original source folder called it."""
     import hashlib
     from app.api.ingest import _do_confirm
     from app.models.user import User
@@ -635,10 +611,6 @@ def test_verify_checksums_discovers_and_verifies_backfill(app, db, api, tmp_path
 
 
 def test_save_info_file_overwrites_existing(api, tmp_path):
-    """Editing the info file on the Add Recording form and saving it should
-    write straight back to the real file scan_folder() found — independent
-    of Confirm, per Ryan's 2026-07-13 ask (so a corrected file can drive a
-    fresh AI Assist run before the show is ever added)."""
     src = tmp_path / "src_show5"; src.mkdir()
     (src / "info.txt").write_text("Original content\n")
 
@@ -682,15 +654,12 @@ def test_artist_and_venue_delete_when_empty(api):
     assert _db.session.get(Venue, vid) is None
 
 
-# ── Multi-disc flatten + rename (2026-07-14) ────────────────────────────────
-# Ryan's report: a CD1/CD2 source ingested with duplicate/interleaved track
-# numbers (01,01,02,02,03... then 06-10 unduplicated) because each disc's
-# FLAC files independently reset TRACKNUMBER. Root cause: multi-set/disc
-# detection existed in scan_folder() but was fully dead code. Fix: wire up
-# detection (below) + always flatten+rename audio into the library folder
-# root on ingest (compute_audio_rename_map / move_to_library) so DB
-# track_number is driven by the scan's own continuous index, never a
-# per-disc tag that can collide.
+# ── Multi-disc flatten + rename ────────────────────────────────
+# Root cause: multi-set/disc detection existed in scan_folder but was fully
+# dead code. Fix: wire up detection (below) + always flatten+rename audio into
+# the library folder root on ingest (compute_audio_rename_map /
+# move_to_library) so DB track_number is driven by the scan's own continuous
+# index, never a per-disc tag that can collide.
 
 def test_scan_folder_detects_and_orders_multi_disc(tmp_path):
     """CD1 (3 tracks) + CD2 (2 tracks), plus a non-set Art/ dir and a loose
@@ -735,11 +704,7 @@ def test_scan_folder_single_disc_subdir_not_flagged_as_set(tmp_path):
     assert result["sets_detected"] is False
 
 
-# ── Spelled-out disc folders + multi-disc show resolution (2026-08-12) ──────
-# Ryan's report: `del01-09-22` (disc one / disc two) came into the triage queue
-# as TWO recordings. Two causes, one folder: the set pattern required DIGITS so
-# "disc one" matched nothing, and resolve_shows() expanded any parent with 2+
-# audio-bearing subdirs into separate shows. A multi-disc show is one show.
+# ── Spelled-out disc folders + multi-disc show resolution ──────
 
 def test_parse_set_dir_word_and_digit_forms():
     """Both spellings resolve to the same canonical label, and the two
@@ -814,13 +779,7 @@ def test_scan_folder_spelled_out_disc_subdirs(tmp_path):
         "del01-09-22d1.md5", "del01-09-22d2.md5"]
 
 
-# ── Filename-encoded discs (2026-08-12) ─────────────────────────────────────
-# Ryan's report: Pat Metheny 1979-06-14 ingested with duplicate track numbers
-# (01,01,02,02...). Source was FLAT — no CD1/CD2 subdirs — with the disc in the
-# FILENAME (D01T01..D01T09, D02T01..D02T07). Subdir-only set detection saw one
-# folder, sets_detected stayed False, and the wizard fell back to trusting each
-# file's TRACKNUMBER tag, which resets per disc. Same bug as 2026-07-14, with
-# the disc number carried by the filename instead of a directory.
+# ── Filename-encoded discs ─────────────────────────────────────
 
 def test_scan_folder_detects_disc_prefix_in_filenames(tmp_path):
     """Flat folder, disc encoded as 'D01T01.' — sets_detected True, labels
@@ -1121,7 +1080,7 @@ def test_do_confirm_keeps_names_and_nesting_in_keep_mode(app, db, tmp_path):
 
 
 
-# ── Bulk Ingest, in-root sources (spec section 1.1, chunk 1, 2026-09-26) ────
+# ── Bulk Ingest, in-root sources ────
 #
 # A source folder whose realpath is already inside LIBRARY_ROOT is ingested
 # exactly where it sits -- folder_path becomes its path relative to
@@ -1306,7 +1265,7 @@ def test_do_confirm_in_root_cd1_cd2_source_organize_mode(app, db, tmp_path):
     assert tracks[1].expected_checksum == md5_2
 
 
-# ── Duplicate detection across artist/musician variants (2026-08-02) ─────────
+# ── Duplicate detection across artist/musician variants ─────────
 # The triage card now warns when the library already holds this act on this
 # date. Exact-name matching alone would miss the variant that actually bites:
 # "Aoife O'Donovan" and "Aoife O'Donovan Band" are one act to a collector and
@@ -1348,8 +1307,6 @@ def test_resolve_similar_artist_ids_finds_variants(app):
 
 
 def test_resolve_similar_artist_ids_reaches_through_a_person(app):
-    """Ryan asked for 'artist OR musician'. Since the 07-11 remodel those are
-    different tables, so a person's name has to find the acts they play in."""
     from app.extensions import db as _db
     from app.models.artist import Artist
     from app.models.musician import Musician, Membership
@@ -1372,11 +1329,9 @@ def test_resolve_similar_artist_ids_is_empty_for_a_blank_name():
     assert resolve_similar_artist_ids(None) == []
 
 
-# ── Genre (2026-08-02) ───────────────────────────────────────────────────────
 # Genre is a proper dimension: its own table, one nullable FK from Artist,
-# guarded delete matching Venue/Collection/Musician. See the Genre design spec
-# in Context Library. Nothing may create a genre implicitly — every picker
-# selects from the existing table only.
+# guarded delete matching Venue/Collection/Musician. Nothing may create a
+# genre implicitly — every picker selects from the existing table only.
 
 def test_genre_name_uniqueness(api):
     r1 = api.post("/api/genres/", json={"name": "Ska"})
@@ -1394,13 +1349,11 @@ def test_genre_name_uniqueness(api):
     assert dup.status_code == 409
 
 
-def test_genre_color_roundtrip_validation_and_clearing(api):
-    """Colour is `#rrggbb` only, normalised to lowercase, and CLEARABLE.
+def test_genre_color_roundtrip_validation_and_no_clearing(api):
+    """Colour is `#rrggbb` only, normalised to lowercase, and never clearable.
 
-    Clearing matters as much as setting: NULL is a first-class state that
-    renders the same neutral grey as a artist with no genre at all, so it
-    must not be a validation failure. Shorthand and named colours are refused
-    at the door so every consumer gets one canonical form.
+    Shorthand and named colours are refused at the door so every consumer
+    gets one canonical form.
     """
     g = api.post("/api/genres/", json={"name": "Dub", "color": "#AABBCC"}).get_json()
     assert g["color"] == "#aabbcc"          # normalised on create
@@ -1412,12 +1365,10 @@ def test_genre_color_roundtrip_validation_and_clearing(api):
         r = api.put(f"/api/genres/{g['id']}", json={"color": bad})
         assert r.status_code == 400, bad
 
-    # Both null and empty string clear it.
-    assert api.put(f"/api/genres/{g['id']}", json={"color": None}).status_code == 200
-    assert api.get(f"/api/genres/{g['id']}").get_json()["color"] is None
-    api.put(f"/api/genres/{g['id']}", json={"color": "#aabbcc"})
-    assert api.put(f"/api/genres/{g['id']}", json={"color": ""}).status_code == 200
-    assert api.get(f"/api/genres/{g['id']}").get_json()["color"] is None
+    # Neither null nor empty string clears it.
+    assert api.put(f"/api/genres/{g['id']}", json={"color": None}).status_code == 400
+    assert api.put(f"/api/genres/{g['id']}", json={"color": ""}).status_code == 400
+    assert api.get(f"/api/genres/{g['id']}").get_json()["color"] == "#123abc"
 
 
 def test_recording_row_card_fields_opt_in(app, seeded_ids):
@@ -1551,13 +1502,9 @@ def test_artist_put_accepts_and_clears_genre_id(api, seeded_ids):
     r = api.put(f"/api/artists/{pid}", json={"genre_id": g["id"]})
     assert r.status_code == 200
     fetched = api.get(f"/api/artists/{pid}").get_json()
-    # Field-wise rather than whole-dict equality: the genre payload gained
-    # `color` on 2026-08-07 and will gain more. This test is about the FK
-    # assignment round-tripping, so it should not fail every time an unrelated
-    # display field is added to the serializer.
     assert fetched["genre"]["id"] == g["id"]
     assert fetched["genre"]["name"] == "Newgrass Test"
-    assert fetched["genre"]["color"] is None   # no colour set on create
+    assert fetched["genre"]["color"] == "#c9605a"   # default colour assigned on create
 
     # Clearing back to null is a legitimate, supported edit.
     r2 = api.put(f"/api/artists/{pid}", json={"genre_id": None})
@@ -1604,7 +1551,7 @@ def test_migrate_add_genre_idempotent_and_seeds_twenty(tmp_path):
     assert "Bluegrass" in names and "Jam" in names
 
 
-# ── Library Browse View (2026-08-02 design spec) ────────────────────────────
+# ── Library Browse View ────────────────────────────
 
 def test_recording_row_omits_waveform_by_default(app, seeded_ids):
     """Load-bearing default: recording_row() also feeds the flat List views
@@ -1703,8 +1650,7 @@ def test_on_this_day_empty_when_nothing_matches(api, seeded_ids):
 
 
 def test_recommended_pool_is_a_and_a_plus_only_not_a_minus(api, db):
-    """'High quality' means quality IN ('A','A+') — A- is deliberately
-    excluded (Ryan, 2026-08-02)."""
+    """'High quality' means quality IN ('A','A+') — A- is deliberately excluded."""
     artist = Artist(name="Recommended Pool Act")
     db.session.add(artist); db.session.flush()
 
@@ -1759,12 +1705,6 @@ def test_recommended_never_repeats_a_artist_in_one_draw(api, db):
 
 def test_recommended_omits_waveform_and_respects_limit(api, seeded_ids, db):
     """`limit` is honored, and the payload carries NO waveform.
-
-    Inverted 2026-08-07 when the Browse card became a handbill rendered from
-    metadata. Asserting the ABSENCE matters: the waveform opt-in triggers an
-    eager load of every track's analysis row, so a future caller quietly
-    switching it back on is a real performance regression, not a cosmetic one.
-    The card's own fields are asserted here so the endpoint can't drop them.
     """
     rec = _db.session.get(Recording, seeded_ids["recording_id"])
     rec.quality = "A+"

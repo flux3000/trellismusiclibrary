@@ -1,19 +1,11 @@
-"""
-scripts/migrate_add_quality.py — Listening Quality persistence.
+"""scripts/migrate_add_quality.py — Listening Quality persistence.
 
 Adds (all additive, idempotent, safe to re-run):
   quality_analysis   (new) — pre-ingest staging, keyed by source folder path
   recording_quality  (new) — permanent per-recording score
 
 Nothing existing is touched and no row changes meaning: both tables are new and
-start empty. See "Context Library/Unified Ingestion + Listening Quality —
-Design Plan.md" §3 for why this is two tables rather than one.
-
-FK NOTE: SQLite FK enforcement has been ON since 2026-07-22 and the live DB's
-stale FK DDL was repaired then, so the `recording.id` references below are safe
-to declare. `quality_analysis.recording_id` is ON DELETE SET NULL (the triage
-decision outlives the recording); `recording_quality.recording_id` is ON DELETE
-CASCADE (the score is meaningless without its recording).
+start empty. Design Plan.md" §3 for why this is two tables rather than one.
 
 Run once from the repo root:
     python3 scripts/migrate_add_quality.py

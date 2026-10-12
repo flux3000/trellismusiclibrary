@@ -1,5 +1,4 @@
-"""
-scripts/migrate_studio_records.py -- Studio Records spec v1, chunk 1 (sharing
+"""scripts/migrate_studio_records.py -- Studio Records spec v1, chunk 1 (sharing
 policy).
 
 Same shape as scripts/migrate_bulk_ingest.py: dry run by default, one
@@ -12,13 +11,12 @@ artwork): each of their new `recording` columns gets its own
 adds each one with its own idempotent existence check -- so this file stays
 one script with one shared list rather than three competing migrations.
 
-Also creates `recording_image` (Design Spec v1 section 5 / chunk 4 --
-recording-level artwork) if it is absent, the same way
+Also creates `recording_image` if it is absent, the same way
 scripts/migrate_add_venue_images.py creates `venue_image`: normal installs
-never need this (SQLAlchemy's create_all() already makes the table on first
-run, since it is registered in app/models/__init__.py), but an existing
-install whose db predates this model and never runs create_all again would
-otherwise be missing it after an --apply of just this script.
+never need this (SQLAlchemy's create_all already makes the table on first run,
+since it is registered in app/models/__init__.py), but an existing install
+whose db predates this model and never runs create_all again would otherwise be
+missing it after an --apply of just this script.
 
 No-op on a second run: every ALTER is guarded by an existence check, and the
 CREATE TABLE is IF NOT EXISTS.

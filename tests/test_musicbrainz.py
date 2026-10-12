@@ -1,5 +1,4 @@
-"""
-tests/test_musicbrainz.py — MusicBrainz matching logic (2026-08-07).
+"""tests/test_musicbrainz.py — MusicBrainz matching logic.
 
 Every test here is NETWORK-FREE. The HTTP layer is stubbed or bypassed, because
 a unit suite that reaches musicbrainz.org is slow, rate-limited, and red
@@ -110,9 +109,10 @@ def test_summarise_tolerates_missing_optional_blocks():
 def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     """MusicBrainz may fill its own columns and nothing else.
 
-    name/bio/members are Ryan's (genre is filled only when empty; see below). An external database silently rewriting
-    a hand-corrected act name would be the same class of bug as the AI Assist
-    auto-apply that was removed in July.
+    name/bio/members are the user's (genre is filled only when empty; see
+    below). An external database silently rewriting a hand-corrected act name
+    would be the same class of bug as the AI Assist auto-apply that was removed
+    in July.
     """
     from app.extensions import db as _db
     from app.models.artist import Artist
@@ -133,7 +133,7 @@ def test_apply_never_touches_human_curated_fields(app, seeded_ids):
     assert "wikipedia" in p.mb_links_json
 
 
-# ── Artist genre from MusicBrainz (Ryan, 2026-10-05) ─────────────────────────
+# ── Artist genre from MusicBrainz ─────────────────────────
 
 def _bare_artist(name="Genre Test Act", genre_id=None):
     from app.extensions import db as _db
@@ -235,14 +235,6 @@ def test_search_artist_empty_name_returns_empty_without_calling(monkeypatch):
     assert called == []
 
 
-# ── Release lookup (Studio Records spec v1, section 2 — independent review) ──
-#
-# apply_to_recording()/classify_release()/search_release() cover the fixes
-# from the 2026-09-27 independent review: B1 (a shared Performance's date
-# fields never get written), B2 (month/day only fill under a matching
-# year), B3 (malformed/zero-padded partial dates), S5 (the exception path
-# still sets mb_release_status), S6 (the score gate runs on release GROUPS,
-# not individual editions), N3 (quotes escaped in the Lucene query).
 
 from app.extensions import db as _db
 from app.models.artist import Artist

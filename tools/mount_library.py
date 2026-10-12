@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-tools/mount_library.py — keep the library SMB share mounted, without Finder.
+"""tools/mount_library.py — keep the library SMB share mounted, without Finder.
 
 Run by the com.fluxaudio.mountlibrary LaunchAgent at login and every 5 minutes.
 Safe to run by hand at any time; it is idempotent and exits fast when the mount
@@ -18,7 +17,6 @@ Two separate failure modes have taken the library offline:
      *session* but creates no mountpoint. That orphan session then blocks the
      mount we actually want: mount_smbfs returns EEXIST ("File exists"), and
      Finder's own "Connect As" button silently does nothing. Diagnosed
-     2026-08-21 via `smbutil statshares -a` showing a live SMB_3.1.1 session
      with SESSION_RECONNECT_COUNT 0 and no corresponding `mount` entry.
 
 So the helper's job is NOT merely "mount the share" — it is "tear down
@@ -36,10 +34,11 @@ hang or fail under launchd where there is no tty.
 
 ESCALATION
 ----------
-Teardown is deliberately graded. umount + rmdir + NetAuthAgent are invisible
-to the user and run freely. Killing Finder is user-visible, so it only happens
+Teardown is deliberately graded. umount + rmdir + NetAuthAgent are invisible to
+the user and run freely. Killing Finder is user-visible, so it only happens
 after MAX_GENTLE_ATTEMPTS consecutive failures (~15 min offline) — long enough
-that we are clearly stuck, short enough that Ryan is not reinstalling macOS.
+that we are clearly stuck, short enough that the user is not reinstalling
+macOS.
 
 Exit codes:  0 mounted and readable   1 still down after this attempt
 """
@@ -60,13 +59,13 @@ SHARE_URL  = os.environ.get("TRELLIS_SHARE_URL",  "smb://SynologyRB.local/music"
 MOUNTPOINT = os.environ.get("TRELLIS_MOUNTPOINT", "/Volumes/music")
 
 # The path we actually care about. `mount` succeeding tells us the kernel is
-# happy; only reading this tells us the app will work.
-# "Trellis" (Ryan, 2026-08-23) — the NAS folder was renamed from "Flux Audio"
-# on disk; mirrors config.py's LIBRARY_ROOT default. This one matters more
-# than most: this LaunchAgent runs unattended every 5 minutes with no env
-# override, so a stale default here means it perceives a perfectly healthy
-# mount as broken forever, escalating all the way to killing Finder every
-# cycle (see MAX_GENTLE_ATTEMPTS below) — not a cosmetic miss.
+# happy; only reading this tells us the app will work. "Trellis" — the NAS
+# folder was renamed from "Flux Audio" on disk; mirrors config.py's
+# LIBRARY_ROOT default. This one matters more than most: this LaunchAgent
+# runs unattended every 5 minutes with no env override, so a stale default
+# here means it perceives a perfectly healthy mount as broken forever,
+# escalating all the way to killing Finder every cycle (see
+# MAX_GENTLE_ATTEMPTS below) — not a cosmetic miss.
 SENTINEL = os.environ.get("TRELLIS_SENTINEL", "/Volumes/music/Trellis/Library")
 
 # Share name as it appears in `smbutil statshares -a` (last path component).

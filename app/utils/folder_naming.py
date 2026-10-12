@@ -1,5 +1,4 @@
-"""
-utils/folder_naming.py — Canonical folder name generation.
+"""utils/folder_naming.py — Canonical folder name generation.
 
 Convention:
   {Artist} - {date} - {Venue} - {Location} ({Source})
@@ -13,9 +12,9 @@ Date formats (partial dates degrade gracefully):
 Source formats:
   source only: SBD
 
-An Album (recording.kind == "studio") is named "{Artist} - {Album Title}"
-(Ryan, 2026-10-06): it has no date, venue or place, and naming it like a show
-gave "Ahmad Jamal - 1973 - Unknown Venue - Unknown Location".
+An Album (recording.kind == "studio") is named "{Artist} - {Album Title}": it
+has no date, venue or place, and naming it like a show gave "Ahmad Jamal - 1973
+- Unknown Venue - Unknown Location".
 
 Examples:
   Ahmad Jamal - Ahmad Jamal '73
@@ -80,9 +79,9 @@ def _format_location(city, state, country):
 
 
 def _sanitize(name):
-    """Remove characters illegal in macOS filenames."""
-    # macOS only disallows : and / in filenames (and NUL)
-    return re.sub(r'[:/\x00]', '-', name).strip()
+    """Make a folder-name part legal on Windows and macOS (file_naming.windows_safe)."""
+    from app.utils.file_naming import windows_safe
+    return windows_safe(name).strip()
 
 
 def build_folder_name(
@@ -165,10 +164,9 @@ def build_folder_name_from_recording(recording, performance, artist, venue):
 
 
 def _dedupe_name(canonical_name, n):
-    """
-    Append a disambiguating digit — inside the source parens if there is one
-    ("... (SBD)" -> "... (SBD 2)"), otherwise a bare "... (2)". Matches
-    Ryan's existing manual practice for colliding folder names.
+    """Append a disambiguating digit — inside the source parens if there is one
+    ("... (SBD)" -> "... (SBD 2)"), otherwise a bare "... (2)". Matches the
+    user's existing manual practice for colliding folder names.
     """
     m = re.match(r'^(.*)\(([^)]*)\)\s*$', canonical_name)
     if m:
@@ -178,8 +176,7 @@ def _dedupe_name(canonical_name, n):
 
 
 def unique_folder_name(parent_abs, canonical_name, keep_abs=None):
-    """
-    Find a folder name under parent_abs (an absolute directory path) that
+    """Find a folder name under parent_abs (an absolute directory path) that
     doesn't collide with anything already on disk there — starting from
     canonical_name and walking _dedupe_name()'s "(2)", "(3)", ... suffixes
     on each collision.
@@ -188,11 +185,9 @@ def unique_folder_name(parent_abs, canonical_name, keep_abs=None):
     canonical name — ingest (move_to_library, app/utils/ingest.py) and
     metadata-driven rename (rename_recording_folder, below) both go through
     this, so two recordings with identical Artist/Date/Venue/Location/Source
-    (e.g. two undated-source "Various Artists" shows at the same venue) get
-    the same disambiguating suffix regardless of which path creates or
-    renames the collision. Before 2026-09-01 only the rename path had this
-    check — ingest had none, and would silently merge the second recording's
-    files into the first's folder (Ryman Auditorium 1964 bug report).
+    (e.g. two undated-source "Various Artists" shows at the same venue) get the
+    same disambiguating suffix regardless of which path creates or renames the
+    collision.
 
     keep_abs: pass the CURRENT absolute path of the folder being renamed so
     a no-op rename (the new name computes to the folder's own existing name)
@@ -242,14 +237,13 @@ def unique_file_name(parent_abs, filename, keep_abs=None):
 
 
 def _other_recordings_in_folder(recording, folder_rel):
-    """
-    How many OTHER recordings claim this same folder_path.
+    """How many OTHER recordings claim this same folder_path.
 
-    Normally zero — but the ingest merge bug (fixed 2026-09-01) left real
-    libraries with folders shared by several recordings; Ryan's had eight
-    Opry transcription shows, 146 files, in one directory. Renaming a shared
-    folder to match ONE of them drags the other seven's audio along and
-    leaves their folder_path pointing at a directory that no longer exists.
+    Normally zero — but the ingest merge bug left real libraries with folders
+    shared by several recordings; the user's had eight Opry transcription
+    shows, 146 files, in one directory. Renaming a shared folder to match ONE
+    of them drags the other seven's audio along and leaves their folder_path
+    pointing at a directory that no longer exists.
 
     Returns 0 when the question cannot be asked at all (no app/DB context —
     a script, or a plain stand-in object in a unit test). That is the
@@ -269,8 +263,7 @@ def _other_recordings_in_folder(recording, folder_rel):
 
 
 def rename_recording_folder(recording, library_root, rename_folders=None):
-    """
-    Rename a recording's on-disk folder to match its CURRENT metadata, if it
+    """Rename a recording's on-disk folder to match its CURRENT metadata, if it
     has drifted from what's on disk (e.g. a date or venue correction after
     ingest, when the folder was only ever named once, at ingest time).
 
@@ -280,14 +273,13 @@ def rename_recording_folder(recording, library_root, rename_folders=None):
     the two current callers (Recording PUT, Performance PUT), so a caller
     added later can't forget it and call this unconditionally.
 
-    rename_folders: pass True/False to state the switch's value explicitly
-    (a caller with no Flask/DB context -- or the pure duck-typed unit tests
-    in test_folder_naming.py, by design). Left as None (the default), it is
-    read from node_settings -- and if THAT has no app context either, this
-    fails CLOSED (returns None, no rename) rather than proceeding as if the
-    switch were on (S10, re-review 2026-09-25): a caller must either run in
-    a real request context or say what it wants, never get a rename by
-    accident because neither was available to ask.
+    rename_folders: pass True/False to state the switch's value explicitly (a
+    caller with no Flask/DB context -- or the pure duck-typed unit tests in
+    test_folder_naming.py, by design). Left as None (the default), it is read
+    from node_settings -- and if THAT has no app context either, this fails
+    CLOSED (returns None, no rename) rather than proceeding as if the switch
+    were on: a caller must either run in a real request context or say what it
+    wants, never get a rename by accident because neither was available to ask.
 
     NON-FATAL BY DESIGN: a filesystem problem must never block a metadata
     save. On any failure this leaves `recording.folder_path` exactly as it
@@ -338,7 +330,7 @@ def rename_recording_folder(recording, library_root, rename_folders=None):
     # Refuse rather than repair: renaming it would move the others' audio to
     # a name that describes only THIS recording's metadata, and silently
     # invalidate their folder_path. Non-fatal like every other failure here,
-    # so the metadata save itself still goes through. 2026-09-01.
+    # so the metadata save itself still goes through.
     shared = _other_recordings_in_folder(recording, old_rel)
     if shared:
         return (f"Folder not renamed: {shared} other recording"

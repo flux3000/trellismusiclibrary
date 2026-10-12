@@ -1,10 +1,5 @@
-"""
-scripts/migrate_rename_artist_musician.py — 2026-09-16 vocabulary rename.
-
-The third naming pass over these two entities (see the dated epoch table in
-CONTEXT.md §2 and "Artist-Musician Rename and FLAC Tag Taxonomy — Design Spec
-v1"). The act becomes Artist, the person becomes Musician. Values are
-unchanged — only names.
+"""The third naming pass over these two entities. The act becomes Artist, the
+person becomes Musician. Values are unchanged — only names.
 
 Two passes, because `artist`, `artist_image` and `membership.artist_id` are
 occupied when the swap begins:
@@ -31,16 +26,7 @@ occupied when the swap begins:
   All drops run before any create: after pass A the old
   `ix_artist_image_artist_id` sits on musician_image and would collide.
 
-⚠ The 2026-07-09 rename ran with FK enforcement off, so SQLite never rewrote
-FK clauses stored in OTHER tables' DDL and tools/repair_stale_fk_ddl.py had to
-rebuild two tables. This script sets legacy_alter_table=OFF and
-foreign_keys=ON before the transaction, and asserts afterwards: FK check empty,
-no `performer` anywhere in sqlite_master, the expected columns and FK targets,
-and unchanged row counts. Any failure rolls the whole thing back.
-
-Photos: person photos would live under LIBRARY_ROOT/_artists/. On 2026-09-16
-there were none (0 artist_image rows, no folder), so there is no folder move —
-the script refuses to run if an `_artists/` folder has appeared since.
+Photos: person photos would live under LIBRARY_ROOT/_artists/.
 
 Dry-run is the default and is safe against the live database: it copies the
 database into memory and runs the full migration and every assertion there.

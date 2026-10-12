@@ -10,8 +10,8 @@ function grab(name) {
   for (; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}') { d--; if (d === 0) break } }
   return src.slice(st, k + 1)
 }
-const code = ['_biLiveRowIds', '_biPlanRowUpdates', '_biSyncRunCounts'].map(grab).join('\n')
-const { _biLiveRowIds, _biPlanRowUpdates, _biSyncRunCounts } = new Function(code + '\nreturn { _biLiveRowIds, _biPlanRowUpdates, _biSyncRunCounts }')()
+const code = ['_biLiveRowIds', '_biPlanRowUpdates'].map(grab).join('\n')
+const { _biLiveRowIds, _biPlanRowUpdates } = new Function(code + '\nreturn { _biLiveRowIds, _biPlanRowUpdates }')()
 let bad = 0
 const chk = (c, m) => { if (!c) { bad++; console.log('FAIL', m) } }
 const queueBelongs = it => it.status !== 'ingested' && it.status !== 'moved'
@@ -33,11 +33,5 @@ chk(_biPlanRowUpdates(before, [1, 2], [after[1]], queueBelongs).remove.join() ==
 const same = _biPlanRowUpdates(before, [1], [{ id: 1, status: 'ready', ingest_requested: true }], queueBelongs)
 chk(!same.remove.length && !same.replace.length, 'unchanged row left alone')
 
-// Badge follows the poll's counts without a request.
-const runs = [{ id: 7, status: 'done', counts: { ready: 2, review: 1 } }]
-chk(_biSyncRunCounts(runs, { id: 7, status: 'running', counts: { ready: 1, review: 1 } }) === true, 'badge change reported')
-chk(runs[0].counts.ready === 1 && runs[0].status === 'running', 'entry updated')
-chk(_biSyncRunCounts(runs, { id: 7, status: 'running', counts: { ready: 1, review: 1, ingested: 3 } }) === false, 'no change reported')
-chk(_biSyncRunCounts(runs, { id: 99, counts: {} }) === false, 'unknown run ignored')
 console.log(bad ? 'FAILED' : 'incremental ok')
 process.exit(bad ? 1 : 0)

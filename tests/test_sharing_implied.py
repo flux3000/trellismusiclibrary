@@ -1,5 +1,4 @@
-"""
-tests/test_sharing_implied.py: sharing is implied (Ryan, 2026-10-06).
+"""tests/test_sharing_implied.py: sharing is implied.
 
 The per-peer "Share my library" switch is gone, so every unrevoked peer must hold
 an active grant to the Full Library collection: on creation, on a minted invite,

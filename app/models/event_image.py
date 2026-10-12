@@ -1,9 +1,8 @@
-"""
-models/event_image.py — multiple images per Event, one designated primary.
+"""models/event_image.py — multiple images per Event, one designated primary.
 
-Fourth parallel table, added with the Event CRUD build (Ryan, 2026-09-01).
-Same reasoning as venue_image and musician_image: parallel tables so each keeps a
-real foreign key, shared behaviour in `app/utils/entity_images.py` keyed off
+Fourth parallel table, added with the Event CRUD build. Same reasoning as
+venue_image and musician_image: parallel tables so each keeps a real foreign
+key, shared behaviour in `app/utils/entity_images.py` keyed off
 `__parent_fk__`. See app/models/venue_image.py for the full argument.
 
 Files live at LIBRARY_ROOT/_events/<sanitized event name>/_images/<filename>.

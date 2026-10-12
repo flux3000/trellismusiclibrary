@@ -1,5 +1,4 @@
-"""
-Fitting the confidence thresholds (Resolver v2, chunk 6, 2026-10-04).
+"""Fitting the confidence thresholds.
 
 Pure: no network, no filesystem except write_calibration(). Deterministic: no random
 numbers, folds are assigned by sorting, ties are broken the same way every run.

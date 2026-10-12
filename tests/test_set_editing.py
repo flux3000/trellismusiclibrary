@@ -1,6 +1,4 @@
-"""
-tests/test_set_editing.py — Set editing on View Recording (spec section 6.4 /
-7, chunk 11).
+"""tests/test_set_editing.py — Set editing on View Recording.
 
 track.set_number is a plain, click-to-edit field: a PUT changes grouping and
 the derived per-set track number the next GET returns, clears on an empty

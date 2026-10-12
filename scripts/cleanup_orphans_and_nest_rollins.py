@@ -1,7 +1,6 @@
-"""
-cleanup_orphans_and_nest_rollins.py — One-time data cleanup (2026-07-09, session 2).
+"""cleanup_orphans_and_nest_rollins.py — One-time data cleanup.
 
-Two independent operations, both approved by Ryan:
+Two independent operations, both approved by the user:
 
 A) Delete orphaned performances (0 recordings) and their now-dangling parents.
    Failed-ingest / test residue. Deleting a performance can leave a performer

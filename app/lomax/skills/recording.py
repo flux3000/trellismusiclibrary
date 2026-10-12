@@ -5,7 +5,7 @@ import re
 from app.lomax import evidence as ev
 from app.lomax import filters
 from app.lomax.prompts import EvidenceSection
-from app.lomax.skills.base import Skill
+from app.lomax.skills.base import REPLY_PROP, Skill
 from app.lomax.sources import trusted_section
 
 FIELDS = list(ev.CURRENT_FIELDS)          # the ten Resolver fields
@@ -25,7 +25,9 @@ what that evidence is.
 library and the trusted sources, not against themselves.
 - Tracks: return an entry in 'tracks' for EVERY track on disk, as {number, title, songwriter, \
 note}, ordered to match the audio files. Give your best title for each (the filed one when you \
-agree) and the songwriter when you can establish one. A track 'note' exists ONLY to carry what the info file says about that track, through a \
+agree) and the songwriter when you can establish one. Evaluate title, songwriter and note \
+independently for EVERY track, including a track whose title you agree with: return the \
+songwriter whenever you can establish one, even when the title is unchanged. A track 'note' exists ONLY to carry what the info file says about that track, through a \
 footnote mark beside the track that a footer line explains ("* with Jerry Garcia on pedal \
 steel"), or a parenthetical or bracketed annotation on the track's own line. Copy that text, \
 short, in the info file's own words. NEVER write a note that: describes what the track is \
@@ -83,6 +85,7 @@ SUBMIT = {
         "properties": {
             "thinking": {"type": "string"},
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
+            "reply": REPLY_PROP,
             "proposals": {"type": "array", "items": {"type": "object", "properties": {
                 "field": {"type": "string", "enum": [f for f in FIELDS if f != "lineage"] + ["genre"]},
                 "current": {"type": "string"},
@@ -260,7 +263,7 @@ def normalize(raw, subject):
     thinking = raw.get("thinking", "")
     if not asked:
         thinking = filters.drop_absent_question_sentences(thinking)
-    result = {"thinking": thinking, "answer": answer,
+    result = {"thinking": thinking, "answer": answer, "reply": raw.get("reply", ""),
               "proposals": props, "tracks": tracks,
               "track_titles": [{"number": t["number"], "title": t["title"]} for t in tracks if t["title"]],
               "verify_items": raw.get("verify_items") or [],

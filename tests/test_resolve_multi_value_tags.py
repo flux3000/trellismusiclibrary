@@ -1,5 +1,4 @@
-"""A tag with several values (two ARTIST comments) must not crash the resolver
-(2026-10-05: 'list' object has no attribute 'lower' on an import row)."""
+"""A tag with several values (two ARTIST comments) must not crash the resolver."""
 from app.utils.resolve import _consistent_tag, _tag_container_values
 
 

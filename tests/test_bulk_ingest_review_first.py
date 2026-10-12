@@ -112,9 +112,9 @@ def _hold_run(env, *names, flagged=()):
 # ── mode ────────────────────────────────────────────────────────────────────
 
 def test_mode_defaults_and_idempotent_start(app, env):
-    # One Queue, one mode (Ryan, 2026-10-06): the first source takes its
-    # placement's default, a later source joins the Queue's mode, and an
-    # explicit mode applies to the whole Queue.
+    # One Queue, one mode: the first source takes its placement's
+    # default, a later source joins the Queue's mode, and an explicit
+    # mode applies to the whole Queue.
     c = app.test_client()
     _admin(c)
     _good(env.incoming, "S1")
@@ -149,7 +149,7 @@ def test_hold_run_leaves_items_ready_scored_and_library_empty(env):
     row = _db.session.query(QualityAnalysis).filter(
         QualityAnalysis.folder_path.like("%/S1")).first()
     assert row.listening_quality == 77.0 and row.recording_id is None
-    assert env.score_calls["n"] == 2              # Needs Review is scored too (Ryan, 2026-10-06)
+    assert env.score_calls["n"] == 2              # Needs Review is scored too
 
 
 def test_hold_reuses_current_analysis(env):
@@ -518,7 +518,6 @@ def test_reanalyze_puts_item_back_to_pending(app, env):
     assert got.status == "pending" and got.meta is None
 
 
-# ── review fixes (2026-10-02) ───────────────────────────────────────────────
 
 def test_single_show_run_reads_its_own_folder_name(env):
     # An outside single-folder run has one item, rel_path "."; the folder name
@@ -581,7 +580,6 @@ def test_per_item_review_confirm_takes_the_item_out_of_the_queue(app, env, seede
     assert it.status == "ingested" and it.recording_id == rid
 
 
-# ── review fixes (2026-10-02, second pass) ─────────────────────────────────
 
 def test_bring_in_in_progress_goes_to_review_on_boot_reset(env):
     run = _run(env.incoming)
@@ -875,8 +873,8 @@ def test_queued_convert_all_rows_report_converting(app, env):
 
 
 def test_add_to_library_queues_the_folder_paused(app, env):
-    # Add to Library on a working folder (Ryan, 2026-10-06): the folder is in the
-    # Queue, nothing has been scanned, and the run waits for the person's Start.
+    # Add to Library on a working folder: the folder is in the Queue, nothing has
+    # been scanned, and the run waits for the person's Start.
     _good(env.incoming, "S1")
     c = app.test_client()
     _admin(c)
@@ -888,7 +886,6 @@ def test_add_to_library_queues_the_folder_paused(app, env):
     assert [i.status for i in items] == ["pending"]
 
 
-# ── One Queue (Ryan, 2026-10-06: "There should only be one queue. Ever.") ────
 
 def test_two_sources_make_one_queue_and_reset_clears_both(app, env):
     _good(env.incoming, "S1")
@@ -945,7 +942,7 @@ def test_import_all_requests_ready_and_review_and_skipped_sort_last(app, env):
     assert asked == {"B", "C"}
 
 
-# ── Pre-import checks on Add Recording (2026-10-06) ──────────────────────────
+# ── Pre-import checks on Add Recording ──────────────────────────
 
 def test_fingerprint_and_spectrogram_routes_are_admin_only(app, env):
     _good(env.incoming, "S1")

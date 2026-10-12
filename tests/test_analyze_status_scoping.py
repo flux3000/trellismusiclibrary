@@ -1,14 +1,13 @@
-"""
-tests/test_analyze_status_scoping.py — the review queue only ever lists the
+"""tests/test_analyze_status_scoping.py — the review queue only ever lists the
 folders the scan that produced it actually resolved.
 
-The bug (Ryan, 2026-09-02): a Pat Metheny show from several jobs ago that would
-not leave the Review & Ingest list.  `qs.list_staging()` answers "every
-unpromoted row recorded under this source dir", which is a SUPERSET of "what is
-under this directory now" — staging rows deliberately outlive their folders so
-`promote_to_recording` still has something to write to after a Move ingest.
-The same show had been ingested from a different path, so the row under the
-scanned parent was never marked promoted, and nothing else would ever clear it.
+The bug: a Pat Metheny show from several jobs ago that would not leave the
+Review & Ingest list. `qs.list_staging` answers "every unpromoted row recorded
+under this source dir", which is a SUPERSET of "what is under this directory
+now" — staging rows deliberately outlive their folders so
+`promote_to_recording` still has something to write to after a Move ingest. The
+same show had been ingested from a different path, so the row under the scanned
+parent was never marked promoted, and nothing else would ever clear it.
 
 The job knows the real answer before a single byte is decoded, so
 `analyze_status` filters its results to that.  These tests pin the filter, and
@@ -93,13 +92,6 @@ def test_rows_this_scan_resolved_are_all_listed(app, client, job):
 
 
 def test_filter_matches_on_the_normalised_path(app, client, job):
-    """
-    Paths are compared through norm_path, not raw.  macOS hands back decomposed
-    filenames while SQLite stores composed ones, and a filter that compared the
-    bytes would silently drop every accented folder from the queue — the exact
-    failure mode CONTEXT.md warns about, arriving as an empty list rather than
-    an error.
-    """
     import unicodedata
     accented = "/src/Lucía Trio"
     _stage(unicodedata.normalize("NFC", accented), "/src")

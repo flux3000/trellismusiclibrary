@@ -1,10 +1,8 @@
-"""
-tests/test_paula.py — pure-function unit tests for app/utils/paula.py.
+"""tests/test_paula.py — pure-function unit tests for app/utils/paula.py.
 
-Paula is the free, non-AI completeness/confidence scorer (2026-07-16 design
-conversation with Ryan). No DB or app context needed — known_artists/
-known_venues are passed in directly, same pattern as parse_info_file's own
-(currently unused-in-production) fuzzy matching.
+Paula is the free, non-AI completeness/confidence scorer. No DB or app context
+needed — known_artists/ known_venues are passed in directly, same pattern as
+parse_info_file's own (currently unused-in-production) fuzzy matching.
 """
 
 from app.utils.paula import compute_paula_score, _score_name_attribute, _score_date
@@ -27,9 +25,6 @@ def test_name_attribute_full_agreement_scores_max():
 
 
 def test_name_attribute_new_unmatched_tag_alone_scores_070():
-    """The calibration fix Ryan asked for: a well-formed tag value that just
-    hasn't been seen in the DB yet (~10% of ingests, per Ryan) should NOT
-    score as unreliable. 0.70, not the old 0.35."""
     sub, detail = _score_name_attribute("Brand New Act", False, None, False)
     assert sub == 0.70
     assert detail["tag_present"] and not detail["tag_matched"]
@@ -67,7 +62,7 @@ def test_name_attribute_nothing_present_scores_zero():
     assert not detail["tag_present"] and not detail["txt_present"]
 
 
-# ── Date: all-or-nothing agreement (Ryan's explicit correction) ────────────
+# ── Date: all-or-nothing agreement ────────────
 
 def test_date_full_agreement_gets_bonus():
     sub, detail = _score_date((1979, 12, 12), (1979, 12, 12))
@@ -76,9 +71,6 @@ def test_date_full_agreement_gets_bonus():
 
 
 def test_date_tag_full_txt_month_only_gets_no_bonus():
-    """The exact false-positive Ryan flagged: txt only says 'December 1979'
-    (no day) — under the old shared-precision rule this wrongly earned the
-    full agreement bonus. Must now score tag-presence-only."""
     sub, detail = _score_date((1979, 12, 12), (1979, 12, None))
     assert sub == 0.70          # tag's own day-precision presence only
     assert not detail["exact_agree"]
@@ -101,12 +93,8 @@ def test_date_nothing_present():
     assert sub == 0.0
 
 
-# ── Full weighted score — locks in the worked examples Ryan reviewed ───────
 
 def test_full_score_well_tagged_new_artist_known_venue():
-    """Reproduces the worked example Ryan approved: well-tagged show, brand
-    new (unmatched) artist, venue already in the DB. Should land ~75,
-    not the old miscalibrated 58."""
     tags = {
         "artist": "Brand New Act", "concert_date": "1994-06-15",
         "venue": "The Fillmore", "city": "San Francisco", "state": "CA",
@@ -172,9 +160,10 @@ def test_track_completeness_confirmed_tag_only_txt_only_conflict_missing():
 
 
 def test_track_completeness_all_tag_only_still_scores_solidly():
-    """Per Ryan's real-world calibration note (~5% full-match rate), a
-    recording where every track is tag-only (no info file at all) should
-    still read as a good score, not penalized for lacking corroboration."""
+    """Per the user's real-world calibration note (~5% full-match rate), a
+    recording where every track is tag-only (no info file at all) should still
+    read as a good score, not penalized for lacking corroboration.
+    """
     tags = {"tracks": [{"title": "One"}, {"title": "Two"}, {"title": "Three"}]}
     scan = _scan(tags=tags, info={}, audio_count=3)
     result = compute_paula_score(scan, [], [])
