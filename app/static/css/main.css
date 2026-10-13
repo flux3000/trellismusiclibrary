@@ -658,9 +658,9 @@
    `html.peer-mode` ITSELF is not gone — it is a structural/permissions flag
    (still toggled by applyPeerTheme() in app.js) and drives the non-colour
    rules further down this file: hiding the library-selector centre cluster,
-   the drive-offline banner, and the `[data-admin]` backstop. It sets no
-   colours at all, which is also why it does not fight the palette attribute
-   now sitting on the same element — `.peer-mode` is one class, and every
+   the drive-offline banner, and the `[data-admin]` backstop. Its only colour
+   is the header wash (2026-10-13), mixed from the palette's own --accent, so
+   it does not fight the palette attribute now sitting on the same element — `.peer-mode` is one class, and every
    palette selector is `:root[data-palette=…]`, which outranks it. */
 
 /* ── Reset ──────────────────────────────────────────────────────────────────── */
@@ -1214,23 +1214,23 @@ body.sidebar-collapsed .sidebar-resizer { display: none; }
 @keyframes iq-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 .iq-now-row { animation: iq-pulse 2s ease-in-out infinite; }
 
-/* FORMAT + TYPE columns, and (soundQuality:false callers) no Sound Quality
+/* MARKS (fingerprint, MusicBrainz) + FORMAT + TYPE columns, and (soundQuality:false callers) no Sound Quality
    column -- narrower than .lq-brow's own 7-column grid, so it is overridden
    with an extra class the same way .bi-brow used to. */
 .lq-brow-head.iq-brow, .lq-brow.iq-brow {
-  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 56px 62px 112px 196px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 44px 46px 56px 62px 112px 196px;
   gap: 12px;
 }
 /* The Lomax column (140px, after Status) while Lomax is on for the queue. */
 .lq-brow-head.iq-brow.iq-brow--lx, .lq-brow.iq-brow.iq-brow--lx {
-  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 56px 62px 112px 80px 196px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 44px 46px 56px 62px 112px 80px 196px;
 }
 /* No Sound Quality column (everything but a Review First Queue). */
 .lq-brow-head.iq-brow.iq-brow--nosq, .lq-brow.iq-brow.iq-brow--nosq {
-  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 62px 112px 196px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 44px 46px 62px 112px 196px;
 }
 .lq-brow-head.iq-brow.iq-brow--nosq.iq-brow--lx, .lq-brow.iq-brow.iq-brow--nosq.iq-brow--lx {
-  grid-template-columns: 30px minmax(0, 1fr) 44px 46px 62px 112px 80px 196px;
+  grid-template-columns: 30px minmax(0, 1fr) 44px 44px 46px 62px 112px 80px 196px;
 }
 
 .lq-brow.iq-brow { min-height: 46px; }
@@ -1860,25 +1860,6 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   text-align: center;
 }
 
-/* ── Source badges ──────────────────────────────────────────────────────────── */
-
-.badge {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  font-family: var(--font-ui);
-  letter-spacing: 0.06em;
-  padding: 2px 5px;
-  border-radius: 3px;
-  text-transform: uppercase;
-}
-
-.badge-SBD  { background: var(--sbd-bg);   color: var(--sbd-fg);  }
-.badge-AUD  { background: var(--aud-bg);   color: var(--aud-fg);  }
-.badge-MTX  { background: var(--mtx-bg);   color: var(--mtx-fg);  }
-.badge-FM   { background: var(--fm-bg);    color: var(--fm-fg);   }
-.badge-src  { background: var(--other-bg); color: var(--other-fg);}
-
 /* ── Quality badge ──────────────────────────────────────────────────────────── */
 
 .quality {
@@ -2199,7 +2180,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .venue-result-loc { color: var(--t3); font-size: 11px; margin-left: 6px; }
 
 /* Add-to-library copy progress (background ingest job) */
-.confirm-progress { margin: 0; padding: 10px 20px 12px; } /* 20px matches .ingest-actions */
+.confirm-progress { margin: 0; padding: 0; } /* inside .ingest-foot, in place of the File Handling line */
 .confirm-progress-bar {
   height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
 }
@@ -3898,7 +3879,6 @@ a.member-chip-name:hover { color: var(--accent); }
 /* In a remote library the selector itself carries the accent, so the thing
    naming where you are is also the thing that looks different. */
 .lib-select.is-remote { border-color: var(--accent); color: var(--accent-lit); }
-.lib-select-icon { color: var(--accent); font-size: 12px; flex-shrink: 0; }
 .lib-select-name { flex: 1; min-width: 0; font-weight: 500; }
 .lib-select-caret { color: var(--t3); font-size: 10px; }
 
@@ -3951,7 +3931,6 @@ a.member-chip-name:hover { color: var(--accent); }
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   height: var(--hdr-ctl-h); padding: 0 12px; background: var(--bg-2);
 }
-.lib-join-ic { width: 12px; height: 12px; }
 
 .join-note { font-size: 12px; color: var(--t2); line-height: 1.5; margin: 0 0 12px; }
 .join-hash { font-family: var(--font-mono); color: var(--t1); }
@@ -5588,6 +5567,14 @@ a.member-chip-name:hover { color: var(--accent); }
   flex: 0 0 auto;
 }
 .ingest-actions-right .btn { white-space: nowrap; }
+/* Add Recording's footer (Ryan, 2026-10-13): the form's own colour, buttons
+   right, and a small File Handling line beneath that the progress bar replaces
+   once the form is submitted. */
+.ingest-actions--form { background: transparent; justify-content: flex-end; padding-bottom: 4px; }
+.ingest-foot { padding: 0 20px 10px; min-height: 30px; }
+.ingest-foot-fh { display: flex; justify-content: flex-end; }
+.ingest-foot-fh[hidden] { display: none; }
+.ingest-foot-fh .fh-strip { font-size: 11px; color: var(--t2); }
 /* Busy: the label stays put and a spinner appears in front of it, so the
    button's width is identical before, during and after. The detailed progress
    (Preparing… / Copying files… N%) lives in the bar below, which has room for
@@ -6915,6 +6902,7 @@ a.member-chip-name:hover { color: var(--accent); }
 .iq-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; line-height: 1.3; }
 .iq-status--ready { color: var(--green); }
 .iq-status--issue { color: var(--amber); }
+.iq-status--bad { color: var(--red); }
 .iq-status-ic { width: 13px; height: 13px; flex: none; }
 /* Rows that need a look sit on a faint amber wash over the row fill. */
 /* Ingest All Ready: the row Ingest button one size up. */
@@ -7117,14 +7105,8 @@ a.member-chip-name:hover { color: var(--accent); }
   font-size: 10.5px; letter-spacing: .02em;
   color: var(--t2); margin-top: 5px;
 }
-.rec-card-genre {
-  display: inline-block; margin: 9px auto 0; padding: 2px 8px; border-radius: var(--r-sm);
-  font-size: 9.5px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase;
-  color: var(--genre-fg); border: 1px solid var(--genre-fg);
-  /* color-mix keeps one colour source: the chip fill is the genre colour at low
-     alpha, so adding a genre never means also picking a background. */
-  background: color-mix(in srgb, var(--genre-fg) 14%, transparent);
-}
+/* Genre and source on the card are plain text, no pill (Ryan, 2026-10-13). */
+.rec-card-genre { margin-top: 9px; font-size: 10.5px; color: var(--t2); }
 
 .rec-card-foot {
   display: flex; align-items: center; justify-content: center;
@@ -7133,11 +7115,6 @@ a.member-chip-name:hover { color: var(--accent); }
   margin-top: auto; padding-top: 12px;   /* auto = pinned to the card bottom */
 }
 .rec-card-dot { opacity: .5; }
-.rec-card-src {
-  border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
-  border-radius: 3px; padding: 1px 5px;
-  font-size: 9px; font-weight: 700; letter-spacing: .12em;
-}
 
 /* ── Recording ROW card — RECENTLY ADDED MODULE ───────────────────────────────
    Full-width rows with list-like density but card styling: a middle ground
@@ -7389,6 +7366,10 @@ a.member-chip-name:hover { color: var(--accent); }
    else's. The whole centre cell goes; the header keeps its shape because the
    side columns are 1fr each. */
 html.peer-mode .app-header-center { visibility: hidden; }
+/* The one colour peer mode sets (Ryan, 2026-10-13): the header band takes a
+   light wash of the palette's own accent, so a shared library reads as
+   somewhere else in every palette with no new colour values. Chrome only. */
+html.peer-mode .app-header { background: color-mix(in srgb, var(--accent) 10%, var(--bg-1)); }
 
 /* Admin / Playback segmented control. Visually quiet by default — it is a
    development and preview affordance, not a primary action — but the active
@@ -8455,16 +8436,11 @@ html.playback-mode .pp-member-tenure.is-unset { display: none; }
   font-size: 11px; color: var(--t2); text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Reserved cells. `.brow-srccell` is the cell, `.brow-src` the pill inside
-   it — two elements because the pill is content-width (a badge that hugged
-   the cell would stretch "SBD" to 46px) while the cell must hold its column
-   whether or not there is a pill in it. */
+/* Reserved cells. `.brow-srccell` holds its column whether or not there is a
+   source; `.brow-src` is the source as plain row text, same as the size cell
+   (the outlined pill is gone, Ryan 2026-10-13). */
 .brow-srccell { display: flex; justify-content: flex-end; overflow: hidden; }
-.brow-src {
-  font-size: 8.5px; font-weight: 700; letter-spacing: .1em;
-  border: 1px solid var(--genre-fg, var(--t2)); color: var(--genre-fg, var(--t2));
-  border-radius: 3px; padding: 1px 4px; white-space: nowrap;
-}
+.brow-src { font-size: 11px; color: var(--t2); white-space: nowrap; }
 .brow-grade {
   font-size: 11px; font-weight: 600; color: var(--accent-lit);
   text-align: right; font-variant-numeric: tabular-nums;
@@ -9137,15 +9113,6 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 }
 .arc-hd--r { text-align: right; }
 .arc-fmt { font-size: 10.5px; color: var(--t1); text-align: right; }
-.arc-src {
-  font-size: 8.5px; font-weight: 700; letter-spacing: .1em; white-space: nowrap;
-  border: 1px solid currentColor; border-radius: 3px; padding: 1px 4px;
-}
-.arc-src--sbd   { color: var(--sbd-fg); }
-.arc-src--aud   { color: var(--aud-fg); }
-.arc-src--mtx   { color: var(--mtx-fg); }
-.arc-src--fm    { color: var(--fm-fg); }
-.arc-src--other { color: var(--other-fg); }
 .arc-num {
   font-size: 11.5px; color: var(--t1); text-align: right;
   font-variant-numeric: tabular-nums; white-space: nowrap;
@@ -9379,7 +9346,6 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lx-link:disabled { opacity: .5; cursor: default; }
 .lx-done { color: var(--green); font-size: 11px; font-weight: 600; }
 .lx-error { color: var(--red); font-size: 12px; }
-.lx-none { color: var(--t3); }
 
 /* Tables */
 .lx-tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
@@ -9644,45 +9610,6 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 .lnav-sub .nav-col-name:hover { color: var(--t0); text-decoration: none; }
 .lnav-sub .nav-col-recs { padding-left: 12px; }
 
-/* ── Playback mode: View Recording and the player ──────────
-   A listening surface, so the type and controls go up a step and the recording's
-   artwork becomes a faded backdrop. Everything is scoped to Playback (.rec-view-shell--pb
-   is rendered only when canEditLibrary() is false; html.playback-mode for the
-   player), so Admin mode is untouched. */
-html.playback-mode { --player-h: 104px; }
-html.playback-mode .player-bar { grid-template-columns: 300px 1fr 230px; }
-html.playback-mode .player-track-title { font-size: 16px; }
-html.playback-mode .player-track-meta { font-size: 13px; }
-html.playback-mode .player-track-rec { font-size: 12px; }
-html.playback-mode .player-btn:not(.player-btn-play) svg { width: 22px; height: 18px; }
-html.playback-mode .player-btn-play { width: 42px; height: 42px; }
-html.playback-mode .player-btn-play svg { width: 16px; height: 18px; }
-html.playback-mode .player-time { font-size: 13px; min-width: 36px; }
-
-.rec-view-shell--pb { position: relative; }
-.rec-view-shell--pb .rec-detail-header h2 { font-size: 28px; margin-bottom: 6px; }
-.rec-view-shell--pb .rec-detail-header .rec-date-line { font-size: 17px; margin-bottom: 8px; }
-.rec-view-shell--pb .rec-hdr-star { font-size: 20px; vertical-align: -3px; }
-.rec-view-shell--pb .rec-header-photo { width: 156px; height: 156px; }
-.rec-view-shell--pb .rec-header-photo--initials { font-size: 48px; }
-.rec-view-shell--pb .member-chip { font-size: 15px; }
-.rec-view-shell--pb .mg-row-label { font-size: 12px; }
-.rec-view-shell--pb .hm-val { font-size: 15px; }
-.rec-view-shell--pb .hm-val--chip .quality { font-size: 16px; }
-.rec-view-shell--pb .rec-header-notes { font-size: 15px; max-height: 180px; }
-.rec-view-shell--pb .rec-status-note { font-size: 14px; }
-.rec-view-shell--pb .action-bar { padding-top: 14px; padding-bottom: 14px; }
-.rec-view-shell--pb .action-bar .btn-sm { font-size: 15px; padding: 8px 18px; }
-.rec-view-shell--pb .skip-toggle-label { font-size: 15px; padding: 8px 18px; }
-.rec-view-shell--pb .track-row { padding: 12px 24px; }
-.rec-view-shell--pb .track-title { font-size: 18px; }
-.rec-view-shell--pb .track-num,
-.rec-view-shell--pb .track-dur { font-size: 14px; }
-.rec-view-shell--pb .track-play { font-size: 18px; }
-.rec-view-shell--pb .track-note-col,
-.rec-view-shell--pb .track-sw-col { font-size: 13px; }
-.rec-view-shell--pb .track-songwriter { font-size: 12px; }
-.rec-view-shell--pb .track-head { font-size: 11px; }
 
 
 /* ── Notifications (notify.js) ───────────────────────────────────────────────
@@ -9738,3 +9665,44 @@ html.playback-mode .player-time { font-size: 13px; min-width: 36px; }
   max-height: 50vh;
   overflow-y: auto;
 }
+
+/* Settings › Top Shelf: the chosen collections sit under "All in Collection". */
+.ts-cols { padding-left: 22px; }
+
+/* Queue: fingerprint verdict and, on Album rows, the MusicBrainz lookup, left of Format. */
+.iq-col-marks { justify-self: end; }
+.iq-marks { display: inline-flex; align-items: center; gap: 6px; }
+.iq-mb { display: inline-flex; }
+.iq-mb-ic { width: 15px; height: 15px; }
+.iq-mb--ok   { color: var(--green); }
+.iq-mb--miss { color: var(--amber); }
+
+/* Lomax "typing": three dots that pulse in turn before his first reply. */
+.lx-typing { display: inline-flex; gap: 4px; align-items: center; padding: 11px 12px; }
+.lx-typing span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--t2);
+  animation: lx-typing 1.1s infinite ease-in-out;
+}
+.lx-typing span:nth-child(2) { animation-delay: .15s; }
+.lx-typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes lx-typing { 0%, 70%, 100% { opacity: .25; } 35% { opacity: 1; } }
+
+/* The Top Shelf's "Settings" link, beside Shuffle and styled like it. Your own
+   library only: a shared library's shelf is the host's A+/A, not your settings. */
+.lib-tops-settings, .lib-tops-settings:visited { text-decoration: none; color: var(--t2); }
+.lib-module-head .lib-tops-settings { margin-left: 6px; }   /* Shuffle already takes the auto margin */
+
+/* Add Recordings (2026-10-13): an Imported tab that just filled reads green
+   until clicked; the Queue table's header row has no box around it. */
+.pp-tab.bi-tab--fresh, .pp-tab.bi-tab--fresh .pp-tab-n { color: var(--green); }
+#bi-table.lq-cards--compact { border: none; }
+#bi-table > .lq-brow-head { background: transparent; }
+
+/* Play All and Skip Non-Music are one size (Ryan, 2026-10-13): same height,
+   type and padding, with a matching 1px edge on Play All. */
+.action-bar .btn-play-all,
+.action-bar .skip-toggle--action .skip-toggle-label {
+  box-sizing: border-box; height: 30px; padding: 0 14px;
+  font-size: 12px; font-weight: 500; line-height: 1;
+}
+.action-bar .btn-play-all { border: 1px solid var(--accent); }

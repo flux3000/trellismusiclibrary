@@ -265,19 +265,16 @@ def recommended_recordings():
     # its bin is empty and the right-hand chevron should go.
     offset = max(0, request.args.get("offset", 0, type=int) or 0)
 
-    pool = _card_eager(_recommended_pool_query()).all()
+    # The viewer's own Top Shelf criteria (Settings), one pool. Only a
+    # recording there through SBD/FM alone and played in the last 90 days is
+    # moved to the back (app/utils/top_shelf.py).
+    from app.utils import top_shelf
+    base = _card_eager(Recording.query.options(
+        selectinload(Recording.tracks).selectinload(Track.analysis),
+        selectinload(Recording.performance)))
+    pool, played_ids = top_shelf.pool(getattr(current_user, "id", None), base)
     if not pool:
         return jsonify([])
-
-    pool_ids = [r.id for r in pool]
-    played_ids = {
-        rid for (rid,) in
-        db.session.query(Track.recording_id)
-        .join(PlayLog, PlayLog.track_id == Track.id)
-        .filter(Track.recording_id.in_(pool_ids))
-        .distinct()
-        .all()
-    }
 
     perf_by_rec = {r.id: (r.performance.artist_id if r.performance else None) for r in pool}
     genre_by_artist = _genre_by_artist(
@@ -292,7 +289,7 @@ def recommended_recordings():
     played   = [r for r in pool if r.id in played_ids]
     rnd.shuffle(unplayed)
     rnd.shuffle(played)
-    ordered = unplayed + played   # unplayed strongly preferred, never excluded
+    ordered = unplayed + played   # demoted, never excluded
 
     if offset:
         picks = _diverse_sequence(ordered, perf_by_rec,
@@ -419,6 +416,7 @@ def get_recording(recording_id):
         files_staged = 0
 
     _set_track_numbers = derive_set_track_numbers(rec.tracks)
+    from app.utils.bulk_ingest import recording_format
 
     # Spec 6.4: "N discs" on the details line. Derived, not stored
     # (recording.disc_count is never a column -- spec section 1's field
@@ -429,6 +427,7 @@ def get_recording(recording_id):
     return jsonify({
         "id":                   rec.id,
         "disc_count":           disc_count,
+        "format":               recording_format(rec),
         "performance_id":       rec.performance_id,
         "title":                rec.title,
         "source":               rec.source,
@@ -620,6 +619,9 @@ def scan_recording():
     log_step(job, "queried known artists/venues",
              f"{len(known_artists)} artists, {len(known_venues)} venues")
     resp["paula"] = compute_paula_score(resp, known_artists, known_venues)
+    # Add Recording's title says "(In Workshop)" / "(In Backlog)".
+    from app.utils.published import working_folder_name
+    resp["working_folder"] = working_folder_name(folder_path)
     log_step(job, "response ready", "Paula scoring done")
 
     return jsonify(resp)

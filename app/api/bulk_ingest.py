@@ -147,9 +147,17 @@ def _serialize_run(run):
                       RecordingQuality.listening_quality.isnot(None))
               .scalar()) or 0
 
+    # Queue rows "Convert SHN/WAV to FLAC" would act on.
+    convertible = sum(1 for it in (db.session.query(BulkIngestItem)
+                                   .filter(BulkIngestItem.run_id == run.id,
+                                           BulkIngestItem.status == "review",
+                                           BulkIngestItem.reason.like("%unsupported_format%")))
+                      if _shn_wav(it))
+
     return {
         "id":              run.id,
         "root":            run.root,
+        "convertible":     convertible,
         # Derived, never stored: a root inside LIBRARY_ROOT is cataloged in
         # place, anything else is brought in.
         "placement":       "in_place" if bulk_ingest_run.is_in_library(run.root) else "bring_in",
@@ -261,7 +269,7 @@ def _serialize_queue(runs):
             for k, v in (p.get(key) or {}).items():
                 total[k] = total.get(k, 0) + v
         out[key] = total
-    for key in ("failed", "studio", "scored", "scorable"):
+    for key in ("failed", "studio", "scored", "scorable", "convertible"):
         out[key] = sum(p.get(key) or 0 for p in parts)
     out["last_error"] = next((p["last_error"] for p in reversed(parts) if p.get("last_error")), None)
     return out
@@ -398,6 +406,14 @@ def reset(run_id):
     return jsonify({"removed": removed, "run": _serialize_run(run)})
 
 
+def _meta_of(it):
+    try:
+        v = json.loads(it.meta) if it.meta else {}
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
 @bp.route("/queue/items", methods=["GET"], defaults={"run_id": None})
 @bp.route("/<int:run_id>/items", methods=["GET"])
 @admin_required
@@ -483,6 +499,13 @@ def items(run_id):
     from app.utils.serialize import batch_recording_image_urls
     image_urls = batch_recording_image_urls([it.recording_id for it in rows if it.recording_id])
 
+    # Album rows on screen with no MusicBrainz result yet are (re)queued, so a
+    # lookup skipped while MusicBrainz was unreachable is retried (deduped).
+    from app.api.ingest import queue_album_lookup
+    for it in rows:
+        if it.kind == "studio" and it.status in ("ready", "review") and not _meta_of(it).get("mb"):
+            queue_album_lookup(it)
+
     return jsonify({
         "total": total,
         "page": page,
@@ -507,6 +530,8 @@ def _serialize_item(it, image_urls=None):
         # Live convert progress ({done,total,current}) while a job runs on this
         # folder, else None -- how Convert All's rows show their state.
         "converting":   _converting_progress(it),
+        # Queue rows: the folder's fingerprint verdict, as on Downloads.
+        **_item_fp_fields(it),
         # Where the folder actually is. rel_path is relative to the library
         # root for an in-library run and to the run root otherwise, and is "."
         # for an outside single-show folder, so the client cannot rebuild it.
@@ -516,6 +541,22 @@ def _serialize_item(it, image_urls=None):
         "updated_at":   it.updated_at.isoformat() if it.updated_at else None,
         **_item_meta_fields(it),
     }
+
+
+def _item_fp_fields(it):
+    """{"fingerprints": "valid"|"invalid"|None, "fingerprint_detail": [...]} for a
+    row waiting in the Queue. Only a pass or a failure is shown (Ryan,
+    2026-10-13); no checksums, or MD5 only, is None. Cached per folder by
+    folder_fingerprint_state, so a listing does not re-read headers."""
+    if it.status not in ("ready", "review"):
+        return {"fingerprints": None, "fingerprint_detail": []}
+    from app.utils.checksums import folder_fingerprint_state
+    try:
+        st = folder_fingerprint_state(bulk_ingest_run.item_abs_path(it))
+    except OSError:
+        return {"fingerprints": None, "fingerprint_detail": []}
+    state = st.get("state") if st.get("state") in ("valid", "invalid") else None
+    return {"fingerprints": state, "fingerprint_detail": (st.get("detail") or []) if state else []}
 
 
 def _item_meta_fields(it):
@@ -553,6 +594,8 @@ def _item_meta_fields(it):
         # Pre-ingest Listening Quality (Review First, live items only).
         "listening_quality": meta.get("listening_quality"),
         "sound_band": verdict_band(meta.get("listening_quality")),
+        # Album rows: MusicBrainz release lookup result, or None until looked up.
+        "mb": meta.get("mb"),
     }
 
 
@@ -578,6 +621,13 @@ def _unsupported(it):
     """True for a Queue row held back for audio Trellis does not import
     (WAV/AIFF/SHN/APE/WV). Such a row can only be converted or moved."""
     return it.status == "review" and "unsupported_format" in (it.reason or "").split(",")
+
+
+def _shn_wav(it):
+    """An unsupported row whose folder holds SHN or WAV: what "Convert SHN/WAV
+    to FLAC" acts on (Ryan, 2026-10-13). MP3 is never converted."""
+    fmts = {f.strip().upper() for f in (it.format or "").split(",")}
+    return _unsupported(it) and bool(fmts & {"SHN", "WAV"})
 
 
 def _converting_error(items):
@@ -695,14 +745,16 @@ def move_item(item_id):
     takes FS_LOCK). Bring-in runs only: an in-place folder is the person's own
     library and Trellis never moves it.
     """
-    from app.api.quality import move_folder_to_triage
+    from app.api.quality import move_folder_to_triage, trash_folder_path
 
     item = db.session.get(BulkIngestItem, item_id)
     if item is None:
         return jsonify({"error": "item not found"}), 404
     if bulk_ingest_run.is_in_library(item.run.root):
         return jsonify({"error": "Items in the library are never moved"}), 409
-    if item.status not in ("ready", "review"):
+    # A truncated folder can be moved aside too (2026-10-13).
+    if item.status not in ("ready", "review") and not (
+            item.status == "failed" and item.reason == "truncated_file"):
         return jsonify({"error": f"item is {item.status}, not ready or review"}), 409
     # Already handed to the worker for ingest: it moves the folder into the
     # library without FS_LOCK, so a Move now would race it for the same files.
@@ -712,7 +764,12 @@ def move_item(item_id):
     if err:
         return err
     dest = ((request.get_json(silent=True) or {}).get("dest") or "").strip().lower()
-    payload, status = move_folder_to_triage(bulk_ingest_run.item_abs_path(item), dest)
+    if dest == "trash":
+        payload, status = trash_folder_path(bulk_ingest_run.item_abs_path(item),
+                                            stop_at=bulk_ingest_run.item_base(item.run.root))
+    else:
+        payload, status = move_folder_to_triage(bulk_ingest_run.item_abs_path(item), dest,
+                                                stop_at=bulk_ingest_run.item_base(item.run.root))
     if status != 200:
         return jsonify(payload), status
     item.status = "moved"
@@ -834,7 +891,7 @@ def convert_unsupported(run_id):
     rows = (db.session.query(BulkIngestItem)
             .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status == "review")
             .order_by(BulkIngestItem.id.asc()).all())
-    rows = [it for it in rows if _unsupported(it)]
+    rows = [it for it in rows if _shn_wav(it)]
     if rows and run_id in _CONVERT_ALL_ACTIVE:
         return jsonify({"error": "This folder is still converting."}), 409
     with download_queue.FS_LOCK:

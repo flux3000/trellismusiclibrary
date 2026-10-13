@@ -100,3 +100,75 @@ def test_manual_find_release_ignores_track_count(app, client, monkeypatch):  # n
     rec = _album()
     got = client.get(f"/api/recordings/{rec.id}/release-candidates").get_json()
     assert [c["mbid"] for c in got["candidates"]] == ["r1"]
+
+
+# ── Queue: MusicBrainz lookup for Album rows (2026-10-13) ────────────────────
+
+def _queue_item(app, meta, kind="studio", status="ready"):
+    import json
+    from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
+    run = BulkIngestRun(root="/tmp/src", mode="hold")
+    _db.session.add(run); _db.session.flush()
+    it = BulkIngestItem(run_id=run.id, rel_path="A", status=status, kind=kind,
+                        meta=json.dumps(meta))
+    _db.session.add(it); _db.session.commit()
+    return it
+
+
+def test_queue_lookup_found_and_not_found(app, monkeypatch, online):
+    import json
+    from app.api import ingest
+    monkeypatch.setattr(mb, "search_release", lambda a, t, **k: [
+        {"mbid": "r1", "title": "Solo Banjo Works", "release_group_id": "g1",
+         "track_count": 2, "score": 100}] if t == "Solo Banjo Works" else [])
+    hit = _queue_item(app, {"artist": "Fleck", "title": "Solo Banjo Works", "track_count": 2})
+    miss = _queue_item(app, {"artist": "Fleck", "title": "Nope", "track_count": 2})
+    for it in (hit, miss):
+        ingest._handle_mb_queue(it.id)
+    assert json.loads(_db.session.get(type(hit), hit.id).meta)["mb"]["found"] is True
+    got = json.loads(_db.session.get(type(miss), miss.id).meta)["mb"]
+    assert got["found"] is False and got["status"] == "none"
+
+
+def test_queue_lookup_skips_live_rows_and_offline(app, monkeypatch):
+    import json
+    from app.api import ingest
+    live = _queue_item(app, {"artist": "X", "title": "Y"}, kind="live")
+    ingest._handle_mb_queue(live.id)          # MusicBrainz is off under TESTING too
+    assert "mb" not in json.loads(_db.session.get(type(live), live.id).meta)
+    album = _queue_item(app, {"artist": "X", "title": "Y"})
+    ingest._handle_mb_queue(album.id)
+    assert "mb" not in json.loads(_db.session.get(type(album), album.id).meta)
+
+
+def test_followups_queue_unlooked_album_rows(app):
+    from app.api import ingest
+    album = _queue_item(app, {"artist": "X", "title": "Y"})
+    _queue_item(app, {"artist": "X", "title": "Y", "mb": {"found": True}})
+    assert _queued(ingest, "mb_queue", ingest.enqueue_followups) == [album.id]
+
+
+def test_queue_row_fingerprint_field(app, monkeypatch):
+    from app.api import bulk_ingest as bi
+    from app.utils import checksums
+    it = _queue_item(app, {"artist": "X"}, kind="live", status="review")
+    for state, shown in (("valid", "valid"), ("invalid", "invalid"), ("unchecked", None), ("absent", None)):
+        monkeypatch.setattr(checksums, "folder_fingerprint_state",
+                            lambda p, s=state: {"state": s, "detail": ["01.flac"] if s == "invalid" else []})
+        got = bi._item_fp_fields(it)
+        assert got["fingerprints"] == shown
+        assert got["fingerprint_detail"] == (["01.flac"] if shown == "invalid" else [])
+
+
+def test_queue_found_release_is_passed_to_the_import(app, monkeypatch, tmp_path):
+    from app.api import ingest
+    from tests.test_resolve import _flac_with_tags
+    show = tmp_path / "Fleck - Solo Banjo Works"
+    for i in (1, 2):
+        _flac_with_tags(show / f"0{i}.flac", ARTIST="Bela Fleck", ALBUM="Solo Banjo Works",
+                        TITLE=f"Song {i}", DATE="1992")
+    seen = {}
+    monkeypatch.setattr(ingest, "_do_confirm", lambda payload, *a, **k: seen.update(payload) or {"recording_id": 1})
+    out = ingest.auto_confirm(str(show), None, force=True, mb_release_id="r1")
+    assert out["status"] == "ingested"
+    assert seen["mb_release_id"] == "r1" and seen["mb_release_status"] == "matched"

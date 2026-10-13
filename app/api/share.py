@@ -294,8 +294,10 @@ def recording_detail(recording_id):
             "waveform":             _json.loads(ta.waveform_json) if ta.waveform_json else [],
         }
 
+    from app.utils.bulk_ingest import recording_format
     return jsonify({
         "id":               rec.id,
+        "format":           recording_format(rec),
         # The recording page's NEXT call: it fetches /performances/<id> for
         # artist, date, venue and personnel. Omitting this left the page
         # with nothing to look up, so it rendered its local empty state —
@@ -445,12 +447,9 @@ def _peer_row(rec, card=False, image_url=_serialize_UNSET):
     `is_favorite` means "the VIEWER starred this" everywhere in the UI — it
     renders as the star you click.
 
-    The owner's favourites deliberately do not travel: the star is only free to
-    mean "this one is special" while it stays private, and Collections is the
-    surface built for curation that IS meant to be read. False is the honest
-    answer here, not a redaction — a peer genuinely has no favourites yet. When
-    peer-side favourites are built, this is where the viewer's own value gets
-    filled in.
+    The owner's stars travel as a LIST (Host Favorites, /recordings/favorites),
+    never as this flag: the flag is the viewer's own star, kept on the viewer's
+    node in remote_favorite and filled in client-side.
 
     image_url must be computed with the SHARE-prefixed url, not recording_row's
     local default -- app/api/remotes.py's proxy only rewrites strings that
@@ -1027,6 +1026,37 @@ def recent_recordings():
     return jsonify([_peer_row(r, card=card, image_url=img_urls.get(r.id)) for r in recs])
 
 
+@bp.route("/recordings/favorites", strict_slashes=False)
+@peer_required
+def host_favorite_recordings():
+    """Host Favorites (Ryan, 2026-10-13, reversing "the owner's stars never
+    travel"): the host's starred, published recordings this peer can see,
+    ordered like the owner's own list (artist, then date).
+
+    Rows still go through _peer_row, so `is_favorite` stays the VIEWER'S star;
+    being in this list is what says the host starred it."""
+    peer = current_peer()
+    visible = peer_visible_recording_ids(peer)
+    if not visible:
+        return jsonify([])
+    from app.api.recordings import _card_eager
+    from app.models.artist import Artist
+    from app.models.performance import Performance
+    limit = max(1, min(request.args.get("limit", 200, type=int) or 200, 500))
+    sort_key = db.func.coalesce(Artist.sort_name, Artist.name)
+    recs = _card_eager(
+        Recording.query
+        .filter(Recording.id.in_(visible), Recording.is_favorite.is_(True),
+                Recording.is_published.is_(True))
+        .join(Performance, Recording.performance_id == Performance.id)
+        .outerjoin(Artist, Performance.artist_id == Artist.id)
+        .order_by(sort_key.asc(), Performance.start_year.asc(),
+                  Performance.start_month.asc(), Performance.start_day.asc())
+    ).limit(limit).all()
+    img_urls = _peer_image_urls(recs)
+    return jsonify([_peer_row(r, card=True, image_url=img_urls.get(r.id)) for r in recs])
+
+
 @bp.route("/recordings/kind-counts", strict_slashes=False)
 @peer_required
 def kind_counts():
@@ -1055,7 +1085,7 @@ def recommended_recordings():
     import random
     from datetime import date as _date
     from app.api.recordings import (
-        _card_eager, _recommended_pool_query, _genre_by_artist, _select_diverse,
+        _card_eager, _genre_by_artist, _select_diverse,
     )
 
     peer = current_peer()
@@ -1067,11 +1097,13 @@ def recommended_recordings():
     limit = max(1, min(limit, 12))
     reroll = request.args.get("reroll", 0, type=int) or 0
 
-    # The one change from local: the A/A+ pool is intersected with the visible
-    # set BEFORE selection, so diversity is computed over what the peer can
-    # actually play rather than over the whole library.
-    pool = (_card_eager(_recommended_pool_query())
-            .filter(Recording.id.in_(visible)).all())
+    # The host's own Top Shelf settings, intersected with the
+    # visible set BEFORE selection, so diversity is computed over what the peer
+    # can actually play rather than over the whole library.
+    from app.utils import top_shelf
+    from app.utils.bulk_ingest_run import _owner_user_id
+    pool, _ = top_shelf.pool(_owner_user_id(), _card_eager(Recording.query.filter(Recording.id.in_(visible))),
+                             for_peer=True)
     if not pool:
         return jsonify([])
 

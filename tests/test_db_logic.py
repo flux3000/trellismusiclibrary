@@ -1650,14 +1650,15 @@ def test_on_this_day_empty_when_nothing_matches(api, seeded_ids):
 
 
 def test_recommended_pool_is_a_and_a_plus_only_not_a_minus(api, db):
-    """'High quality' means quality IN ('A','A+') — A- is deliberately excluded."""
+    """'High quality' means quality IN ('A','A+') — A- is deliberately excluded.
+    AUD source, so the default SBD/FM criteria do not bring the A- back in."""
     artist = Artist(name="Recommended Pool Act")
     db.session.add(artist); db.session.flush()
 
     def _make(quality, suffix):
         perf = Performance(artist_id=artist.id, start_year=2000, start_month=1, start_day=1)
         db.session.add(perf); db.session.flush()
-        rec = Recording(performance_id=perf.id, source="SBD", quality=quality,
+        rec = Recording(performance_id=perf.id, source="AUD", quality=quality,
                         folder_path=f"x/{suffix}")
         db.session.add(rec); db.session.flush()
         db.session.add(Track(recording_id=rec.id, track_number=1, title="One",

@@ -1378,7 +1378,7 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
             if lib and norm.startswith(lib + "/"):
                 rel = norm[len(lib) + 1:]
         hit = (db.session.query(Recording.id)
-               .filter(Recording.folder_path == rel).first())
+               .filter(Recording.folder_path == rel, Recording.is_published.is_(True)).first())
         if hit:
             dups.append(Duplicate(kind="folder", recording_id=hit[0]))
 
@@ -1399,9 +1399,13 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
                 if rid is not None:
                     owners[h] = rid
         else:
+            # Only recordings in the library: one moved out to Workshop or
+            # Backlog is not a duplicate of itself coming back (2026-10-13).
             rows = (db.session.query(RecordingFingerprint.recording_id,
                                      RecordingFingerprint.content)
-                    .filter(RecordingFingerprint.fingerprint_type.in_(DEDUP_FP_TYPES))
+                    .join(Recording, Recording.id == RecordingFingerprint.recording_id)
+                    .filter(RecordingFingerprint.fingerprint_type.in_(DEDUP_FP_TYPES),
+                            Recording.is_published.is_(True))
                     .all())
             db_map = {}
             for rid, content in rows:
@@ -1436,7 +1440,8 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
                     q = q.filter(Performance.start_day == date["day"])
                 for p in q.all():
                     for rec in (p.recordings or []):
-                        dups.append(Duplicate(kind="show", recording_id=rec.id))
+                        if rec.is_published:
+                            dups.append(Duplicate(kind="show", recording_id=rec.id))
         except Exception:  # noqa: BLE001 -- informational only, never fatal
             pass
 
@@ -1524,45 +1529,84 @@ def _tag_int(v, part=0):
         return None
 
 
+_MAX_DISCS = 50    # a disc number above this is a stray tag value, not a disc
+
+
 def tag_track_shortfall(scan):
     """
     The folder holds fewer tracks than its own tags say the release has, or
     None. Offline: the first check for an incomplete Album, before MusicBrainz.
 
-    TRACKTOTAL (or TOTALTRACKS, or the "/24" in TRACKNUMBER) is per disc, so
-    files are grouped by disc: the DISCNUMBER tag, else the disc the scan read
-    from a folder or filename. A DISCTOTAL above the discs present also counts.
-    Only a shortfall flags: more files than the total is usually an untagged
-    multi-disc set, not a missing track.
+    Evidence, per disc (DISCNUMBER tag, else the disc the scan read from a
+    folder or filename):
+      * TRACKTOTAL / TOTALTRACKS / the "/24" in TRACKNUMBER;
+      * the track numbers themselves (Ryan, 2026-10-13): a lone file tagged
+        track 7 means tracks 1 to 6 are missing. A disc whose numbers carry on
+        from the discs before it (disc 2 starting at 13 after 12 files) is
+        read as continuous numbering, not a gap;
+      * disc numbers: DISCTOTAL, or a disc numbered above the discs present
+        (a lone disc 9 means discs 1 to 8 are missing).
+    Only a shortfall flags: more files than the tags account for is usually
+    an untagged multi-disc set, not a missing track.
 
     Returns {"have", "expected", "unit"} with unit "tracks" or "discs".
     """
     from_tags = (scan.get("suggestions") or {}).get("from_tags") or {}
     disc_of = {(af.get("rel_path") or af.get("filename")): af.get("disc_number")
                for af in scan.get("audio_files") or []}
-    discs, disc_total = {}, None
+    discs, disc_total, top_disc_tag = {}, None, 0
     for t in from_tags.get("tracks") or []:
         raw = t.get("raw")
         if not raw:
             continue
         rel = t.get("rel_path") or t.get("filename")
-        disc = (_tag_int(raw.get("discnumber")) or disc_of.get(rel) or 1)
+        disc_tag = _tag_int(raw.get("discnumber"))
+        if disc_tag and disc_tag > _MAX_DISCS:
+            disc_tag = None             # "disc 4481 of 4481": a stray number, not a disc
+        if disc_tag:
+            top_disc_tag = max(top_disc_tag, disc_tag)
+        disc = disc_tag or disc_of.get(rel) or 1
         total = (_tag_int(raw.get("tracktotal")) or _tag_int(raw.get("totaltracks"))
                  or _tag_int(raw.get("tracknumber"), 1))
         dt = (_tag_int(raw.get("disctotal")) or _tag_int(raw.get("totaldiscs"))
               or _tag_int(raw.get("discnumber"), 1))
-        if dt:
+        if dt and dt <= _MAX_DISCS:
             disc_total = max(disc_total or 0, dt)
-        have, best = discs.get(disc, (0, None))
-        discs[disc] = (have + 1, max(best or 0, total or 0) or None)
+        d = discs.setdefault(disc, {"n": 0, "total": 0, "nums": set()})
+        d["n"] += 1
+        d["total"] = max(d["total"], total or 0)
+        num = _tag_int(raw.get("tracknumber"))
+        if num:
+            d["nums"].add(num)
     if not discs:
         return None
-    if disc_total and disc_total > len(discs):
-        return {"have": len(discs), "expected": disc_total, "unit": "discs"}
-    have = sum(n for n, _ in discs.values())
-    if any(total is None for _, total in discs.values()):
-        return None                     # a disc with no total: nothing to compare
-    expected = sum(total for _, total in discs.values())
+
+    expected_discs = max(disc_total or 0, top_disc_tag)
+    if expected_discs > len(discs):
+        return {"have": len(discs), "expected": expected_discs, "unit": "discs"}
+
+    # Numbering that never repeats across discs (disc 2 carries on at 13) is
+    # one sequence for the whole show, and its TRACKTOTAL is the show's total,
+    # not a per-disc one (Jerry Douglas, 16 tracks over two discs, every file
+    # "of 16"). Measured on the laptop library 2026-10-13.
+    all_nums = [n for d in discs.values() for n in d["nums"]]
+    if len(discs) > 1 and all_nums and len(all_nums) == len(set(all_nums)):
+        have = sum(d["n"] for d in discs.values())
+        expected = max([d["total"] for d in discs.values()] + all_nums + [have])
+        return {"have": have, "expected": expected, "unit": "tracks"} if expected > have else None
+
+    have = expected = before = 0
+    for disc in sorted(discs):
+        d = discs[disc]
+        exp = d["total"]
+        if d["nums"]:
+            lo, hi = min(d["nums"]), max(d["nums"])
+            continuous = before > 0 and lo == before + 1
+            exp = max(exp, (hi - lo + 1) if continuous else hi)
+        exp = max(exp, d["n"])
+        have += d["n"]
+        expected += exp
+        before += d["n"]
     if expected > have:
         return {"have": have, "expected": expected, "unit": "tracks"}
     return None

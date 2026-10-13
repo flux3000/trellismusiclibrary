@@ -35,6 +35,7 @@ import re
 import unicodedata
 import time
 import logging
+import threading
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -77,15 +78,41 @@ _MARGIN = 12
 # once offline.
 _MAX_CONSECUTIVE_FAILURES = 3
 _failures = [0]
+# The breaker re-arms after a cool-down (2026-10-13): a brief outage used to
+# switch lookups off until restart, and Queue Albums stayed unlooked-up.
+_COOLDOWN_SEC = 300
+_tripped_at = [0.0]
 
 
 def tripped():
-    return _failures[0] >= _MAX_CONSECUTIVE_FAILURES
+    if _failures[0] < _MAX_CONSECUTIVE_FAILURES:
+        return False
+    import time as _t
+    if not _tripped_at[0]:
+        _tripped_at[0] = _t.monotonic()
+    if _t.monotonic() - _tripped_at[0] >= _COOLDOWN_SEC:
+        _failures[0], _tripped_at[0] = 0, 0.0
+        return False
+    return True
+
+
+def failure_count():
+    """Consecutive failures so far; a caller compares before/after a lookup to
+    tell "nothing found" from "could not ask"."""
+    return _failures[0]
+
+
+def cooldown_left():
+    """Seconds until a tripped breaker re-arms (0 when not tripped)."""
+    if not tripped():
+        return 0
+    return max(0.0, _COOLDOWN_SEC - (time.monotonic() - _tripped_at[0]))
 
 
 def reset_breaker():
     """Clear the failure count — for an explicit user-initiated retry."""
     _failures[0] = 0
+    _tripped_at[0] = 0.0
 
 
 def enabled():
@@ -108,11 +135,24 @@ def enabled():
         return True
 
 
+# One request at a time across every thread (2026-10-13): the import worker
+# and the follow-up worker both call MusicBrainz during a scan, and an unlocked
+# spacer let them burst past the rate limit into 503s that tripped the breaker.
+_CALL_LOCK = threading.Lock()
+
+
 def _throttle():
     gap = time.time() - _last_call[0]
     if gap < _MIN_INTERVAL:
         time.sleep(_MIN_INTERVAL - gap)
     _last_call[0] = time.time()
+
+
+def _fetch(req):
+    with _CALL_LOCK:
+        _throttle()
+        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
+            return json.loads(resp.read().decode("utf-8"))
 
 
 def _get(path, params):
@@ -128,10 +168,14 @@ def _get(path, params):
         return None
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        _throttle()
-        with urllib.request.urlopen(req, timeout=_TIMEOUT, context=SSL_CONTEXT) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        _failures[0] = 0
+        try:
+            data = _fetch(req)
+        except urllib.error.HTTPError as e:
+            if e.code != 503:
+                raise
+            time.sleep(2)                 # rate-limited: one patient retry
+            data = _fetch(req)
+        _failures[0], _tripped_at[0] = 0, 0.0
         return data
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
             ValueError, OSError) as e:

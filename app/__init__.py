@@ -75,7 +75,8 @@ def create_app(config_class=Config):
                                               ensure_venue_history, ensure_event_history, ensure_full_library_grants,
                                               ensure_invite_code, ensure_bulk_run_cleared_at,
                                               ensure_recording_completeness_checked_at,
-                                              ensure_lomax_easter_eggs, ensure_genre_colors)
+                                              ensure_lomax_easter_eggs, ensure_genre_colors,
+                                              ensure_download_job)
         ensure_artist_confirmed_at(db.engine)
         ensure_bulk_run_cleared_at(db.engine)
         ensure_recording_completeness_checked_at(db.engine)
@@ -87,6 +88,10 @@ def create_app(config_class=Config):
         ensure_full_library_grants(db.engine)
         ensure_genre_colors(db.engine)
         ensure_invite_code(db.engine)
+        ensure_download_job(db.engine)
+        from app.utils.bulk_ingest_run import relabel_truncated_items, relink_missing_folder_items
+        relabel_truncated_items()
+        relink_missing_folder_items()
 
     # Runs for every mode this factory builds, including SERVER_MODE — placed
     # before that branch's early return rather than after it. Non-fatal by

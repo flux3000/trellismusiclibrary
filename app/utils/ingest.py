@@ -240,7 +240,10 @@ def _is_multi_disc(subs):
     """2+ audio-bearing subdirs named for a disc/set: the parent is ONE show.
     Shared by resolve_shows and is_show_root so they cannot disagree."""
     names = [s.name for s in subs]
-    return sum(1 for n in names if _parse_set_dir_among(n, names)) >= 2
+    discs = sum(1 for n in names if _parse_set_dir_among(n, names))
+    # At most one non-disc sibling ("Extras") (Ryan, 2026-10-13): an artist
+    # folder of albums holding two "..., Disc N" folders is not one show.
+    return discs >= 2 and len(names) - discs <= 1
 
 
 def is_show_root(path):
@@ -675,6 +678,11 @@ def scan_folder(folder_path):
     # Encore's number is None — sort it after every numbered set/disc.
     set_dirs.sort(key=lambda x: (x[2] is None, x[2]))
     sets_detected = len(set_dirs) >= 2   # one lone "Disc 1" folder isn't multi-anything
+    if sets_detected:
+        # Same sibling cap as _is_multi_disc, so the scanner and the queue agree.
+        set_paths = {d[0] for d in set_dirs}
+        others = sum(1 for s in _audio_subdirs(folder_path) if s.path not in set_paths)
+        sets_detected = others <= 1
     result["sets_detected"] = sets_detected
 
     # Determine scan mode

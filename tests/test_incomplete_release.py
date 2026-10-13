@@ -189,3 +189,50 @@ def test_unknown_type_needs_a_person_and_no_date_reasons():
     status, reasons = verdict(r)
     assert status == "review" and "needs_type" in reasons
     assert not any(x.startswith("needs_") and x != "needs_type" for x in reasons)
+
+
+def test_lone_track_seven_on_disc_nine_is_short():
+    s = _scan({"tracknumber": "7", "discnumber": "9"})
+    assert tag_track_shortfall(s) == {"have": 1, "expected": 9, "unit": "discs"}
+
+
+def test_track_numbers_alone_show_a_gap():
+    s = _scan({"tracknumber": "7"})
+    assert tag_track_shortfall(s) == {"have": 1, "expected": 7, "unit": "tracks"}
+    assert tag_track_shortfall(_scan({"tracknumber": "1"}, {"tracknumber": "2"})) is None
+
+
+def test_continuous_numbering_across_discs_is_complete():
+    d1 = [{"discnumber": "1", "tracknumber": str(i)} for i in (1, 2)]
+    d2 = [{"discnumber": "2", "tracknumber": str(i)} for i in (3, 4)]
+    assert tag_track_shortfall(_scan(*d1, *d2)) is None
+
+
+def test_show_wide_total_with_continuous_numbering_is_complete():
+    d1 = [{"discnumber": "1", "tracknumber": str(i), "tracktotal": "16", "disctotal": "2"} for i in range(1, 13)]
+    d2 = [{"discnumber": "2", "tracknumber": str(i), "tracktotal": "16", "disctotal": "2"} for i in range(13, 17)]
+    assert tag_track_shortfall(_scan(*d1, *d2)) is None
+    assert tag_track_shortfall(_scan(*d1, *d2[:2]))["expected"] == 16
+
+
+def test_absurd_disc_number_is_ignored():
+    files = [{"discnumber": "4481", "disctotal": "4481", "tracknumber": str(i), "tracktotal": "3"} for i in (1, 2, 3)]
+    assert tag_track_shortfall(_scan(*files)) is None
+
+
+def test_per_disc_restart_still_flags_a_short_disc():
+    d1 = [{"discnumber": "1", "tracknumber": str(i), "tracktotal": "3"} for i in (1, 2, 3)]
+    d2 = [{"discnumber": "2", "tracknumber": str(i), "tracktotal": "3"} for i in (1, 2)]
+    assert tag_track_shortfall(_scan(*d1, *d2)) == {"have": 5, "expected": 6, "unit": "tracks"}
+
+
+def test_live_show_missing_tracks_is_held_with_its_own_reason(app, tmp_path):
+    from app.api import ingest
+    from tests.test_resolve import _flac_with_tags
+    show = tmp_path / "Phish - 1997-11-22"
+    for i in (1, 2):
+        _flac_with_tags(show / f"0{i}.flac", ARTIST="Phish", DATE="1997-11-22",
+                        TRACKNUMBER=str(i), TRACKTOTAL="5", TITLE=f"Song {i}")
+    out = ingest.auto_confirm(str(show), None, hold=True)
+    assert out["status"] == "review" and "incomplete_recording" in out["reasons"]
+    assert out["detail"] == "2 of 5 tracks"

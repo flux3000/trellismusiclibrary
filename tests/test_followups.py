@@ -109,7 +109,7 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
     # All four live recordings (rec_scored, rec_a, rec_b, the seeded one) have
     # no track with a non_music_score yet, so each is owed an audio pass even
     # though rec_scored already has a score; "images": none was scanned.
-    assert counts == {"audio": 4, "mb_artist": 1, "mb_release": 0, "images": 4, "completeness": 0}
+    assert counts == {"audio": 4, "mb_artist": 1, "mb_release": 0, "images": 4, "completeness": 0, "mb_queue": 0}
 
     all_recs = [rec_scored, rec_a, rec_b]
     expected = ({("audio", r.id) for r in all_recs} | {("audio", seeded_ids["recording_id"])}
@@ -120,7 +120,7 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
 
     # A second call: everything above is still waiting, nothing new.
     again = ingest_api.enqueue_followups()
-    assert again == {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0}
+    assert again == {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0, "mb_queue": 0}
     assert _lane_sizes() == {"audio": 4, "net": 5}
 
     # Stub the scorer chain and the librosa pass so no real audio is needed.
@@ -471,3 +471,40 @@ def test_genre_fetch_with_lookups_off_leaves_the_artist_owing(app, seeded_ids):
     _db.session.commit()
     ingest_api._handle_item("mb_artist", a.id)     # lookups are disabled under test
     assert a.genre_id is None and _mb.owes_artist_genre(a)
+
+
+def test_breaker_rearms_after_cooldown(monkeypatch):
+    from app.utils import musicbrainz as mb
+    import time
+    mb.reset_breaker()
+    mb._failures[0] = mb._MAX_CONSECUTIVE_FAILURES
+    assert mb.tripped()
+    real = time.monotonic
+    monkeypatch.setattr(time, "monotonic", lambda: real() + mb._COOLDOWN_SEC + 1)
+    assert not mb.tripped() and mb._failures[0] == 0
+
+
+def test_failed_queue_lookup_is_not_stored_as_none(app, monkeypatch):
+    """A search that could not reach MusicBrainz leaves the row unlooked-up
+    (retried later) instead of recording "not found"."""
+    import json
+    from app.extensions import db
+    from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
+    from app.api import ingest
+    from app.utils import musicbrainz as mb
+    run = BulkIngestRun(root="/tmp/x"); db.session.add(run); db.session.flush()
+    it = BulkIngestItem(run_id=run.id, rel_path="A", status="ready", kind="studio",
+                        meta=json.dumps({"artist": "Bee Gees", "title": "Mr. Natural"}))
+    db.session.add(it); db.session.commit()
+    mb.reset_breaker()
+    monkeypatch.setattr(mb, "enabled", lambda: True)
+
+    def failing(*a, **k):
+        mb._failures[0] += 1
+        return []
+    monkeypatch.setattr(mb, "search_release", failing)
+    retried = []
+    monkeypatch.setattr(ingest, "_retry_mb_queue_later", lambda item, delay: retried.append(item.id))
+    ingest._handle_mb_queue(it.id)
+    assert json.loads(it.meta).get("mb") is None and retried == [it.id]
+    mb.reset_breaker()

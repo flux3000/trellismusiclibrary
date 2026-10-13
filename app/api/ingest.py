@@ -119,8 +119,11 @@ def check_existing():
 
     performances = []
     for p in q.all():
-        if not p.recordings:
-            continue   # nothing recorded against it yet — no duplicate risk
+        # Only recordings in the library: one moved out to Workshop or Backlog
+        # is not "already in your library" (2026-10-13).
+        recs = [r for r in p.recordings if r.is_published]
+        if not recs:
+            continue   # nothing in the library against it — no duplicate risk
         v = p.venue
         performances.append({
             "id":    p.id,
@@ -138,7 +141,7 @@ def check_existing():
                     "track_count": len(r.tracks),
                     "created_at":  r.created_at.isoformat() if r.created_at else None,
                 }
-                for r in p.recordings
+                for r in recs
             ],
         })
     return jsonify({"artist_found": True, "performances": performances})
@@ -337,6 +340,9 @@ PHASES = {
 #   "images"     artwork scan for a recording never scanned for it.
 #   "completeness" is this Album part of a longer release (tags, then
 #                MusicBrainz)? Studio only, after its release lookup.
+#   "mb_queue"   MusicBrainz release lookup for an Album row waiting in the
+#                Queue (a BulkIngestItem id, not a recording): found or not,
+#                shown as the row's MusicBrainz icon.
 #
 # Two lanes, one worker thread each: "audio" (CPU/disk-bound decode) and
 # "net" (MusicBrainz + artwork). They are independent, so a slow decode never
@@ -415,7 +421,8 @@ _ANALYSIS_STATE = {
     "failed":  0,
 }
 _QUEUED_KEYS = set()
-_PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0}
+_PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0,
+                    "mb_queue": 0}
 
 # Kinds an older build queued. Folded into "audio" so nothing crashes on them.
 _LEGACY_AUDIO_KINDS = ("analysis", "score", "signals")
@@ -695,7 +702,64 @@ def _handle_completeness(recording_id):
     db.session.commit()
 
 
+def _handle_mb_queue(item_id):
+    """Release lookup for one Album row in the Queue (Ryan, 2026-10-13). The
+    result rides in the item's meta as {"found", "status", "mbid", "title"};
+    "found" is the same confident match the import-time lookup would make.
+    Nothing is stored when MusicBrainz cannot be asked, so the row is tried
+    again at the next enqueue."""
+    import json as _json
+    from app.models.bulk_ingest import BulkIngestItem
+    from app.utils import musicbrainz as _mb
+    it = db.session.get(BulkIngestItem, item_id)
+    if it is None or it.kind != "studio" or it.status not in ("ready", "review"):
+        return
+    try:
+        meta = _json.loads(it.meta or "{}") or {}
+    except ValueError:
+        return
+    if meta.get("mb") or not _mb.enabled():
+        return
+    if _mb.tripped():
+        _retry_mb_queue_later(it, _mb.cooldown_left())
+        return
+    artist, title = meta.get("artist"), meta.get("title")
+    status, best = "none", None
+    if artist and title:
+        before = _mb.failure_count()
+        cands = _mb.search_release(artist, title)
+        # A failed request is "could not ask", never "not found" (2026-10-13).
+        if _mb.tripped() or _mb.failure_count() > before:
+            _retry_mb_queue_later(it, _mb.cooldown_left() or 30)
+            return
+        status, best, _ = _mb.classify_release(cands, meta.get("track_count"))
+    meta["mb"] = {"found": status == "matched", "status": status,
+                  "mbid": best.get("mbid") if best else None,
+                  "title": best.get("title") if best else None}
+    it.meta = _json.dumps(meta)
+    db.session.commit()
+
+
+def _retry_mb_queue_later(item, delay):
+    """Queue this row's lookup again once MusicBrainz can be asked."""
+    app = current_app._get_current_object()
+    item_id, run_id = item.id, item.run_id
+    t = threading.Timer(max(1.0, delay), lambda: _enqueue(app, "mb_queue", item_id, run_id))
+    t.daemon = True
+    t.start()
+
+
+def queue_album_lookup(item):
+    """Queue the MusicBrainz lookup for an Album row once it has been read."""
+    from app.utils import musicbrainz as _mb
+    if not _mb.enabled():                 # off under TESTING, like every lookup
+        return
+    if item.kind == "studio" and item.status in ("ready", "review"):
+        _enqueue(current_app._get_current_object(), "mb_queue", item.id, item.run_id)
+
+
 _HANDLERS = {
+    "mb_queue":   _handle_mb_queue,
     "completeness": _handle_completeness,
     "audio":      _handle_audio,
     "mb_artist":  _handle_mb_artist,
@@ -814,6 +878,19 @@ def enqueue_followups():
     mb_release_n = sum(1 for rid in release_ids
                        if _enqueue(app, "mb_release", rid, run_of_rec.get(rid)))
 
+    # Album rows waiting in the Queue that have not been looked up yet.
+    import json as _json
+    mb_queue_n = 0
+    for iid, meta in (db.session.query(BulkIngestItem.id, BulkIngestItem.meta)
+                      .filter(BulkIngestItem.kind == "studio",
+                              BulkIngestItem.status.in_(("ready", "review"))).all()):
+        try:
+            looked = bool((_json.loads(meta or "{}") or {}).get("mb"))
+        except ValueError:
+            looked = True
+        if not looked and _enqueue(app, "mb_queue", iid, None):
+            mb_queue_n += 1
+
     # After the release lookup, so a release it links is the one compared.
     completeness_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
@@ -832,7 +909,7 @@ def enqueue_followups():
                    if _enqueue(app, "images", rid, run_of_rec.get(rid)))
 
     return {"audio": audio_n, "mb_artist": mb_n, "mb_release": mb_release_n,
-            "images": images_n, "completeness": completeness_n}
+            "images": images_n, "completeness": completeness_n, "mb_queue": mb_queue_n}
 
 
 def analysis_snapshot():
@@ -1052,7 +1129,7 @@ def apply_blanket_values(resolved, payload, applied):
 
 def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                   progress_cb=None, cancel_cb=None, phase_cb=None,
-                  hold=False, force=False, applied=None):
+                  hold=False, force=False, applied=None, mb_release_id=None):
     """
     The one server function that turns a folder into an ingested (or
     reviewed, or skipped) recording via the resolver -- spec section 4.
@@ -1092,6 +1169,12 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     library_root = current_app.config.get("LIBRARY_ROOT", "")
     placement = node_settings.get_file_handling().get("placement")
 
+    # A folder that is gone (imported or moved since it was queued) says so,
+    # rather than reading as a folder without audio (2026-10-13).
+    if not os.path.isdir(folder_abs):
+        return {"status": "failed", "reasons": ["folder_missing"], "format": None,
+                "detail": None, "resolved": None, "result": None, "duplicate_of": None}
+
     scan_raw = scan_folder(folder_abs)
     readable_files = [f for f in scan_raw["audio_files"]
                       if _Path(f["filename"]).suffix.lower() in _READABLE_AUDIO_EXTS]
@@ -1122,6 +1205,13 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     unopenable = [t for t in readable_tags if t.get("raw") is None]
     if readable_tags and len(unopenable) == len(readable_tags):
         detail = next((t.get("open_error") for t in unopenable if t.get("open_error")), None)
+        # A reader error caused by a truncated file says so (2026-10-13).
+        from app.utils.truncated_audio import truncated_files
+        short = truncated_files(folder_abs)
+        if short:
+            return {"status": "failed", "reasons": ["truncated_file"], "format": fmt,
+                    "detail": ", ".join(short[:3]) + (f" and {len(short) - 3} more" if len(short) > 3 else ""),
+                    "resolved": None, "result": None, "duplicate_of": None}
         return {"status": "failed", "reasons": ["unreadable"], "format": fmt,
                 "detail": detail or "unreadable", "resolved": None, "result": None,
                 "duplicate_of": None}
@@ -1163,6 +1253,18 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
             if not force:
                 status = "review"
             resolved.status, resolved.reasons = status, reasons
+    elif resolved.kind == "live":
+        # A live show gets the same offline tag reading (track and disc
+        # numbers, totals); no MusicBrainz, a show is not a release. Measured
+        # on the laptop library 2026-10-13: no false flags on 32 live shows.
+        from app.utils.resolve import tag_track_shortfall
+        short = tag_track_shortfall(scan)
+        if short:
+            detail = f"{short['have']} of {short['expected']} {short['unit']}"
+            reasons = reasons + ["incomplete_recording"]
+            if not force and status != "skipped":
+                status = "review"
+            resolved.status, resolved.reasons = status, reasons
 
     # "Ingest anyway" still refuses a folder with no artist or no type.
     if status == "review" and not (force and "needs_artist" not in reasons
@@ -1178,12 +1280,16 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     # No person confirmed these values, so nothing is learned from the save (aliases,
     # queue re-check). "Ingest anyway" is a person's decision to take them as read.
     payload["unattended"] = not force
+    if resolved.kind == "studio" and mb_release_id:
+        # The release the Queue's MusicBrainz lookup found is linked at import.
+        payload["mb_release_id"] = mb_release_id
+        payload["mb_release_status"] = "matched"
     if resolved.kind == "studio":
         # The Queue already ran the completeness check; "Ingest anyway" on an
         # incomplete Album imports it marked incomplete.
         payload["completeness_checked"] = True
-        if "incomplete_release" in reasons:
-            payload["is_complete"] = False
+    if "incomplete_release" in reasons or "incomplete_recording" in reasons:
+        payload["is_complete"] = False
     apply_blanket_values(resolved, payload, applied)
     payload["resolver_result"] = resolved.to_dict()
     result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
@@ -1956,7 +2062,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             _mbr.reset_breaker()   # a human pick: background failures must not silently drop it
             details = _mbr.lookup_release(mb_release_id)
             if details:
-                _mbr.apply_to_recording(rec, details, status="linked")
+                # "matched" when the Queue's own lookup found it (no person
+                # picked it), else "linked" (the form's MusicBrainz tab).
+                how = "matched" if data.get("mb_release_status") == "matched" else "linked"
+                _mbr.apply_to_recording(rec, details, status=how)
                 _mbr.enrich_from_release(rec)
                 db.session.commit()
         except Exception:  # noqa: BLE001 -- the recording is saved either way
@@ -2034,6 +2143,13 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             _bir.recheck_queue(source_folder, confirmed_keys(
                 data, artist, venue, event.name if event else event_name))
         except Exception:  # noqa: BLE001 -- never fails a save that already succeeded
+            db.session.rollback()
+        # The folder's own Queue row is now imported (2026-10-13). After the
+        # re-check, which finds the run through this row.
+        try:
+            from app.utils import bulk_ingest_run as _bir
+            _bir.mark_folder_ingested(source_folder, rec)
+        except Exception:  # noqa: BLE001
             db.session.rollback()
             import traceback as _tb5
             _tb5.print_exc()

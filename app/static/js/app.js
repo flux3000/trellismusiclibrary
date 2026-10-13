@@ -459,10 +459,10 @@ const App = (() => {
     return desc ? -cmp : cmp
   }
 
+  // Source as plain text in the surrounding style, everywhere (Ryan,
+  // 2026-10-13; the coloured pill is gone). Name kept for its callers.
   function sourceBadge(source) {
-    if (!source) return ''
-    const cls = ['SBD','AUD','MTX','FM'].includes(source) ? `badge-${source}` : 'badge-src'
-    return `<span class="badge ${cls}">${escHtml(source)}</span>`
+    return source ? escHtml(source) : ''
   }
 
   function qualityClass(q) {
@@ -564,6 +564,9 @@ const App = (() => {
     'alert':        '<circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
     'folder-open':  '<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\"/>',
     // Fingerprint verdict on the compact row. Lucide 'fingerprint'.
+    // MusicBrainz's own mark (Ryan's file, 2026-10-13): a filled shape, so the
+    // path carries its own fill and no stroke, like the Lomax portrait.
+    'musicbrainz':  '<path fill="currentColor" stroke="none" d="M11.582 0L1.418 5.832v12.336L11.582 24V10.01L7.1 12.668v3.664c.01.111.01.225 0 .336-.103.435-.54.804-1 1.111-.802.537-1.752.509-2.166-.111-.413-.62-.141-1.631.666-2.168.384-.28.863-.399 1.334-.332V6.619c0-.154.134-.252.226-.308L11.582 3zm.836 0v6.162c.574.03 1.14.16 1.668.387a2.225 2.225 0 0 0 1.656-.717 1.02 1.02 0 1 1 1.832-.803l.004.006a1.022 1.022 0 0 1-1.295 1.197c-.34.403-.792.698-1.297.85.34.263.641.576.891.928a1.04 1.04 0 0 1 .777.125c.768.486.568 1.657-.318 1.857-.886.2-1.574-.77-1.09-1.539.02-.03.042-.06.065-.09a3.598 3.598 0 0 0-1.436-1.166 4.142 4.142 0 0 0-1.457-.369v4.01c.855.06 1.256.493 1.555.834.227.256.356.39.578.402.323.018.568.008.806 0a5.44 5.44 0 0 1 .895.022c.94-.017 1.272-.226 1.605-.446a2.533 2.533 0 0 1 1.131-.463 1.027 1.027 0 0 1 .12-.263 1.04 1.04 0 0 1 .105-.137c.023-.025.047-.044.07-.066a4.775 4.775 0 0 1 0-2.405l-.012-.01a1.02 1.02 0 1 1 .692.272h-.057a4.288 4.288 0 0 0 0 1.877h.063a1.02 1.02 0 1 1-.545 1.883l-.047-.033a1 1 0 0 1-.352-.442 1.885 1.885 0 0 0-.814.354 3.03 3.03 0 0 1-.703.365c.757.555 1.772 1.6 2.199 2.299a1.03 1.03 0 0 1 .256-.033 1.02 1.02 0 1 1-.545 1.88l-.047-.03a1.017 1.017 0 0 1-.27-1.376.72.72 0 0 1 .051-.072c-.445-.775-2.026-2.28-2.46-2.387a4.037 4.037 0 0 0-1.31-.117c-.24.008-.513.018-.866 0-.515-.027-.783-.333-1.043-.629-.26-.296-.51-.56-1.055-.611V18.5a1.877 1.877 0 0 0 .426-.135.333.333 0 0 1 .058-.027c.56-.267 1.421-.91 2.096-2.447a1.02 1.02 0 0 1-.27-1.344 1.02 1.02 0 1 1 .915 1.54 6.273 6.273 0 0 1-1.432 2.136 1.785 1.785 0 0 1 .691.306.667.667 0 0 0 .37.168 3.31 3.31 0 0 0 .888-.222 1.02 1.02 0 0 1 1.787-.79v-.005a1.02 1.02 0 0 1-.773 1.683 1.022 1.022 0 0 1-.719-.287 3.935 3.935 0 0 1-1.168.287h-.05a1.313 1.313 0 0 1-.71-.275c-.262-.177-.51-.345-1.402-.12a2.098 2.098 0 0 1-.707.2V24l10.164-5.832V5.832zm4.154 4.904a.352.352 0 0 0-.197.639l.018.01c.163.1.378.053.484-.108v-.002a.352.352 0 0 0-.303-.539zm-4.99 1.928L7.082 9.5v2l4.5-2.668zm8.385.38a.352.352 0 0 0-.295.165v.002a.35.35 0 0 0 .096.473l.013.01a.357.357 0 0 0 .487-.108.352.352 0 0 0-.301-.541zM16.09 8.647a.352.352 0 0 0-.277.163.355.355 0 0 0 .296.54c.482 0 .463-.73-.02-.703zm3.877 2.477a.352.352 0 0 0-.295.164.35.35 0 0 0 .094.475l.015.01a.357.357 0 0 0 .485-.11.352.352 0 0 0-.3-.539zm-4.375 3.594a.352.352 0 0 0-.291.172.35.35 0 0 0-.04.265.352.352 0 1 0 .33-.437zm4.375.789a.352.352 0 0 0-.295.164v.002a.352.352 0 0 0 .094.473l.015.01a.357.357 0 0 0 .485-.108.352.352 0 0 0-.3-.54zm-2.803 2.488v.002a.347.347 0 0 0-.223.084.352.352 0 0 0 .23.62.347.347 0 0 0 .23-.085.348.348 0 0 0 .12-.24.353.353 0 0 0-.35-.38.347.347 0 0 0-.007 0Z"/>',
     'fingerprint':  '<path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 4"/><path d="M5 19.5C5.5 18 6 15 6 12c0-.7.12-1.37.34-2"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2"/>',
     'map-pin':      '<path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
     'users':        '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/>',
@@ -637,7 +640,10 @@ const App = (() => {
   // An album has no Info File tab (info: false) and no Resolver; Add Recording's album layout
   // adds the MusicBrainz tab (mb: true).
   function detailsTabsHtml(attr, prefix, { resolver, research, staged, info = true, mb = false }) {
-    return DETAILS_TABS
+    // An album (info: false): MusicBrainz, Tags, Checksums, Quality, Lomax (Ryan, 2026-10-13).
+    const order = info ? DETAILS_TABS
+      : ['mb', 'filetags', 'checksums', 'quality', 'resolver', 'ai'].map(k => DETAILS_TABS.find(t => t[0] === k))
+    return order
       .filter(([k]) => (k !== 'resolver' || resolver) && (k !== 'ai' || research) &&
                        (k !== 'info' || info) && (k !== 'mb' || mb))
       .map(([k, label]) => `<button class="slide-tab${k === 'ai' ? ' slide-tab--ai' : ''}` +
@@ -1536,6 +1542,24 @@ const App = (() => {
       el.addEventListener('click', () => { window.location.hash = `#/recording/${el.dataset.id}` }))
   }
 
+  // Host Favorites: the host's stars, in a joined library only. Read-only,
+  // hidden while empty like My Favorites. API.recordings is REMOTE_CAPABLE, so
+  // this reaches /api/share/recordings/favorites on the host.
+  async function _renderHostFavorites() {
+    const box = document.getElementById('nav-hostfav-flat')
+    if (!box || libraryState.activeId == null) return
+    const lib = libraryState.activeId
+    let rows = []
+    try { rows = await API.recordings.favorites() } catch (_) {}
+    if (libraryState.activeId !== lib) return
+    const sec = document.getElementById('nav-sec-hostfavorites')
+    if (!rows.length) { box.innerHTML = ''; if (sec) sec.hidden = true; return }
+    box.innerHTML = rows.map(r => navRecRowHtml(r)).join('')
+    if (sec) sec.hidden = false
+    box.querySelectorAll('.nav-fav-row[data-id]').forEach(el =>
+      el.addEventListener('click', () => { window.location.hash = `#/recording/${el.dataset.id}` }))
+  }
+
   // Invalidate one or more dimension caches and silently re-render any open ones.
   // Call after edits that can prune/create artists, venues, or musicians.
   function invalidateDims(...dims) {
@@ -1591,7 +1615,6 @@ const App = (() => {
     return `
       <div class="lib-select${solo ? ' is-solo' : ''}${active ? ' is-remote' : ''}"
            id="lib-select" ${solo ? '' : 'role="button" tabindex="0"'}>
-        <span class="lib-select-icon">${active ? icon('arrow-left-right') : icon('library')}</span>
         <span class="lib-select-name truncate">${esc(label)}</span>
         ${solo ? '' : `<span class="lib-select-caret">${chevronIcon('caret-ic--down')}</span>`}
       </div>
@@ -1618,7 +1641,7 @@ const App = (() => {
     if (libraryState.remotes.length === 0) {
       host.innerHTML = `
         <button class="btn btn-ghost btn-sm lib-join-btn" id="lib-join-empty">
-          ${icon('plus', 'lib-join-ic')}Join a Library
+          Join a Library
         </button>`
       host.querySelector('#lib-join-empty')
           .addEventListener('click', openJoinLibraryModal)
@@ -1642,14 +1665,12 @@ const App = (() => {
       ].map(l => `
         <div class="lib-select-opt${l.id === libraryState.activeId ? ' active' : ''}"
              data-lib-id="${l.id == null ? '' : l.id}">
-          <span class="lib-select-icon">${l.id == null ? icon('library') : icon('arrow-left-right')}</span>
           <span class="truncate">${esc(l.display_name)}</span>
           ${l.id == null ? '' :
             `<span class="lib-select-leave" data-leave-id="${l.id}"
                    title="Leave ${esc(l.display_name)}">${icon('x')}</span>`}
         </div>`).join('')
         + `<div class="lib-select-join" id="lib-select-join">
-             <span class="lib-select-icon">${icon('plus')}</span>
              <span>Join a Library…</span>
            </div>`
       menu.style.display = 'block'
@@ -1689,9 +1710,32 @@ const App = (() => {
   // theme flips, the sidebar reloads, and the current view is meaningless in
   // the new context. So it resets to the library root rather than trying to
   // map, say, /artist/12 onto a different database's ids.
-  async function switchLibrary(id) {
-    if (libraryState.activeId === id) return
+  // `hash`: where to land in the new library (default its home page).
+  async function switchLibrary(id, hash) {
+    if (libraryState.activeId === id) { if (hash) window.location.hash = hash; return }
+    await _enterLibrary(id)
+    window.location.hash = hash || '#/'
+    renderSidebar()
+    route()
+  }
+
+  // A reload keeps the address (#/artist/12) but used to forget which library
+  // it belongs to, so the host's id was looked up at home. The active library
+  // is kept for the window's session: a reload returns to it, a fresh launch
+  // starts at home.
+  const _LIB_KEY = 'trellisActiveLibrary'
+  async function restoreLibraryAfterReload() {
+    let id = null
+    try { id = Number(sessionStorage.getItem(_LIB_KEY)) || null } catch (_) {}
+    if (id != null && (libraryState.remotes || []).some(r => r.id === id)) await _enterLibrary(id)
+  }
+
+  async function _enterLibrary(id) {
     libraryState.activeId = id
+    try {
+      if (id == null) sessionStorage.removeItem(_LIB_KEY)
+      else sessionStorage.setItem(_LIB_KEY, String(id))
+    } catch (_) {}
     // Tell api.js first — everything rendered after this line must resolve
     // against the new library, and route() below re-renders immediately.
     API.setLibraryContext(id)
@@ -1704,9 +1748,6 @@ const App = (() => {
     // whichever library is now active, rather than leaving stale chrome from
     // the library we just left.
     initViewMode()
-    window.location.hash = '#/'
-    renderSidebar()
-    route()
   }
 
   // ── Joining and leaving libraries ─────────────────────────────────────────
@@ -1854,7 +1895,10 @@ const App = (() => {
                   ['events', 'Events'], ['genres', 'Genres']]
     // Shared Libraries: the Live Music Archive (admin only) and every library
     // joined through an invite. A peer entry switches library exactly as the
-    // header selector does (switchLibrary).
+    // header selector does (switchLibrary). Not shown inside a joined library
+    // (Ryan, 2026-10-13); the header selector is the way back. The section
+    // labels say whose they are: My Favorites (always the viewer's own), My
+    // Collections at home, Host Collections in a joined library.
     const shared = (dl ? '<a class="lnav-item" data-nav="archive-lma" href="#/archive/lma">Live Music Archive</a>' : '') +
       (libraryState.remotes || []).map(r =>
         `<a class="lnav-item${libraryState.activeId === r.id ? ' active' : ''}" href="#/" data-lib-switch="${r.id}">${esc(r.display_name)}</a>`).join('')
@@ -1873,9 +1917,10 @@ const App = (() => {
         <div class="lnav-block">
           ${dims.map(([d, label]) => `<a class="lnav-item" data-nav="${d}" href="#/${d}">${label}</a>`).join('')}
         </div>
-        ${_navSectionHtml('favorites', 'Favorites', _navActHtml('fav-refresh', 'Refresh favorites', 'rotate-cw'), '<div id="nav-favorites-flat"></div>', true)}
-        ${_navSectionHtml('collections', 'Collections', colActs, '<div class="nav-records" id="nav-records-collections"></div>')}
-        ${shared ? _navSectionHtml('shared', 'Shared Libraries', '', shared) : ''}
+        ${_navSectionHtml('favorites', 'My Favorites', _navActHtml('fav-refresh', 'Refresh favorites', 'rotate-cw'), '<div id="nav-favorites-flat"></div>', true)}
+        ${remote ? _navSectionHtml('hostfavorites', 'Host Favorites', '', '<div id="nav-hostfav-flat"></div>', true) : ''}
+        ${_navSectionHtml('collections', remote ? 'Host Collections' : 'My Collections', colActs, '<div class="nav-records" id="nav-records-collections"></div>')}
+        ${shared && !remote ? _navSectionHtml('shared', 'Shared Libraries', '', shared) : ''}
       </div>`
 
     // The library selector lives in the App Header, but it is rendered from
@@ -1894,20 +1939,16 @@ const App = (() => {
     nav.querySelector('[data-nav-act="col-refresh"]')?.addEventListener('click', () => _refreshCollections())
     nav.querySelector('[data-nav-act="fav-refresh"]')?.addEventListener('click', () => refreshFavoritesNav())
     _renderDimRecords('collections')
-    // Favorites is the VIEWER'S, in both worlds.
+    // My Favorites is the VIEWER'S, in both worlds. In a joined library the
+    // host's stars show as their own read-only section, Host Favorites
+    // (Ryan, 2026-10-13; this reverses "the owner's stars never travel").
     //
-    // The OWNER'S stars never travel. The star is deliberately not a quality
-    // scale — "this one is special", one click, no deliberation — and it is
-    // only free to mean that while it stays private; publish it and you start
-    // starring for an audience, which costs you the tool. Same argument that
-    // keeps play_log home. Curation travels through COLLECTIONS, the surface
-    // built to be read by someone else.
-    //
-    // So this section means what it says everywhere else in software: MINE.
+    // So My Favorites means what it says everywhere else in software: MINE.
     // In my own library that is Recording.is_favorite; in a joined library it
     // is the remote_favorite rows on this node. One section, one meaning, two
     // stores — resolved in _renderFavoritesFlat, not here.
     _renderFavoritesFlat()
+    if (remote) _renderHostFavorites()
     setActiveNav(state._activeNav)
     _dlSidebarSync()
 
@@ -3656,12 +3697,6 @@ const App = (() => {
 
   // ── Library Browse view ────────────────────────────
 
-  // Source → CSS color token. Kept separate rather than parsing sourceBadge's
-  // HTML back apart. Drives the card's accent rules and source chip.
-  function _sourceColorVar(source) {
-    return { SBD: '--sbd-fg', AUD: '--aud-fg', MTX: '--mtx-fg', FM: '--fm-fg' }[source] || '--other-fg'
-  }
-
   // MusicBrainz's public page for an artist. The MBID is a stable permalink,
   // so this needs no lookup — and it's the only way to actually VERIFY a match
   // on a vague name like "Acoustic All-Stars", where our one-line summary
@@ -4448,6 +4483,7 @@ const App = (() => {
           <button type="button" class="lib-reroll-btn" id="browse-shuffle">
             ${icon('rotate-cw')} Shuffle
           </button>
+          ${libraryState.activeId == null ? '<a class="lib-reroll-btn lib-tops-settings" href="#/settings/topshelf">Settings</a>' : ''}
         </div>
         <div class="tops-shelf">
           <button type="button" class="tops-nav tops-nav-l hidden" id="tops-nav-l" aria-label="Scroll left">${icon('chevron-left', 'tops-nav-ic')}</button>
@@ -5004,7 +5040,6 @@ const App = (() => {
 
     const descText = artist.bio && artist.bio.trim()
 
-    const mbf = artist.musicbrainz || {}
 
     // ── Hero stat: recordings only ────────────────────────
     // Venue count and total runtime were cut as uninteresting. Span was cut as
@@ -5022,12 +5057,8 @@ const App = (() => {
       : [[totalRecordings, totalRecordings === 1 ? 'Live Recording' : 'Live Recordings']]
     if (studioCount) stats.push([studioCount, studioCount === 1 ? 'Album' : 'Albums'])
 
-    // MusicBrainz one-liner: type · origin · active years, whichever exist.
-    const mbBits = [
-      mbf.type ? `<b>${esc(mbf.type)}</b>` : '',
-      mbf.area ? esc(mbf.area) : '',
-      mbf.begin ? `active <b>${esc(mbf.begin)}${mbf.end ? '–' + esc(mbf.end) : '–present'}</b>` : '',
-    ].filter(Boolean).join(' · ')
+    // No MusicBrainz type/origin/active-years line beside the header (Ryan,
+    // 2026-10-13); those facts stay on the MusicBrainz block.
 
     const photoCount = (artist.images || []).length
 
@@ -5041,8 +5072,7 @@ const App = (() => {
       // alongside it (as first built) showed the same value twice and only one
       // of them responded to a click.
       chips: `<span class="pp-editable pp-genre-field" id="pp-genre"
-                    title="Click to edit"></span>`
-           + (mbBits ? `<span class="pp-hero-fact">${mbBits}</span>` : ''),
+                    title="Click to edit"></span>`,
       stats,
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="pp-delete" title="Delete artist">Delete</button>`,
       // Recordings first and default across all five dimension pages. On an
@@ -6158,6 +6188,9 @@ const App = (() => {
 
   // Researching (with the time it has taken, counted from the server's own start
   // time so it survives a reload) or the error. A finished run returns ''.
+  const LX_TYPING_MS = 1400
+  const lxTypingMsg = () => `<div class="lx-msg">${lomaxAvatar()}<div class="lx-say lx-typing" role="status" aria-label="Lomax is typing"><span></span><span></span><span></span></div></div>`
+
   function lomaxRunState(run) {
     if (!run) return ''
     if (run.status === 'queued' || run.status === 'running') {
@@ -6297,6 +6330,10 @@ const App = (() => {
       catch (e) { c.error = lxErrText(e); changed(); return }
       c.pending = run
       put(run)
+      // A short pause with Lomax "typing" before his first reply shows.
+      c.typingUntil = { [run.id]: Date.now() + LX_TYPING_MS }
+      // The clock appears only after the pause, so its ticker starts then too.
+      setTimeout(() => { changed(); lxTickStart() }, LX_TYPING_MS + 20)
       changed()
       c.wait(run.id)
     }
@@ -6549,6 +6586,7 @@ const App = (() => {
   // About page, its empty-state sentence and its own result cards.
   const LX_ACKS = ["Hi. I'll check on that.", 'Sure. Let me look into it.', 'Hey there. Give me a minute to dig around.',
     "Okay. I'll see what I can find.", "Hi. Let me see what's out there.", "Alright. I'll start digging."]
+  const LX_NOTHING = ["I looked around but didn't turn up anything to add."]
   const LX_FOLLOWS = ['Let me know if you need anything else.', 'Ask me if you want anything else looked into.',
     "If there's more you want to know about this one, ask below.", 'Anything else on this show, just ask.',
     'I can dig further if you have more questions.']
@@ -6590,7 +6628,13 @@ const App = (() => {
 
   function lxResultMessage(run, c, o) {
     const parts = lxResultParts(run, c, Object.assign({}, o, { readonly: false }))
-    return `<div class="lx-msg">${o.lead ? lxGhost : lomaxAvatar()}<div class="lx-bub">${parts.join('') || '<div class="lx-none">Nothing to add</div>'}${lomaxUsageLine(run)}</div></div>`
+    if (!parts.length) {
+      // Nothing found: Lomax says so, unless his reply already did.
+      const replied = run.result && String(run.result.reply || '').trim()
+      return (replied ? '' : lxSayMsg(lxPick(LX_NOTHING, run), !o.lead)) +
+        `<div class="lx-msg">${lxGhost}<div class="lx-took">${lomaxUsageLine(run)}</div></div>`
+    }
+    return `<div class="lx-msg">${o.lead ? lxGhost : lomaxAvatar()}<div class="lx-bub">${parts.join('')}${lomaxUsageLine(run)}</div></div>`
   }
 
   // A run made during import (no question) opens with one of these.
@@ -6629,6 +6673,8 @@ const App = (() => {
       if (stamp) html += `<div class="lx-day">${esc(stamp)}</div>`
       const asked = !!run.question, greeted = !asked && imports && run.status === 'done'
       const lead = asked || greeted
+      const typing = asked && c.typingUntil && c.typingUntil[run.id] > Date.now()
+      if (typing) { html += `<div class="lx-me"><div class="lx-me-b">${esc(run.question)}</div></div>` + lxTypingMsg(); continue }
       if (asked) html += `<div class="lx-me"><div class="lx-me-b">${esc(run.question)}</div></div>` + lxSayMsg(run.ack_text || lxPick(LX_ACKS, run))
       else if (greeted) html += lxIntroHtml(run, o)
       const ro = Object.assign({}, o, { lead })
@@ -7129,12 +7175,19 @@ const App = (() => {
     // Rating (the letter-grade chip) is a live-show judgement — the user does
     // not grade studio releases, so it never appears in a studio Provenance
     // Row.
-    const rowIsEmpty = isStudioKind
+    // Format, always shown when known: before Rating (live) or Release (album).
+    const formatItemHtml = rec.format ? `
+        <div class="rec-sl-item">
+          <span class="mg-row-label">Format</span>
+          <span class="hm-val">${esc(rec.format)}</span>
+        </div>` : ''
+    const rowIsEmpty = !rec.format && (isStudioKind
       ? (!showReleaseBlock)
       : (!qEditable && !rec.source && !rec.lineage && !rec.quality
-         && !rec.source_tag && !rec.etree_shnid)
+         && !rec.source_tag && !rec.etree_shnid))
     const sourceLineageRow = rowIsEmpty ? '' : `
       <div class="rec-sl-row">
+        ${!isStudioKind ? formatItemHtml : ''}
         ${!isStudioKind ? `<div class="rec-sl-item rec-sl-item--quality">
           <span class="mg-row-label">Rating</span>
           <span class="hm-val hm-val--chip${qc}"${qa('quality')}><span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '\u2014')}</span></span>
@@ -7156,7 +7209,7 @@ const App = (() => {
           <span class="mg-row-label">Lineage</span>
           <span class="hm-val${qc}"${qa('lineage')}>${esc(lineageDisplay || rec.lineage || '\u2014')}</span>
         </div>` : ''}
-        ${releaseItemHtml}
+        ${isStudioKind ? formatItemHtml : ''}${releaseItemHtml}
       </div>`
 
     // Analyze Audio lives in the Side Panel's tab strip with every other pane
@@ -8762,6 +8815,10 @@ const App = (() => {
       // A remembered pane whose tab is gone (an album has no Info File tab) falls back to the
       // first tab that remains.
       function pickPane(p) {
+        // An album opens on MusicBrainz (its first tab) unless this same
+        // recording is being reloaded.
+        const album = !!panel.querySelector('.slide-tab[data-pane="mb"]')
+        if (album && state.recLastPaneFor !== recordingId) p = null
         if (p && p !== 'spectrogram' && panel.querySelector(`.slide-tab[data-pane="${p}"]`)) return p
         return panel.querySelector('.slide-tab')?.dataset.pane || 'info'
       }
@@ -8776,6 +8833,7 @@ const App = (() => {
         syncPaneActs(pane)
         activePane = pane
         state.recLastPane = pane   // survives the reload an Apply/edit triggers
+        state.recLastPaneFor = recordingId
         rail?.setAttribute('aria-expanded', 'true')
         if (pane === 'filetags') loadFileTags(recordingId)
         if (pane === 'quality')  loadQualityPane()
@@ -9598,12 +9656,15 @@ const App = (() => {
     needs_day:           'Year and month known, day missing',
     unsupported_format:  'Unsupported format',
     unreadable:          'Could not be read',
+    truncated_file:      'Truncated file',
     no_audio:            'No audio files',
+    folder_missing:      'Folder not found',
     // Shortest plain phrasing: every track's fingerprint already belongs
     // to one recording in the library -- this folder was never ingested a
     // second time (spec section 9).
     duplicate_content:   'Duplicate recording',
     incomplete_release:  'Incomplete release',
+    incomplete_recording: 'Incomplete recording',
     needs_type:          'Type unknown',
   }
   // Queue Type column. Unknown: neither an Album nor dated (never stored on a recording).
@@ -9653,10 +9714,10 @@ const App = (() => {
     }
     if (!canEditLibrary()) return ''
     const btns = []
+    btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${esc(row.id)}">Review</button>`)
     if (opts.canIngest) {
       btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${esc(row.id)}">Import</button>`)
     }
-    btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${esc(row.id)}">Review</button>`)
     if (opts.moveTargets && opts.moveTargets.length) {
       btns.push(`<div class="lq-move-wrap">
         <button type="button" class="lq-act lq-act--move" data-path="${esc(row.id)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
@@ -9714,6 +9775,10 @@ const App = (() => {
   // person to check it. "Needs Review" with the issues on hover; "Ready" with
   // a check, so the two line up.
   function _iqStatusCell(row) {
+    // Unsupported audio is a hard stop, not a review: red, naming the format.
+    if (row.unsupported) {
+      return `<span class="iq-status iq-status--bad">${icon('alert', 'iq-status-ic')}<span>Unsupported format${row.format ? ': ' + esc(String(row.format).toUpperCase()) : ''}</span></span>`
+    }
     if (row.needs_review) {
       const issues = (row.review_issues && row.review_issues.length)
         ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
@@ -9724,13 +9789,30 @@ const App = (() => {
     return ''
   }
 
+  // Album rows: the MusicBrainz release lookup the Queue runs after the scan.
+  // Green when a release was found, yellow when not; nothing until looked up.
+  function _iqMbHtml(mb) {
+    if (!mb) return ''
+    const label = mb.found ? 'Found on MusicBrainz' : 'Not found on MusicBrainz'
+    return `<span class="iq-mb lq-tip iq-mb--${mb.found ? 'ok' : 'miss'}" role="img" aria-label="${label}">
+      ${icon('musicbrainz', 'iq-mb-ic')}
+      <span class="lq-tipbox"><div class="tt">${label}</div>${mb.found && mb.title ? `<div class="ab">${esc(mb.title)}</div>` : ''}</span></span>`
+  }
+
+  // Fingerprint (green pass / red fail / none) then, on Album rows, MusicBrainz.
+  function _iqMarksHtml(row) {
+    const fp = row._it && row._it.fingerprints ? _dlChecksumHtml(row._it) : ''
+    const marks = fp + _iqMbHtml(row.mb)
+    return marks ? `<span class="iq-marks">${marks}</span>` : ''   // own column, left of Format
+  }
+
   function _iqRow(row, opts) {
     const open = !!(opts.isOpen && opts.isOpen(row))
     const cls = (opts.soundQuality ? 'iq-brow' : 'iq-brow iq-brow--nosq') + (opts.lomaxCell ? ' iq-brow--lx' : '')
     let metaLine
     if (row.status === 'pending') metaLine = 'Queued'
-    else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>Importing</span>`
-    else if (row.status === 'failed') metaLine = esc(row.status_text || 'Could not be read')
+    else if (row.status === 'ingesting') metaLine = `<span class="lq-spin"></span><span>${row.scanning ? 'Scanning' : 'Importing'}</span>`
+    else if (row.status === 'failed') metaLine = esc(row.fail_detail || row.status_text || 'Could not be read')
     else metaLine = row.meta === '' ? '' : (row.meta || '—')
 
     const actions = opts.actionsHtml ? opts.actionsHtml(row) : _iqDefaultActions(row, opts)
@@ -9759,6 +9841,7 @@ const App = (() => {
             ${metaLine ? `<div class="lq-brow-sub">${metaLine}</div>` : ''}
           </div>
         </div>
+        <span class="iq-col-marks">${skipped ? '' : _iqMarksHtml(row)}</span>
         <span class="iq-col-format">${!skipped && row.format ? esc(row.format) : ''}</span>
         <span class="iq-col-type">${!skipped && row.kind ? (_KIND_LABEL[row.kind] || '') : ''}</span>
         ${opts.soundQuality ? `<span class="lq-brow-band">${skipped ? '' : _iqBandPill(row.sound_band)}</span>` : ''}
@@ -10302,6 +10385,7 @@ const App = (() => {
       })),
       info_file_content: ingest.scan.info_file_content || '',
       notes: g('f-notes'),
+      genre: g('f-genre'),
       fingerprint: lxFingerprint(ingest.scan),
     }
   }
@@ -11338,7 +11422,8 @@ const App = (() => {
         <a href="#" id="ingest-back-link" class="ingest-back-link">${
           ingest.returnTo ? 'Back to Add Recordings' : 'Back'}</a>
         <div class="ingest-topbar-line">
-          <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}</span></h2>
+          <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}${
+            { workshop: ' (In Workshop)', backlog: ' (In Backlog)' }[ingest.scan?.working_folder] || ''}</span></h2>
           <div class="meta-readout" id="iq-score"
                title="How much of the metadata this form has filled in">
             <span class="meta-readout-label">Metadata Completeness</span>
@@ -11501,8 +11586,7 @@ const App = (() => {
             </label>`}
 
           </div>
-          <div class="ingest-actions">
-            <div class="ingest-actions-left" id="ingest-fh-strip"></div>
+          <div class="ingest-actions ingest-actions--form">
             <div class="ingest-actions-right">
               <button class="btn btn-ingest-secondary" id="btn-confirm"
                       data-after="return" title="Add to library and return to the list">Add &amp; Return ↵</button>
@@ -11510,9 +11594,12 @@ const App = (() => {
                       data-after="view" title="Add to library and open the finished record">Add &amp; View →</button>
             </div>
           </div>
-          <div id="confirm-progress" class="confirm-progress" style="visibility:hidden">
-            <div class="confirm-progress-bar"><div class="confirm-progress-fill" id="confirm-progress-fill"></div></div>
-            <div class="confirm-progress-label" id="confirm-progress-label">Preparing…</div>
+          <div class="ingest-foot">
+            <div class="ingest-foot-fh" id="ingest-fh-strip"></div>
+            <div id="confirm-progress" class="confirm-progress" hidden>
+              <div class="confirm-progress-bar"><div class="confirm-progress-fill" id="confirm-progress-fill"></div></div>
+              <div class="confirm-progress-label" id="confirm-progress-label">Preparing…</div>
+            </div>
           </div>
           <div id="review-submit-error" class="review-submit-error" style="display:none"></div>
         </div>
@@ -12628,7 +12715,7 @@ const App = (() => {
             } catch (_) { /* offline or unreachable: no suggestion, and nothing cached */ }
           }
         }
-        if (alive()) c.refresh()
+        if (alive()) { c.refresh(); ingest.mbPaint?.() }
       }
       let genreTimer = null
       const scheduleGenre = () => {
@@ -12639,6 +12726,7 @@ const App = (() => {
       document.getElementById('f-artist')?.addEventListener('input', scheduleGenre)
       document.getElementById('f-artist')?.addEventListener('change', scheduleGenre)
       ingest.lxc = c
+      ingest.applyMbGenre = applyGenre
       if (resRoot) {
         resRoot.closest('.slide-pane').setAttribute('data-lx-ctl', c.id)
         c.addView(ctl => {
@@ -12674,8 +12762,30 @@ const App = (() => {
       const m = () => (ingest.mb = ingest.mb || { state: 'idle', cands: [], picked: null, error: '' })
       const val = id => (document.getElementById(id)?.value || '').trim()
       const findBtn = label => `<button type="button" class="btn ${label === 'Find release' ? 'btn-primary' : 'btn-ghost'} btn-xs" id="ingest-mb-find">${label}</button>`
+      // The act's genre from MusicBrainz, offered while the form has none
+      // (an Album has no Resolver tab to carry it). Ryan, 2026-10-13.
+      function genreHtml() {
+        const f = ingest.form, g = f && f._mbGenre
+        if (!g || !g.name || g.state === 'dismissed') return ''
+        if (g.state !== 'accepted' && (f.genre_id || f.genre_name)) return ''
+        const acts = g.state === 'accepted' ? '<span class="lx-done">Accepted</span>'
+          : (canEditLibrary() ? `<span class="lx-acts">${lxIconBtn('mb-genre-accept', 'Accept', 'check', 'lx-ok')}${lxIconBtn('mb-genre-dismiss', 'Dismiss', 'x', 'lx-no')}</span>` : '')
+        return `<div class="pp-mb-genre"><span class="mg-row-label">Genre</span><span class="pp-mb-genre-val">${esc(g.name)}</span>${acts}</div>`
+      }
       function paint() {
         if (!document.body.contains(root)) return
+        paintBody()
+        root.insertAdjacentHTML('afterbegin', genreHtml())
+        root.querySelectorAll('.pp-mb-genre [data-lx-act]').forEach(b => b.addEventListener('click', async () => {
+          const g = ingest.form._mbGenre
+          if (!g) return
+          if (b.dataset.lxAct === 'mb-genre-accept') { if (ingest.applyMbGenre && await ingest.applyMbGenre(g.name, g.genre_id)) g.state = 'accepted' }
+          else g.state = 'dismissed'
+          paint(); ingest.lxc?.refresh()
+        }))
+      }
+      ingest.mbPaint = paint
+      function paintBody() {
         const st = m()
         if (st.picked && !st.picked.detail && !st.picked._asked && st.picked.mbid) {
           // A link made earlier on this form: fetch the release facts once.
@@ -12905,7 +13015,8 @@ const App = (() => {
       const label = document.getElementById('confirm-progress-label')
       if (fill)  fill.style.width = '0'
       if (label) label.textContent = 'Preparing…'
-      if (prog)  prog.style.visibility = 'visible'
+      if (prog)  prog.hidden = false
+      document.getElementById('ingest-fh-strip')?.setAttribute('hidden', '')
       const fmtMB = b => b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(1) + ' MB'
 
       try {
@@ -12944,7 +13055,8 @@ const App = (() => {
         btn.disabled = false
         if (otherBtn) otherBtn.disabled = false
         btn.classList.remove('is-busy')
-        if (prog) prog.style.visibility = 'hidden'
+        if (prog) prog.hidden = true
+        document.getElementById('ingest-fh-strip')?.removeAttribute('hidden')
       }
     }
 
@@ -14836,9 +14948,11 @@ const App = (() => {
     // of them, so a row needing both an artist and a day shows both, not
     // just the first.
     const reviewIssues = needsReview ? _ingestReasonLabels(it.reason) : []
-    // An incomplete Album carries "1 of 91 tracks" in detail.
-    const _incIdx = reviewIssues.indexOf(_INGEST_REASON_LABEL.incomplete_release)
-    if (_incIdx >= 0 && it.detail) reviewIssues[_incIdx] += `, ${it.detail}`
+    // An incomplete Album or show carries "1 of 91 tracks" in detail.
+    for (const code of ['incomplete_release', 'incomplete_recording']) {
+      const i = reviewIssues.indexOf(_INGEST_REASON_LABEL[code])
+      if (i >= 0 && it.detail) reviewIssues[i] += `, ${it.detail}`
+    }
     if (needsReview && !reviewIssues.length) reviewIssues.push('Needs review')
     const reviewLabel = reviewIssues[0] || null
     // Same fragment-map style as before ("Skipped already in your library"),
@@ -14848,7 +14962,9 @@ const App = (() => {
     const statusText = it.status === 'skipped'
       ? (skippedCodes.includes('duplicate_content') ? 'Exact duplicate in the library, skipped.'
         : `Skipped${skippedPhrases.length ? ' ' + skippedPhrases.join(', ') : ''}`)
-      : it.status === 'failed' ? (it.detail || 'Could not be read') : null
+      : it.status === 'failed'
+        // The reason's own label when it has one (never a raw code like "no_audio").
+        ? (_ingestReasonLabel(String(it.reason || '').split(',')[0]) || it.detail || 'Could not be read') : null
     const meta = (status === 'pending' || status === 'ingesting' || status === 'failed')
       ? '' : _biMetaLine(it)
     const basename = _biItemName(it)
@@ -14877,6 +14993,7 @@ const App = (() => {
       kind: it.kind || null,
       sound_band: it.sound_band || null,
       meta_band: it.meta_band || null,
+      mb: it.mb || null,
       convertible: unsupported ? _biConvertKind(it) : null,
       unsupported,
       _it: it,
@@ -14890,6 +15007,10 @@ const App = (() => {
         ? { url: it.image_url || null, initials: String(it.artist || it.title || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() }
         : null,
       status_text: statusText,
+      // In progress without an import request is the first read of the folder.
+      scanning: inProgress && !it.ingest_requested,
+      // Truncated file: the grey line names the file(s); the status says why.
+      fail_detail: it.status === 'failed' && it.detail && it.detail !== it.reason ? it.detail : null,
       detail: {
         artist: it.artist, date: it.date_text, venue: it.venue,
         location: it.location, source: it.source, lineage: it.lineage,
@@ -15002,7 +15123,7 @@ const App = (() => {
       inner = cell.n
         ? `<a href="#" class="lx-qc-link" data-lx-review="${esc(it.id)}">Findings</a>`
         : 'Nothing to add'
-    } else if (cell && cell.state === 'skipped') inner = 'Skipped: not reachable'
+    } else if (cell && cell.state === 'skipped') inner = 'Skipped'
     else if (cell || lxImportLevel() !== 'off') inner = 'Queued'
     return `<span class="lx-qc" data-lx-qc="${esc(it.id)}">${inner}</span>`
   }
@@ -15150,7 +15271,7 @@ const App = (() => {
     if (link) {
       e.preventDefault()
       const it = _biRowsCache.get(Number(link.dataset.lxReview))
-      if (it) _biOpenReviewFor(it)
+      if (it) _biOpenReviewFor(it, null, 'isp-ai')   // Findings opens on the Lomax tab
       return
     }
     if (e.target.closest && e.target.closest('[data-lx-pause]')) {
@@ -15169,7 +15290,7 @@ const App = (() => {
     const lx = _lxColShown()
     return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}${lx ? ' iq-brow--lx' : ''}">
       <span></span><span>Recording</span>
-      <span>Format</span><span>Type</span>
+      <span></span><span>Format</span><span>Type</span>
       ${sq ? '<span>Quality</span>' : ''}
       <span>Metadata</span><span class="iq-head-status">Status</span>${lx ? `<span>${lomaxMark()}</span>` : ''}<span></span>
     </div>`
@@ -15180,6 +15301,10 @@ const App = (() => {
   function _biActionsHtml(row) {
     const it = row._it
     if (row.status === 'moved') return ''
+    // A truncated folder keeps Move (2026-10-13), after its status.
+    if (it && row.status === 'failed' && it.reason === 'truncated_file') {
+      return _iqDefaultActions(row, {}) + (canEditLibrary() ? _biMoveHtml(it) : '')
+    }
     if (!it || (row.status !== 'ready' && row.status !== 'review')) return _iqDefaultActions(row, {})
     if (!canEditLibrary()) return ''
     const id = esc(row.id)
@@ -15197,26 +15322,32 @@ const App = (() => {
     // Unsupported audio is never imported, so Import and Review are not
     // offered. A paused run refuses import requests (409), so the button is
     // not offered then either.
-    if (!row.unsupported && !(_biRun && _biRun.status === 'paused')) {
-      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${id}">Import</button>`)
-    }
+    // Review first, then Import (Ryan, 2026-10-13).
     if (!row.unsupported) {
       btns.push(`<button type="button" class="lq-act lq-act--review" data-path="${id}">Review</button>`)
+    }
+    if (!row.unsupported && !(_biRun && _biRun.status === 'paused')) {
+      btns.push(`<button type="button" class="lq-act lq-act--ingest" data-path="${id}">Import</button>`)
     }
     // Convert is offered everywhere, library folders included: it only runs
     // on an explicit click, behind a confirmation.
     if (row.convertible) {
       btns.push(`<button class="lq-act lq-act--convert" data-convert="${id}">Convert to FLAC</button>`)
     }
-    // Move is for brought-in folders; one inside the library is never moved.
-    if (it.placement === 'bring_in' && triageDests().length) {
-      btns.push(`<div class="lq-move-wrap">
+    btns.push(_biMoveHtml(it))
+    return btns.join('')
+  }
+
+  // Move is for brought-in folders; one inside the library is never moved.
+  // Move to Trash closes the menu, as on the working-folder pages.
+  function _biMoveHtml(it) {
+    if (it.placement !== 'bring_in') return ''
+    const id = esc(it.id)
+    return `<div class="lq-move-wrap">
         <button type="button" class="lq-act lq-act--move" data-path="${id}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
         <div class="lq-move-menu" hidden>${triageDests().map(d =>
-          `<button type="button" class="lq-move-opt" data-path="${id}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}</div>
-      </div>`)
-    }
-    return btns.join('')
+          `<button type="button" class="lq-move-opt" data-path="${id}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}<button type="button" class="lq-move-opt" data-path="${id}" data-dest="trash">Move to Trash</button></div>
+      </div>`
   }
 
   function _biRowHtml(it) {
@@ -15403,12 +15534,20 @@ const App = (() => {
     return { queue: total - ingested - (c.moved || 0), live: ingested - album, album }
   }
 
+  // An Imported tab that fills while this page is open shows in green until
+  // first clicked (Ryan, 2026-10-13).
+  const _biTabFresh = new Set()
+  const _biTabPrev = {}
   function _biTabsHtml(run) {
     const n = _biTabCounts(run)
+    for (const id of ['live', 'album']) {
+      if (_biTabPrev[id] === 0 && n[id] > 0) _biTabFresh.add(id)
+      _biTabPrev[id] = n[id]
+    }
     const tabs = [['queue', 'Queue'], ['live', 'Imported - Live Recordings'], ['album', 'Imported - Albums']]
     // Imported tabs appear only once they hold rows.
     const left = tabs.filter(([id]) => id === 'queue' || n[id] > 0).map(([id, label]) => `
-      <button type="button" class="pp-tab bi-tab--${id}${_biTab === id && !_biApplyOpen ? ' active' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
+      <button type="button" class="pp-tab bi-tab--${id}${_biTab === id && !_biApplyOpen ? ' active' : ''}${_biTabFresh.has(id) ? ' bi-tab--fresh' : ''}" data-bitab="${id}">${label}<span class="pp-tab-n">${n[id]}</span></button>`).join('')
     // Bulk Value Apply sits at the right end and replaces the table while open; it is not a
     // filter of rows, so it is page state (_biApplyOpen), never a _biTab value the table reads.
     return left + (_biApplyAvailable(run) ? `
@@ -15439,17 +15578,15 @@ const App = (() => {
     if (allEl) allEl.innerHTML = _biIngestAllHtml(run)
   }
 
-  // Rows held back for unsupported audio, from the run's reason breakdown
-  // (keys are comma-joined reason codes, see _biSplitReasonCounts).
+  // Queue rows whose folder holds SHN or WAV (server-counted: the reason
+  // breakdown alone cannot tell SHN/WAV from other unimportable audio).
   function _biUnsupportedCount(run) {
-    return Object.entries(run.reasons || {})
-      .filter(([k]) => k.split(',').includes('unsupported_format'))
-      .reduce((n, [, c]) => n + c, 0)
+    return run.convertible || 0
   }
 
   // In the scan row, left of the scan button: Import All Ready (Review First only) imports every
-  // item that is ready; Convert All to FLAC (any mode) shows only while a
-  // Queue row has unsupported audio. Same button family as the row actions,
+  // item that is ready; Convert SHN/WAV to FLAC (any mode) shows only while a
+  // Queue row's folder holds SHN or WAV. Same button family as the row actions,
   // one size up.
   function _biIngestAllHtml(run) {
     if (!canEditLibrary() || _biTab !== 'queue') return ''
@@ -15462,7 +15599,7 @@ const App = (() => {
       html += `<button type="button" class="btn btn-ghost" id="bi-import-everything"${waiting && idle ? '' : ' disabled'}>Import All</button>`
     }
     if (_biUnsupportedCount(run) > 0) {
-      html += `<button type="button" class="lq-act lq-act--convert lq-act--lg" id="bi-convert-all"${idle ? '' : ' disabled'}>Convert All to FLAC</button>`
+      html += `<button type="button" class="lq-act lq-act--convert lq-act--lg" id="bi-convert-all"${idle ? '' : ' disabled'}>Convert SHN/WAV to FLAC</button>`
     }
     return html
   }
@@ -15489,7 +15626,7 @@ const App = (() => {
   // bulk item flagged needs_artist/needs_date/unsupported_format cannot be
   // safely one-click auto-ingested, so both buttons land on the same form a
   // human finishes.
-  async function _biOpenReviewFor(it, btn) {
+  async function _biOpenReviewFor(it, btn, pane) {
     const root = (_biRun && _biRun.root) || ''
     const abs = it.abs_path || (root.replace(/\/+$/, '') + '/' + it.rel_path)
     if (btn) { btn.disabled = true; btn.textContent = '…' }
@@ -15498,6 +15635,7 @@ const App = (() => {
       ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = abs
       ingest.form = {}; ingest.tracks = []
       ingest.returnTo = _biRun ? '#/bulk-ingest' : null; ingest._resume = true
+      if (pane) { ingest._keepPane = pane; state.ingestPanelOpen = true }
       window.location.hash = '#/ingest'
       renderIngestStep()
     } catch (e) {
@@ -15540,7 +15678,7 @@ const App = (() => {
     if (btn) { btn.disabled = true; btn.textContent = '…' }
     try { await API.bulkIngest.moveItem(it.id, dest) }
     catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = TRIAGE_LABELS[dest] || dest }
+      if (btn) { btn.disabled = false; btn.textContent = dest === 'trash' ? 'Move to Trash' : (TRIAGE_LABELS[dest] || dest) }
       Notify.error(`Move failed: ${e.message}`)
       return
     }
@@ -15585,7 +15723,7 @@ const App = (() => {
   function _biConvertAll(btn) {
     const n = _biUnsupportedCount(_biRun || {})
     _confirmDialog(`Replace the SHN and WAV files in ${n} recordings with FLAC? The originals will be deleted. This can't be undone.`,
-      'Convert All to FLAC', async () => {
+      'Convert SHN/WAV to FLAC', async () => {
         if (btn) btn.disabled = true
         try { await API.bulkIngest.convertUnsupported(_biPageRunId) }
         catch (e) { if (btn) btn.disabled = false; Notify.error(e.message); return }
@@ -15952,6 +16090,8 @@ const App = (() => {
         document.getElementById('lq-apply-artist')?.focus()
         return
       }
+      _biTabFresh.delete(t.dataset.bitab)
+      t.classList.remove('bi-tab--fresh')
       const wasApply = _biApplyOpen
       _biApplyOpen = false
       _biApplyMode()
@@ -16008,7 +16148,6 @@ const App = (() => {
   const _dlIsLive = j => j.status === 'queued' || j.status === 'active'
 
   const ARC_SORTS = [['newest', 'Newest'], ['date', 'Show date'], ['az', 'A–Z']]
-  const ARC_SRC_CLASSES = new Set(['sbd', 'aud', 'mtx', 'fm'])
 
   const _arc = {
     sort: 'newest', q: '', page: 0, hasMore: false, loading: false, seq: 0,
@@ -16393,7 +16532,7 @@ const App = (() => {
         <span class="brow-venue">${esc(it.venue || '')}</span>
         <span class="brow-loc">${esc(it.location || '')}</span>
         <span class="arc-fmt">${esc(it.format || '')}</span>
-        <span class="brow-srccell">${st ? `<span class="arc-src arc-src--${ARC_SRC_CLASSES.has(st) ? st : 'other'}">${esc(it.source_type)}</span>` : ''}</span>
+        <span class="brow-srccell">${st ? `<span class="brow-src">${esc(it.source_type)}</span>` : ''}</span>
         <span class="arc-num">${esc(it.size_bytes ? fmtBytes(it.size_bytes) : '')}</span>
         <span class="arc-num arc-num--dim">${esc(_arcAgo(it.added))}</span>
         <span class="arc-actcell">${_arcActionHtml(it)}</span>
@@ -17318,11 +17457,11 @@ const App = (() => {
     if (tab) _settingsTab = tab
     setLoading()
 
-    let prefs = {}, me = {}, about = {}, fh = {}
+    let prefs = {}, me = {}, about = {}, fh = {}, cols = []
     try {
-      [prefs, me, about, fh] = await Promise.all([
+      [prefs, me, about, fh, cols] = await Promise.all([
         API.preferences.get(), API.auth.me(), API.system.about(),
-        fileHandling(true),
+        fileHandling(true), API.collections.list().catch(() => []),
       ])
     } catch (e) {
       setMainHTML(`<div class="empty-state">
@@ -17339,7 +17478,7 @@ const App = (() => {
     // Files, Folders and Sharing are install-level and admin-only, so in Playback mode
     // they are absent rather than shown and refused.
     const tabs = [
-      ['profile', 'Profile'], ['appearance', 'Appearance'],
+      ['profile', 'Profile'], ['appearance', 'Appearance'], ['topshelf', 'Top Shelf'],
       ...(editable ? [['files', 'Files'], ['folders', 'Folders'], ['sharing', 'Sharing']] : []),
       ['lomax', 'Lomax'], ['about', 'About'],
     ]
@@ -17375,6 +17514,7 @@ const App = (() => {
 `,
 
       appearance: _palettePickerHtml(),
+      topshelf:   _topShelfSectionHtml(prefs.top_shelf || {}, cols),
 
       files:   editable ? _fileHandlingSectionHtml(fh) : '',
       folders: editable ? _foldersSectionHtml(fh, about) : '',
@@ -17453,6 +17593,56 @@ const App = (() => {
     }))
 
     _wireSettings(me)
+    _wireTopShelfSettings(prefs.top_shelf || {})
+  }
+
+  /** Settings › Top Shelf: which recordings the shelf draws from (Ryan,
+   *  2026-10-13). One pool of everything that meets any ticked criterion.
+   *  Labels are Ryan's wording. */
+  function _topShelfSectionHtml(ts, cols) {
+    const box = (key, label) => `<label class="check"><input type="checkbox" data-ts="${key}" ${ts[key] ? 'checked' : ''}><div>${label}</div></label>`
+    const mine = (cols || []).filter(c => !c.is_system)
+    const picked = new Set(ts.collection_ids || [])
+    return `
+      <div class="set-field">
+        <span class="set-label">Include</span>
+        ${box('top_grades', 'A+ or A recordings')}
+        ${box('sbd', 'Include randomly-selected SBD sourced recordings*')}
+        ${box('fm', 'Include randomly-selected FM sourced recordings*')}
+        ${box('favorites', 'Include Favorites')}
+        ${box('collections', 'All in Collection')}
+        ${mine.length ? `<div class="ts-cols"${ts.collections ? '' : ' hidden'}>${mine.map(c => `
+          <label class="check"><input type="checkbox" data-ts-col="${c.id}" ${picked.has(c.id) ? 'checked' : ''}><div>${esc(c.name)}</div></label>`).join('')}
+        </div>` : ''}
+        <p class="set-hint">* Recordings you have not played in the last 90 days come first.</p>
+        <span class="set-flash" id="ts-flash"></span>
+      </div>`
+  }
+
+  function _wireTopShelfSettings(ts) {
+    const pane = document.querySelector('[data-set-pane="topshelf"]')
+    if (!pane) return
+    const state = { ...ts, collection_ids: [...(ts.collection_ids || [])] }
+    const save = async () => {
+      try {
+        await API.preferences.update({ top_shelf: state })
+        _settingsSaved(document.getElementById('ts-flash'))
+      } catch (e) {
+        _settingsSaved(document.getElementById('ts-flash'), e.message || 'Could not save')
+      }
+    }
+    pane.querySelectorAll('[data-ts]').forEach(el => el.addEventListener('change', () => {
+      state[el.dataset.ts] = el.checked
+      if (el.dataset.ts === 'collections') {
+        const list = pane.querySelector('.ts-cols')
+        if (list) list.hidden = !el.checked
+      }
+      save()
+    }))
+    pane.querySelectorAll('[data-ts-col]').forEach(el => el.addEventListener('change', () => {
+      state.collection_ids = [...pane.querySelectorAll('[data-ts-col]:checked')].map(x => Number(x.dataset.tsCol))
+      save()
+    }))
   }
 
   function _wireSettings(me) {
@@ -18402,6 +18592,8 @@ const App = (() => {
       // libraryState.remotes, and a selector that appears as a plain label and
       // then sprouts a dropdown a moment later reads as a glitch.
       await loadRemotes()
+      // Back into the shared library a reload left, before anything renders.
+      await restoreLibraryAfterReload()
       // Bulk Ingest (spec 7a/7c) — fetched once here, before the sidebar,
       // so its nav item (renderSidebar) is right on the very first paint
       // rather than popping in a moment later.
@@ -18461,6 +18653,9 @@ const App = (() => {
     get paula()       { return (typeof ingest !== 'undefined' && ingest?.scan?.paula) || null },
   }
 
-  return { onTrackChange, syncPlayButtons, libraryDrive }
+  // The player bar's link back to a recording that came from another library.
+  function openRecordingIn(lib, recId) { return switchLibrary(lib ?? null, `#/recording/${recId}`) }
+
+  return { onTrackChange, syncPlayButtons, libraryDrive, openRecordingIn }
 
 })()

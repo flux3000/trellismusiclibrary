@@ -446,8 +446,11 @@ def _build_dedup_map():
     already held before this run started.
     """
     hash_to_recording = {}
+    # In-library recordings only; see resolve.find_duplicates.
     rows = (db.session.query(RecordingFingerprint.recording_id, RecordingFingerprint.content)
-            .filter(RecordingFingerprint.fingerprint_type.in_(_DEDUP_FP_TYPES))
+            .join(Recording, Recording.id == RecordingFingerprint.recording_id)
+            .filter(RecordingFingerprint.fingerprint_type.in_(_DEDUP_FP_TYPES),
+                    Recording.is_published.is_(True))
             .all())
     for recording_id, content in rows:
         for entry in parse_checksum_file(content or ""):
@@ -623,9 +626,16 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         # Import's auto-confirm endpoint calls the exact same function
         # (spec section 4), so a bulk-ingested and an auto-ingested-from-
         # Batch-Import recording can never come out different.
+        # A release the Queue's MusicBrainz lookup found rides into the import.
+        try:
+            _old = json.loads(item.meta or "{}") or {}
+        except ValueError:
+            _old = {}
+        _mb = _old.get("mb") or {}
         outcome = auto_confirm(folder_abs, user_id,
                                hash_cache=hash_to_recording,
-                               hold=hold, force=force, applied=applied)
+                               hold=hold, force=force, applied=applied,
+                               mb_release_id=_mb.get("mbid") if _mb.get("found") else None)
         status   = outcome["status"]
         reasons  = outcome["reasons"]
         resolved = outcome["resolved"]
@@ -671,6 +681,10 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "track_count":  track_count,
             "tracks":       track_titles,
             "duration_sec": duration_sec,
+            # The Queue's MusicBrainz lookup survives a re-read of the same
+            # album (same artist and title); anything else is looked up again.
+            "mb": (_mb or None) if (resolved and resolved.artist.value == _old.get("artist")
+                                    and resolved.album.value == _old.get("title")) else None,
         })
 
         # BulkIngestItem.reason is a single String(32) column -- there is
@@ -695,7 +709,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.status = "review"
             item.reason = reason_str
             item.kind = resolved.kind if resolved else None
-            if "incomplete_release" in (reasons or []):
+            if {"incomplete_release", "incomplete_recording"} & set(reasons or []):
                 item.detail = outcome.get("detail")      # "1 of 91 tracks"
             _write_review_staging(folder_abs, library_root, item)
         elif status == "skipped":
@@ -712,6 +726,9 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.detail = outcome.get("detail") or reason_str
         item.ingest_requested = False
         db.session.commit()
+        if item.kind == "studio" and item.status in ("ready", "review"):
+            from app.api.ingest import queue_album_lookup
+            queue_album_lookup(item)
     except MoveFailed as e:
         # move_to_library failed partway (a bring-in item; part of the show
         # may already be in the library). Retrying blindly would re-ingest
@@ -735,6 +752,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         item.status = "failed"
         item.reason = "unreadable"
         item.detail = str(e)
+        _mark_truncated(item, folder_abs)
         item.ingest_requested = False
         db.session.commit()
     except Exception as e:  # noqa: BLE001
@@ -743,9 +761,62 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         item.status = "failed"
         item.reason = None
         item.detail = str(e)
+        _mark_truncated(item, folder_abs)
         item.ingest_requested = False
         db.session.commit()
         traceback.print_exc()
+
+
+def relink_missing_folder_items():
+    """Boot pass (2026-10-13): a failed row whose folder no longer exists is
+    linked to the recording imported from it (one recording carrying that
+    folder's original name), else labelled folder_missing."""
+    try:
+        rows = (db.session.query(BulkIngestItem)
+                .filter(BulkIngestItem.status == "failed",
+                        BulkIngestItem.reason.in_(("no_audio", "unreadable"))).all())
+        for it in rows:
+            path = item_abs_path(it)
+            if os.path.isdir(path):
+                continue
+            recs = (db.session.query(Recording)
+                    .filter(Recording.original_folder_name == os.path.basename(path)).all())
+            if len(recs) == 1:
+                it.status, it.reason, it.detail = "ingested", None, None
+                it.recording_id, it.kind = recs[0].id, recs[0].kind
+            else:
+                it.reason, it.detail = "folder_missing", None
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+
+
+def relabel_truncated_items():
+    """Boot pass (2026-10-13): failed "unreadable" rows recorded before the
+    truncated-file check get its label. Only failed rows are read; non-fatal."""
+    try:
+        rows = (db.session.query(BulkIngestItem)
+                .filter(BulkIngestItem.status == "failed", BulkIngestItem.reason == "unreadable").all())
+        for it in rows:
+            path = item_abs_path(it)
+            if os.path.isdir(path):
+                _mark_truncated(it, path)
+        db.session.commit()
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+
+
+def _mark_truncated(item, folder_abs):
+    """A reader error caused by a truncated file says so (2026-10-13):
+    reason truncated_file, detail the file name(s)."""
+    from app.utils.truncated_audio import truncated_files
+    try:
+        short = truncated_files(folder_abs)
+    except OSError:
+        return
+    if short:
+        item.reason = "truncated_file"
+        item.detail = ", ".join(short[:3]) + (f" and {len(short) - 3} more" if len(short) > 3 else "")
 
 
 def _scan_seconds(scan):
@@ -913,7 +984,8 @@ def _reconcile_review_items(run=None):
 # still overwrite whatever it reads, so human-set values stay locked.
 
 # Reasons no confirmation of an act, venue or event can change.
-_NOT_RECHECKABLE = ("unsupported_format", "move_failed", "duplicate_content", "unreadable",
+_NOT_RECHECKABLE = ("unsupported_format", "move_failed", "duplicate_content", "unreadable", "truncated_file",
+                    "folder_missing",
                     "no_audio", _DOWNLOADING, _CONVERTING)
 
 
@@ -923,6 +995,30 @@ def _meta_dict(item):
     except ValueError:
         return {}
     return v if isinstance(v, dict) else {}
+
+
+def mark_folder_ingested(folder_path, rec):
+    """A folder imported through the Add Recording form: its Queue row (any
+    listed run) becomes ingested and points at the recording. Without this a
+    Ready row stayed Ready, and a later re-read found the folder gone."""
+    if not folder_path or rec is None:
+        return 0
+    want = os.path.realpath(str(folder_path))
+    n = 0
+    for r in listed_runs():
+        rel = os.path.relpath(want, item_base(r.root))
+        if rel == ".." or rel.startswith(".." + os.sep):
+            continue
+        rp = _norm_rel(rel) if rel != "." else "."
+        for it in (db.session.query(BulkIngestItem)
+                   .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.rel_path == rp,
+                           BulkIngestItem.status.notin_(("ingested", "moved")))):
+            it.status, it.reason, it.detail = "ingested", None, None
+            it.recording_id, it.kind, it.ingest_requested = rec.id, rec.kind, False
+            n += 1
+    if n:
+        db.session.commit()
+    return n
 
 
 def recheck_queue(folder_path, keys):

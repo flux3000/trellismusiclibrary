@@ -37,6 +37,14 @@ _FORMAT_LABELS = {".flac": "FLAC", ".mp3": "MP3", ".wav": "WAV", ".shn": "SHN",
                   ".aiff": "AIFF", ".aif": "AIFF", ".ape": "APE", ".wv": "WV"}
 
 
+def recording_format(rec):
+    """Format label(s) of a recording's tracks, "FLAC" or "FLAC, MP3", by
+    file extension. None when no track has a known one. (2026-10-13)"""
+    labels = {_FORMAT_LABELS[e] for e in
+              (Path(t.file_path or "").suffix.lower() for t in rec.tracks) if e in _FORMAT_LABELS}
+    return ", ".join(sorted(labels)) if labels else None
+
+
 def folder_format(scan):
     """Comma-joined, alphabetical format labels found in one scan_folder()
     result -- "FLAC", "WAV", or "FLAC, MP3" for a mixed folder. None when

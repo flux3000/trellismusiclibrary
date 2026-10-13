@@ -40,6 +40,10 @@ return your best match and flag the difference in verify_items. Do not write tra
 facts when listed, then the info file when one is present, then trusted sources (MusicBrainz, \
 Discogs, the label, the artist's own pages), then the open web. An info file, when present, \
 is one source; corroborate it elsewhere.
+- Genre: when the act has no genre, propose ONE genre for the act (field 'genre'). The genre \
+comes from general knowledge and needs no search: if the act is well known, propose its primary \
+genre. Choose from the Trellis genres listed when one fits, and a short plain name (at most four \
+words) only when none does. Never propose a genre for an act that already has one.
 - verify_items are things the archivist should check (for example a title that differs between \
 editions or countries)."""
 
@@ -54,7 +58,7 @@ SUBMIT = {
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
             "reply": REPLY_PROP,
             "proposals": {"type": "array", "items": {"type": "object", "properties": {
-                "field": {"type": "string", "enum": list(FIELDS)},
+                "field": {"type": "string", "enum": list(FIELDS) + ["genre"]},
                 "current": {"type": "string"},
                 "proposed": {"type": "string", "description": "For notes: a few short paragraphs of plain, sourced prose."},
                 "agrees": {"type": "boolean", "description": "True when this equals the filed value."},
@@ -149,8 +153,17 @@ def gather(subject, ctx):
     artist = ev.artist_row(cur.get("artist"))
     task = ["Research this studio album: confirm its title and year, establish the track titles "
             "and songwriters, and write the album story for the notes."]
+    # Genre, as the recording skill does it (Ryan, 2026-10-13): only for an act with none.
+    filed_genre = ev.act_genre_name(cur)
+    subject.scratch["genre_open"] = not filed_genre
+    task.append("Genre is open: the act has no genre. Propose its primary genre (general knowledge, "
+                "no search needed)." if not filed_genre else
+                "The act already has the genre %s. Do not propose a genre." % filed_genre)
+    names = ev.genre_names()
     return [
         EvidenceSection("task", task),
+        EvidenceSection("known", ["  " + "; ".join(names)] if names else [],
+                        title="Trellis genres (choose one of these when one fits):"),
         _known_section(cur),
         ev.tracks_section(cur),
         _tags_section(cur),
@@ -195,6 +208,13 @@ def normalize(raw, subject):
     cur = subject.scratch.get("current") or _current(subject)
     asked = bool((subject.scratch.get("question") or "").strip())
     props, seen = [], set()
+    if subject.scratch.get("genre_open", not ev.act_genre_name(cur)):
+        from app.lomax.skills.recording import _one_genre
+        g = next((p for p in raw.get("proposals") or []
+                  if isinstance(p, dict) and p.get("field") == "genre" and p.get("proposed")), None)
+        val = _one_genre(g["proposed"]) if g else ""
+        if val:
+            props.append(dict(g, proposed=val, current="", agrees=False, challenge=False))
     for p in raw.get("proposals") or []:
         if not (isinstance(p, dict) and p.get("field") in FIELDS and p.get("proposed")) or p["field"] in seen:
             continue

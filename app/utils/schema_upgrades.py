@@ -226,6 +226,30 @@ def ensure_lomax_easter_eggs(engine):
         raise RuntimeError(msg) from e
 
 
+def ensure_download_job(engine):
+    """Create download_job when missing. The archive downloader added this table with no
+    migration, so a database older than that feature never got it (found on the Mac mini,
+    2026-10-13). Returns True when created, None when nothing was needed."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.connect() as con:
+            names = {r[0] for r in con.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "user" not in names or "download_job" in names:
+            return None
+        from app.models.download_job import DownloadJob
+        DownloadJob.__table__.create(engine, checkfirst=True)
+        log.warning("schema: created download_job in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not create the download_job table in the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
 def ensure_bulk_run_cleared_at(engine):
     """Add bulk_ingest_run.cleared_at when missing. Returns True when added, None
     when nothing was needed (no file, no table, or already there).

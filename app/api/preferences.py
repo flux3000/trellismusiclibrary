@@ -10,6 +10,7 @@ from flask_login import login_required, current_user
 
 from app.utils.prefs import (get_pref, set_pref, has_api_key,
                              set_api_key, delete_api_key, _HAS_KEYRING)
+from app.utils import top_shelf
 
 bp = Blueprint("preferences", __name__)
 
@@ -35,6 +36,7 @@ def _snapshot(uid):
         # 400'd on click -- a failure reported as a different failure, which
         # this codebase has a rule about.
         "triage_destinations":  sorted(current_app.config.get("TRIAGE_DIRS", {})),
+        "top_shelf":            top_shelf.get_settings(uid),
     }
 
 
@@ -51,6 +53,9 @@ def get_preferences():
 def update_preferences():
     uid  = current_user.id
     data = request.get_json() or {}
+
+    if isinstance(data.get("top_shelf"), dict):
+        top_shelf.set_settings(uid, data["top_shelf"])
 
     if data.get("ai_model") in _ALLOWED_MODELS:
         set_pref(uid, "ai_model", data["ai_model"])

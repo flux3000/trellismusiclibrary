@@ -26,6 +26,9 @@ const Player = (() => {
 
   let queue      = []
   let queueIdx   = -1
+  // The library the queue was loaded from (null = your own). Its recording ids
+  // only mean anything there, so the bar's link goes back to that library.
+  let queueLib   = null
   let startedAt  = null   // Date when play started (for PlayLog)
 
   // Set by whichever page is currently showing a recording with nothing
@@ -38,7 +41,12 @@ const Player = (() => {
   // Navigate back to the currently-playing recording when user clicks the info area
   infoEl.addEventListener('click', () => {
     const recId = infoEl.dataset.recId
-    if (recId) location.hash = `#/recording/${recId}`
+    if (!recId) return
+    if (queueLib !== (API.getLibraryContext() ?? null) && typeof App !== 'undefined' && App.openRecordingIn) {
+      App.openRecordingIn(queueLib, recId)
+    } else {
+      location.hash = `#/recording/${recId}`
+    }
   })
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -138,6 +146,7 @@ const Player = (() => {
    */
   function loadQueue(tracks, startIndex, opts) {
     queue    = tracks
+    queueLib = API.getLibraryContext() ?? null
     playIdx(startIndex, opts)
   }
 

@@ -33,6 +33,18 @@ def working_folders():
     return [_norm(d) for d in dirs if d]
 
 
+def working_folder_name(abs_path):
+    """'workshop' / 'backlog' / 'downloads' for a path inside one, else None."""
+    from app.utils.downloads_dir import downloads_dir
+    named = [("downloads", downloads_dir()),
+             *((current_app.config.get("TRIAGE_DIRS") or {}).items())]
+    p = _norm(abs_path)
+    for name, d in named:
+        if d and (p == _norm(d) or p.startswith(_norm(d) + os.sep)):
+            return name
+    return None
+
+
 def in_working_folder(abs_path, folders=None):
     p = _norm(abs_path)
     return any(p == w or p.startswith(w + os.sep) for w in (folders or working_folders()))

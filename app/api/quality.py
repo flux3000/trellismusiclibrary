@@ -708,6 +708,9 @@ def _attach_concerns(results):
             elif reason == "incomplete_release":
                 concerns.append({"level": "warn", "kind": "incomplete_release",
                                  "text": "Incomplete release"})
+            elif reason == "incomplete_recording":
+                concerns.append({"level": "warn", "kind": "incomplete_recording",
+                                 "text": "Incomplete recording"})
             elif reason.startswith("conflict:"):
                 field_name = reason.split(":", 1)[1].replace("_", " ")
                 concerns.append({"level": "warn", "kind": "conflict",
@@ -1285,7 +1288,63 @@ def _shortcuts():
     return out
 
 
-def move_folder_to_triage(folder_path, destination):
+_JUNK_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+
+
+def _is_empty_dir(path):
+    try:
+        return all(e.name in _JUNK_FILES or e.name.startswith("._") for e in os.scandir(path))
+    except OSError:
+        return False
+
+
+def trash_folder_path(folder_path, stop_at=None):
+    """Move to Trash for a queued folder (2026-10-13): the same guards as a
+    Move (a real folder, inside the import roots, not downloading), then the
+    system Trash. Returns (payload, http_status)."""
+    from app.utils.trash import move_to_trash, TrashUnavailable
+    from app.utils import download_queue as dq
+    src = os.path.realpath(folder_path)
+    if not os.path.isdir(src):
+        return {"error": f"Not a folder: {folder_path!r}"}, 400
+    if os.path.ismount(src) or os.path.dirname(src) == src:
+        return {"error": "Refusing to move a mount point or root"}, 400
+    if not within_import_roots(src):
+        return {"error": "Folder is outside the permitted import roots"}, 403
+    with dq.FS_LOCK:
+        if dq.downloading_here(src):
+            return {"error": "This folder is still downloading."}, 409
+        try:
+            move_to_trash(src)
+        except TrashUnavailable as e:
+            return {"error": str(e)}, 501
+        except OSError as e:
+            return {"error": str(e)}, 500
+        _trash_emptied_parents(src, stop_at)
+    return {"moved_to": "trash"}, 200
+
+
+def _trash_emptied_parents(src, stop_at=None):
+    """A containing folder left empty by a move or trash (an artist folder)
+    goes to the Trash too, walking up, but never `stop_at`, an import root or
+    a working folder (2026-10-13)."""
+    from app.utils.trash import move_to_trash, TrashUnavailable
+    stop = os.path.realpath(stop_at) if stop_at else None
+    keep = {os.path.realpath(r) for r in (current_app.config.get("IMPORT_ROOTS") or [])}
+    keep |= {os.path.realpath(d) for d in (current_app.config.get("TRIAGE_DIRS") or {}).values() if d}
+    if current_app.config.get("LIBRARY_ROOT"):
+        keep.add(os.path.realpath(current_app.config["LIBRARY_ROOT"]))
+    parent = os.path.dirname(src)
+    while (parent != src and parent != stop and parent not in keep
+           and within_import_roots(parent) and _is_empty_dir(parent)):
+        try:
+            move_to_trash(parent)
+        except (TrashUnavailable, OSError):
+            break
+        src, parent = parent, os.path.dirname(parent)
+
+
+def move_folder_to_triage(folder_path, destination, stop_at=None):
     """The Move action's whole job, shared by POST /api/quality/move and the
     Bulk Ingest item move: returns (payload, http_status). Moves USER FILES, so
     every guard below stays in one place -- see the route's docstring."""
@@ -1327,6 +1386,7 @@ def move_folder_to_triage(folder_path, destination):
             shutil.move(src, target)
         except OSError as e:
             return {"error": f"Move failed: {e}"}, 500
+        _trash_emptied_parents(src, stop_at)
 
     # Keep the analysis, repointed at the new location: re-scanning Backlog or
     # Working later shows the existing score instead of paying to redo it.

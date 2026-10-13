@@ -23,6 +23,13 @@ bp = Blueprint("stream", __name__)
 
 CHUNK_SIZE = 1024 * 256  # 256 KB chunks
 MIMETYPE   = "audio/flac"
+# By extension (2026-10-13): an MP3 sent as audio/flac fails in the app's
+# WebKit player ("stream error").
+_MIMETYPES = {".flac": "audio/flac", ".mp3": "audio/mpeg"}
+
+
+def _mimetype_of(path):
+    return _MIMETYPES.get(os.path.splitext(path)[1].lower(), MIMETYPE)
 
 
 def _path_within(candidate, base):
@@ -107,7 +114,7 @@ def stream_track(track_id):
     if not os.path.isfile(full_path):
         abort(404)
 
-    return _serve_file(full_path)
+    return _serve_file(full_path, mimetype=_mimetype_of(full_path))
 
 
 @bp.route("/ingest-preview")
@@ -138,7 +145,7 @@ def stream_ingest_preview():
     if not os.path.isfile(full_path):
         abort(404)
 
-    return _serve_file(full_path)
+    return _serve_file(full_path, mimetype=_mimetype_of(full_path))
 
 
 def _parse_range(range_header, file_size):
