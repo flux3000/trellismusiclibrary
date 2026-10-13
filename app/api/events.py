@@ -25,6 +25,7 @@ from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_row
+from app.utils.published import on_shelf
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
 from app.api.system import require_library
@@ -98,7 +99,7 @@ def list_events():
     rec_counts = dict(
         db.session.query(Performance.event_id, func.count(Recording.id))
         .join(Recording, Recording.performance_id == Performance.id)
-        .filter(Performance.event_id.isnot(None))
+        .filter(Performance.event_id.isnot(None), Recording.is_published.is_(True))
         .group_by(Performance.event_id).all()
     )
     image_ids = {}
@@ -140,7 +141,7 @@ def get_event(event_id):
 
     # One row per Recording at this event, chronological. Same serializer the
     # Venue page uses, so the frontend renders both with one row builder.
-    recordings = [recording_row(r) for p in perfs for r in p.recordings]
+    recordings = [recording_row(r) for p in perfs for r in on_shelf(p.recordings)]
 
     return jsonify({
         **_event_summary(e),
@@ -158,7 +159,7 @@ def get_event(event_id):
                 "date":      format_partial_date(p.start_year, p.start_month, p.start_day),
                 "stage":     p.stage,
                 "venue":     p.venue.name if p.venue else None,
-                "recording_count": len(p.recordings),
+                "recording_count": len(on_shelf(p.recordings)),
             }
             for p in perfs
         ],

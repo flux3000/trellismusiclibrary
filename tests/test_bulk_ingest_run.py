@@ -79,7 +79,7 @@ def _build_tree(root):
     _flac(root / "YearOnlyNoVenueShow" / "01.flac",
           ARTIST="Phish", DATE="1995")
 
-    # No date at all -> review / needs_date
+    # No date, no album -> review / needs_type (Unknown)
     _flac(root / "NoDateShow" / "01.flac", ARTIST="Phish")
 
     # Dateless studio album (ALBUM tag, no month anywhere) -> ingested / studio
@@ -189,7 +189,7 @@ def test_discover_and_process_full_tree(app, tmp_path, seeded_ids, monkeypatch):
     assert items["YearOnlyNoVenueShow"].reason == "needs_month"
 
     assert items["NoDateShow"].status == "review"
-    assert items["NoDateShow"].reason == "needs_date"
+    assert items["NoDateShow"].reason == "needs_type"     # no date, no album: Unknown
 
     assert items["StudioAlbum"].status == "ingested"
     assert items["StudioAlbum"].kind == "studio"

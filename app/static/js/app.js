@@ -7225,32 +7225,20 @@ const App = (() => {
       <div class="rec-header-avatar${imageClickable ? ' rec-header-avatar--btn' : ''}" id="rec-cover"
            style="--genre-fg:${esc(perf?.artist_genre_color || 'var(--bd-1)')}"${imageClickable ? ' role="button" tabindex="0"' : ''}></div>`
 
-    // Studio heading + sub-line. The album title takes the h2 that a live
-    // recording gives the artist; the artist name drops down into the sub-line
-    // that a live recording spends on date/venue/location/event, none of which
-    // a studio release has. If the ALBUM tag never gave us a title, the heading
-    // falls back to exactly what a live recording shows (artist name, same
-    // id/wiring) — the sub-line still carries artist/year/track-count/length
-    // below it, since that information does not depend on having a title to put
-    // above it.
-    const studioTitleHtml = rec.title ? `
-          <div class="rec-name-row">
-            <h2 class="rec-perf-name rec-perf-name--album${canEdit ? ' pp-editable' : ''}" id="rec-title"${canEdit ? ' title="Click to edit"' : ''}>${esc(rec.title)}</h2>
-          </div>` : `
-          <div class="rec-name-row">
-            <h2 class="rec-perf-name${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</h2>
-            ${perfNavLink}
-          </div>`
+    // Studio heading + sub-line (Ryan, 2026-10-13): the same layout as a live
+    // recording. The artist is the h2; the album title leads the line below,
+    // in the place a live recording gives its date, then year, track count and
+    // length.
     const studioTrackCount = rec.tracks?.length || 0
     const studioTrackCountStr = studioTrackCount
       ? `${studioTrackCount} track${studioTrackCount === 1 ? '' : 's'}` : null
     const studioTotalMinutes = Math.round((rec.tracks || []).reduce((sum, t) => sum + (t.duration || 0), 0) / 60)
     const studioLengthStr = studioTotalMinutes > 0 ? `${studioTotalMinutes} min` : null
     const studioYearStr = perf?.start_year ? String(perf.start_year) : null
-    const studioArtistHtml = rec.title
-      ? `<span class="rec-f rec-f-artist${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</span>${perfNavLink}`
+    const studioTitleHtml = (rec.title || canEdit)
+      ? `<span class="rec-f rec-f-title${canEdit ? ' pp-editable' : ''}" id="rec-title">${rec.title ? esc(rec.title) : '<span class="pp-empty">Add title</span>'}</span>`
       : null
-    const studioSubParts = [studioArtistHtml, studioYearStr ? esc(studioYearStr) : null,
+    const studioSubParts = [studioTitleHtml, studioYearStr ? esc(studioYearStr) : null,
       studioTrackCountStr ? esc(studioTrackCountStr) : null, studioLengthStr ? esc(studioLengthStr) : null].filter(Boolean)
     // The favorite star sits just left of the date: an icon that toggles, for live
     // shows and albums alike. Not an edit, so it renders in every mode, and in a
@@ -7277,11 +7265,10 @@ const App = (() => {
         <div class="rec-header-left">
           ${coverBlockHtml}
           <div class="rec-header-lines">
-          ${isStudioKind ? studioTitleHtml : `
           <div class="rec-name-row">
             <h2 class="rec-perf-name${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</h2>
             ${perfNavLink}
-          </div>`}
+          </div>
           ${isStudioKind ? studioSubLineHtml : `
           <div class="rec-date-line" id="rec-date-line">
             ${headerStarHtml}<span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>
@@ -7931,11 +7918,9 @@ const App = (() => {
         },
       })
 
-      // Album title — no-ops when #rec-title isn't on the page (live, or a
-      // studio recording with no title yet). Reloads on save rather than
-      // patching in place: clearing the title out swaps the whole
-      // heading/sub-line back to the live-style fallback, which is a
-      // different element (id and all), not a text swap.
+      // Album title, first on the line under the artist. No-ops when
+      // #rec-title isn't on the page (live, or Playback with no title).
+      // Reloads on save so the "Add title" placeholder comes and goes.
       makeInlineEditable(document.getElementById('rec-title'), {
         get: () => rec.title || '',
         onSave: async v => {
@@ -9618,7 +9603,11 @@ const App = (() => {
     // to one recording in the library -- this folder was never ingested a
     // second time (spec section 9).
     duplicate_content:   'Duplicate recording',
+    incomplete_release:  'Incomplete release',
+    needs_type:          'Type unknown',
   }
+  // Queue Type column. Unknown: neither an Album nor dated (never stored on a recording).
+  const _KIND_LABEL = { studio: 'Album', live: 'Live', unknown: 'Unknown' }
   function _ingestReasonLabel(code) {
     if (!code) return null
     if (code.startsWith('conflict:')) {
@@ -9692,7 +9681,7 @@ const App = (() => {
     ] : [
       ['Artist', d.artist], ['Date', d.date], ['Venue', d.venue],
       ['Location', d.location], ['Source', d.source], ['Lineage', d.lineage],
-      ['Format', row.format], ['Type', row.kind ? 'Live' : null],
+      ['Format', row.format], ['Type', _KIND_LABEL[row.kind] || null],
       ['Tracks', d.tracksText],
     ]
     const listingRow = d.trackListing ? `
@@ -9771,7 +9760,7 @@ const App = (() => {
           </div>
         </div>
         <span class="iq-col-format">${!skipped && row.format ? esc(row.format) : ''}</span>
-        <span class="iq-col-type">${!skipped && row.kind ? (row.kind === 'studio' ? 'Album' : 'Live') : ''}</span>
+        <span class="iq-col-type">${!skipped && row.kind ? (_KIND_LABEL[row.kind] || '') : ''}</span>
         ${opts.soundQuality ? `<span class="lq-brow-band">${skipped ? '' : _iqBandPill(row.sound_band)}</span>` : ''}
         <span class="lq-brow-meta">${skipped ? '' : _iqBandPill(row.meta_band)}</span>
         <span class="iq-col-status">${_iqStatusCell(row)}</span>
@@ -14827,7 +14816,7 @@ const App = (() => {
   }
 
   function _biKindLabel(it) {
-    return it.kind === 'studio' ? 'Album' : (it.kind === 'live' ? 'Live' : '')
+    return _KIND_LABEL[it.kind] || ''
   }
 
   // Normalizes one GET .../items row into the shared ingest-queue-table row
@@ -14847,6 +14836,9 @@ const App = (() => {
     // of them, so a row needing both an artist and a day shows both, not
     // just the first.
     const reviewIssues = needsReview ? _ingestReasonLabels(it.reason) : []
+    // An incomplete Album carries "1 of 91 tracks" in detail.
+    const _incIdx = reviewIssues.indexOf(_INGEST_REASON_LABEL.incomplete_release)
+    if (_incIdx >= 0 && it.detail) reviewIssues[_incIdx] += `, ${it.detail}`
     if (needsReview && !reviewIssues.length) reviewIssues.push('Needs review')
     const reviewLabel = reviewIssues[0] || null
     // Same fragment-map style as before ("Skipped already in your library"),
@@ -16687,15 +16679,13 @@ const App = (() => {
 
   // ── Downloads page: #/downloads ────────────────────────────────────────────
 
-  // Fingerprint verdict from the server, one per working-folder row: valid,
-  // invalid, unchecked (MD5 only, never run automatically) or absent. Same glyph
-  // and tip box as the checksum verdicts elsewhere. A row still downloading shows
-  // none.
+  // Fingerprint verdict from the server, one per working-folder row. Two
+  // states only (Ryan, 2026-10-13): green when the checksums pass, red when any
+  // fails. No checksums, or only an MD5 list (never run automatically), shows
+  // no icon at all. A row still downloading shows none.
   const _DL_FP = {
     valid:      ['ok',   'Checksums verified'],
     invalid:    ['bad',  'Checksums failed'],
-    unchecked:  ['dim',  'Not checked'],
-    absent:     ['dim',  'No checksums'],
   }
   function _dlChecksumHtml(f) {
     const v = _DL_FP[f.fingerprints]

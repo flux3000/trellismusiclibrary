@@ -335,6 +335,8 @@ PHASES = {
 #                still at "never looked up" (mb_release_status IS NULL).
 #                Never enqueued for a live recording.
 #   "images"     artwork scan for a recording never scanned for it.
+#   "completeness" is this Album part of a longer release (tags, then
+#                MusicBrainz)? Studio only, after its release lookup.
 #
 # Two lanes, one worker thread each: "audio" (CPU/disk-bound decode) and
 # "net" (MusicBrainz + artwork). They are independent, so a slow decode never
@@ -413,7 +415,7 @@ _ANALYSIS_STATE = {
     "failed":  0,
 }
 _QUEUED_KEYS = set()
-_PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+_PENDING_BY_KIND = {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0}
 
 # Kinds an older build queued. Folded into "audio" so nothing crashes on them.
 _LEGACY_AUDIO_KINDS = ("analysis", "score", "signals")
@@ -641,6 +643,9 @@ def _handle_mb_release(recording_id):
         return
     _mb.try_match_release(rec)
     db.session.commit()
+    # Completeness waits for the release lookup; queue it now it has run.
+    if rec.kind == "studio" and rec.completeness_checked_at is None:
+        _enqueue(current_app._get_current_object(), "completeness", rec.id)
 
 
 def _handle_images(recording_id):
@@ -678,7 +683,20 @@ def _handle_images(recording_id):
     db.session.commit()
 
 
+def _handle_completeness(recording_id):
+    """Album completeness for one studio recording not yet checked. NULL is
+    left in place when MusicBrainz could not be asked, so it is retried."""
+    from app.models.recording import Recording
+    from app.utils.album_completeness import check_album
+    rec = db.session.get(Recording, recording_id)
+    if not rec or rec.completeness_checked_at is not None:
+        return
+    check_album(rec)
+    db.session.commit()
+
+
 _HANDLERS = {
+    "completeness": _handle_completeness,
     "audio":      _handle_audio,
     "mb_artist":  _handle_mb_artist,
     "mb_release": _handle_mb_release,
@@ -796,6 +814,15 @@ def enqueue_followups():
     mb_release_n = sum(1 for rid in release_ids
                        if _enqueue(app, "mb_release", rid, run_of_rec.get(rid)))
 
+    # After the release lookup, so a release it links is the one compared.
+    completeness_ids = [rid for (rid,) in (
+        db.session.query(Recording.id)
+        .filter(Recording.kind == "studio", Recording.mb_release_status.isnot(None),
+                Recording.completeness_checked_at.is_(None))
+        .order_by(Recording.id).all())]
+    completeness_n = sum(1 for rid in completeness_ids
+                         if _enqueue(app, "completeness", rid, run_of_rec.get(rid)))
+
     image_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
         .outerjoin(RecordingImage, RecordingImage.recording_id == Recording.id)
@@ -805,7 +832,7 @@ def enqueue_followups():
                    if _enqueue(app, "images", rid, run_of_rec.get(rid)))
 
     return {"audio": audio_n, "mb_artist": mb_n, "mb_release": mb_release_n,
-            "images": images_n}
+            "images": images_n, "completeness": completeness_n}
 
 
 def analysis_snapshot():
@@ -1112,8 +1139,35 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                 "resolved": resolved, "result": None,
                 "duplicate_of": dup.recording_id if dup else None}
 
-    if status == "review" and not (force and "needs_artist" not in reasons):
-        return {"status": "review", "reasons": reasons, "format": fmt, "detail": None,
+    # Albums only: is this folder an incomplete part of a longer official
+    # release (a Various Artists box set split up by artist)? A MusicBrainz
+    # call, so it runs here and not in the resolver, which stays offline.
+    # Under "Ingest anyway" (force) it still runs, so the Album is imported
+    # marked incomplete, but it no longer holds the row back.
+    # The folder's own tags are checked first (TRACKTOTAL against the files
+    # present, offline); MusicBrainz is only asked when they say nothing.
+    detail = None
+    if resolved.kind == "studio":
+        from app.utils.resolve import tag_track_shortfall
+        short = tag_track_shortfall(scan)
+        if short:
+            detail = f"{short['have']} of {short['expected']} {short['unit']}"
+        else:
+            from app.utils.musicbrainz import find_incomplete_release
+            found = find_incomplete_release(resolved.artist.value, resolved.album.value,
+                                            [t.get("title") for t in resolved.tracks or []])
+            if found:
+                detail = f"{found['folder_tracks']} of {found['release_tracks']} tracks"
+        if detail:
+            reasons = reasons + ["incomplete_release"]
+            if not force:
+                status = "review"
+            resolved.status, resolved.reasons = status, reasons
+
+    # "Ingest anyway" still refuses a folder with no artist or no type.
+    if status == "review" and not (force and "needs_artist" not in reasons
+                                   and "needs_type" not in reasons):
+        return {"status": "review", "reasons": reasons, "format": fmt, "detail": detail,
                 "resolved": resolved, "result": None, "duplicate_of": None}
 
     if hold:
@@ -1124,6 +1178,12 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     # No person confirmed these values, so nothing is learned from the save (aliases,
     # queue re-check). "Ingest anyway" is a person's decision to take them as read.
     payload["unattended"] = not force
+    if resolved.kind == "studio":
+        # The Queue already ran the completeness check; "Ingest anyway" on an
+        # incomplete Album imports it marked incomplete.
+        payload["completeness_checked"] = True
+        if "incomplete_release" in reasons:
+            payload["is_complete"] = False
     apply_blanket_values(resolved, payload, applied)
     payload["resolver_result"] = resolved.to_dict()
     result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
@@ -1695,6 +1755,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     # etree_shnid was already validated/coerced to int-or-None at the top of
     # this function -- reads straight through here. rec_kind was resolved
     # and validated earlier (step 4 needs it too).
+    from app.utils.published import is_published_location
     rec = Recording(
         performance_id       = performance.id,
         source               = data.get("source"),
@@ -1711,6 +1772,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         title                = data.get("title") or None,
         kind                 = rec_kind,
         resolver_json        = resolver_json_for_storage(data.get("resolver_result")),
+        # Catalogued where it sits inside Backlog/Workshop: not on the shelf.
+        is_published         = is_published_location(new_folder_path),
+        completeness_checked_at = (datetime.now(timezone.utc)
+                                   if data.get("completeness_checked") else None),
     )
     db.session.add(rec)
     db.session.flush()

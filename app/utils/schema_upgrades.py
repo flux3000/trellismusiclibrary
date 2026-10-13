@@ -249,6 +249,28 @@ def ensure_bulk_run_cleared_at(engine):
         raise RuntimeError(msg) from e
 
 
+def ensure_recording_completeness_checked_at(engine):
+    """Add recording.completeness_checked_at when missing (2026-10-13). Returns
+    True when added, None when nothing was needed."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(recording)"))}
+            if not cols or "completeness_checked_at" in cols:
+                return None
+            con.execute(text("ALTER TABLE recording ADD COLUMN completeness_checked_at DATETIME"))
+        log.warning("schema: added recording.completeness_checked_at in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not add the recording.completeness_checked_at column to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
 def ensure_invite_code(engine):
     """Add peer_invite.code when the column is missing. Returns True when added,
     None when nothing was needed.

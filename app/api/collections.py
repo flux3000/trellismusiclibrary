@@ -10,6 +10,7 @@ from app.extensions import db
 from app.models.collection import Collection, CollectionRecording
 from app.models.recording import Recording
 from app.utils.serialize import recording_row
+from app.utils.published import on_shelf
 
 bp = Blueprint("collections", __name__)
 
@@ -35,11 +36,18 @@ def _reject_system(c, what):
 @login_required
 def list_collections():
     cols = db.session.query(Collection).order_by(Collection.name).all()
+    # Published members only (moved-out recordings are off every list).
+    # System collections already resolve to published recordings.
+    shelf_counts = dict(
+        db.session.query(CollectionRecording.collection_id, db.func.count(Recording.id))
+        .join(Recording, Recording.id == CollectionRecording.recording_id)
+        .filter(Recording.is_published.is_(True))
+        .group_by(CollectionRecording.collection_id).all())
     # recording_count comes from the model, which resolves dynamic membership.
     # `len(c.recording_links)` would report 0 for every system collection.
     return jsonify([
         {"id": c.id, "name": c.name, "description": c.description,
-         "recording_count": c.recording_count,
+         "recording_count": c.recording_count if c.is_system else shelf_counts.get(c.id, 0),
          "is_system": c.is_system, "system_key": c.system_key}
         for c in cols
     ])
@@ -61,7 +69,7 @@ def get_collection(collection_id):
     # NOT cheap. The frontend should route a system collection to Browse rather
     # than render it as a collection page; this endpoint stays honest rather
     # than lying about its contents, but it is not a page to link casually.
-    rows = [recording_row(r, card=True) for r in c.recordings]
+    rows = [recording_row(r, card=True) for r in on_shelf(c.recordings)]
     rows.sort(key=lambda r: ((r["artist"] or "").lower(),
                              r["start_year"] or 0, r["start_month"] or 0, r["start_day"] or 0))
     return jsonify({"id": c.id, "name": c.name, "description": c.description,

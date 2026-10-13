@@ -41,7 +41,7 @@ def _good(root, name, day=8):
 
 
 def _flagged(root, name):
-    _flac(root / name / "01.flac", ARTIST="Phish")        # needs_date
+    _flac(root / name / "01.flac", ARTIST="Phish", DATE="1997")   # needs_month (year only)
 
 
 def _never_stop():
@@ -143,7 +143,7 @@ def test_hold_run_leaves_items_ready_scored_and_library_empty(env):
     assert run.status == "done"
     ready, flagged = _item(run, "S1"), _item(run, "F1")
     assert ready.status == "ready" and ready.kind == "live"
-    assert flagged.status == "review" and "needs_date" in flagged.reason
+    assert flagged.status == "review" and "needs_month" in flagged.reason
     assert _db.session.query(Recording).count() == before
     assert (env.incoming / "S1").is_dir()                       # nothing moved
     row = _db.session.query(QualityAnalysis).filter(

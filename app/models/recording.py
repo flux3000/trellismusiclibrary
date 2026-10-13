@@ -141,6 +141,12 @@ class Recording(db.Model):
     # a live recording can carry taper art too.
     images_checked_at = db.Column(db.DateTime, nullable=True)
 
+    # Album completeness follow-up (Ryan, 2026-10-13). NULL until the
+    # "completeness" follow-up (or the Queue's own check at import) has
+    # compared the folder against its tags and MusicBrainz. The result lands
+    # in is_complete, which this check only ever sets False.
+    completeness_checked_at = db.Column(db.DateTime, nullable=True)
+
     # Latest AI Assist research result (JSON blob: thinking, proposals,
     # track_titles, verify_items, provenance_notes, sources). Overwritten on
     # each re-run — no history kept. Persisted so a research pass isn't lost

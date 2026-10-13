@@ -1084,12 +1084,35 @@ def _resolve_folder_only_field(scan, key):
     return Field(value=v, source="folder", candidates={"folder": v}, conflict=False)
 
 
+def _folder_album_title(scan):
+    """The "Album" half of an "Artist - Album" folder name, or None."""
+    name = (scan.get("folder_name") or "").strip()
+    if " - " not in name:
+        return None
+    return name.split(" - ", 1)[1].strip() or None
+
+
+def _album_key(s):
+    return " ".join(_re.sub(r"[^\w]+", " ", (s or "").casefold()).split())
+
+
 def _resolve_album_field(scan):
     from_tags = scan["suggestions"]["from_tags"]
-    v = _consistent_tag(from_tags.get("tracks", []), "album")
-    if not v:
-        return Field()
-    return Field(value=v, source="tags", candidates={"tags": v}, conflict=False)
+    tracks = from_tags.get("tracks", [])
+    v = _consistent_tag(tracks, "album")
+    if v:
+        return Field(value=v, source="tags", candidates={"tags": v}, conflict=False)
+    # The tags disagree (Ryan, 2026-10-13): an "Artist - Album" folder name
+    # whose title is one of the tag values settles it, flagged as a conflict
+    # so the row still waits for a person.
+    folder_title = _folder_album_title(scan)
+    tag_values = [t for t in (_tag_container_values(tracks, "album") or []) if t]
+    if folder_title and any(_album_key(t) == _album_key(folder_title) for t in tag_values):
+        others = sorted({t for t in tag_values if _album_key(t) != _album_key(folder_title)})
+        return Field(value=folder_title, source="folder",
+                     candidates={"folder": folder_title, "tags": ", ".join(others)},
+                     conflict=bool(others))
+    return Field()
 
 
 # ── kind (classify_kind moved here unchanged, spec 3.1) ─────────────────────
@@ -1105,15 +1128,27 @@ def _any_source_has_month(scan):
     return False
 
 
-def classify_kind(scan, album, venue):
+_NO_DATE_ARG = object()
+
+
+def classify_kind(scan, album, venue, date=_NO_DATE_ARG):
     """
-    "studio" when ALBUM is identical across every readable file, no source
-    (tag, info file, or folder name) states a month anywhere, and no venue
-    was found; else "live". Moved here unchanged from app/utils/bulk_ingest.py
-    (spec section 3.1) -- same signature, same behaviour.
+    "studio" when there is an album (ALBUM identical across every readable
+    file, or settled by the folder name), no source (tag, info file, or folder
+    name) states a month anywhere, and no venue was found. Otherwise "live"
+    when any date was read, else "unknown" (Ryan, 2026-10-13): a folder with
+    neither waits for a person to say what it is.
+
+    `date` is the resolved date value ({"year", ...}); None means no date. A
+    caller that leaves it out gets the old two-way answer (live or studio).
     """
     no_month_anywhere = (not _any_source_has_month(scan)) if scan else True
-    return "studio" if (album is not None and no_month_anywhere and venue is None) else "live"
+    if album is not None and no_month_anywhere and venue is None:
+        return "studio"
+    if date is _NO_DATE_ARG or (date or {}).get("year"):
+        return "live"
+    return "unknown"
+
 
 
 # ── Tracks (resolve_tracks, spec 3.2) ────────────────────────────────────────
@@ -1280,7 +1315,7 @@ def resolve(scan, *, library_root=None, placement=None):
     venue_f = _resolve_venue_field(scan, shows=shows, atlas=atlas)
     loc = _resolve_location_fields(scan, venue_f, shows=shows, atlas=atlas)
     album_f = _resolve_album_field(scan)
-    kind = classify_kind(scan, album_f.value, venue_f.value)
+    kind = classify_kind(scan, album_f.value, venue_f.value, date_f.value)
     tracks = resolve_tracks(scan)
 
     return Resolved(
@@ -1434,7 +1469,11 @@ def verdict(resolved):
     if not resolved.artist.value:
         reasons.append("needs_artist")
 
-    if resolved.kind != "studio":
+    # Neither an Album nor dated: a person says what it is.
+    if resolved.kind == "unknown":
+        reasons.append("needs_type")
+
+    if resolved.kind == "live":
         date = resolved.date.value or {}
         year, month, day = date.get("year"), date.get("month"), date.get("day")
         if not year:
@@ -1454,7 +1493,7 @@ def verdict(resolved):
     # Year-only and year-and-month dates already have their own reasons above.
     if resolved.artist.value and resolved.artist.confidence == "tentative":
         reasons.append("tentative:artist")
-    if resolved.kind != "studio":
+    if resolved.kind == "live":
         date = resolved.date.value or {}
         if (date.get("year") and date.get("month") and date.get("day")
                 and resolved.date.confidence == "tentative"):
@@ -1468,3 +1507,62 @@ def verdict(resolved):
     if reasons:
         return "review", reasons
     return "ingested", reasons
+
+
+# ── Track total from tags (Ryan, 2026-10-13) ─────────────────────────────────
+
+def _tag_int(v, part=0):
+    """'24' -> 24, '1/24' part 1 -> 24; None when absent or not a number."""
+    if isinstance(v, list):
+        v = v[0] if v else None
+    if v is None:
+        return None
+    bits = str(v).split("/")
+    try:
+        return int(bits[part].strip()) if len(bits) > part else None
+    except ValueError:
+        return None
+
+
+def tag_track_shortfall(scan):
+    """
+    The folder holds fewer tracks than its own tags say the release has, or
+    None. Offline: the first check for an incomplete Album, before MusicBrainz.
+
+    TRACKTOTAL (or TOTALTRACKS, or the "/24" in TRACKNUMBER) is per disc, so
+    files are grouped by disc: the DISCNUMBER tag, else the disc the scan read
+    from a folder or filename. A DISCTOTAL above the discs present also counts.
+    Only a shortfall flags: more files than the total is usually an untagged
+    multi-disc set, not a missing track.
+
+    Returns {"have", "expected", "unit"} with unit "tracks" or "discs".
+    """
+    from_tags = (scan.get("suggestions") or {}).get("from_tags") or {}
+    disc_of = {(af.get("rel_path") or af.get("filename")): af.get("disc_number")
+               for af in scan.get("audio_files") or []}
+    discs, disc_total = {}, None
+    for t in from_tags.get("tracks") or []:
+        raw = t.get("raw")
+        if not raw:
+            continue
+        rel = t.get("rel_path") or t.get("filename")
+        disc = (_tag_int(raw.get("discnumber")) or disc_of.get(rel) or 1)
+        total = (_tag_int(raw.get("tracktotal")) or _tag_int(raw.get("totaltracks"))
+                 or _tag_int(raw.get("tracknumber"), 1))
+        dt = (_tag_int(raw.get("disctotal")) or _tag_int(raw.get("totaldiscs"))
+              or _tag_int(raw.get("discnumber"), 1))
+        if dt:
+            disc_total = max(disc_total or 0, dt)
+        have, best = discs.get(disc, (0, None))
+        discs[disc] = (have + 1, max(best or 0, total or 0) or None)
+    if not discs:
+        return None
+    if disc_total and disc_total > len(discs):
+        return {"have": len(discs), "expected": disc_total, "unit": "discs"}
+    have = sum(n for n, _ in discs.values())
+    if any(total is None for _, total in discs.values()):
+        return None                     # a disc with no total: nothing to compare
+    expected = sum(total for _, total in discs.values())
+    if expected > have:
+        return {"have": have, "expected": expected, "unit": "tracks"}
+    return None

@@ -23,6 +23,7 @@ from app.models.artist import Artist
 from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.serialize import recording_summary
+from app.utils.published import on_shelf
 
 bp = Blueprint("genres", __name__)
 
@@ -45,7 +46,7 @@ def list_genres():
         db.session.query(Artist.genre_id, func.count(Recording.id))
         .join(Performance, Performance.artist_id == Artist.id)
         .join(Recording, Recording.performance_id == Performance.id)
-        .filter(Artist.genre_id.isnot(None))
+        .filter(Artist.genre_id.isnot(None), Recording.is_published.is_(True))
         .group_by(Artist.genre_id).all()
     )
     # ?index=1: the run of artist faces on the Genres INDEX page.
@@ -122,7 +123,7 @@ def get_genre(genre_id):
         recordings = []
         for perf in performances:
             v = perf.venue
-            for r in perf.recordings:
+            for r in on_shelf(perf.recordings):
                 row = recording_summary(r)
                 row.update({
                     "artist":   p.name,

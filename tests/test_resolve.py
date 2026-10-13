@@ -137,14 +137,16 @@ def test_year_only_needs_month(tmp_path):
     assert reasons == ["needs_month"]
 
 
-def test_no_date_at_all_needs_date(tmp_path):
+def test_no_date_and_no_album_is_unknown_type(tmp_path):
+    # Neither an Album nor dated: "unknown", held for a person (2026-10-13).
     show = tmp_path / "show"
     _flac_with_tags(show / "01.flac", ARTIST="Test Band")
     scan = build_scan_payload(str(show))
     resolved = resolve(scan)
     status, reasons = verdict(resolved)
+    assert resolved.kind == "unknown"
     assert status == "review"
-    assert "needs_date" in reasons
+    assert reasons == ["needs_type"]
 
 
 def test_no_artist_needs_artist(tmp_path):

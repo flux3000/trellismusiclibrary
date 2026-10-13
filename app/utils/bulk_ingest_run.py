@@ -695,6 +695,8 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.status = "review"
             item.reason = reason_str
             item.kind = resolved.kind if resolved else None
+            if "incomplete_release" in (reasons or []):
+                item.detail = outcome.get("detail")      # "1 of 91 tracks"
             _write_review_staging(folder_abs, library_root, item)
         elif status == "skipped":
             # Exact content duplicate (spec section 9, resolved
@@ -881,6 +883,10 @@ def _reconcile_review_items(run=None):
             item.status = "ingested"
             item.reason = None
             item.recording_id = staging.recording_id
+            # The person chose the type on the form; an "unknown" row takes it.
+            rec = db.session.get(Recording, staging.recording_id)
+            if rec is not None:
+                item.kind = rec.kind
             reconciled += 1
         elif staging.triage_status == "rejected":
             # a review row the reviewer rejected (not accepted) never

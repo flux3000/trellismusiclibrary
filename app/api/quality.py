@@ -703,6 +703,11 @@ def _attach_concerns(results):
             elif reason == "needs_day":
                 concerns.append({"level": "warn", "kind": "needs_day",
                                  "text": "Year and month known, day missing"})
+            elif reason == "needs_type":
+                concerns.append({"level": "warn", "kind": "needs_type", "text": "Type unknown"})
+            elif reason == "incomplete_release":
+                concerns.append({"level": "warn", "kind": "incomplete_release",
+                                 "text": "Incomplete release"})
             elif reason.startswith("conflict:"):
                 field_name = reason.split(":", 1)[1].replace("_", " ")
                 concerns.append({"level": "warn", "kind": "conflict",

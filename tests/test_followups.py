@@ -109,7 +109,7 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
     # All four live recordings (rec_scored, rec_a, rec_b, the seeded one) have
     # no track with a non_music_score yet, so each is owed an audio pass even
     # though rec_scored already has a score; "images": none was scanned.
-    assert counts == {"audio": 4, "mb_artist": 1, "mb_release": 0, "images": 4}
+    assert counts == {"audio": 4, "mb_artist": 1, "mb_release": 0, "images": 4, "completeness": 0}
 
     all_recs = [rec_scored, rec_a, rec_b]
     expected = ({("audio", r.id) for r in all_recs} | {("audio", seeded_ids["recording_id"])}
@@ -120,7 +120,7 @@ def test_enqueue_followups_counts_dedup_and_drain(app, monkeypatch, seeded_ids):
 
     # A second call: everything above is still waiting, nothing new.
     again = ingest_api.enqueue_followups()
-    assert again == {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0}
+    assert again == {"audio": 0, "mb_artist": 0, "mb_release": 0, "images": 0, "completeness": 0}
     assert _lane_sizes() == {"audio": 4, "net": 5}
 
     # Stub the scorer chain and the librosa pass so no real audio is needed.

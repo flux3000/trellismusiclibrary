@@ -121,6 +121,7 @@ def build_search_index():
         .outerjoin(Artist, Artist.id == Performance.artist_id)
         .outerjoin(Venue, Venue.id == Performance.venue_id)
         .outerjoin(RecordingQuality, RecordingQuality.recording_id == Recording.id)
+        .filter(Recording.is_published.is_(True))
         .all()
     )
 

@@ -18,6 +18,7 @@ from app.models.venue_image import VenueImage
 from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.serialize import recording_row
+from app.utils.published import on_shelf
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
 from app.api.system import require_library
@@ -56,7 +57,7 @@ def list_venues():
     rec_counts = dict(
         db.session.query(Performance.venue_id, func.count(Recording.id))
         .join(Recording, Recording.performance_id == Performance.id)
-        .filter(Performance.venue_id.isnot(None))
+        .filter(Performance.venue_id.isnot(None), Recording.is_published.is_(True))
         .group_by(Performance.venue_id).all()
     )
     # Primary first, oldest as the fallback — matches primary_for()'s ordering,
@@ -105,7 +106,7 @@ def get_venue(venue_id):
 
     # One row per Recording at this venue (two tapers of one show = two rows),
     # chronological old→new. Recordings within a performance keep their own order.
-    recordings = [recording_row(r) for p in perfs for r in p.recordings]
+    recordings = [recording_row(r) for p in perfs for r in on_shelf(p.recordings)]
 
     return jsonify({
         "id":                v.id,

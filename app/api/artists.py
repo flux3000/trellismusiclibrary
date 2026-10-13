@@ -22,6 +22,7 @@ from app.extensions import db
 from app.models.artist import Artist, ArtistResource
 from app.models.artist_image import ArtistImage
 from app.utils.entity_images import set_primary
+from app.utils.published import on_shelf
 from app.models.genre import Genre
 from app.models.musician import Musician, Membership
 from app.models.performance import Performance
@@ -101,7 +102,7 @@ def list_artists():
     rows = (
         db.session.query(Artist, func.count(Recording.id).label("rc"))
         .outerjoin(Performance, Performance.artist_id == Artist.id)
-        .outerjoin(Recording,   Recording.performance_id == Performance.id)
+        .outerjoin(Recording,   (Recording.performance_id == Performance.id) & Recording.is_published.is_(True))
         .group_by(Artist.id)
         .order_by(func.coalesce(Artist.sort_name, Artist.name))
         .all()
@@ -192,9 +193,13 @@ def all_recordings():
             (p.start_day   is None, p.start_day   or 0),
         )
 
+    # Recordings moved out to Backlog or Workshop are left off Browse and
+    # Albums (Ryan, 2026-10-13); a performance whose recordings all moved
+    # out goes with them, and so does an artist left with nothing.
     result = []
     for pf in artists:
-        performances = sorted(pf.performances, key=_perf_sort_key)
+        performances = [p for p in sorted(pf.performances, key=_perf_sort_key)
+                        if on_shelf(p.recordings) or not p.recordings]
         if not performances:
             continue
         perf_list = []
@@ -214,7 +219,7 @@ def all_recordings():
                 "city":           v.city    if v else p.city,
                 "state":          v.state   if v else p.state,
                 "country":        v.country if v else p.country,
-                "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id)) for r in p.recordings],
+                "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id)) for r in on_shelf(p.recordings)],
             })
         # Genre rides along per ARTIST, not per recording — the model is one
         # genre per act.
@@ -306,7 +311,10 @@ def get_artist_recordings(artist_id):
     # One image-url query for every recording on this artist, not one per
     # row (S1) -- this route was measured at 500 recording_image queries for
     # 500 image-less recordings.
-    all_recs = [r for perf in performances for r in perf.recordings]
+    # Moved-out recordings are off the page; so is a show left with none.
+    performances = [perf for perf in performances
+                    if on_shelf(perf.recordings) or not perf.recordings]
+    all_recs = [r for perf in performances for r in on_shelf(perf.recordings)]
     rec_image_urls = batch_recording_image_urls([r.id for r in all_recs])
 
     out = []
@@ -328,7 +336,7 @@ def get_artist_recordings(artist_id):
             "state":          v.state   if v else perf.state,
             "country":        v.country if v else perf.country,
             "recordings":     [recording_summary(r, image_url=rec_image_urls.get(r.id))
-                              for r in perf.recordings],
+                              for r in on_shelf(perf.recordings)],
         })
     return jsonify(out)
 

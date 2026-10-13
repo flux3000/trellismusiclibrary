@@ -2171,7 +2171,6 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .rec-perf-name.pp-editable:hover { background: var(--bg-1); }
 /* Studio album title — slightly larger than the live heading; the live
    heading itself is unchanged. */
-.rec-perf-name--album { font-size: 28px; }
 .rec-date-line .rec-f { border-radius: 3px; }
 .rec-date-line .pp-editable { cursor: text; padding: 0 3px; margin: 0 -3px; }
 .rec-date-line .pp-editable:hover { background: var(--bg-1); }
@@ -9259,8 +9258,6 @@ body.archive-on .dlq-tab { box-shadow: inset 0 2px 0 var(--accent); }
 
 .dl-fp--ok   { color: var(--green); }
 .dl-fp--bad  { color: var(--red); }
-.dl-fp--warn { color: var(--amber); }
-.dl-fp--dim  { color: var(--t3); }
 /* Sortable column headers on the working-folder pages (Name, Modified). */
 .arc-hd--sort { background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit;
   display: inline-flex; align-items: center; gap: 3px; }
@@ -9664,7 +9661,6 @@ html.playback-mode .player-time { font-size: 13px; min-width: 36px; }
 
 .rec-view-shell--pb { position: relative; }
 .rec-view-shell--pb .rec-detail-header h2 { font-size: 28px; margin-bottom: 6px; }
-.rec-view-shell--pb .rec-detail-header h2.rec-perf-name--album { font-size: 34px; }
 .rec-view-shell--pb .rec-detail-header .rec-date-line { font-size: 17px; margin-bottom: 8px; }
 .rec-view-shell--pb .rec-hdr-star { font-size: 20px; vertical-align: -3px; }
 .rec-view-shell--pb .rec-header-photo { width: 156px; height: 156px; }

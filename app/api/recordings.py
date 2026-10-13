@@ -130,7 +130,11 @@ def recent_recordings():
     # Reverse chronological by ingest time — most recently added first. This is
     # the module's whole premise, so it is the query's order, not something the
     # client re-sorts.
-    recs = query.order_by(Recording.created_at.desc()).offset(offset).limit(limit).all()
+    # A recording moved out to Backlog or Workshop keeps its row but is not
+    # on the shelf (Ryan, 2026-10-13): it leaves Recently Added, Browse,
+    # Albums and the Top Shelf.
+    recs = (query.filter(Recording.is_published.is_(True))
+            .order_by(Recording.created_at.desc()).offset(offset).limit(limit).all())
     return jsonify([recording_row(r, waveform=waveform, card=card) for r in recs])
 
 
@@ -144,7 +148,8 @@ def recent_recordings():
 def _recommended_pool_query():
     return (
         Recording.query
-        .filter(Recording.quality.in_(("A", "A+")), Recording.kind == "live")
+        .filter(Recording.quality.in_(("A", "A+")), Recording.kind == "live",
+                Recording.is_published.is_(True))
         .options(
             selectinload(Recording.tracks).selectinload(Track.analysis),
             selectinload(Recording.performance),
@@ -346,6 +351,7 @@ def on_this_day():
 def kind_counts():
     rows = (
         db.session.query(Recording.kind, db.func.count(Recording.id))
+        .filter(Recording.is_published.is_(True))
         .group_by(Recording.kind)
         .all()
     )
@@ -553,7 +559,7 @@ def favorite_recordings():
     sort_key = db.func.coalesce(Artist.sort_name, Artist.name)
     recs = _card_eager(
         Recording.query
-        .filter(Recording.is_favorite.is_(True))
+        .filter(Recording.is_favorite.is_(True), Recording.is_published.is_(True))
         .join(Performance, Recording.performance_id == Performance.id)
         .outerjoin(Artist, Performance.artist_id == Artist.id)
         .order_by(sort_key.asc(),
@@ -732,7 +738,10 @@ def release_candidates(recording_id):
     artist_name = rec.performance.artist.name if rec.performance and rec.performance.artist else None
     musicbrainz.reset_breaker()
     candidates = musicbrainz.search_release(artist_name, rec.title)
-    _status, _best, ranked = musicbrainz.classify_release(candidates, len(rec.tracks or []))
+    # A person is choosing: every same-titled release is shown, whatever its
+    # track count. The count filter is for the automatic match only; here it
+    # hid the full release of an incomplete Album (Solo Banjo Works, 2 of 24).
+    _status, _best, ranked = musicbrainz.classify_release(candidates, None)
     return jsonify({"candidates": ranked})
 
 
@@ -759,6 +768,10 @@ def release_link(recording_id):
     details = musicbrainz.link_release(rec, mbid)
     if not details:
         return jsonify({"error": "Could not fetch that MusicBrainz release"}), 502
+    # A linked release longer than the folder marks the Album incomplete.
+    if len(details.get("tracks") or []) > len(rec.tracks or []):
+        rec.is_complete = False
+    rec.completeness_checked_at = datetime.now(timezone.utc)
     db.session.commit()
     return jsonify({"status": "linked", "mb_release_id": rec.mb_release_id,
                     "mb_release_group_id": rec.mb_release_group_id,

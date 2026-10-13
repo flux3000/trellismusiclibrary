@@ -70,7 +70,8 @@ def _perf_stats(rec_ids):
     from app.models.recording import Recording
 
     counts = {}
-    for rid, pid in db.session.query(Recording.id, Recording.performance_id):
+    for rid, pid in db.session.query(Recording.id, Recording.performance_id).filter(
+            Recording.is_published.is_(True)):
         if pid is None:
             continue
         if rec_ids is not None and rid not in rec_ids:
@@ -220,7 +221,7 @@ def event_extras():
     from app.models.recording import Recording
     per_perf = {}
     for pid, in db.session.query(Recording.performance_id).filter(
-            Recording.performance_id.isnot(None)):
+            Recording.performance_id.isnot(None), Recording.is_published.is_(True)):
         per_perf[pid] = per_perf.get(pid, 0) + 1
 
     by_event = {}

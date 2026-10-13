@@ -61,6 +61,14 @@ def main():
     if not Config.SERVER_MODE:
         from app.utils.download_queue import resume_on_boot as _resume_downloads
         _resume_downloads(app)
+    # Recordings in Downloads/Backlog/Workshop are unpublished (2026-10-13).
+    try:
+        from app.utils.published import unpublish_working_folder_recordings
+        with app.app_context():
+            unpublish_working_folder_recordings()
+    except Exception:                                        # noqa: BLE001
+        import traceback
+        traceback.print_exc()
     _serve(app)
 
 

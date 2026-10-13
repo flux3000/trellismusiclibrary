@@ -214,6 +214,19 @@ def _maybe_start_bulk_ingest_from_marker():
         bulk_ingest_run.start_run(app.config["LIBRARY_ROOT"], "hold")
 
 
+def _unpublish_working_folders():
+    """Recordings sitting in Downloads/Backlog/Workshop are unpublished. Run
+    once config is final (boot) and after a working folder changes. Never
+    blocks start-up."""
+    try:
+        from app.utils.published import unpublish_working_folder_recordings
+        with app.app_context():
+            unpublish_working_folder_recordings()
+    except Exception:                                        # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+
+
 def _apply_marker(data):
     """Patch config from either marker shape. See _read_trellis_root_marker."""
     if data.get("mode") == "imported":
@@ -781,6 +794,7 @@ class FluxAPI:
             _apply_marker(data)
         except Exception as e:
             return {"ok": False, "error": str(e)}
+        _unpublish_working_folders()
         return {"ok": True, "path": str(path)}
 
     def _apply_file_handling_choice(self, file_handling_mode, placement):
@@ -928,6 +942,7 @@ if __name__ == "__main__":
     # download left active at quit back in the queue and restart the worker.
     from app.utils.download_queue import resume_on_boot as _resume_downloads
     _resume_downloads(app)
+    _unpublish_working_folders()
 
     # Flask runs in a daemon thread — dies when the window closes
     flask_thread = threading.Thread(target=start_flask, daemon=True)

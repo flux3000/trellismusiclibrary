@@ -74,9 +74,11 @@ def create_app(config_class=Config):
         from app.utils.schema_upgrades import (ensure_artist_confirmed_at, ensure_bulk_meta_band, ensure_lomax,
                                               ensure_venue_history, ensure_event_history, ensure_full_library_grants,
                                               ensure_invite_code, ensure_bulk_run_cleared_at,
+                                              ensure_recording_completeness_checked_at,
                                               ensure_lomax_easter_eggs, ensure_genre_colors)
         ensure_artist_confirmed_at(db.engine)
         ensure_bulk_run_cleared_at(db.engine)
+        ensure_recording_completeness_checked_at(db.engine)
         ensure_venue_history(db.engine)
         ensure_event_history(db.engine)
         ensure_lomax(db.engine)

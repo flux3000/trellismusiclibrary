@@ -1016,6 +1016,106 @@ def try_match_release(rec):
         return "error"
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# Incomplete release check (Ryan, 2026-10-13)
+#
+# A queued Album folder can hold part of an official release: a Various
+# Artists box set split up by artist, so one folder carries a single Herbie
+# Mann track. try_match_release() cannot see this -- it searches by the
+# folder's artist and drops any release whose track count differs from ours
+# -- so this is its own question, asked at queue time from auto_confirm().
+#
+# A folder is flagged only when a release with the SAME title (folded) holds
+# every one of our track titles, credits our artist on the release or on
+# those tracks, and EVERY edition of its release group is longer than our
+# folder. The last rule keeps a standard edition from reading as an
+# incomplete deluxe one. Offline, tripped, or any doubt: no flag.
+# ─────────────────────────────────────────────────────────────────────────
+
+_INCOMPLETE_MAX_GROUPS = 2      # release-group lookups per folder (1 call/sec)
+
+
+def _norm_title(s):
+    """Fold accents/case, drop a trailing (...) or [...] and all punctuation."""
+    s = _fold(s or "")
+    s = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]\s*$", "", s)
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", s).split())
+
+
+def find_incomplete_release(artist_name, album_title, track_titles):
+    """
+    The release this folder is an incomplete part of, or None.
+
+    Returns {"mbid", "title", "artist_credit", "release_tracks", "folder_tracks"}.
+    Never raises. Off under TESTING and when the breaker has tripped, like
+    every other MusicBrainz call.
+    """
+    if not enabled() or tripped():
+        return None
+    want_album = _norm_title(album_title)
+    # "Bela Fleck and Tony Trischka" is credited "Béla Fleck, Tony Trischka":
+    # any one of our names credited is enough.
+    want_artists = [_fold(n).strip() for n in (_split_artist_names(artist_name)
+                                               or [artist_name or ""]) if n.strip()]
+    ours = [_norm_title(t) for t in track_titles or []]
+    if (not want_album or not want_artists or not ours
+            or any(not t or _PLACEHOLDER_TITLE.match(t or "") for t in track_titles)):
+        return None                       # a "Track N" folder cannot be checked by title
+    try:
+        q = 'release:"%s"' % album_title.strip().replace("\\", "\\\\").replace('"', '\\"')
+        data = _get("release/", {"query": q, "limit": 25, "inc": "release-groups"})
+        cands = [_summarise_release(r) for r in (data or {}).get("releases", [])]
+        cands = [c for c in cands if _norm_title(c.get("title")) == want_album]
+
+        groups = {}
+        for c in cands:
+            groups.setdefault(c.get("release_group_id") or c.get("mbid"), []).append(c)
+
+        looked = 0
+        for editions in groups.values():
+            counts = [c.get("track_count") for c in editions]
+            if any(n is None or n <= len(ours) for n in counts):
+                continue                  # some edition is no longer than our folder
+            if looked >= _INCOMPLETE_MAX_GROUPS:
+                break
+            looked += 1
+            shortest = min(editions, key=lambda c: c["track_count"])
+            rel = _get("release/%s" % shortest["mbid"],
+                       {"inc": "recordings+artist-credits+media"})
+            if not rel:
+                continue
+            credit = " ".join(_fold(ac.get("name") or "") for ac in rel.get("artist-credit") or []
+                              if isinstance(ac, dict))
+            by_title = {}
+            for m in rel.get("media") or []:
+                for t in m.get("tracks") or []:
+                    title = t.get("title") or (t.get("recording") or {}).get("title")
+                    names = " ".join(_fold(ac.get("name") or "")
+                                     for ac in t.get("artist-credit") or [] if isinstance(ac, dict))
+                    by_title.setdefault(_norm_title(title), []).append(names)
+            if not all(t in by_title for t in ours):
+                continue
+            if not any(a in credit or any(a in names for t in ours for names in by_title[t])
+                       for a in want_artists):
+                continue
+            total = sum(len(m.get("tracks") or []) for m in rel.get("media") or [])
+            if total <= len(ours):
+                continue
+            return {
+                "mbid":          rel.get("id"),
+                "title":         rel.get("title"),
+                "artist_credit": "".join((ac.get("name") or "") + (ac.get("joinphrase") or "")
+                                         for ac in rel.get("artist-credit") or []
+                                         if isinstance(ac, dict)) or None,
+                "release_tracks": total,
+                "folder_tracks":  len(ours),
+            }
+        return None
+    except Exception as e:                                   # noqa: BLE001
+        log.warning("incomplete release check failed for %r: %s", album_title, e)
+        return None
+
+
 def link_release(rec, mbid):
     """
     The human path: a person picked a candidate from the picker (S5). Looks
