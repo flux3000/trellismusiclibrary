@@ -5079,7 +5079,8 @@ const App = (() => {
       // artist that is emphatically what you came for; Overview led with
       // Members and a Description that is empty on most acts.
       tabs: [
-        { id: 'recordings', label: 'Recordings', count: totalRecordings, active: true,
+        // The tab lists Albums and live recordings, so it counts both.
+        { id: 'recordings', label: 'Recordings', count: totalRecordings + studioCount, active: true,
           // Albums strip above the live list — release order (year
           // ascending, nulls last), only when the act has any. When an act
           // has ONLY albums the live list is skipped entirely rather than
@@ -5096,11 +5097,6 @@ const App = (() => {
             <div class="pp-musicians" id="pp-musicians"></div>
             <div class="pp-stint-editor" id="pp-stint-editor" style="display:none"></div>
 
-            <div class="pp-sec-row">
-              <div class="pp-sec">Abbreviation</div>
-            </div>
-            <div class="pp-editable ${artist.abbreviation ? '' : 'pp-empty'}" id="pp-abbr" title="Click to edit">${artist.abbreviation ? esc(artist.abbreviation) : 'Add an abbreviation…'}</div>
-
             <div class="pp-sec">Biography</div>
             <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="pp-desc" title="Click to edit">${descText ? esc(artist.bio) : 'Add a description\u2026'}</div>
 
@@ -5114,6 +5110,11 @@ const App = (() => {
               <h2 class="pp-block-title">Trusted sources</h2>
               <div class="pp-block-hint">Sites worth trusting for this act specifically: a fan-maintained show database, an archivist's site. We already check the obvious ones, so add what we wouldn't know to look for. These are treated as sources of truth in future research and import jobs.</div>
               <div class="pp-resources" id="pp-resources"></div>
+            </div>
+
+            <div class="pp-abbr-row">
+              <div class="pp-sec">Abbreviation <span class="pp-sec-note">(for etree-style folder naming)</span></div>
+              <div class="pp-editable ${artist.abbreviation ? '' : 'pp-empty'}" id="pp-abbr" title="Click to edit">${artist.abbreviation ? esc(artist.abbreviation) : 'Add an abbreviation…'}</div>
             </div>`, 'pp-lx-col') },
         { id: 'photos',     label: 'Photos', count: photoCount || null,
           html: '<div id="pp-photos"></div>' },
@@ -5926,9 +5927,7 @@ const App = (() => {
         </div>
         ${c.status === 'mismatch' ? `<div class="cksum-detail">expected ${esc(c.expected || '')}</div>` : ''}`
     }).join('')
-    const st5Note = withData.some(t => t.checksum.type === 'st5')
-      ? `<p class="cksum-hint">ST5 verification is best-effort. Treat a mismatch as worth a second look, not a hard failure.</p>` : ''
-    return `${summary}<div class="cksum-rows">${rows}</div>${st5Note}`
+    return `${summary}<div class="cksum-rows">${rows}</div>`
   }
 
   // Add Recording's Checksums pane: the FFP is checked against the source
@@ -10067,7 +10066,7 @@ const App = (() => {
     const aa = cx.aa
     const anyApplied = !!(aa.event.trim() || aa.stage.trim() || aa.artist.trim() || aa.venue.name.trim()
       || aa.city.trim() || aa.state.trim() || aa.country.trim()
-      || aa.source.trim() || aa.source_tag.trim() || aa.lineage.trim() || aa.notes.trim())
+      || aa.source.trim() || aa.source_tag.trim() || aa.lineage.trim() || aa.notes.trim() || aa.clear_discs)
     // Locked exactly like the Add Recording form's own venue picker: an id
     // means an existing Venue row was picked, so City/State/Country are that
     // venue's own stored values and editing them here would do nothing — the
@@ -10177,6 +10176,10 @@ const App = (() => {
                <label>Notes</label>
                <textarea id="lq-apply-notes" ${cx.busy ? 'disabled' : ''}>${esc(aa.notes)}</textarea>
              </div>
+             ${cx.discs ? `<label class="lq-applyall-check">
+               <input type="checkbox" id="lq-apply-clear-discs" ${aa.clear_discs ? 'checked' : ''} ${cx.busy ? 'disabled' : ''}>
+               <span>Clear disc numbers</span>
+             </label>` : ''}
            </div>`}
          </div>`
   }
@@ -10194,6 +10197,10 @@ const App = (() => {
       if (!el) return
       el.addEventListener('input', e => { cx.aa[key] = e.target.value })
       el.addEventListener('blur', () => cx.repaintSoon())
+    })
+    document.getElementById('lq-apply-clear-discs')?.addEventListener('change', e => {
+      cx.aa.clear_discs = e.target.checked
+      cx.repaintSoon()
     })
 
     // Artist — the same wirePickerDropdown() autocomplete the Members/
@@ -10734,6 +10741,7 @@ const App = (() => {
       if (v) out[f.key] = v
     }
     if (out.venue && aa.venue.id) out.venue_id = aa.venue.id
+    if (aa.clear_discs) out.clear_disc_numbers = true
     return out
   }
 
@@ -11172,6 +11180,10 @@ const App = (() => {
       // Resolver-built -- title-cased, flagged, scan-index numbered. The
       // human can still edit this list before it posts.
       ingest.tracks = ingest.scan?.resolved?.tracks || []
+      // Bulk Value Apply's "Clear disc numbers": the form's tracks carry none.
+      if (_biApplied && _biApplied.clear_disc_numbers) {
+        ingest.tracks.forEach(t => { t.disc_number = null; t.disc_track_number = null })
+      }
       if (ingest.tracks.length && ingest.lxReapplyWait) ingest.lxReapplyWait()
     }
 
@@ -15595,7 +15607,9 @@ const App = (() => {
     if (run.mode === 'hold') {
       const ready = (run.counts && run.counts.ready) || 0
       const waiting = ready + ((run.counts && run.counts.review) || 0)
-      html += `<button type="button" class="btn btn-import-ready" id="bi-ingest-all"${ready && idle ? '' : ' disabled'}>Import All Ready</button>`
+      // Also live while folders are still being read: they import as each comes out Ready.
+      const reading = ((run.counts && run.counts.pending) || 0) + ((run.counts && run.counts.in_progress) || 0)
+      html += `<button type="button" class="btn btn-import-ready" id="bi-ingest-all"${(ready || reading) && idle ? '' : ' disabled'}>Import All Ready</button>`
       html += `<button type="button" class="btn btn-ghost" id="bi-import-everything"${waiting && idle ? '' : ' disabled'}>Import All</button>`
     }
     if (_biUnsupportedCount(run) > 0) {
@@ -15800,6 +15814,7 @@ const App = (() => {
   const _biEmptyAa = () => ({
     event: '', stage: '', artist: '', venue: { id: null, name: '' },
     city: '', state: '', country: '', source: '', source_tag: '', lineage: '', notes: '',
+    clear_discs: false,
   })
   let _biAa = _biEmptyAa()
   let _biApplyOpen = false   // the Bulk Value Apply tab is showing in place of the table
@@ -15811,6 +15826,7 @@ const App = (() => {
     if (!a) return aa
     for (const k of ['artist', 'city', 'state', 'country', 'event', 'stage', 'source', 'source_tag', 'lineage', 'notes']) aa[k] = a[k] || ''
     aa.venue = { id: a.venue_id || null, name: a.venue || '' }
+    aa.clear_discs = !!a.clear_disc_numbers
     return aa
   }
 
@@ -15828,22 +15844,26 @@ const App = (() => {
       return
     }
     el.innerHTML = _applyAllHtml({
-      aa: _biAa, tabbed: true, busy: false, applied: _biApplied,
+      aa: _biAa, tabbed: true, busy: false, applied: _biApplied, discs: true,
       typed: _aaTyped(_biAa), state: _biAaState(),
     })
     document.getElementById('lq-applyall-apply')?.addEventListener('click', async () => {
       const typed = _aaTyped(_biAa)
       try { await API.bulkIngest.setApplied(_biPageRunId, typed) }
       catch (e) { Notify.error(e.message); return }
+      const rereads = !!typed.clear_disc_numbers !== !!(_biApplied && _biApplied.clear_disc_numbers)
       _biApplied = typed
       _biPaintApplyAll()
+      if (rereads) await _biAfterAction()   // the server sent the waiting rows back to be read again
     })
     document.getElementById('lq-applyall-clear')?.addEventListener('click', async () => {
       try { await API.bulkIngest.setApplied(_biPageRunId, {}) }
       catch (e) { Notify.error(e.message); return }
+      const rereads = !!(_biApplied && _biApplied.clear_disc_numbers)
       _biAa = _biEmptyAa()
       _biApplied = null
       _biPaintApplyAll()
+      if (rereads) await _biAfterAction()
     })
     _wireApplyAll({
       aa: _biAa, rerender: _biPaintApplyAll,

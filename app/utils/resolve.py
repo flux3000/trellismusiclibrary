@@ -1610,3 +1610,29 @@ def tag_track_shortfall(scan):
     if expected > have:
         return {"have": have, "expected": expected, "unit": "tracks"}
     return None
+
+
+_DISC_TAG_KEYS = ("discnumber", "disctotal", "totaldiscs", "disc", "discc")
+
+
+def clear_disc_numbers(scan):
+    """Bulk Value Apply's "Clear disc numbers" (Ryan, 2026-10-13): forget every
+    disc reading in a scan payload, from tags, file names and subfolders, so
+    the folder reads as one disc. For albums whose DISCNUMBER tags are junk
+    (a compilation split up, "disc 17" on every track)."""
+    if not scan:
+        return scan
+    scan["sets_detected"] = False
+    for af in scan.get("audio_files") or []:
+        af["disc_number"] = None
+        af["disc_track_number"] = None
+    from_tags = (scan.get("suggestions") or {}).get("from_tags") or {}
+    for t in from_tags.get("tracks") or []:
+        raw = t.get("raw")
+        if isinstance(raw, dict):
+            for k in [k for k in raw if k.lower() in _DISC_TAG_KEYS]:
+                raw.pop(k, None)
+        for k in ("disc_number", "disc_track_number"):
+            if k in t:
+                t[k] = None
+    return scan

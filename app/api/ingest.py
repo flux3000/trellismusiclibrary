@@ -1216,6 +1216,9 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                 "detail": detail or "unreadable", "resolved": None, "result": None,
                 "duplicate_of": None}
 
+    if applied and applied.get("clear_disc_numbers"):
+        from app.utils.resolve import clear_disc_numbers
+        clear_disc_numbers(scan)
     resolved = resolve(scan, library_root=library_root, placement=placement)
     apply_blanket_values(resolved, None, applied)
     resolved.duplicates = find_duplicates(resolved, library_root=library_root,

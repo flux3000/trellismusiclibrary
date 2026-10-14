@@ -567,6 +567,26 @@ def process(run, stop_flag):
     _finish_if_drained(run)
 
 
+# Runs where a person pressed Import All Ready while folders were still being
+# read (Ryan, 2026-10-13): each row that comes out Ready is imported too, until
+# the read ends. Process-scoped, like the worker itself.
+_IMPORT_READY_ON_READ = set()
+
+
+def import_ready_on_read(run_id):
+    """Standing Import All Ready for a run whose read is still going."""
+    _IMPORT_READY_ON_READ.add(run_id)
+
+
+def reading(run_id):
+    """True while a run still has folders waiting to be read."""
+    return (db.session.query(BulkIngestItem.id)
+            .filter(BulkIngestItem.run_id == run_id,
+                    BulkIngestItem.status.in_(("pending", "in_progress")),
+                    BulkIngestItem.ingest_requested.is_(False))
+            .first()) is not None
+
+
 def _requested_query(run_id):
     """Ready/review items a person asked to ingest and the worker has not yet
     done."""
@@ -705,6 +725,11 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.status = "ready"
             item.reason = None
             item.kind = resolved.kind if resolved else None
+            if run.id in _IMPORT_READY_ON_READ:
+                # Import All Ready was pressed during this read: import it too.
+                item.ingest_requested = True
+                db.session.commit()
+                return
         elif status == "review":
             item.status = "review"
             item.reason = reason_str
@@ -867,6 +892,7 @@ def _finish_if_drained(run):
                 .first())
     if remaining or _requested_query(run.id).first():
         return
+    _IMPORT_READY_ON_READ.discard(run.id)
     run.status = "done"
     run.finished_at = datetime.now(timezone.utc)
     # A hold run's ready items are NOT outstanding work for the worker: they
@@ -995,6 +1021,28 @@ def _meta_dict(item):
     except ValueError:
         return {}
     return v if isinstance(v, dict) else {}
+
+
+def reread_waiting(run):
+    """Send a run's Ready / Needs Review rows (not already sent to import) back
+    to pending, so the worker reads them again under the run's current Bulk
+    Value Apply values. Rows held for reasons a re-read cannot change stay."""
+    n = 0
+    for it in (db.session.query(BulkIngestItem)
+               .filter(BulkIngestItem.run_id == run.id, BulkIngestItem.status.in_(_QUEUE_WAITING),
+                       BulkIngestItem.ingest_requested.is_(False))):
+        if set((it.reason or "").split(",")) & set(_NOT_RECHECKABLE):
+            continue
+        it.status, it.reason, it.detail = "pending", None, None
+        n += 1
+    if n:
+        if run.status == "done":
+            run.status = "running"
+            run.finished_at = None
+            _SKIP_DISCOVER.add(run.id)
+        db.session.commit()
+        _start_worker()
+    return n
 
 
 def mark_folder_ingested(folder_path, rec):

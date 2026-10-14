@@ -966,3 +966,24 @@ def test_reset_queue_clears_the_imported_rows_from_the_page(app, env):
     assert c.get("/api/bulk-ingest/current").get_json()["counts"]["ingested"] == 1
     assert c.post("/api/bulk-ingest/queue/reset").status_code == 200
     assert c.get("/api/bulk-ingest/current").get_json() == {"run": None}
+
+
+def test_import_all_ready_during_a_read_takes_rows_that_finish_ready(app, env, monkeypatch):
+    """Import All Ready pressed while folders are still being read imports each
+    row that comes out Ready, and leaves Needs Review rows waiting (2026-10-13)."""
+    monkeypatch.setattr(bir, "_start_worker", lambda: None)
+    _good(env.incoming, "S1", day=11)
+    _good(env.incoming, "S22", day=12)
+    _flagged(env.incoming, "F1")
+    run = _run(env.incoming)
+    bir.discover(run)                        # everything pending: the read has not run yet
+    c = app.test_client()
+    _admin(c)
+    out = c.post(f"/api/bulk-ingest/runs/{run.id}/ingest-ready")
+    assert out.status_code == 202 and out.get_json()["queued"] == 0
+    run = _db.session.get(BulkIngestRun, run.id)
+    bir.process(run, _never_stop)
+    assert _item(run, "S1").status == "ingested"
+    assert _item(run, "S22").status == "ingested"
+    assert _item(run, "F1").status == "review"
+    assert run.id not in bir._IMPORT_READY_ON_READ

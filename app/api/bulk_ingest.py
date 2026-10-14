@@ -695,6 +695,13 @@ def ingest_ready(run_id):
         if err:
             return err
         _request_ingest(run, ready)
+    # Folders still being read join as each comes out Ready (2026-10-13).
+    if bulk_ingest_run.reading(run.id):
+        bulk_ingest_run.import_ready_on_read(run.id)
+        if run.status == "done":
+            run.status, run.finished_at = "running", None
+            db.session.commit()
+        bulk_ingest_run._start_worker()
     return jsonify({"queued": len(ready), "run": _serialize_run(run)}), 202
 
 
@@ -725,13 +732,21 @@ def set_applied(run_id):
         v = v.strip()
         if v:
             applied[key] = v
+    # "Clear disc numbers" (2026-10-13): a switch, not a text value.
+    if body.get("clear_disc_numbers") is True:
+        applied["clear_disc_numbers"] = True
     vid = body.get("venue_id")
     if applied.get("venue") and vid is not None:
         if isinstance(vid, bool) or not isinstance(vid, int):
             return jsonify({"error": "venue_id must be an integer"}), 400
         applied["venue_id"] = vid
+    was = bool((bulk_ingest_run.applied_values(run) or {}).get("clear_disc_numbers"))
     run.applied_json = json.dumps(applied) if applied else None
     db.session.commit()
+    # Turning it on or off changes how every folder reads: the waiting rows
+    # are read again so their flags and track lists follow.
+    if was != bool(applied.get("clear_disc_numbers")):
+        bulk_ingest_run.reread_waiting(run)
     return jsonify(_serialize_run(run))
 
 
