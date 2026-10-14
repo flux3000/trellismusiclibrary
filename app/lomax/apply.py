@@ -10,7 +10,7 @@ from sqlalchemy import func
 
 from app.extensions import db
 from app.lomax import filters
-from app.lomax.evidence import split_iso
+from app.lomax.evidence import ENGINEER_FIELDS, split_iso
 from app.models.lomax import LomaxProposal, LomaxRun
 from app.models.track import Track
 
@@ -66,6 +66,12 @@ def _apply_recording(prop, run, user_id):
 
     if f in ("source", "lineage"):
         setattr(rec, f, v)
+    elif f in ENGINEER_FIELDS:
+        # Same helper the Recording PUT uses: resolves by name or alias, creates on first use.
+        if rec.kind == "studio":
+            raise ApplyError("An album has no engineer credits.")
+        from app.utils.engineers import apply_engineer_names
+        apply_engineer_names(rec, {f: v})
     elif f == "artist":
         if not v:
             raise ApplyError("Empty artist.")

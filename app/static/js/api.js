@@ -27,7 +27,7 @@ const API = (() => {
   // would be a bug worth catching loudly rather than proxying politely.
   const REMOTE_CAPABLE = new Set([
     'collections', 'recordings', 'performances', 'artists', 'venues',
-    'musicians', 'genres', 'stream', 'search',
+    'musicians', 'engineers', 'genres', 'stream', 'search',
   ])
 
   function contextualise(path) {
@@ -240,6 +240,21 @@ const API = (() => {
       removeArtist: (id, perfId) => request('DELETE', `/api/musicians/${id}/artists/${perfId}`),
 
       ...entityImageApi('musicians'),
+    },
+
+    // ── Engineers (taper / transfer / mastering credits) ───────────────────────
+    engineers: {
+      search: (q)        => get(`/api/engineers/search?q=${encodeURIComponent(q)}`),
+      list:   ()         => get('/api/engineers/'),
+      listIndex: ()      => get('/api/engineers/?index=1'),
+      get:    (id)       => get(`/api/engineers/${id}`),
+      create: (data)     => post('/api/engineers/', data),
+      update: (id, data) => put(`/api/engineers/${id}`, data),
+      remove: (id)       => request('DELETE', `/api/engineers/${id}`),
+      addAlias:    (id, alias)   => post(`/api/engineers/${id}/aliases`, { alias }),
+      removeAlias: (id, aliasId) => request('DELETE', `/api/engineers/${id}/aliases/${aliasId}`),
+
+      ...entityImageApi('engineers'),
     },
 
     // ── Collections ───────────────────────────────────────────────────────────

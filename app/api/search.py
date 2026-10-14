@@ -33,6 +33,8 @@ from flask_login import login_required
 
 from app.extensions import db
 from app.models.musician import Musician, Membership
+from app.models.engineer import Engineer
+from app.models.alias import EngineerAlias
 from app.models.performance import Performance
 from app.models.artist import Artist
 from app.models.quality import RecordingQuality
@@ -90,6 +92,16 @@ def build_search_index():
          "artist_ids": member_of.get(aid, [])}
         for aid, name, sort_name in db.session.query(
             Musician.id, Musician.name, Musician.sort_name)
+    ]
+
+    # Engineers (people credited on live tapes), with their aliases as extra match keys.
+    aliases_of = {}
+    for engineer_id, alias in db.session.query(EngineerAlias.engineer_id, EngineerAlias.alias):
+        aliases_of.setdefault(engineer_id, []).append(alias)
+    engineers = [
+        {"id": eid, "name": name, "sort_name": sort_name, "aliases": aliases_of.get(eid, [])}
+        for eid, name, sort_name in db.session.query(
+            Engineer.id, Engineer.name, Engineer.sort_name)
     ]
 
     venues = [
@@ -198,7 +210,7 @@ def build_search_index():
         for r in rows
     ]
 
-    return se.build_index(artists, musicians, venues, recordings)
+    return se.build_index(artists, musicians, venues, recordings, engineers)
 
 
 # ── Serialisation ──────────────────────────────────────────────────────────
@@ -222,6 +234,13 @@ def _musician_item(row, artist_names):
         "member_of": [artist_names[p] for p in row.get("artist_ids", [])
                       if p in artist_names],
         "hash": f"#/musician/{row['id']}",
+    }
+
+
+def _engineer_item(row):
+    return {
+        "type": "engineer", "id": row["id"], "name": row["name"],
+        "hash": f"#/engineer/{row['id']}",
     }
 
 
@@ -295,6 +314,8 @@ def _serialise(group_key, entries, index, counts):
     if group_key == "musicians":
         names = {p["id"]: p["name"] for p in index["artists"]}
         return [_musician_item(e["row"], names) for e in entries]
+    if group_key == "engineers":
+        return [_engineer_item(e["row"]) for e in entries]
     if group_key == "albums":
         return [_album_item(e["row"]) for e in entries]
     return [_recording_item(e["row"]) for e in entries]

@@ -335,3 +335,16 @@ def test_a_recording_with_no_resolver_json_and_no_run_still_loads(api, seeded_id
     db.session.commit()
     assert api.get("/api/recordings/%d" % rid).get_json()["resolver_json"] is None
     assert api.get("/api/lomax/runs?skill=recording&subject_type=recording&subject_id=%d" % rid).get_json()["runs"] == []
+
+
+def test_accepting_an_engineer_sets_the_credit_and_resolves_by_name(api, fake, seeded_ids):
+    rid = seeded_ids["recording_id"]
+    run = _make_run(fake, "recording", "recording", rid, {"thinking": "t", "proposals": [
+        {"field": "recording_engineer", "proposed": "Bornfree", "confidence": "medium", "source": "info_file"},
+        {"field": "mastering_engineer", "proposed": "Chuck Miller", "confidence": "medium", "source": "web"}]})
+    props = _proposals(run.id)
+    for f in ("recording_engineer", "mastering_engineer"):
+        assert api.post("/api/lomax/proposals/%d" % props[f].id, json={"decision": "accepted"}).status_code == 200
+    rec = db.session.get(Recording, rid)
+    assert rec.recording_engineer.name == "Bornfree" and rec.mastering_engineer.name == "Chuck Miller"
+    assert rec.transfer_engineer is None

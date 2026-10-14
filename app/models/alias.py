@@ -49,3 +49,20 @@ class ArtistAlias(db.Model):
 
     artist = db.relationship("Artist", backref=db.backref(
         "aliases", cascade="all, delete-orphan", passive_deletes=True))
+
+
+class EngineerAlias(db.Model):
+    """Another way a source writes an engineer's name ("Born Free" for
+    "Bornfree"). Same contract as ArtistAlias; find_or_create_engineer consults it."""
+    __tablename__ = "engineer_alias"
+    __table_args__ = (db.UniqueConstraint("engineer_id", "alias_key", name="uq_engineer_alias_key"),)
+
+    id          = db.Column(db.Integer, primary_key=True)
+    engineer_id = db.Column(db.Integer, db.ForeignKey("engineer.id", ondelete="CASCADE"),
+                            nullable=False, index=True)
+    alias       = db.Column(db.String(255), nullable=False)
+    alias_key   = db.Column(db.String(255), nullable=False, index=True)
+    created_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    engineer = db.relationship("Engineer", backref=db.backref(
+        "aliases", cascade="all, delete-orphan", passive_deletes=True))

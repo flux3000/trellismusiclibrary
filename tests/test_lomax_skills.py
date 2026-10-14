@@ -299,3 +299,35 @@ def test_a_skill_refuses_a_subject_type_it_does_not_work_on(seeded_ids):
         lomax.create_run("venue", "venue", subject_id=9999)
     with pytest.raises(lomax.LomaxError):
         lomax.create_run("recording", "recording", subject_id=seeded_ids["recording_id"], level="deep")
+
+
+def test_recording_proposes_engineers_and_drops_gear_and_unknown_roles(fake, seeded_ids):
+    fake.canned["submit_recording_research"] = {"thinking": "t", "proposals": [
+        {"field": "recording_engineer", "proposed": "Bornfree", "confidence": "high", "source": "info_file"},
+        {"field": "transfer_engineer", "proposed": "Sony TC-D5M", "confidence": "high", "source": "info_file"},
+        {"field": "mastering_engineer", "proposed": "Chuck Miller", "confidence": "medium", "source": "web"},
+        {"field": "editing_engineer", "proposed": "Nobody", "confidence": "low", "source": "web"}]}
+    run = run_skill("recording", "recording", seeded_ids["recording_id"])
+    got = {p["field"]: p for p in lomax.get_run(run.id)["result"]["proposals"]}
+    assert set(got) == {"recording_engineer", "mastering_engineer"}     # gear and an unknown role are dropped
+    assert got["recording_engineer"]["proposed"] == "Bornfree" and got["recording_engineer"]["challenge"] is False
+
+
+def test_recording_instructions_and_schema_cover_the_engineer_credits():
+    from app.lomax.skills import recording
+    enum = recording.SUBMIT["input_schema"]["properties"]["proposals"]["items"]["properties"]["field"]["enum"]
+    for f in evidence.ENGINEER_FIELDS:
+        assert f in enum and f in recording.INSTRUCTIONS
+    from app.lomax.skills import album
+    assert not any(f in album.INSTRUCTIONS for f in evidence.ENGINEER_FIELDS)
+
+
+def test_current_from_recording_carries_engineers_for_live_only(app, seeded_ids):
+    rec = db.session.get(Recording, seeded_ids["recording_id"])
+    from app.utils.engineers import apply_engineer_names
+    apply_engineer_names(rec, {"transfer_engineer": "Chuck Miller"})
+    db.session.commit()
+    assert evidence.current_from_recording(rec)["transfer_engineer"] == "Chuck Miller"
+    rec.kind = "studio"
+    assert "transfer_engineer" not in evidence.current_from_recording(rec)
+    db.session.rollback()

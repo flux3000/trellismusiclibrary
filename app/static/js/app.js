@@ -1353,6 +1353,7 @@ const App = (() => {
       if (dim === 'venues')            rows = await API.venues.list()
       else if (dim === 'artists')   rows = await API.artists.list()
       else if (dim === 'musicians')      rows = await API.musicians.list()
+      else if (dim === 'engineers')      rows = await API.engineers.list()
       else if (dim === 'collections')  rows = await API.collections.list()
       else if (dim === 'genres')       rows = await API.genres.list()
       else if (dim === 'events')       rows = await API.events.list()
@@ -1376,7 +1377,7 @@ const App = (() => {
     // in place would pull the entire library into the sidebar (580 card rows
     // through GET /api/collections/<id>).
     if (dim === 'collections') rows = rows.filter(isCuratedCollection)
-    const target = { venues: 'venue', artists: 'artist', musicians: 'musician',
+    const target = { venues: 'venue', artists: 'artist', musicians: 'musician', engineers: 'engineer',
                      collections: 'collection', genres: 'genre', events: 'event' }[dim]
     // The index page for this dimension — the "view all" door. A dimension
     // section used to be a dead end: expanding it listed every record and there
@@ -1385,14 +1386,14 @@ const App = (() => {
     // redirects there). That is why nobody had noticed those two pages were
     // still the pre-entity-shell admin screens.
     const indexHash = { venues: '#/venues', artists: '#/artists',
-                        musicians: '#/musicians', genres: '#/genres',
+                        musicians: '#/musicians', engineers: '#/engineers', genres: '#/genres',
                         events: '#/events' }[dim]
     if (!rows.length) {
       // Still offer the index: it is where the create form lives, and a bare
       // "None yet" with nothing to click is a dead end on the one dimension
       // that most needs a way to add its first record.
       const emptyIndex = { venues: '#/venues', artists: '#/artists',
-                           musicians: '#/musicians', genres: '#/genres',
+                           musicians: '#/musicians', engineers: '#/engineers', genres: '#/genres',
                            events: '#/events' }[dim]
       box.innerHTML = `<div class="nav-record nav-record--empty">None yet</div>` +
         (emptyIndex ? `<div class="nav-record nav-record--all" data-all="${emptyIndex}">Open ${dim} \u2192</div>` : '')
@@ -1877,7 +1878,7 @@ const App = (() => {
     if (!appPrefs) await getPrefs()
     const _mySidebarSeq = ++_sidebarRenderSeq
     const _mySidebarLib = libraryState.activeId
-    _dimCache.venues = _dimCache.artists = _dimCache.musicians =
+    _dimCache.venues = _dimCache.artists = _dimCache.musicians = _dimCache.engineers =
       _dimCache.collections = _dimCache.genres = _dimCache.events = null
 
     // ONE sidebar for both contexts: a listener in a shared library sees the
@@ -1892,7 +1893,7 @@ const App = (() => {
     const biWaiting = remote ? 0 : _biWaitingCount()
     const dl = _dlAllowed()
     const dims = [['artists', 'Artists'], ['musicians', 'Musicians'], ['venues', 'Venues'],
-                  ['events', 'Events'], ['genres', 'Genres']]
+                  ['events', 'Events'], ['engineers', 'Engineers'], ['genres', 'Genres']]
     // Shared Libraries: the Live Music Archive (admin only) and every library
     // joined through an invite. A peer entry switches library exactly as the
     // header selector does (switchLibrary). Not shown inside a joined library
@@ -2010,7 +2011,7 @@ const App = (() => {
         ${thumb}
         ${showArtist ? `<span class="rec-artist-cell truncate">${esc(r.artist || '')}</span>` : ''}
         <span class="rec-date truncate">${esc(date)}</span>
-        <span class="rec-venue truncate">${esc(venueText)}</span>
+        <span class="rec-venue truncate">${esc(venueText)}${r.role_text ? `<span class="rec-role"> \u00b7 ${esc(r.role_text)}</span>` : ''}</span>
         <span class="rec-location truncate">${esc(loc)}</span>
         <span>${id.isStudio ? '' : sourceBadge(r.source)}</span>
         <span class="quality ${id.isStudio ? '' : qualityClass(quality)}">${esc(quality)}</span>
@@ -3691,6 +3692,117 @@ const App = (() => {
     onAdminClick('pn-delete', async () => {
       if (!confirm(`Delete musician "${a.name}"? This can't be undone.`)) return
       try { await API.musicians.remove(id); refreshSidebar(); window.location.hash = '#/' }
+      catch (e) { Notify.error(e.message) }
+    })
+  }
+
+  // Engineer page: bio, aliases, photos, and every live recording they are credited on, each row
+  // labelled with the role(s). Mirrors the Musician page.
+  const ENGINEER_ROLE_LABEL = { recording: 'Recording', transfer: 'Transfer', mastering: 'Mastering' }
+  async function renderEngineerView(id) {
+    setActiveNav('engineers'); setActiveArtist(null); setLoading()
+    let a
+    try { a = await API.engineers.get(id) }
+    catch (e) {
+      invalidateDims('engineers')   // heal the sidebar if this engineer was removed
+      setMainHTML(`<div class="empty-state"><div class="empty-title">This engineer no longer exists</div></div>`)
+      return
+    }
+    setNavCurrent(a.name)
+    const recRows = (a.recordings || []).map(r => ({
+      ...r, role_text: ['recording', 'transfer', 'mastering'].filter(k => (r.roles || []).includes(k))
+        .map(k => ENGINEER_ROLE_LABEL[k]).join(', '),
+    }))
+    recRows.sort((x, y) => compareByDate(x, y, false))
+    const total = recRows.length
+    const descText = a.bio && a.bio.trim()
+    const navBack = state.navBack
+    const photoCount = (a.images || []).length
+    const canEditHere = canEditLibrary()
+
+    setMainHTML(entityShellHtml({
+      navBack,
+      hero: { imageUrl: (a.images || [])[0] ? API.engineers.imageUrl(a.images[0].id) : null },
+      title: esc(a.name),
+      titleId: 'en-name',
+      titleEditable: true,
+      stats: [[total, total === 1 ? 'Recording' : 'Recordings']],
+      actions: `<button class="btn btn-ghost btn-sm pp-delete" id="en-delete" title="Delete engineer">Delete</button>`,
+      tabs: [
+        { id: 'recordings', label: 'Recordings', active: true, count: total,
+          html: recordingsPaneHtml(recRows, { showArtist: true, mountId: 'rec-table-engineer',
+                                              empty: 'No recordings yet' }) },
+        { id: 'about', label: 'About', html: `
+            <div class="pp-sec">Bio</div>
+            <div class="pp-desc pp-editable ${descText ? '' : 'pp-empty'}" id="en-desc" title="Click to edit">${descText ? esc(a.bio) : 'Add a bio\u2026'}</div>
+
+            <div class="pp-sec">Aliases</div>
+            <div class="pp-musicians" id="en-aliases"></div>` },
+        { id: 'photos', label: 'Photos', count: photoCount || null,
+          html: '<div id="en-photos"></div>' },
+      ],
+    }))
+    wireEntityShell(mainContent, navBack)
+    wireRecordingRows(mainContent)
+    if (recRows.length) wireDateAddedSort(document.getElementById('rec-table-engineer'), recRows, true)
+
+    createPhotoGallery({
+      mountId: 'en-photos', api: API.engineers, entityId: id, images: a.images || [],
+      linkTiles: photoSearchTiles(a.name, 'engineer'),
+      onChange: imgs => {
+        a.images = imgs
+        setHeroImage(imgs[0] ? API.engineers.imageUrl(imgs[0].id) : null)
+        const tab = mainContent.querySelector('.pp-tab[data-pane="photos"]')
+        if (tab) tab.innerHTML = 'Photos' + (imgs.length ? `<span class="pp-tab-n">${imgs.length}</span>` : '')
+      },
+    })
+
+    const refreshSidebar = () => invalidateDims('engineers')
+    async function saveField(patch) {
+      try { await API.engineers.update(id, patch); refreshSidebar() }
+      catch (e) { Notify.error('Save failed: ' + e.message) }
+    }
+    makeInlineEditable(document.getElementById('en-name'), {
+      get: () => a.name,
+      onSave: async v => { v = v.trim(); if (!v || v === a.name) return; a.name = v; await saveField({ name: v }) },
+    })
+    makeInlineEditable(document.getElementById('en-desc'), {
+      multiline: true, placeholder: 'Add a bio…',
+      get: () => a.bio || '',
+      onSave: async v => { v = v.trim(); a.bio = v; await saveField({ bio: v || null }) },
+    })
+
+    // Aliases: chips with a remove x, and a plain input (Enter adds). No picker: an alias is free text.
+    function renderAliases() {
+      const box = document.getElementById('en-aliases')
+      if (!box) return
+      box.innerHTML = (a.aliases || []).map((al, i) =>
+        `<span class="member-chip">${esc(al.alias)}${canEditHere ? ` <span class="member-chip-x" data-i="${i}" title="Remove">${icon('x')}</span>` : ''}</span>`).join('') +
+        (canEditHere ? `<span class="pp-add-wrap"><input type="text" class="member-input pp-add-input" autocomplete="off" placeholder="Add an alias…" /></span>` : '')
+      box.querySelectorAll('.member-chip-x').forEach(x => x.addEventListener('click', async () => {
+        const al = a.aliases[parseInt(x.dataset.i)]
+        try { await API.engineers.removeAlias(id, al.id); a.aliases.splice(parseInt(x.dataset.i), 1); renderAliases(); refreshSidebar() }
+        catch (e) { Notify.error(e.message) }
+      }))
+      const input = box.querySelector('.pp-add-input')
+      input?.addEventListener('keydown', async e => {
+        if (e.key !== 'Enter') return
+        e.preventDefault()
+        const v = input.value.trim()
+        if (!v) return
+        try {
+          const al = await API.engineers.addAlias(id, v)
+          if (!(a.aliases || []).some(x => x.id === al.id)) a.aliases = (a.aliases || []).concat([al])
+          renderAliases(); refreshSidebar()
+        }
+        catch (err) { Notify.error(err.message) }
+      })
+    }
+    renderAliases()
+
+    onAdminClick('en-delete', async () => {
+      if (!confirm(`Delete engineer "${a.name}"? This can't be undone.`)) return
+      try { await API.engineers.remove(id); refreshSidebar(); window.location.hash = '#/' }
       catch (e) { Notify.error(e.message) }
     })
   }
@@ -5994,6 +6106,8 @@ const App = (() => {
   const LX_FIELDS = [
     ['artist', 'Artist'], ['date', 'Date'], ['venue', 'Venue'], ['city', 'City'], ['state', 'State'],
     ['country', 'Country'], ['event', 'Event'], ['stage', 'Stage'], ['source', 'Source'], ['lineage', 'Lineage'],
+    ['recording_engineer', 'Recording Engineer'], ['transfer_engineer', 'Transfer Engineer'],
+    ['mastering_engineer', 'Mastering Engineer'],
   ]
   // An album run proposes these (skill 'album'); they show as field cards in the Lomax pane.
   const LX_ALBUM_FIELDS = [['title', 'Title'], ['year', 'Year'], ['notes', 'Notes']]
@@ -6920,7 +7034,9 @@ const App = (() => {
     const date = p.start_year
       ? `${p.start_year}${p.start_month ? '-' + pad(p.start_month) : ''}${(p.start_month && p.start_day) ? '-' + pad(p.start_day) : ''}` : ''
     const vals = { artist: p.artist, date, venue: p.venue_name, city: p.city, state: p.state, country: p.country,
-      event: p.event_name, stage: p.stage, source: rec.source, lineage: rec.lineage, genre: p.artist_genre }
+      event: p.event_name, stage: p.stage, source: rec.source, lineage: rec.lineage, genre: p.artist_genre,
+      recording_engineer: rec.recording_engineer?.name, transfer_engineer: rec.transfer_engineer?.name,
+      mastering_engineer: rec.mastering_engineer?.name }
     return {
       resolved: rec.resolver_json || {},
       value: k => (vals[k] == null ? '' : String(vals[k])),
@@ -7128,6 +7244,11 @@ const App = (() => {
     const trunc          = (s, n) => s && s.length > n ? s.slice(0, n) + '\u2026' : s
     const lineageDisplay = rec.lineage ? trunc(rec.lineage, 220) : null
 
+    const ENGINEER_FIELDS = [['recording_engineer', 'Recording Engineer'], ['transfer_engineer', 'Transfer Engineer'],
+                             ['mastering_engineer', 'Mastering Engineer']]
+    // A set name links to the Engineer page; the cell edit starts from a click anywhere but the link.
+    const engineerCellHtml = e => e && e.name
+      ? (e.id ? `<a href="#/engineer/${e.id}">${esc(e.name)}</a>` : esc(e.name)) : '\u2014'
     const qEditable = canEditLibrary()
     const qc  = qEditable ? ' hm-val--editable' : ''
     const qa  = f => qEditable ? ` data-qedit="${f}" title="Click to edit"` : ''
@@ -7183,7 +7304,8 @@ const App = (() => {
     const rowIsEmpty = !rec.format && (isStudioKind
       ? (!showReleaseBlock)
       : (!qEditable && !rec.source && !rec.lineage && !rec.quality
-         && !rec.source_tag && !rec.etree_shnid))
+         && !rec.source_tag && !rec.etree_shnid
+         && !rec.recording_engineer && !rec.transfer_engineer && !rec.mastering_engineer))
     const sourceLineageRow = rowIsEmpty ? '' : `
       <div class="rec-sl-row">
         ${!isStudioKind ? formatItemHtml : ''}
@@ -7202,14 +7324,23 @@ const App = (() => {
         <div class="rec-sl-item">
           <span class="mg-row-label">SHNID</span>
           <span class="hm-val mono${qc}"${qa('etree_shnid')}>${esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '\u2014')}</span>
-        </div>` : ''}
+        </div>
+        ` : ''}
         ${discsItemHtml}
-        ${!isStudioKind ? `<div class="rec-sl-item rec-sl-item--lineage">
+        ${isStudioKind ? formatItemHtml : ''}${releaseItemHtml}
+      </div>
+      ${!isStudioKind ? `<div class="rec-sl-row rec-sl-row--eng">
+        ${ENGINEER_FIELDS.map(([f, label]) => `<div class="rec-sl-item">
+          <span class="mg-row-label">${label}</span>
+          <span class="hm-val${qc}"${qa(f)}>${engineerCellHtml(rec[f])}</span>
+        </div>`).join('')}
+      </div>
+      <div class="rec-sl-row rec-sl-row--lineage">
+        <div class="rec-sl-item rec-sl-item--lineage">
           <span class="mg-row-label">Lineage</span>
           <span class="hm-val${qc}"${qa('lineage')}>${esc(lineageDisplay || rec.lineage || '\u2014')}</span>
-        </div>` : ''}
-        ${isStudioKind ? formatItemHtml : ''}${releaseItemHtml}
-      </div>`
+        </div>
+      </div>` : ''}`
 
     // Analyze Audio lives in the Side Panel's tab strip with every other pane
     // action — see the .pane-acts block below. POST /reprocess runs the whole
@@ -7488,6 +7619,7 @@ const App = (() => {
       if (field === 'source')  return sourceBadge(rec.source) || '—'
       if (field === 'source_tag') return esc(rec.source_tag || '—')
       if (field === 'etree_shnid') return esc(rec.etree_shnid != null ? String(rec.etree_shnid) : '—')
+      if (ENGINEER_FIELDS.some(([f]) => f === field)) return engineerCellHtml(rec[field])
       if (field === 'lineage') { const l = rec.lineage; return esc(l ? (l.length > 220 ? l.slice(0, 220) + '…' : l) : '—') }
       return `<span class="quality ${qualityClass(rec.quality)}">${esc(rec.quality || '—')}</span>`  // quality
     }
@@ -7497,6 +7629,7 @@ const App = (() => {
                 : field === 'source_tag'  ? (rec.source_tag  || '')
                 : field === 'etree_shnid' ? (rec.etree_shnid != null ? String(rec.etree_shnid) : '')
                 : field === 'lineage'     ? (rec.lineage     || '')
+                : ENGINEER_FIELDS.some(([f]) => f === field) ? (rec[field]?.name || '')
                 :                           (rec.quality     || '')
       cell.innerHTML = `<input class="hm-qedit-input" type="text" value="${esc(String(raw))}" />`
       const input = cell.querySelector('input')
@@ -7506,10 +7639,16 @@ const App = (() => {
         if (done) return; done = true
         if (save) {
           const v = input.value.trim()
-          const payload = { [field]: v || null }
+          const isEng = ENGINEER_FIELDS.some(([f]) => f === field)
+          const payload = { [field]: isEng ? v : (v || null) }    // an engineer is sent by name; '' clears
           try {
             await API.recordings.update(recordingId, { ...payload, change_note: 'Quick edit' })
-            Object.assign(rec, payload)
+            if (isEng) {
+              // The server resolves the name to an Engineer (existing, alias or new): take its {id, name}.
+              const fresh = await API.recordings.get(recordingId)
+              rec[field] = fresh[field] || null
+              invalidateDims('engineers')
+            } else Object.assign(rec, payload)
             markStaged()   // now has unwritten changes
           } catch (e) { console.error('Quick edit failed:', e) }
         }
@@ -7620,6 +7759,7 @@ const App = (() => {
     if (canEditLibrary()) {
       mainContent.querySelector('.rec-view-shell')?.addEventListener('click', ev => {
         const cell = ev.target.closest('.hm-val--editable[data-qedit]')
+        if (ev.target.closest('a')) return    // an Engineer link navigates, it does not edit
         if (cell && !cell.querySelector('input')) startMetaQuickEdit(cell)
       })
     }
@@ -10373,6 +10513,7 @@ const App = (() => {
       city:    g('f-city'),   state: g('f-state'), country: g('f-country'),
       source:  g('f-source'), lineage: g('f-lineage'), event: g('f-event-name'),
       stage:   g('f-stage'),   genre: g('f-genre'),   fingerprint: lxFingerprint(ingest.scan),
+      recording_engineer: g('f-rec-eng'), transfer_engineer: g('f-xfer-eng'), mastering_engineer: g('f-mast-eng'),
       tracks:  (ingest.tracks || []).map(t => ({
         number: t.track_number, title: t.title, duration: t.duration,
         songwriter: t.songwriter || '', notes: t.notes || '',
@@ -10443,6 +10584,9 @@ const App = (() => {
       case 'source':  return g('f-source')
       case 'stage':   return g('f-stage')
       case 'lineage': return g('f-lineage')
+      case 'recording_engineer': return g('f-rec-eng')
+      case 'transfer_engineer':  return g('f-xfer-eng')
+      case 'mastering_engineer': return g('f-mast-eng')
       case 'genre':   return g('f-genre')
       case 'date': {
         const y = g('f-year'), m = g('f-month'), d = g('f-day')
@@ -10470,6 +10614,9 @@ const App = (() => {
       case 'source':  set('f-source', value);      ingest.form.source      = value; break
       case 'stage':   set('f-stage', value);       ingest.form.stage       = value; break
       case 'lineage': set('f-lineage', value);     ingest.form.lineage     = value; break
+      case 'recording_engineer': set('f-rec-eng', value);   ingest.form.recording_engineer = value; break
+      case 'transfer_engineer':  set('f-xfer-eng', value);  ingest.form.transfer_engineer  = value; break
+      case 'mastering_engineer': set('f-mast-eng', value);  ingest.form.mastering_engineer = value; break
       case 'date': {
         const p = String(value).split('-')
         set('f-year', p[0] || '')
@@ -10677,6 +10824,7 @@ const App = (() => {
     'artist_name', 'start_year', 'start_month', 'start_day',
     'end_year', 'end_month', 'end_day', 'venue_name', 'city', 'state',
     'country', 'source', 'quality', 'lineage', 'notes', 'event_name', 'stage',
+    'recording_engineer', 'transfer_engineer', 'mastering_engineer',
   ]
   // Queue-level values → this form.
   //
@@ -10840,7 +10988,8 @@ const App = (() => {
       venue_name: g('f-venue-name'), city: g('f-city'), state: g('f-state'),
       country: g('f-country'), source: g('f-source'), quality: g('f-quality'),
       lineage: g('f-lineage'), notes: g('f-notes'), event_name: g('f-event-name'),
-      stage: g('f-stage'),
+      stage: g('f-stage'), recording_engineer: g('f-rec-eng'), transfer_engineer: g('f-xfer-eng'),
+      mastering_engineer: g('f-mast-eng'),
     }
     return _ingestFormSnapshot(live) !== f._inferred
   }
@@ -11151,6 +11300,9 @@ const App = (() => {
       f.lineage         = document.getElementById('f-lineage').value.trim()
       f.source_tag      = document.getElementById('f-source-tag').value.trim()
       f.etree_shnid     = document.getElementById('f-shnid').value.trim()
+      f.recording_engineer = (document.getElementById('f-rec-eng')?.value ?? f.recording_engineer ?? '').trim()
+      f.transfer_engineer  = (document.getElementById('f-xfer-eng')?.value ?? f.transfer_engineer ?? '').trim()
+      f.mastering_engineer = (document.getElementById('f-mast-eng')?.value ?? f.mastering_engineer ?? '').trim()
       f.notes           = document.getElementById('f-notes').value.trim()
     f.album_title     = (document.getElementById('f-album-title')?.value ?? f.album_title ?? '').trim()
     f._genreText      = document.getElementById('f-genre')?.value || ''
@@ -11214,6 +11366,9 @@ const App = (() => {
       // produces them; never written without the form.
       f.source_tag      = rv('source_tag') || ''
       f.etree_shnid     = r.shnid?.value != null ? String(r.shnid.value) : ''
+      f.recording_engineer = rv('recording_engineer') || ''
+      f.transfer_engineer  = rv('transfer_engineer')  || ''
+      f.mastering_engineer = rv('mastering_engineer') || ''
       f.quality         = ''
       f.lineage         = rv('lineage') || ''
       f.notes           = ''
@@ -11541,7 +11696,7 @@ const App = (() => {
               </div>
             </div>
 
-            <div class="ingest-field-grid ingest-row-src" style="margin-top:6px${studio ? '; display:none' : ''}">
+            <div class="ingest-field-grid ingest-row-src ingest-row-prov" style="margin-top:6px${studio ? '; display:none' : ''}">
               <div class="ingest-field">
                 <label>Source Tag</label>
                 <input type="text" id="f-source-tag" value="${esc(f.source_tag)}" />
@@ -11550,6 +11705,13 @@ const App = (() => {
                 <label>SHNID</label>
                 <input type="text" id="f-shnid" class="mono" value="${esc(f.etree_shnid)}" />
               </div>
+              ${[['Recording Engineer', 'f-rec-eng', f.recording_engineer], ['Transfer Engineer', 'f-xfer-eng', f.transfer_engineer],
+                 ['Mastering Engineer', 'f-mast-eng', f.mastering_engineer]].map(([label, id, val]) => `
+              <div class="ingest-field artist-picker-wrap">
+                <label>${label}</label>
+                <input type="text" id="${id}" value="${esc(val || '')}" autocomplete="off" />
+                <div class="artist-dropdown" id="${id}-dd" style="display:none"></div>
+              </div>`).join('')}
             </div>
 
             <div class="rev-tracks-header" style="margin-top:16px; padding-top:12px; border-top:1px solid var(--bd-1)">
@@ -12596,6 +12758,13 @@ const App = (() => {
       ingestBackFromReview()
     })
 
+    // Engineer name autocomplete: an existing Engineer, or whatever is typed (resolved on save).
+    for (const id of ['f-rec-eng', 'f-xfer-eng', 'f-mast-eng']) {
+      const input = document.getElementById(id)
+      wirePickerDropdown(input, document.getElementById(id + '-dd'), API.engineers.search,
+        ({ name }) => { input.value = name; input.dispatchEvent(new Event('input', { bubbles: true })) })
+    }
+
     // Lomax. One controller on this folder drives the Resolver tab and the
     // chat. A run is filed against the folder, and moves to the recording when
     // it is added. Accepting applies to the form here, because the database has
@@ -12676,7 +12845,8 @@ const App = (() => {
       // A field the person types into is theirs: it is never re-applied from a stored decision.
       const FIELD_OF = { 'f-artist': 'artist', 'f-venue-name': 'venue', 'f-city': 'city', 'f-state': 'state',
         'f-country': 'country', 'f-event-name': 'event', 'f-source': 'source', 'f-stage': 'stage',
-        'f-lineage': 'lineage', 'f-year': 'date', 'f-month': 'date', 'f-day': 'date', 'f-genre': 'genre',
+        'f-lineage': 'lineage', 'f-rec-eng': 'recording_engineer', 'f-xfer-eng': 'transfer_engineer',
+        'f-mast-eng': 'mastering_engineer', 'f-year': 'date', 'f-month': 'date', 'f-day': 'date', 'f-genre': 'genre',
         'f-album-title': 'title', 'f-notes': 'notes' }
       mainContent.oninput = ev => {        // one handler, replaced on each render
         const t = ev.target
@@ -13003,6 +13173,7 @@ const App = (() => {
           venue_name: '', venue_id: null, event_name: '', event_id: null, stage: '',
           city: '', state: '', country: '', quality: '', source: '', lineage: '',
           source_tag: '', etree_shnid: '',
+          recording_engineer: '', transfer_engineer: '', mastering_engineer: '',
         })
       }
       // ⚠ NO blanket-value fallback here any more.
@@ -14260,6 +14431,32 @@ const App = (() => {
       stats: rows => [
         [rows.length, rows.length === 1 ? 'Musician' : 'Musicians'],
         [rows.filter(a => a.recording_count).length, 'On record'],
+      ],
+    })
+  }
+
+  // ── Engineers ────────────────────────────────────────────────────────────────
+  function renderEngineersIndexPage() {
+    return renderDimIndexPage({
+      nav: 'engineers', title: 'Engineers', singular: 'Engineer',
+      load: () => API.engineers.listIndex(),
+      row: a => `
+        <a class="dx-row dx-row--musician" href="#/engineer/${a.id}">
+          <span class="dx-body">
+            <div class="dx-name">${esc(a.name)}</div>
+            ${a.excerpt ? `<div class="dx-text">${esc(a.excerpt)}</div>` : ''}
+          </span>
+          ${_dxSide(a.recording_count ? a.recording_count : null)}
+        </a>`,
+      searchable: a => [a.name, a.sort_name].filter(Boolean).join(' '),
+      group: { sort: 'name', key: _dxLetter, label: _dxLetter },
+      sorts: [
+        { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
+        { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
+      ],
+      stats: rows => [
+        [rows.length, rows.length === 1 ? 'Engineer' : 'Engineers'],
+        [rows.reduce((n, a) => n + (a.recording_count || 0), 0), 'Recordings'],
       ],
     })
   }
@@ -17228,6 +17425,14 @@ const App = (() => {
     } else if (hash === '#/musicians') {
       renderMusiciansIndexPage()
 
+    } else if (hash === '#/engineers') {
+      renderEngineersIndexPage()
+
+    } else if (hash.startsWith('#/engineer/')) {
+      const id = parseInt(hash.split('/')[2])
+      if (id) renderEngineerView(id)
+      else    renderLibraryView()
+
     } else if (hash.startsWith('#/musician/')) {
       // Edit-in-place, so #/musician/<id> and any legacy /edit both land on the view.
       const id = parseInt(hash.split('/')[2])
@@ -18014,6 +18219,7 @@ const App = (() => {
       return `<span class="search-item-name">${esc(item.name)}</span>
               <span class="search-item-meta">${esc((item.member_of || []).join(', '))}</span>`
     }
+    if (item.type === 'engineer') return `<span class="search-item-name">${esc(item.name)}</span>`
     const n = item.recording_count
     return `<span class="search-item-name">${esc(item.name)}</span>
             <span class="search-item-meta">${n} recording${n === 1 ? '' : 's'}</span>`
@@ -18255,6 +18461,11 @@ const App = (() => {
                   <div class="search-row-name">${esc(item.name)}</div>
                   <div class="search-row-meta">${esc((item.member_of || []).join(', ') || 'No artists recorded')}</div>
                 </div>
+              </div>`
+    }
+    if (item.type === 'engineer') {
+      return `<div class="search-row" data-hash="${esc(item.hash)}">
+                <div class="search-row-main"><div class="search-row-name">${esc(item.name)}</div></div>
               </div>`
     }
     const n = item.recording_count

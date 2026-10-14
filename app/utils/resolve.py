@@ -151,6 +151,11 @@ class Resolved:
     tracks: list
     folder_path: str = None
     scan: dict = None
+    # Who taped / transferred / mastered it. Optional, live only, never a
+    # review reason (see _resolve_engineer_fields).
+    recording_engineer: Field = _dc_field(default_factory=Field)
+    transfer_engineer: Field = _dc_field(default_factory=Field)
+    mastering_engineer: Field = _dc_field(default_factory=Field)
     duplicates: list = _dc_field(default_factory=list)
     status: str = None
     reasons: list = _dc_field(default_factory=list)
@@ -170,6 +175,9 @@ class Resolved:
             "lineage":     self.lineage.to_dict(),
             "source_tag":  self.source_tag.to_dict(),
             "shnid":       self.shnid.to_dict(),
+            "recording_engineer": self.recording_engineer.to_dict(),
+            "transfer_engineer":  self.transfer_engineer.to_dict(),
+            "mastering_engineer": self.mastering_engineer.to_dict(),
             "album":       self.album.to_dict(),
             "kind":        self.kind,
             "tracks":      list(self.tracks),
@@ -1084,6 +1092,39 @@ def _resolve_folder_only_field(scan, key):
     return Field(value=v, source="folder", candidates={"folder": v}, conflict=False)
 
 
+def _resolve_engineer_fields(scan, kind):
+    """recording_engineer / transfer_engineer / mastering_engineer: ENGINEER/TIPL
+    (and TAPER/TRANSFER) tags, then the info file, then the COMMENT tag. First
+    source with a valid name wins; the others ride along as candidates. Empty
+    for a studio record. Never a conflict, never a review reason."""
+    from app.utils.engineers import extract_engineers, ROLES
+    empty = {f"{r}_engineer": Field() for r in ROLES}
+    if kind == "studio":
+        return empty
+    from_tags = scan["suggestions"]["from_tags"]
+    info = extract_engineers(scan.get("info_file_content"))
+    comments = []
+    for t in from_tags.get("tracks", []):
+        c = (t.get("raw") or {}).get("comment")
+        for v in (c if isinstance(c, list) else [c]):
+            if v and str(v) not in comments:
+                comments.append(str(v))
+    comment = extract_engineers("\n".join(comments))
+    out = {}
+    for r in ROLES:
+        key = f"{r}_engineer"
+        cands = {}
+        for source, v in (("tags", from_tags.get(key)), ("info", info.get(r)), ("comment", comment.get(r))):
+            if v:
+                cands[source] = v
+        if not cands:
+            out[key] = Field()
+            continue
+        source = next(k for k in ("tags", "info", "comment") if k in cands)
+        out[key] = Field(value=cands[source], source=source, candidates=cands, conflict=False)
+    return out
+
+
 def _folder_album_title(scan):
     """The "Album" half of an "Artist - Album" folder name, or None."""
     name = (scan.get("folder_name") or "").strip()
@@ -1317,6 +1358,7 @@ def resolve(scan, *, library_root=None, placement=None):
     album_f = _resolve_album_field(scan)
     kind = classify_kind(scan, album_f.value, venue_f.value, date_f.value)
     tracks = resolve_tracks(scan)
+    eng = _resolve_engineer_fields(scan, kind)
 
     return Resolved(
         date=date_f,
@@ -1334,6 +1376,7 @@ def resolve(scan, *, library_root=None, placement=None):
         album=album_f,
         kind=kind,
         tracks=tracks,
+        **eng,
         folder_path=scan.get("folder_path"),
         scan=scan,
         members=billing_members(artist_f.value),

@@ -289,7 +289,7 @@ def test_unmatched_query_returns_zero_not_everything():
 
 def test_group_order_is_fixed():
     """A dropdown whose groups reshuffle between keystrokes cannot be aimed at."""
-    assert se.GROUP_ORDER == ("artists", "recordings", "albums", "venues", "musicians")
+    assert se.GROUP_ORDER == ("artists", "recordings", "albums", "venues", "musicians", "engineers")
 
 
 def _album_index():

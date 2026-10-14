@@ -24,6 +24,7 @@ its existing render functions:
   GET  /artists/images/<image_id> artist photo, checked via its owner
   GET  /venues/<id>                  venue + its visible shows, visible counts
   GET  /musicians/<id>                 person, visible acts + guest appearances
+  GET  /engineers/, /engineers/<id>    engineers credited on visible live recordings
   GET  /genres/                      genres present in the visible set
   GET  /genres/<id>                  one genre, its visible acts and shows
 
@@ -54,7 +55,7 @@ from app.utils.peer_access import (
     peer_visible_recording_ids, peer_visible_performance_ids,
     peer_visible_artist_ids, peer_visible_venue_ids, peer_visible_musician_ids,
     peer_can_access_artist, peer_can_access_venue,
-    peer_can_access_musician,
+    peer_can_access_musician, peer_visible_engineer_ids, peer_can_access_engineer,
 )
 from app.utils.serialize import (
     recording_row, recording_summary, _primary_recording_image_url,
@@ -780,6 +781,41 @@ def musician_detail(musician_id):
     })
 
 
+# ── GET /api/share/engineers/<id> ───────────────────────────────────────────────
+# Engineers are reached only through recordings, so the page lists exactly the
+# recordings the peer can see and 403s an engineer with none visible.
+
+@bp.route("/engineers/<int:engineer_id>", strict_slashes=False)
+@peer_required
+def engineer_detail(engineer_id):
+    from app.models.engineer import Engineer
+    from app.utils.engineers import engineer_role_rows
+
+    peer = current_peer()
+    if not peer_can_access_engineer(peer, engineer_id):
+        abort(403)
+    e = db.session.get(Engineer, engineer_id)
+    if e is None:
+        abort(404)
+    visible = peer_visible_recording_ids(peer)
+    rows = [(r, roles) for r, roles in engineer_role_rows(engineer_id) if r.id in visible]
+    img_urls = _peer_image_urls([r for r, _ in rows])
+    recordings = [{**_peer_summary(r, image_url=img_urls.get(r.id)), "roles": roles}
+                  for r, roles in rows]
+    return jsonify({
+        "id":         e.id,
+        "name":       e.name,
+        "sort_name":  e.sort_name,
+        "bio":        e.bio,
+        "aliases":    [{"id": a.id, "alias": a.alias} for a in e.aliases],
+        "recording_count": len(recordings),
+        "recordings": recordings,
+        # Engineer photos are not exposed to peers (no share image route).
+        "has_image":  False,
+        "images":     [],
+    })
+
+
 # ── GET /api/share/genres/ ────────────────────────────────────────────────────
 # Local list_genres computes artist_count and recording_count with a GROUP BY
 # over the whole library. Reproduced here in Python over the visible set only,
@@ -1273,6 +1309,30 @@ def list_musicians():
     ])
 
 
+@bp.route("/engineers/", strict_slashes=False)
+@peer_required
+def list_engineers():
+    """Engineers credited on a recording the peer can see. Mirrors local list_engineers."""
+    from sqlalchemy import func as _func
+    from app.models.engineer import Engineer
+
+    peer = current_peer()
+    engineer_ids = peer_visible_engineer_ids(peer)
+    if not engineer_ids:
+        return jsonify([])
+    rows = (db.session.query(Engineer)
+            .filter(Engineer.id.in_(engineer_ids))
+            .order_by(_func.coalesce(Engineer.sort_name, Engineer.name)).all())
+    from app.utils import dim_index
+    counts = dim_index.engineer_extras(peer_visible_recording_ids(peer))
+    extra = counts if request.args.get("index") else {}
+    return jsonify([
+        {**extra.get(e.id, {}),
+         "id": e.id, "name": e.name, "sort_name": e.sort_name,
+         "recording_count": counts.get(e.id, {}).get("recording_count", 0)} for e in rows
+    ])
+
+
 @bp.route("/search", strict_slashes=False)
 @peer_required
 def search():
@@ -1343,7 +1403,9 @@ def search():
                                 if pid in visible_artists]}
         for a in raw["musicians"] if a["id"] in visible_musicians
     ]
-    index = se.build_index(artists, musicians, venues, recordings + albums)
+    visible_engineers = peer_visible_engineer_ids(peer)
+    engineers = [e for e in raw["engineers"] if e["id"] in visible_engineers]
+    index = se.build_index(artists, musicians, venues, recordings + albums, engineers)
 
     result = se.run_search(index, q)
     counts = local_search._derived_counts(index)

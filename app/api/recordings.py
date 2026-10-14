@@ -23,6 +23,7 @@ from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
 from sqlalchemy.orm import selectinload
 
+from app.utils.engineers import recording_engineer_payload, apply_engineer_names
 from app.extensions import db
 from app.models.recording import Recording, RecordingFingerprint
 from app.models.collection import CollectionRecording
@@ -434,6 +435,9 @@ def get_recording(recording_id):
         "lineage":              rec.lineage,
         "source_tag":           rec.source_tag,
         "etree_shnid":          rec.etree_shnid,
+        # recording_engineer / transfer_engineer / mastering_engineer as {id, name}
+        # or null; absent for a studio record (live recordings only).
+        **recording_engineer_payload(rec),
         "files_staged":         files_staged,
         "quality":              rec.quality,
         "is_favorite":          bool(rec.is_favorite),
@@ -665,6 +669,10 @@ def update_recording(recording_id):
     if "etree_shnid" in data:
         raw = data["etree_shnid"]
         rec.etree_shnid = int(raw) if str(raw).strip() else None
+
+    # Engineers: names (string; empty clears), resolved by name/alias or created.
+    # Live recordings only -- apply_engineer_names ignores a studio record.
+    apply_engineer_names(rec, data)
 
     # is_official — cascade True to all tracks; never force-cascade False
     if "is_official" in data:

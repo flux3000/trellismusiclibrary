@@ -147,6 +147,16 @@ class Recording(db.Model):
     # in is_complete, which this check only ever sets False.
     completeness_checked_at = db.Column(db.DateTime, nullable=True)
 
+    # Who taped / transferred / mastered it (Engineer rows, one per role).
+    # LIVE recordings only: never set or shown for kind == 'studio'. SET NULL so
+    # deleting an Engineer just clears the credit.
+    recording_engineer_id = db.Column(db.Integer, db.ForeignKey("engineer.id", ondelete="SET NULL"),
+                                      nullable=True, index=True)
+    transfer_engineer_id  = db.Column(db.Integer, db.ForeignKey("engineer.id", ondelete="SET NULL"),
+                                      nullable=True, index=True)
+    mastering_engineer_id = db.Column(db.Integer, db.ForeignKey("engineer.id", ondelete="SET NULL"),
+                                      nullable=True, index=True)
+
     # Latest AI Assist research result (JSON blob: thinking, proposals,
     # track_titles, verify_items, provenance_notes, sources). Overwritten on
     # each re-run — no history kept. Persisted so a research pass isn't lost
@@ -174,6 +184,9 @@ class Recording(db.Model):
                                     order_by="Track.track_number")
     events        = db.relationship("RecordingEvent",       back_populates="recording",
                                     order_by="RecordingEvent.created_at")
+    recording_engineer = db.relationship("Engineer", foreign_keys=[recording_engineer_id])
+    transfer_engineer  = db.relationship("Engineer", foreign_keys=[transfer_engineer_id])
+    mastering_engineer = db.relationship("Engineer", foreign_keys=[mastering_engineer_id])
     # Recording-level artwork, one flagged
     # primary. Sort mirrors artist/venue images (primary first, then
     # sort_order/id) via app/utils/entity_images.py's primary_for/set_primary.

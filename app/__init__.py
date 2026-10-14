@@ -75,11 +75,13 @@ def create_app(config_class=Config):
                                               ensure_venue_history, ensure_event_history, ensure_full_library_grants,
                                               ensure_invite_code, ensure_bulk_run_cleared_at,
                                               ensure_recording_completeness_checked_at,
+                                              ensure_recording_engineer_columns,
                                               ensure_lomax_easter_eggs, ensure_genre_colors,
                                               ensure_download_job)
         ensure_artist_confirmed_at(db.engine)
         ensure_bulk_run_cleared_at(db.engine)
         ensure_recording_completeness_checked_at(db.engine)
+        ensure_recording_engineer_columns(db.engine)
         ensure_venue_history(db.engine)
         ensure_event_history(db.engine)
         ensure_lomax(db.engine)
@@ -156,6 +158,7 @@ def create_app(config_class=Config):
     # ── Register blueprints ────────────────────────────────────
     from app.api.auth         import bp as auth_bp
     from app.api.musicians      import bp as musicians_bp
+    from app.api.engineers      import bp as engineers_bp
     from app.api.artists    import bp as artists_bp
     from app.api.collections   import bp as collections_bp
     from app.api.performances import bp as performances_bp
@@ -179,6 +182,7 @@ def create_app(config_class=Config):
 
     app.register_blueprint(auth_bp,         url_prefix="/api/auth")
     app.register_blueprint(musicians_bp,      url_prefix="/api/musicians")
+    app.register_blueprint(engineers_bp,      url_prefix="/api/engineers")
     app.register_blueprint(artists_bp,   url_prefix="/api/artists")
     app.register_blueprint(collections_bp,  url_prefix="/api/collections")
     app.register_blueprint(performances_bp, url_prefix="/api/performances")

@@ -8,7 +8,7 @@ from app.lomax.prompts import EvidenceSection
 from app.lomax.skills.base import REPLY_PROP, Skill
 from app.lomax.sources import trusted_section
 
-FIELDS = list(ev.CURRENT_FIELDS)          # the ten Resolver fields
+FIELDS = list(ev.CURRENT_FIELDS + ev.ENGINEER_FIELDS)   # the ten Resolver fields and the three engineer credits
 TRACK_PIECES = (("title", "title"), ("songwriter", "songwriter"), ("note", "notes"))
 
 INSTRUCTIONS = """SKILL: Recording.
@@ -66,6 +66,14 @@ words (per, said, refers, notes), dates, place names or people; the one exceptio
 credit, "Taper: Name", as its own step when the info file states one. Leave 'lineage' empty \
 when the files give no chain. Any discrepancy or explanation about lineage goes in \
 verify_items or thinking, never in lineage.
+- Engineers: also propose recording_engineer, transfer_engineer and mastering_engineer, each the \
+plain name of ONE person (a nickname is a name: "Bornfree", "MIKE"), from the info file, the \
+tags or a trusted source. recording_engineer is the taper, who recorded it ("taped by", "recorded \
+by", "taper:"); transfer_engineer made the digital transfer ("transferred by", "transfer by"); \
+mastering_engineer mastered or edited the files ("mastered by", "mastering by"). One person may \
+fill more than one role. Leave a role out when nothing names someone for it. Never propose gear, \
+a mic, a recorder, a website, a trader or seeder ("seeded by", "uploaded by"), or the artist \
+themself as an engineer. Do not guess.
 - Genre: when the act this recording will be filed under has no genre, propose ONE genre. That \
 act is the filed artist, or the artist you propose when you propose a different one (judge the \
 genre for that artist, the filed name may be a misread). The genre comes from general \
@@ -149,11 +157,11 @@ def gather(subject, ctx):
         genres = ["  " + "; ".join(names)]
     return [
         EvidenceSection("task", task),
-        ev.known_fields_section(cur),
+        ev.known_fields_section(cur, ev.CURRENT_FIELDS + ev.ENGINEER_FIELDS),
         EvidenceSection("known", genres, title="Trellis genres (choose one of these when one fits):"),
         ev.library_section(cur, exclude_recording_id=rec_id),
         ev.atlas_section(cur),
-        ev.resolver_section(resolved, scope),
+        ev.resolver_section(resolved, scope, ev.RESOLVER_FIELDS + ev.ENGINEER_FIELDS),
         ev.tracks_section(cur),
         ev.info_file_section(cur),
         trusted_section(artist),
@@ -195,6 +203,14 @@ def _field_proposal(p, cur, scope, genre_open, country=""):
         agrees = _same(val, was)
         return dict(p, proposed=val, current=cur.get(f) or p.get("current"), agrees=agrees,
                     challenge=(not agrees) and f not in scope)   # state is a resolver field
+    if f in ev.ENGINEER_FIELDS:
+        # A person's name only: gear, source types and over-long strings are dropped, as in the resolver.
+        from app.utils.engineers import clean_engineer_name
+        val = clean_engineer_name(val, cut=False) or ""
+        if not val:
+            return None
+        agrees = _same(val, cur.get(f))
+        return dict(p, proposed=val, agrees=agrees, challenge=False)        # not a resolver field
     if f == "lineage":
         val = filters.clean_lineage(val)
         if not val:

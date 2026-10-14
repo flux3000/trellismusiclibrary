@@ -180,6 +180,28 @@ def musician_extras(rec_ids=None, artist_ids=None):
     return out
 
 
+def engineer_extras(rec_ids=None):
+    """{engineer_id: {recording_count, excerpt}} over LIVE recordings credited in
+    any role. `rec_ids` restricts which recordings count (a peer's visible set);
+    None is the whole library, published recordings only."""
+    from app.models.engineer import Engineer
+    from app.models.recording import Recording
+
+    q = db.session.query(Recording.id, Recording.recording_engineer_id,
+                         Recording.transfer_engineer_id, Recording.mastering_engineer_id
+                         ).filter(Recording.kind != "studio")
+    if rec_ids is None:
+        q = q.filter(Recording.is_published.is_(True))
+    counts = {}
+    for rid, *eids in q:
+        if rec_ids is not None and rid not in rec_ids:
+            continue
+        for eid in {x for x in eids if x is not None}:
+            counts[eid] = counts.get(eid, 0) + 1
+    return {eid: {"recording_count": counts.get(eid, 0), "excerpt": excerpt(bio)}
+            for eid, bio in db.session.query(Engineer.id, Engineer.bio)}
+
+
 def venue_extras(rec_ids=None):
     """{venue_id: {first_year, last_year, recording_count, excerpt}}"""
     from app.models.venue import Venue

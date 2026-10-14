@@ -21,6 +21,8 @@ INFO_FILE_CHAR_CAP = 20_000
 TRACK_CAP = 60
 RESOLVER_FIELDS = ("artist", "date", "venue", "city", "state", "country", "event", "stage")
 CURRENT_FIELDS = RESOLVER_FIELDS + ("source", "lineage")
+# Credits on a LIVE recording only (an album has none); proposed as plain names.
+ENGINEER_FIELDS = ("recording_engineer", "transfer_engineer", "mastering_engineer")
 
 _ISO_RE = re.compile(r"^\s*(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?\s*$")
 
@@ -60,7 +62,7 @@ def current_from_recording(rec):
     """The recording's values as the pages show them: location from the venue when there is one."""
     p = rec.performance
     v = p.venue if p else None
-    return {
+    cur = {
         "artist":  (p.artist.name if (p and p.artist) else ""),
         "date":    (format_partial_date(p.start_year, p.start_month, p.start_day) or "") if p else "",
         "venue":   (v.name if v else ""),
@@ -75,6 +77,11 @@ def current_from_recording(rec):
                      "songwriter": t.songwriter or "", "notes": t.notes or ""} for t in rec.tracks],
         "info_file_content": rec.info_file_content or "",
     }
+    if getattr(rec, "kind", "live") != "studio":
+        for f in ENGINEER_FIELDS:
+            e = getattr(rec, f, None)
+            cur[f] = e.name if e is not None else ""
+    return cur
 
 
 def known_fields_section(current, fields=CURRENT_FIELDS):
@@ -236,14 +243,14 @@ def resolver_scope(resolved, current, fields=RESOLVER_FIELDS):
     return scope
 
 
-def resolver_section(resolved, scope):
+def resolver_section(resolved, scope, fields=RESOLVER_FIELDS):
     lines = []
     if not resolved:
         return EvidenceSection("files")
     if resolved.get("status"):
         lines.append("Resolver verdict: %s%s" % (resolved["status"], " (%s)" % ", ".join(resolved.get("reasons") or [])
                                                  if resolved.get("reasons") else ""))
-    for name in RESOLVER_FIELDS:
+    for name in fields:
         f = resolved.get(name)
         if not isinstance(f, dict):
             continue

@@ -315,7 +315,7 @@ def score_row(query, candidate_keys, ymd=None):
 
 # ── Index construction ─────────────────────────────────────────────────────
 
-def build_index(artists, musicians, venues, recordings):
+def build_index(artists, musicians, venues, recordings, engineers=()):
     """
     Precompute match keys for every searchable row.
 
@@ -326,6 +326,7 @@ def build_index(artists, musicians, venues, recordings):
       artist  {id, name, sort_name}
       musician     {id, name, sort_name, artist_ids: [int]}
       venue      {id, name, city, state, country}
+      engineer   {id, name, sort_name, aliases: [str]}   (optional)
       recording  {id, performance_id, artist_id, artist_name,
                   artist_sort_name, musician_names: [str], venue_name,
                   city, state, country, year, month, day, source,
@@ -334,13 +335,18 @@ def build_index(artists, musicians, venues, recordings):
     Normalisation happens once here rather than once per query term, which is
     what keeps the measured cost at ~15ms for the whole corpus.
     """
-    idx = {"artists": [], "musicians": [], "venues": [], "recordings": [], "albums": []}
+    idx = {"artists": [], "musicians": [], "venues": [], "recordings": [], "albums": [],
+           "engineers": []}
 
     for p in artists:
         idx["artists"].append({**p, "_keys": keys(p.get("name"), p.get("sort_name"))})
 
     for a in musicians:
         idx["musicians"].append({**a, "_keys": keys(a.get("name"), a.get("sort_name"))})
+
+    for e in engineers:
+        idx["engineers"].append({**e, "_keys": keys(e.get("name"), e.get("sort_name"),
+                                                    *e.get("aliases", []))})
 
     for v in venues:
         idx["venues"].append({
@@ -387,13 +393,14 @@ GROUP_LABELS = {
     "albums":     "Albums",
     "venues":     "Venues",
     "musicians":    "Musicians",
+    "engineers":    "Engineers",
 }
 
 # Fixed group order rather than reordering by best match. A dropdown whose
 # groups reshuffle between keystrokes is impossible to aim at — the user
 # starts moving toward a row that has already moved. Albums sits right after
 # Recordings/Shows.
-GROUP_ORDER = ("artists", "recordings", "albums", "venues", "musicians")
+GROUP_ORDER = ("artists", "recordings", "albums", "venues", "musicians", "engineers")
 
 
 def _sort_key_entity(entry):
@@ -449,7 +456,7 @@ def run_search(index, q, today_year=None):
     # is exactly the shape of matching an entity by name.
     if query.text_terms:
         entity_query = Query(query.raw, query.text_terms, [])
-        for key in ("artists", "venues", "musicians", "albums"):
+        for key in ("artists", "venues", "musicians", "albums", "engineers"):
             hits = []
             for row in index.get(key, []):
                 s = score_row(entity_query, row["_keys"])

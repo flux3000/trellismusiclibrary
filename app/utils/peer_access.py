@@ -264,6 +264,22 @@ def peer_visible_musician_ids(peer):
     return {aid for (aid,) in rows if aid is not None}
 
 
+def peer_visible_engineer_ids(peer):
+    """Engineers credited (any role) on a recording the peer can see. Live
+    recordings only; studio records carry no engineers."""
+    from app.models.recording import Recording
+    rec_ids = peer_visible_recording_ids(peer)
+    if not rec_ids:
+        return set()
+    out = set()
+    for r in (db.session.query(Recording.id, Recording.recording_engineer_id,
+                               Recording.transfer_engineer_id, Recording.mastering_engineer_id)
+              .filter(Recording.kind != "studio")):
+        if r[0] in rec_ids:
+            out.update(x for x in r[1:] if x is not None)
+    return out
+
+
 def peer_visible_genre_ids(peer):
     """Genres carried by artists with at least one visible recording."""
     from app.models.artist import Artist
@@ -287,6 +303,10 @@ def peer_can_access_venue(peer, venue_id):
 
 def peer_can_access_musician(peer, musician_id):
     return musician_id is not None and musician_id in peer_visible_musician_ids(peer)
+
+
+def peer_can_access_engineer(peer, engineer_id):
+    return engineer_id is not None and engineer_id in peer_visible_engineer_ids(peer)
 
 
 def peer_can_access_genre(peer, genre_id):

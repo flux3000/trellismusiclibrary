@@ -1061,6 +1061,10 @@ def _confirm_payload_from_resolved(resolved, scan):
         "lineage":            resolved.lineage.value,
         "source_tag":         resolved.source_tag.value,
         "etree_shnid":        resolved.shnid.value,
+        # Engineer names (live only; _do_confirm ignores them for a studio record).
+        "recording_engineer": resolved.recording_engineer.value,
+        "transfer_engineer":  resolved.transfer_engineer.value,
+        "mastering_engineer": resolved.mastering_engineer.value,
         "info_file_content":  scan.get("info_file_content"),
         "fingerprints":       scan.get("fingerprints"),
         "is_complete":        True,
@@ -1512,6 +1516,7 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
       "source":             "SBD",
       "quality":            "B+",
       "lineage":            "...",
+      "recording_engineer": "Bornfree",   # optional names; also transfer_engineer, mastering_engineer (live only)
       "notes":              "",
       "is_complete":        true,
       "info_file_content":  "...",
@@ -1888,6 +1893,9 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     )
     db.session.add(rec)
     db.session.flush()
+    # Engineers by name (found by name/alias or created); live recordings only.
+    from app.utils.engineers import apply_engineer_names
+    apply_engineer_names(rec, data)
     # Lomax runs made on this folder before it was saved now belong to the recording; a result the
     # page holds from a run it never filed is kept as a done run (replaces ai_research_json).
     if not lomax.repoint_folder(source_folder, rec.id) and ai_result:

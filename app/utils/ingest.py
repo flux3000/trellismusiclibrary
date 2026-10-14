@@ -20,7 +20,7 @@ from pathlib import Path
 from mutagen.flac import FLAC
 from mutagen import MutagenError
 from mutagen.mp3 import MP3
-from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX
+from mutagen.id3 import TPE1, TPE2, TALB, TDRC, TIT2, TRCK, TPOS, TXXX, TIPL
 import geonamescache as _geonamescache
 
 log = logging.getLogger(__name__)
@@ -983,6 +983,11 @@ def _first_tag(tags, keys):
     return None
 
 
+def _engineers_from_tags(tags):
+    from app.utils.engineers import engineers_from_tags
+    return engineers_from_tags(tags)
+
+
 def _container_from_tags(tags):
     """Container fields from one file's Vorbis comments (see _CONTAINER_TAG_KEYS)."""
     out = {}
@@ -996,6 +1001,9 @@ def _container_from_tags(tags):
         best = max(dates, key=len)             # "1977-05-08" beats "1977"
         out["concert_date"] = best
         out["year"] = best[:4]
+
+    # Engineer credits (ENGINEER "Name (role)", TIPL via the MP3 adapter, TAPER/TRANSFER).
+    out.update(_engineers_from_tags(tags))
 
     # A VENUE carrying "2015.02.27 - Ryman Auditorium - Nashville, TN" (seen in
     # the wild): the date and place fill fields the file left empty.
@@ -1037,6 +1045,14 @@ _ID3_PAIR_CLASS = {"TRCK": TRCK, "TPOS": TPOS}
 _TXXX_KEYS_WE_OWN = {"VENUE", "LOCATION", "SOURCE", "LINEAGE", "GENRE",
                      "PERFORMER", "COMPOSER", "COMMENT"}
 
+# ENGINEER ("Name (role)", multi-valued) is a virtual key on MP3: it lives in the
+# TIPL (involved people) frame as role/name pairs. Only these three roles are
+# ours; any other TIPL pair is left alone on write and ignored on read.
+_TIPL_ROLE_OF = {"recording": "recording engineer", "transfer": "transfer engineer",
+                 "mastering": "mastering engineer"}
+_TIPL_ROLE_BACK = {v: k for k, v in _TIPL_ROLE_OF.items()}
+_TIPL_ROLE_BACK.update({"engineer": "recording", "taper": "recording"})
+
 
 class _MP3TagAdapter:
     """
@@ -1074,7 +1090,32 @@ class _MP3TagAdapter:
             text = f"{text}/{total}"
         self._id3.setall(frame_id, [cls(encoding=3, text=[text])])
 
+    def _tipl_pairs(self):
+        frame = self._id3.get("TIPL")
+        return [list(p) for p in (frame.people if frame else [])]
+
+    def _engineer_values(self):
+        out = []
+        for pair in self._tipl_pairs():
+            role = _TIPL_ROLE_BACK.get(str(pair[0]).strip().lower()) if len(pair) > 1 else None
+            if role and str(pair[1]).strip():
+                out.append(f"{str(pair[1]).strip()} ({role})")
+        return out
+
+    def _set_engineers(self, values):
+        """Replace our engineer pairs in TIPL, keeping every foreign pair."""
+        from app.utils.engineers import parse_engineer_values
+        keep = [p for p in self._tipl_pairs()
+                if len(p) < 2 or str(p[0]).strip().lower() not in _TIPL_ROLE_BACK]
+        mine = [[_TIPL_ROLE_OF[r], n] for r, n in parse_engineer_values(values).items()]
+        people = keep + mine
+        self._id3.delall("TIPL")
+        if people:
+            self._id3.add(TIPL(encoding=3, people=people))
+
     def get(self, key, default=None):
+        if key == "ENGINEER":
+            return self._engineer_values() or default
         if key in _ID3_SIMPLE:
             frame = self._id3.get(_ID3_SIMPLE[key].__name__)
             return [str(frame.text[0])] if frame and frame.text else default
@@ -1096,7 +1137,9 @@ class _MP3TagAdapter:
     def __setitem__(self, key, value):
         values = value if isinstance(value, list) else [value]
         values = [str(v) for v in values]
-        if key in _ID3_SIMPLE:
+        if key == "ENGINEER":
+            self._set_engineers(values)
+        elif key in _ID3_SIMPLE:
             cls = _ID3_SIMPLE[key]
             self._id3.setall(cls.__name__, [cls(encoding=3, text=values)])
         elif key in _ID3_PAIR:
@@ -1112,6 +1155,7 @@ class _MP3TagAdapter:
     def keys(self):
         out = [k for k in _ID3_SIMPLE if k in self]
         out += [k for k in _ID3_PAIR if k in self]
+        out += ["ENGINEER"] if self._engineer_values() else []
         out += [frame.desc for frame in self._id3.getall("TXXX")]
         return out
 
@@ -1131,6 +1175,7 @@ class _MP3TagAdapter:
             self._id3.delall(frame_id)
         for key in _TXXX_KEYS_WE_OWN:
             self._id3.delall(f"TXXX:{key}")
+        self._set_engineers([])
 
     def save(self):
         self._mp3.save()
@@ -1278,6 +1323,10 @@ def build_recording_tags(recording):
     if recording.lineage: container_tags["LINEAGE"]     = recording.lineage
     if genre_name:        container_tags["GENRE"]       = genre_name
     if performers:        container_tags["PERFORMER"]   = performers   # multi-valued
+    # ENGINEER "Name (recording|transfer|mastering)", one value per person; live only.
+    from app.utils.engineers import engineer_tag_values
+    engineers = engineer_tag_values(recording)
+    if engineers:         container_tags["ENGINEER"]    = engineers    # multi-valued
 
     return container_tags, str(len(tracks))
 
@@ -2799,6 +2848,9 @@ def build_scan_payload(folder_path, info_override=None):
                 "country":      tag_country,
                 "source":       from_tags["container"].get("source"),
                 "lineage":      from_tags["container"].get("lineage"),
+                "recording_engineer": from_tags["container"].get("recording_engineer"),
+                "transfer_engineer":  from_tags["container"].get("transfer_engineer"),
+                "mastering_engineer": from_tags["container"].get("mastering_engineer"),
                 "tracks": [
                     {
                         "index":        t["index"],

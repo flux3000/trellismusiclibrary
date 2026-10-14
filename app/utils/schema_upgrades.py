@@ -295,6 +295,42 @@ def ensure_recording_completeness_checked_at(engine):
         raise RuntimeError(msg) from e
 
 
+def ensure_recording_engineer_columns(engine):
+    """Create the engineer / engineer_image / engineer_alias tables and add
+    recording.recording_engineer_id / transfer_engineer_id / mastering_engineer_id
+    when missing (2026-10-13). A database older than the feature never ran
+    create_all for the new tables, so they are created here (checkfirst).
+    Returns the list of recording columns added, None when nothing was added."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    wanted = ("recording_engineer_id", "transfer_engineer_id", "mastering_engineer_id")
+    try:
+        with engine.connect() as con:
+            names = {r[0] for r in con.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "recording" not in names:
+            return None
+        from app.models.engineer import Engineer, EngineerImage
+        from app.models.alias import EngineerAlias
+        for model in (Engineer, EngineerImage, EngineerAlias):
+            model.__table__.create(engine, checkfirst=True)
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(recording)"))}
+            added = [c for c in wanted if c not in cols]
+            for c in added:
+                con.execute(text(f"ALTER TABLE recording ADD COLUMN {c} INTEGER REFERENCES engineer(id) ON DELETE SET NULL"))
+        if not added:
+            return None
+        log.warning("schema: added recording engineer columns %s in %s", added, path)
+        return added
+    except SQLAlchemyError as e:
+        msg = f"Could not add the recording engineer columns to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
 def ensure_invite_code(engine):
     """Add peer_invite.code when the column is missing. Returns True when added,
     None when nothing was needed.

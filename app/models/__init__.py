@@ -6,6 +6,7 @@ from .artist import Artist, ArtistResource
 from .artist_image import ArtistImage
 from .musician import Musician, Membership
 from .musician_image import MusicianImage
+from .engineer import Engineer, EngineerImage
 from .venue import Venue
 from .venue_image import VenueImage
 from .event import Event
@@ -25,5 +26,5 @@ from .quality import QualityAnalysis, RecordingQuality
 from .node_setting import NodeSetting
 from .bulk_ingest import BulkIngestRun, BulkIngestItem
 from .download_job import DownloadJob
-from .alias import VenueAlias, ArtistAlias
+from .alias import VenueAlias, ArtistAlias, EngineerAlias
 from .lomax import LomaxRun, LomaxProposal, LomaxEasterEggSeen

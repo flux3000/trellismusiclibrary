@@ -56,7 +56,7 @@ bp = Blueprint("remotes", __name__)
 # as an empty page. tests/test_peer_surface_parity.py asserts all three.
 _ALLOWED_PREFIXES = {
     "me", "collections", "recordings", "performances", "artists",
-    "venues", "musicians", "genres", "stream", "search",
+    "venues", "musicians", "engineers", "genres", "stream", "search",
 }
 
 # Header names worth carrying in each direction. Everything else is dropped —
