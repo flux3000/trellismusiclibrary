@@ -575,7 +575,7 @@
      well as on .rec-view-shell so a stray .slide-panel outside that shell still
      resolves calc() rather than collapsing to width:auto. */
   --rec-panel-w: 42%;
-  --player-h:  108px;  /* 2026-10-13 (Ryan): 84 -> 108, larger controls and text */
+  --player-h:  84px;   /* was 68px — bar read as smushed with no vertical padding at all */
   --header-h:   58px;
   --r-sm: 4px;
   /* The three header-row controls (library join/select, Admin/Playback, search)
@@ -2800,7 +2800,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 .player-track-title {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--t0);
   font-weight: 500;
   white-space: nowrap;
@@ -2809,7 +2809,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 .player-track-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--t1);
   white-space: nowrap;
   overflow: hidden;
@@ -2817,7 +2817,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 .player-track-rec {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--t3);
   white-space: nowrap;
   overflow: hidden;
@@ -2829,7 +2829,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .player-controls {
@@ -2843,7 +2843,7 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
   border: none;
   color: var(--t1);
   cursor: pointer;
-  padding: 6px 10px;
+  padding: 5px 8px;
   border-radius: var(--r-sm);
   font-size: 14px;
   transition: color 0.1s, background 0.1s;
@@ -2853,8 +2853,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 .player-btn:hover { color: var(--t0); background: var(--bg-4); }
 
 .player-btn-play {
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   background: var(--accent);
   color: #fff;
   border-radius: 50%;
@@ -2872,8 +2872,8 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 
 /* SVG icons inside player buttons */
 .player-btn svg { display: block; }
-.player-btn-play svg { width: 15px; height: 17px; }
-.player-btn:not(.player-btn-play) svg { width: 22px; height: 17px; }
+.player-btn-play svg { width: 12px; height: 14px; }
+.player-btn:not(.player-btn-play) svg { width: 18px; height: 14px; }
 
 .player-progress {
   display: flex;
@@ -2883,12 +2883,12 @@ textarea.pp-inline-input { resize: vertical; font-family: var(--font); font-size
 }
 
 .player-time {
-  font-size: 11.5px;
+  font-size: 10px;
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;  /* was monospaced; tnum keeps the column aligned */
   color: var(--t2);
   flex-shrink: 0;
-  min-width: 34px;
+  min-width: 28px;
   text-align: center;
 }
 
@@ -3199,7 +3199,7 @@ input[type="range"].progress-bar {
 
 /* Player bar: a compact face so the right column never spills into the progress bar */
 .player-right { gap: 6px; }
-.player-right .skip-toggle-label { padding: 4px 10px; font-size: 12px; }
+.player-right .skip-toggle-label { padding: 3px 9px; font-size: 11px; }
 .player-right .vol-sep { margin: 0 2px; }
 .player-right input[type="range"].volume-bar { width: 56px; }
 
@@ -5512,7 +5512,7 @@ a.member-chip-name:hover { color: var(--accent); }
 }
 .ingest-xport-btn:hover { color: var(--t0); }
 .ingest-xport-btn svg { width: 14px; height: 14px; display: block; }
-/* Same accent-filled circle as .player-btn-play, 24px against its 40px. */
+/* Same accent-filled circle as .player-btn-play, 24px against its 32px. */
 .ingest-xport-play {
   width: 24px;
   height: 24px;
