@@ -254,6 +254,10 @@ class Config:
     # shows the raw code and explains what's missing instead.
     SHARE_BASE_URL = os.environ.get("SHARE_BASE_URL") or None
 
+    # Where the update notifier looks for the latest release. A static JSON file;
+    # see app/utils/update_check.py.
+    UPDATE_MANIFEST_URL = os.environ.get("UPDATE_MANIFEST_URL") or "https://trellismusiclibrary.com/releases/latest.json"
+
     # ── User avatars ──────────────────────────────────────────
     # Beside the database, NOT under LIBRARY_ROOT. Artist and venue photos live
     # in the music library because they are about its contents; a person's own

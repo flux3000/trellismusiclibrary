@@ -256,6 +256,7 @@ def _other_recordings_in_folder(recording, folder_rel):
         from app.models.recording import Recording
         return (db.session.query(Recording)
                 .filter(Recording.folder_path == folder_rel,
+                        Recording.location == "library",
                         Recording.id != getattr(recording, "id", None))
                 .count())
     except Exception:  # noqa: BLE001 — see docstring
@@ -304,6 +305,9 @@ def rename_recording_folder(recording, library_root, rename_folders=None):
             # No Flask/DB context and no explicit mode given -- fail CLOSED.
             return None
     if not rename_folders:
+        return None
+    # Folders in Workshop / Backlog are the person's working copies: never renamed.
+    if (getattr(recording, "location", None) or "library") != "library":
         return None
     performance = recording.performance
     if not performance:

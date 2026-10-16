@@ -168,7 +168,10 @@ def test_queue_found_release_is_passed_to_the_import(app, monkeypatch, tmp_path)
         _flac_with_tags(show / f"0{i}.flac", ARTIST="Bela Fleck", ALBUM="Solo Banjo Works",
                         TITLE=f"Song {i}", DATE="1992")
     seen = {}
-    monkeypatch.setattr(ingest, "_do_confirm", lambda payload, *a, **k: seen.update(payload) or {"recording_id": 1})
-    out = ingest.auto_confirm(str(show), None, force=True, mb_release_id="r1")
+    from app.models.user import User
+    uid = User.query.first().id
+    monkeypatch.setattr(ingest, "promote_to_library",
+                        lambda rec, user_id, payload, **k: seen.update(payload) or {"recording_id": rec.id})
+    out = ingest.auto_confirm(str(show), uid, force=True, mb_release_id="r1")
     assert out["status"] == "ingested"
     assert seen["mb_release_id"] == "r1" and seen["mb_release_status"] == "matched"

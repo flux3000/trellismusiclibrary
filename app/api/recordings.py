@@ -9,7 +9,12 @@ Routes:
   POST /api/recordings/<id>/write-tags     write Vorbis comments to FLAC files
   POST /api/recordings/<id>/info-file      save info-file text (DB, + disk if a .txt exists)
   DELETE /api/recordings/<id>[?delete_files=1]  delete the record, optionally the folder too
-  POST /api/recordings/<id>/move           move the folder out to Workshop/Backlog (unpublish)
+  POST /api/recordings/<id>/move           move the folder to Workshop/Backlog (from library, queue, workshop, backlog)
+  POST /api/recordings/<id>/trash          Queue/Workshop/Backlog: folder to system Trash, then delete the record
+  GET  /api/recordings/<id>/review         Review form data for a non-library recording
+  PUT  /api/recordings/<id>/draft          Review form autosave (confirms nothing unless confirm:true)
+  POST /api/recordings/open-folder         read a Workshop/Backlog folder with no recording, return its id
+  POST /api/recordings/move-folder         move a folder row with no recording (reads it first)
   POST /api/recordings/<id>/reprocess      Analyze Audio: score + signals + librosa, any recording
   POST /api/recordings/<id>/verify-checksums  (re-)validate fingerprint checksums
 """
@@ -28,6 +33,7 @@ from app.extensions import db
 from app.models.recording import Recording, RecordingFingerprint
 from app.models.collection import CollectionRecording
 from app.models.recording_event import RecordingEvent
+from app.models.bulk_ingest import BulkIngestItem
 from app.models.track import Track
 from app.models.performance import Performance
 from app.models.artist import Artist
@@ -37,10 +43,11 @@ from app.utils.ingest import (build_scan_payload, write_flac_tags, read_recordin
                               desired_track_tags)
 from app.utils.folder_naming import rename_recording_folder, unique_file_name
 from app.utils import node_settings
+from app.utils.paths import location_root, recording_folder_abs, queue_item_for
 from app.utils.file_naming import rename_plan, TemplateError
 from app.api.system import require_library
 from app.utils.pruning import prune_after_recording_delete
-from app.utils.serialize import (recording_row, derive_set_track_numbers,
+from app.utils.serialize import (recording_row, derive_set_track_numbers, show_card_extras,
                                  _primary_recording_image_url)
 from app.utils.paula import compute_paula_score
 from app.utils.checksums import (
@@ -110,6 +117,24 @@ def _image_chain_eager():
         .selectinload(Performance.venue)
         .selectinload(Venue.images),
     )
+
+
+@bp.route("/card-extras")
+@login_required
+def card_extras():
+    """Show-card extras for a page of list rows, so Card view can fill in what
+    the flat list rows do not carry. Published recordings only."""
+    ids = []
+    for part in (request.args.get("ids") or "").split(",")[:200]:
+        try:
+            ids.append(int(part))
+        except ValueError:
+            continue
+    if not ids:
+        return jsonify({})
+    recs = Recording.query.filter(Recording.id.in_(ids),
+                                  Recording.is_published.is_(True)).all()
+    return jsonify({str(r.id): show_card_extras(r) for r in recs})
 
 
 @bp.route("/recent")
@@ -460,6 +485,7 @@ def get_recording(recording_id):
         # normal and simply fail to play — the "empty state that is really a
         # failed fetch" trap, in its most confusing form.
         "is_published":         bool(rec.is_published),
+        "location":            rec.location or "library",
         "info_file_content":    rec.info_file_content,
         "notes":                rec.notes,
         "ai_research":          lomax.latest_result("recording", rec.id, ("recording", "resolution")),
@@ -746,8 +772,11 @@ def release_candidates(recording_id):
         return jsonify({"error": "MusicBrainz lookups are disabled"}), 503
 
     artist_name = rec.performance.artist.name if rec.performance and rec.performance.artist else None
+    # The Search row may carry edited Artist / Title values; blank or absent falls back to the recording's own.
+    artist_name = (request.args.get("artist") or "").strip() or artist_name
+    title = (request.args.get("title") or "").strip() or rec.title
     musicbrainz.reset_breaker()
-    candidates = musicbrainz.search_release(artist_name, rec.title)
+    candidates = musicbrainz.search_release(artist_name, title)
     # A person is choosing: every same-titled release is shown, whatever its
     # track count. The count filter is for the automatic match only; here it
     # hid the full release of an incomplete Album (Solo Banjo Works, 2 of 24).
@@ -960,8 +989,8 @@ def delete_recording(recording_id):
     delete_files = request.args.get("delete_files") in ("1", "true", "yes")
     files_deleted, files_error = False, None
     if delete_files:
-        library_root = os.path.realpath(str(current_app.config.get("LIBRARY_ROOT", "")))
-        target = os.path.realpath(os.path.join(library_root, rec.folder_path or ""))
+        library_root = os.path.realpath(location_root(rec.location))
+        target = os.path.realpath(recording_folder_abs(rec) or library_root)
         if not library_root or not rec.folder_path:
             files_error = "No library folder recorded for this recording"
         elif not (target != library_root and target.startswith(library_root + os.sep)):
@@ -1056,9 +1085,8 @@ def save_recording_info_file(recording_id):
     ))
     db.session.commit()
 
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder = os.path.join(library_root, rec.folder_path or "")
-    if not rec.folder_path or not os.path.isdir(folder):
+    folder = recording_folder_abs(rec)
+    if not folder or not os.path.isdir(folder):
         return jsonify({"ok": True, "wrote_file": False, "filename": None,
                         "reason": "Recording folder is not reachable"})
 
@@ -1087,7 +1115,53 @@ def save_recording_info_file(recording_id):
     return jsonify({"ok": True, "wrote_file": True, "filename": target, "reason": None})
 
 
-# ── POST /api/recordings/<id>/move ───────────────────────────────────────────
+# ── Moving, trashing and reviewing a recording that is not on the shelf ─────
+
+def _working_source(rec):
+    """(folder_abs, stop_at) for a recording that is not in the library, or (None, error)."""
+    from app.utils import bulk_ingest_run as bir
+    if rec.location == "queue":
+        it = queue_item_for(rec)
+        if it is None:
+            return None, "This recording has no folder in the Queue"
+        return bir.item_abs_path(it), bir.item_base(it.run.root)
+    return recording_folder_abs(rec), location_root(rec.location)
+
+
+def _event(rec, kind, note):
+    db.session.add(RecordingEvent(recording_id=rec.id, user_id=current_user.id,
+                                  event_type=kind, note=note))
+
+
+def _relocate(rec, destination):
+    """Move a non-library recording's whole folder (no flattening) into Workshop or
+    Backlog: files first, then location and folder_path. A name collision gets " (2)".
+    Returns (payload, status)."""
+    from app.api.quality import move_folder_to_triage
+    from app.utils import bulk_ingest_run as bir
+    src, stop_at = _working_source(rec)
+    if src is None:
+        return {"error": stop_at}, 400
+    it = queue_item_for(rec) if rec.location == "queue" else None
+    if it is not None and bir.is_in_library(it.run.root):
+        return {"error": "Items in the library are never moved"}, 409
+    if it is not None and it.ingest_requested:
+        return {"error": "This recording is already queued for import"}, 409
+    payload, status = move_folder_to_triage(src, destination, stop_at=stop_at)
+    if status != 200:
+        return payload, status
+    was = rec.location
+    rec.location = destination
+    rec.folder_path = os.path.basename(payload["moved_to"])
+    for row in (db.session.query(BulkIngestItem)
+                .filter(BulkIngestItem.recording_id == rec.id,
+                        BulkIngestItem.status.notin_(("ingested", "moved")))):
+        row.status, row.ingest_requested = "moved", False
+    _event(rec, "moved_out_of_library" if was == "library" else "moved",
+           f"Moved to {destination} as {rec.folder_path}")
+    db.session.commit()
+    return {"ok": True, "destination": destination, "moved_to_name": rec.folder_path}, 200
+
 
 @bp.route("/<int:recording_id>/move", methods=["POST"])
 @login_required
@@ -1096,28 +1170,12 @@ def move_recording_out(recording_id):
     Body: { destination: "workshop" | "backlog" }
     Returns: { ok, destination, moved_to_name }
 
-    Takes an ingested recording back off the shelf: physically moves its folder
-    out of the library into one of the TRIAGE_DIRS and sets is_published=False.
-    The library record survives in full — metadata, lineage, checksums, event
-    history — so a show that comes back does not have to be re-ingested.
-
-    Deliberately its OWN endpoint rather than reusing POST /api/quality/move.
-    That one takes an absolute folder path from the client, which is fine for
-    triage — the client is looking at a scan of a folder it named — but it is
-    exactly what the library's path obfuscation forbids: the frontend knows
-    recording IDs and nothing else, and Flask resolves paths. Here the id is
-    the input and the path is derived server-side.
-
-    Same paranoia as the delete-files path, for the same reason: this moves
-    user files. The source must resolve INSIDE LIBRARY_ROOT, be a directory,
-    and not be a mount point or root; the destination must be a configured
-    TRIAGE_DIR. Never overwrites — a name collision gets " (2)", " (3)", …
-    rather than merging two shows, matching /api/quality/move's behaviour.
-
-    Files move BEFORE the flag flips. A failed move leaves a published
-    recording whose folder is exactly where it always was, which is the state
-    the user can see and retry from; flipping the flag first would hide a show
-    that never actually went anywhere.
+    Moves a recording's folder to Workshop or Backlog and sets its location. From the
+    library that takes the show off the shelf (the record survives in full); from the
+    Queue, Workshop or Backlog it moves the whole folder as it is. The id is the input
+    and the path is derived server-side; the destination must be a configured working
+    folder. Files move BEFORE the location changes, so a failed move leaves the
+    recording where it was. Never overwrites: a collision gets " (2)", " (3)".
     """
     import shutil
 
@@ -1130,12 +1188,15 @@ def move_recording_out(recording_id):
     if destination not in triage_dirs:
         return jsonify({"error": f"Unknown destination {destination!r}; "
                                  f"expected one of {sorted(triage_dirs)}"}), 400
+    if rec.location == destination:
+        return jsonify({"error": f"This recording is already in {destination}"}), 409
 
-    if not rec.is_published:
-        return jsonify({"error": "This recording is already out of the library"}), 409
+    if rec.location != "library":
+        body, code = _relocate(rec, destination)
+        return jsonify(body), code
 
-    library_root = os.path.realpath(str(current_app.config.get("LIBRARY_ROOT", "")))
-    src = os.path.realpath(os.path.join(library_root, rec.folder_path or ""))
+    library_root = os.path.realpath(location_root("library"))
+    src = os.path.realpath(recording_folder_abs(rec) or library_root)
     if not library_root or not rec.folder_path:
         return jsonify({"error": "No library folder recorded for this recording"}), 400
     if not (src != library_root and src.startswith(library_root + os.sep)):
@@ -1162,20 +1223,213 @@ def move_recording_out(recording_id):
     except OSError as e:
         return jsonify({"error": f"Move failed: {e}"}), 500
 
-    rec.is_published = False
-    # folder_path is left alone on purpose — see the model comment. The event is
-    # the durable record of where the folder actually went, and it is the only
-    # one: nothing else on the row can express "it is in Workshop now".
-    db.session.add(RecordingEvent(
-        recording_id = rec.id,
-        user_id      = current_user.id,
-        event_type   = "moved_out_of_library",
-        note         = f"Moved to {destination} as {os.path.basename(target)}",
-    ))
+    rec.location     = destination
+    rec.folder_path  = os.path.basename(target)
+    _event(rec, "moved_out_of_library", f"Moved to {destination} as {os.path.basename(target)}")
     db.session.commit()
 
     return jsonify({"ok": True, "destination": destination,
                     "moved_to_name": os.path.basename(target)})
+
+
+@bp.route("/<int:recording_id>/trash", methods=["POST"])
+@login_required
+def trash_recording(recording_id):
+    """POST /api/recordings/<id>/trash
+    Returns: { ok }
+
+    Trash for a recording anywhere: Queue, Workshop, Backlog or the library (View
+    Recording's Actions menu, Ryan 2026-10-15). The folder goes to the system Trash
+    FIRST; only then is the record deleted, and then whatever it created that nobody
+    confirmed or enriched. A folder that is already gone does not keep the record.
+    """
+    from app.api.quality import trash_folder_path
+    from app.utils.recording_delete import remove_recording
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.location == "library":
+        # Same guards the old Delete used: inside the library, never the root.
+        # And never a folder another recording also lives in: trashing it would
+        # take that recording's files with it.
+        library_root = os.path.realpath(location_root("library"))
+        src = os.path.realpath(recording_folder_abs(rec) or library_root)
+        if not rec.folder_path or not src.startswith(library_root + os.sep):
+            return jsonify({"error": "This recording's folder is not inside the library"}), 400
+        if (db.session.query(Recording.id)
+                .filter(Recording.id != rec.id, Recording.location == "library",
+                        Recording.folder_path == rec.folder_path).first()):
+            return jsonify({"error": "Another recording shares this folder, so it was not moved to the Trash"}), 409
+        stop_at = library_root
+    else:
+        src, stop_at = _working_source(rec)
+    if src and os.path.isdir(src):
+        payload, status = trash_folder_path(src, stop_at=stop_at)
+        if status != 200:
+            return jsonify(payload), status
+    for row in (db.session.query(BulkIngestItem)
+                .filter(BulkIngestItem.recording_id == rec.id,
+                        BulkIngestItem.status.notin_(("ingested", "moved")))):
+        row.status, row.ingest_requested = "moved", False
+    remove_recording(rec.id)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/<int:recording_id>/review", methods=["GET"])
+@login_required
+def review_recording(recording_id):
+    """GET /api/recordings/<id>/review
+    The Review form's data for a recording that is not in the library: the scan of its
+    folder (as POST /scan returns it) plus `draft`, what is saved on the recording."""
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.location == "library":
+        return jsonify({"error": "This recording is in the library"}), 409
+    folder, _stop = _working_source(rec)
+    if not folder or not os.path.isdir(folder):
+        return jsonify({"error": "The folder is not on disk"}), 404
+    resp = build_scan_payload(folder)
+    if resp is None:
+        return jsonify({"error": "No audio files found in folder"}), 422
+    known_artists = [p.name for p in Artist.query.all()]
+    known_venues = [{"name": v.name, "city": v.city, "state": v.state, "country": v.country}
+                    for v in Venue.query.all()]
+    resp["paula"] = compute_paula_score(resp, known_artists, known_venues)
+    from app.utils.published import working_folder_name
+    resp["working_folder"] = working_folder_name(folder)
+    resp["recording_id"] = rec.id
+    resp["location"] = rec.location
+    resp["folder_path"] = folder
+    from app.api.ingest import recording_draft
+    resp["draft"] = recording_draft(rec)
+    return jsonify(resp)
+
+
+@bp.route("/<int:recording_id>/draft", methods=["PUT"])
+@login_required
+def save_draft(recording_id):
+    """PUT /api/recordings/<id>/draft
+    Body: the Review form's payload (any subset of its keys), plus optional
+    `confirm: true` (the person is leaving the form), `kind_set: true`.
+    Returns: { ok, status, reasons }
+
+    The Review form's autosave. Writes whatever is sent onto the recording (incomplete
+    data is allowed: the Workshop is a workspace), re-runs a Queue row's verdict so a
+    fixed Needs Review row becomes Ready, and confirms NOTHING: the act's confirmed
+    mark, learned aliases and the Queue re-check wait for `confirm`, which the form
+    sends when the person leaves, imports or moves.
+    """
+    from app.api.ingest import (save_recording_payload, mark_person_edited, confirm_signals_pre,
+                                confirm_signals_post, KIND_EVENT, kind_chosen)
+    from app.utils import bulk_ingest_run as bir
+    rec = db.session.get(Recording, recording_id)
+    if not rec:
+        return jsonify({"error": "Not found"}), 404
+    if rec.location == "library":
+        return jsonify({"error": "This recording is in the library"}), 409
+    data = request.get_json(silent=True) or {}
+    confirm = bool(data.pop("confirm", False))
+    kind_set = bool(data.pop("kind_set", False))
+    data.pop("source_folder_path", None)             # the client never names a path
+    data.pop("recording_id", None)
+    data["unattended"] = not confirm
+    folder, _stop = _working_source(rec)
+    try:
+        save_recording_payload(data, current_user.id, rec, location=rec.location, source_folder=folder)
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+    mark_person_edited(rec, current_user.id)
+    if kind_set and not kind_chosen(rec):
+        db.session.add(RecordingEvent(recording_id=rec.id, user_id=current_user.id,
+                                      event_type=KIND_EVENT, note=rec.kind))
+    item = queue_item_for(rec) if rec.location == "queue" else None
+    bir.refresh_item_from_recording(item, rec, kind_set=kind_set or kind_chosen(rec))
+    if confirm:
+        confirm_signals_pre(rec, data)
+    db.session.commit()
+    if confirm:
+        confirm_signals_post(rec, data, folder)
+    return jsonify({"ok": True, "status": item.status if item is not None else None,
+                    "reasons": [r for r in (item.reason or "").split(",") if r] if item is not None else []})
+
+
+def _folder_in(which, name):
+    """Absolute path of a folder named in Downloads, Workshop or Backlog, or None.
+    `name` is one folder name, never a path."""
+    from app.utils.downloads_dir import downloads_dir
+    if not name or name in (".", "..") or os.sep in name or "/" in name:
+        return None
+    root = (downloads_dir() if which == "downloads"
+            else (current_app.config.get("TRIAGE_DIRS") or {}).get(which))
+    if not root:
+        return None
+    path = os.path.join(str(root), name)
+    return path if os.path.isdir(path) else None
+
+
+@bp.route("/open-folder", methods=["POST"])
+@login_required
+def open_folder():
+    """POST /api/recordings/open-folder   Body: { which: "workshop" | "backlog", name }
+    Returns: { recording_id }
+
+    A Workshop or Backlog folder with no recording (it was put there by hand, or before
+    recordings were tracked) is read first, which creates its recording there; then the
+    caller opens Review on it."""
+    from app.api.ingest import read_folder_into_recording
+    data = request.get_json(silent=True) or {}
+    which = (data.get("which") or "").lower()
+    if which not in ("workshop", "backlog"):
+        return jsonify({"error": "Unknown folder"}), 400
+    path = _folder_in(which, (data.get("name") or "").strip())
+    if path is None:
+        return jsonify({"error": "Folder not found"}), 404
+    rec, out = read_folder_into_recording(path, which, current_user.id)
+    if rec is None:
+        return jsonify({"error": "This folder cannot be reviewed", "reasons": out.get("reasons")}), 422
+    return jsonify({"recording_id": rec.id})
+
+
+@bp.route("/move-folder", methods=["POST"])
+@login_required
+def move_folder():
+    """POST /api/recordings/move-folder   Body: { which: "downloads"|"workshop"|"backlog", name, destination }
+    Returns: { ok, recording_id|null }
+
+    Move for a folder row that has no recording: the folder is read first (a readable
+    one gets its recording), then moved whole to Workshop or Backlog and the recording
+    placed there. A folder that cannot be read is still moved, with no recording."""
+    from app.api.ingest import read_folder_into_recording
+    from app.api.quality import move_folder_to_triage
+    from app.utils.recording_delete import remove_recording
+    data = request.get_json(silent=True) or {}
+    which = (data.get("which") or "").lower()
+    destination = (data.get("destination") or "").lower()
+    if which not in ("downloads", "workshop", "backlog") or destination not in ("workshop", "backlog"):
+        return jsonify({"error": "Unknown folder"}), 400
+    if which == destination:
+        return jsonify({"error": f"This folder is already in {destination}"}), 409
+    path = _folder_in(which, (data.get("name") or "").strip())
+    if path is None:
+        return jsonify({"error": "Folder not found"}), 404
+    rec, _out = read_folder_into_recording(path, which if which != "downloads" else destination,
+                                           current_user.id)
+    created = rec is not None and which == "downloads"
+    stop_at = (current_app.config.get("TRIAGE_DIRS") or {}).get(which) if which != "downloads" else None
+    payload, status = move_folder_to_triage(path, destination, stop_at=stop_at)
+    if status != 200:
+        if created:                                          # not moved: leave no row behind
+            remove_recording(rec.id)
+            db.session.commit()
+        return jsonify(payload), status
+    if rec is not None:
+        rec.location, rec.folder_path = destination, os.path.basename(payload["moved_to"])
+        _event(rec, "moved", f"Moved to {destination} as {rec.folder_path}")
+        db.session.commit()
+    return jsonify({"ok": True, "recording_id": rec.id if rec is not None else None})
 
 
 # ── POST /api/recordings/<id>/write-tags ──────────────────────────────────────
@@ -1265,8 +1519,7 @@ def rename_files_action(recording_id):
     except TemplateError as e:
         return jsonify({"error": str(e)}), 400
 
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder_abs   = os.path.join(str(library_root), rec.folder_path)
+    folder_abs   = recording_folder_abs(rec)
 
     renamed = 0
     errors  = []
@@ -1339,8 +1592,7 @@ def reveal_folder(recording_id):
     if not rec:
         return jsonify({"error": "Not found"}), 404
 
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder_abs   = os.path.join(str(library_root), rec.folder_path)
+    folder_abs   = recording_folder_abs(rec)
 
     if not os.path.isdir(folder_abs):
         return jsonify({"error": "This recording's folder no longer exists on disk."}), 404
@@ -1557,8 +1809,7 @@ def verify_checksums(recording_id):
     if not rec:
         return jsonify({"error": "Not found"}), 404
 
-    library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder_abs   = os.path.join(str(library_root), rec.folder_path)
+    folder_abs   = recording_folder_abs(rec)
     checked, now = _rematch_and_verify_checksums(rec, folder_abs)
 
     return jsonify({

@@ -15,14 +15,14 @@ import json
 
 from flask import Blueprint, jsonify, request, current_app
 from flask_login import login_required, current_user
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models.artist import Artist, ArtistResource
 from app.models.artist_image import ArtistImage
 from app.utils.entity_images import set_primary
-from app.utils.published import on_shelf
+from app.utils.published import on_shelf, list_all_requested, entity_listed
 from app.models.genre import Genre
 from app.models.musician import Musician, Membership
 from app.models.performance import Performance
@@ -100,13 +100,17 @@ def search_artists():
 def list_artists():
     """All artists with recording counts + member names — powers the sidebar."""
     rows = (
-        db.session.query(Artist, func.count(Recording.id).label("rc"))
+        db.session.query(
+            Artist,
+            func.count(case((Recording.is_published.is_(True), Recording.id))).label("rc"),
+            func.count(Recording.id).label("total"))
         .outerjoin(Performance, Performance.artist_id == Artist.id)
-        .outerjoin(Recording,   (Recording.performance_id == Performance.id) & Recording.is_published.is_(True))
+        .outerjoin(Recording,   Recording.performance_id == Performance.id)
         .group_by(Artist.id)
         .order_by(func.coalesce(Artist.sort_name, Artist.name))
-        .all()
     )
+    show_all = list_all_requested(request.args)
+    rows = [(a, rc) for a, rc, total in rows.all() if entity_listed(rc, total, show_all)]
     # Primary photo id per artist, for the Artists index tiles. One grouped
     # query, not `p.images[0]` per row — this endpoint is called on every
     # sidebar render, and on a 184-artist library that would be 184 extra round

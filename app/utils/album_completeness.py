@@ -23,7 +23,8 @@ def _tag_scan(rec, tracks):
     """A scan-shaped dict of the tracks' tags, or None when the files are not
     there to read (moved out, unmounted)."""
     from app.utils.ingest import open_tags
-    root = os.path.join(str(current_app.config.get("LIBRARY_ROOT") or ""), rec.folder_path or "")
+    from app.utils.paths import recording_folder_abs
+    root = recording_folder_abs(rec)
     files, tag_tracks = [], []
     for t in tracks:
         path = os.path.join(root, t.file_path or "")

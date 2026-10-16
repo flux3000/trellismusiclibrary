@@ -42,9 +42,10 @@ def test_peer_performance_payload_carries_stage_beside_event():
 def test_view_recording_stage_is_editable_only_through_the_shared_helper():
     assert "makeInlineEditable(document.getElementById('rec-f-stage')" in APP_JS
     # Playback mode (canEdit false): rendered as plain text, and only when a stage exists.
-    assert "(stageStr ? `<span class=\"rec-dot\">·</span><span class=\"rec-f-loc\">${esc(stageStr)}</span>` : '')" in APP_JS
+    # The date line is an ordered item list (separators are added when it is joined).
+    assert "(stageStr ? `<span class=\"rec-f-loc\">${esc(stageStr)}</span>` : '')" in APP_JS
     # Edit mode: the editable span is gated by the same canEdit as Event.
-    assert re.search(r"\$\{canEdit\s*\n\s*\? `<span class=\"rec-dot\">·</span><span class=\"rec-f rec-f-stage pp-editable", APP_JS)
+    assert re.search(r"canEdit\s*\n\s*\? `<span class=\"rec-f rec-f-stage pp-editable", APP_JS)
 
 
 def test_stage_is_wired_on_every_ingest_surface():

@@ -20,10 +20,12 @@ def _tag_evidence(rec, library_root, max_files=3):
     audio files. Unreadable or missing files give nothing."""
     from app.utils.ingest import open_tags
     tag_roles, comments = {}, []
-    if not library_root or not rec.folder_path:
+    from app.utils.paths import recording_folder_abs
+    folder = recording_folder_abs(rec, library_root)
+    if not library_root or not folder:
         return tag_roles, {}
     for t in list(rec.tracks)[:max_files]:
-        path = os.path.join(library_root, rec.folder_path, t.file_path or "")
+        path = os.path.join(folder, t.file_path or "")
         try:
             audio = open_tags(path)
         except Exception:  # noqa: BLE001 - a bad file is just no evidence

@@ -278,8 +278,10 @@ def analyse_recording(recording, library_root, db_session, *, reanalyze=True):
     n_ok   = 0
     errors = []
 
+    from app.utils.paths import recording_folder_abs
+    folder_abs = recording_folder_abs(recording, library_root)
     for track in recording.tracks:
-        abs_path = f"{library_root}/{recording.folder_path}/{track.file_path}"
+        abs_path = f"{folder_abs}/{track.file_path}"
         log.info("Analysing %s", abs_path)
 
         status = analyse_and_store_track(track, abs_path, db_session,

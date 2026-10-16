@@ -135,8 +135,8 @@ class Artist(db.Model):
     # always NULL for a row only an unattended import has touched. Never cleared once set. The
     # resolver counts an exact match to a confirmed Artist as an independent source for the
     # artist (reader/confidence.py); see mark_artist_confirmed in utils/artists.py.
-    # scripts/migrate_add_artist_confirmed.py adds it to an existing database and
-    # backfills every existing row.
+    # Added to existing databases (and backfilled on every existing row) by the
+    # 0001_baseline Alembic revision.
     confirmed_at = db.Column(db.DateTime, nullable=True)
 
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

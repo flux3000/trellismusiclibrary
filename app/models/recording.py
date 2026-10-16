@@ -10,6 +10,8 @@ never exposed to the frontend. The API serves audio by track ID only.
 """
 
 from datetime import datetime, timezone
+from sqlalchemy import event
+from sqlalchemy.ext.hybrid import hybrid_property
 from app.extensions import db
 
 
@@ -41,33 +43,50 @@ class Recording(db.Model):
     # (restricts streaming to other users in future multi-user builds)
     is_official    = db.Column(db.Boolean, nullable=False, default=False)
 
-    # Path to recording folder, relative to LIBRARY_ROOT — never sent to frontend.
+    # Path to recording folder, relative to the root `location` names (LIBRARY_ROOT
+    # for "library") — never sent to frontend. Resolve with
+    # app.utils.paths.recording_folder_abs, never by joining LIBRARY_ROOT.
     # Indexed (N4): process() and _reconcile_review_items() both look a
     # recording up by folder_path per item, and that query was a full table
     # scan that grows with the library.
     folder_path    = db.Column(db.String(512), nullable=False, index=True)
 
-    # In the library, or back out at the workbench?
+    # Where the recording is. THE source of truth for "is it on the shelf".
     #
-    # True  — the folder lives under LIBRARY_ROOT at folder_path and the show is
-    #         part of the browsable collection. Every row ingested before this
-    #         column existed backfills to True, which is correct: being in the
-    #         database used to mean exactly this.
-    # False — "Move to Workshop/Backlog" physically moved the folder OUT of the
-    #         library. The audio still exists and the metadata, lineage,
-    #         checksums and event history ingest produced are all still here;
-    #         the show is simply off the shelf.
+    #   queue     read into the Queue; its files are still where the Queue found
+    #             them (no folder of its own: see paths.recording_folder_abs,
+    #             which resolves it through the linked BulkIngestItem)
+    #   workshop  a working folder; folder_path is relative to that folder
+    #   backlog   same
+    #   library   on the shelf; folder_path is relative to LIBRARY_ROOT
     #
-    # Why a flag rather than deleting the row: deleting throws away everything
-    # ingest learned, so a show that comes back has to be re-ingested from
-    # scratch.
-    #
-    # ⚠ folder_path is deliberately NOT rewritten on a move. It stays as the
-    # library-relative path the show HAD, because it is only meaningful relative
-    # to LIBRARY_ROOT and the folder is no longer under it. Where the folder
-    # actually went is recorded in the RecordingEvent the move writes.
-    is_published   = db.Column(db.Boolean, nullable=False, default=True,
-                               server_default="1")
+    # `is_published` (below) is derived from this: published exactly when the
+    # location is 'library'.
+    location       = db.Column(db.String(16), nullable=False, default="library",
+                               server_default="library", index=True)
+
+    # LEGACY. The old is_published column, kept in the table (and mapped, so the
+    # schema check stays clean) until a later revision drops it once every
+    # install has run this version. Nothing reads it; a mapper event keeps it
+    # equal to (location == 'library') so a build that still reads it, after a
+    # rollback, sees the right answer.
+    _is_published_legacy = db.Column("is_published", db.Boolean, nullable=False,
+                                     default=True, server_default="1")
+
+    def _is_published_get(self):
+        return self.location == "library"
+
+    def _is_published_set(self, value):
+        # Compatibility for fixtures only. Production code sets `location`.
+        if value:
+            self.location = "library"
+        elif (self.location or "library") == "library":
+            self.location = "workshop"
+
+    def _is_published_expr(cls):
+        return cls.location == "library"
+
+    is_published = hybrid_property(_is_published_get, _is_published_set, expr=_is_published_expr)
 
     # Original folder name as ingested (before any renaming)
     original_folder_name = db.Column(db.String(512), nullable=True)
@@ -228,3 +247,18 @@ class RecordingFingerprint(db.Model):
 
     def __repr__(self):
         return f"<RecordingFingerprint {self.fingerprint_type} recording={self.recording_id}>"
+
+
+@event.listens_for(Recording, "before_insert")
+def _sync_legacy_on_insert(_mapper, _connection, target):
+    target._is_published_legacy = (target.location or "library") == "library"
+
+
+@event.listens_for(Recording, "before_update")
+def _sync_legacy_on_update(_mapper, _connection, target):
+    # Only when the location itself changed: a row from before this change that
+    # still says (library, is_published = 0) must keep that mark until the boot
+    # pass (app.utils.published) has placed it.
+    from sqlalchemy import inspect
+    if inspect(target).attrs.location.history.has_changes():
+        target._is_published_legacy = (target.location or "library") == "library"

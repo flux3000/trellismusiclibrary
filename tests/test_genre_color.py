@@ -88,5 +88,5 @@ def test_picker_put_sends_only_color_and_index_reflects_it(app):
     assert c.put(f"/api/genres/{gid}", json={"color": "#AABBCC"}).status_code == 200
     g = _db.session.get(Genre, gid)
     assert g.color == "#aabbcc" and g.name == "A" and g.description == "keep"
-    row = next(r for r in c.get("/api/genres/?index=1").get_json() if r["id"] == gid)
+    row = next(r for r in c.get("/api/genres/?index=1&all=1").get_json() if r["id"] == gid)
     assert row["color"] == "#aabbcc"

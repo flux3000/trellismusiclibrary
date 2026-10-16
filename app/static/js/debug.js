@@ -168,6 +168,7 @@
           <button class="dev-pane-btn" data-pane="network">Network <span class="dev-count" id="dev-c-network">0</span></button>
           <button class="dev-pane-btn" data-pane="server">Server</button>
           <button class="dev-pane-btn" data-pane="ingest">Import</button>
+          <button class="dev-pane-btn" data-pane="version">Version</button>
         </div>
         <div class="dev-head-right">
           <label class="dev-check"><input type="checkbox" id="dev-fails-only"> Failures only</label>
@@ -210,6 +211,7 @@
         if (pane === 'errors') { seenErrors = errors.length; updateBadge() }
         pane === 'server' ? startServerPoll() : stopServerPoll()
         pane === 'ingest' ? startIngestPoll() : stopIngestPoll()
+        if (pane === 'version') loadVersion()
         render()
       })
     })
@@ -263,6 +265,7 @@
     if (pane === 'network') els.body.innerHTML = renderNetwork()
     if (pane === 'server')  els.body.innerHTML = renderServer()
     if (pane === 'ingest')  els.body.innerHTML = renderIngest()
+    if (pane === 'version') els.body.innerHTML = renderVersion()
   }
 
   function updateCounts() {
@@ -463,6 +466,65 @@
   }
 
   window.trellisDebug = { open, close, toggle, refresh: render }
+
+  // ── Version pane ──────────────────────────────────────────────────────────
+  // One fetch each time the pane is selected; no polling.
+  let versionInfo = null, versionErr = null
+
+  async function loadVersion() {
+    versionInfo = null; versionErr = null
+    render()
+    try {
+      const res = await _fetch('/api/debug/info', { credentials: 'same-origin' })
+      if (!res.ok) throw new Error('HTTP ' + res.status)
+      versionInfo = await res.json()
+    } catch (e) {
+      versionErr = (e && e.message) || 'request failed'
+    }
+    if (pane === 'version') render()
+  }
+
+  function renderVersion() {
+    if (versionErr)   return empty('Version unavailable.', esc(versionErr))
+    if (!versionInfo) return empty('Loading…', '')
+    const i = versionInfo, a = i.app || {}, s = i.schema || {}, u = i.update || {}, p = i.paths || {}
+    const st = i.startup
+    const kb = n => (n / 1024 / 1024).toFixed(1) + ' MB'
+    const sections = [
+      ['App', [
+        ['Name', a.name], ['Version', a.version], ['Installed', a.installed],
+        ['Python', a.python], ['SQLite', a.sqlite], ['Alembic', a.alembic],
+      ]],
+      ['Schema', [
+        ['Stored', s.stored || 'none'], ['Head', s.head],
+        ['Pending', (s.pending || []).length ? s.pending.join(', ') : 'none'],
+        ...(s.error ? [['Error', s.error]] : []),
+      ]],
+      ['This start', st ? [
+        ['Action', st.action], ['From', st.from || 'none'], ['To', st.to || 'none'],
+        ['Backup', st.backup || 'none'], ['At', st.at],
+      ] : [['Result', 'none']]],
+      ['Backups', (i.backups || []).length
+        ? i.backups.map(b => [b.name, kb(b.size) + '  ' + b.modified])
+        : [['Files', 'none']]],
+      ['Update check', [
+        ['Current', u.current], ['Latest', u.latest || 'none'], ['Available', u.available],
+        ['Skipped', u.skipped], ['Enabled', u.enabled],
+        ...(u.error ? [['Error', u.error]] : []),
+      ]],
+      ['Paths', [
+        ['Data', p.data_dir], ['Database', p.database], ['Library', p.library_root],
+      ]],
+    ]
+    return `<div class="dev-net">${sections.map(([title, rows]) => `
+      <div class="dev-ver-h">${esc(title)}</div>
+      ${rows.map(([k, v]) => `
+      <div class="dev-net-row dev-ver-row">
+        <span class="dev-net-method">${esc(k)}</span>
+        <span class="dev-net-url">${esc(v == null ? '' : v)}</span>
+      </div>`).join('')}`).join('')}</div>`
+  }
+
 
   // ══ Helpers ═══════════════════════════════════════════════════════════════
 

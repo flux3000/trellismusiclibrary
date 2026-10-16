@@ -23,7 +23,9 @@ API_JS = (ROOT / "app/static/js/api.js").read_text(encoding="utf-8")
 def _review():
     i = APP_JS.index("function renderIngestReview()")
     j = APP_JS.index("function fmtDur(", i)
-    return APP_JS[i:j]
+    # The Import payload is built by _ingestReviewPayload, shared with the autosave.
+    k = APP_JS.index("function _ingestReviewPayload(")
+    return APP_JS[i:j] + APP_JS[k:APP_JS.index("function _asStop()", k)]
 
 
 # ── server ──────────────────────────────────────────────────────────────────
@@ -178,21 +180,22 @@ def test_queue_uses_album_skill_for_studio_rows():
 
 def test_mb_tab_wiring_and_data_paths():
     r = _review()
-    assert "API.ingest.releaseCandidates(val('f-artist'), st.title, (ingest.tracks || []).length)" in r
+    assert "API.ingest.releaseCandidates(v.artist, v.title, (ingest.tracks || []).length)" in r
     assert "(res && res.candidates)" in r and "((await API.ingest.releaseDetail(mbid)) || {}).release" in r
     assert "api/ingest/release-candidates?artist=" in API_JS and "api/ingest/release-detail?mbid=" in API_JS
     # Search only on a click; fills only empty fields; no score shown; Unlink wording reused.
-    assert "addEventListener('click', search)" in r
+    assert "mbReleasePanelWire(root, {" in r and "search," in r
     assert "!titleEl.value.trim()" in r and "!yearEl.value.trim()" in r and r.count("/^track\\s*\\d+$/i") == 1
-    assert "pp-mb-cand-score" not in r and "Unlink" in r and "Linked by you" in r
+    assert "pp-mb-cand-score" not in r and "unlink: () =>" in r and "how: 'Linked by you'" in r
+    assert ">Unlink</button>" in APP_JS
     # Saved with the record, studio only; cleared with the folder. Not shown above the
     # tracks any more: the MusicBrainz tab shows the release facts.
     assert "payload.mb_release_id = (payload.kind === 'studio' && ingest.mb && ingest.mb.picked)" in r
     assert 'id="ingest-mb-facts"' not in r and "ingest.mb = null" in r
-    assert "mbReleaseDetailsHtml(st.picked.detail)" in r
-    # Facts line is label, catalog number, country, as on View Recording.
-    f = APP_JS[APP_JS.index("function ingestMbFactsHtml()"):][:500]
-    assert "[p.label, p.catalog_number, p.country]" in f
+    assert "detail: st.picked.detail" in r and "mbReleasePanelHtml({" in r
+    # One shared release panel for Add Recording and View Recording.
+    assert "mbReleasePanelHtml({" in APP_JS[APP_JS.index("function renderReleaseBlock()"):][:1500]
+    assert "ingestMbFactsHtml" not in APP_JS and "mbFindHtml" not in APP_JS
 
 
 def test_notes_field_present_and_sent():
@@ -201,7 +204,7 @@ def test_notes_field_present_and_sent():
     assert "f.notes           = document.getElementById('f-notes').value.trim()" in APP_JS
     # Sent as `notes` via the form spread, read by the server.
     assert "...f," in r
-    assert 'notes                = data.get("notes")' in (ROOT / "app/api/ingest.py").read_text()
+    assert '("notes", "notes", None)' in (ROOT / "app/api/ingest.py").read_text()   # save_recording_payload
     # View Recording shows rec.notes for every kind.
     assert "id=\"rec-notes\"" in APP_JS
 

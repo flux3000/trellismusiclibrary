@@ -140,11 +140,15 @@ def test_mode_defaults_and_idempotent_start(app, env):
 def test_hold_run_leaves_items_ready_scored_and_library_empty(env):
     before = _db.session.query(Recording).count()
     run = _hold_run(env, "S1", flagged=("F1",))
+    # Every folder that reads gets its recording at once, in the Queue.
+    queued = _db.session.query(Recording).filter(Recording.location == "queue").count()
+    assert queued == 2
     assert run.status == "done"
     ready, flagged = _item(run, "S1"), _item(run, "F1")
     assert ready.status == "ready" and ready.kind == "live"
     assert flagged.status == "review" and "needs_month" in flagged.reason
-    assert _db.session.query(Recording).count() == before
+    assert _db.session.query(Recording).count() == before + queued       # nothing in the library
+    assert _db.session.query(Recording).filter(Recording.location == "library").count() == before
     assert (env.incoming / "S1").is_dir()                       # nothing moved
     row = _db.session.query(QualityAnalysis).filter(
         QualityAnalysis.folder_path.like("%/S1")).first()
@@ -253,15 +257,19 @@ def test_ingest_anyway_refuses_exact_duplicate(app, env):
     # is forced it is an exact content duplicate.
     h = "abcd1234abcd1234abcd1234abcd1234"
     _flagged(env.incoming, "F1")
-    (env.incoming / "F1" / "a.ffp").write_text(f"{h} *01.flac\n")
     run = _hold_run(env, flagged=())
     assert _item(run, "F1").status == "review"
-    _good(env.incoming, "Twin")
-    (env.incoming / "Twin" / "a.ffp").write_text(f"{h} *01.flac\n")
-    run2 = _run(env.incoming, mode="auto")
+    # F1 gets its checksum file only after it was read (a Queue recording with the same
+    # checksums would make the twin a duplicate of F1, not the other way round).
+    (env.incoming / "F1" / "a.ffp").write_text(f"{h} *01.flac\n")
+    other = env.incoming.parent / "incoming2"
+    other.mkdir()
+    _good(other, "Twin")
+    (other / "Twin" / "a.ffp").write_text(f"{h} *01.flac\n")
+    run2 = _run(other, mode="auto")
     bir.discover(run2)
     bir.process(run2, _never_stop)
-    assert _item(run2, "Twin").status in ("ingested", "skipped")
+    assert _item(run2, "Twin").status == "ingested"
     c = app.test_client()
     _admin(c)
     it = _item(run, "F1")

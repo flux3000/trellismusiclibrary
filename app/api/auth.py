@@ -36,7 +36,8 @@ def login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     login_user(user)
-    return jsonify({"id": user.id, "username": user.username, "role": user.role})
+    # The profile too, so the header shows the picture after a fresh sign-in.
+    return jsonify({**profile_payload(user), "role": user.role})
 
 
 @bp.route("/logout", methods=["POST"])

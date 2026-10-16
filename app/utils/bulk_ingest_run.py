@@ -68,7 +68,7 @@ _WORKER_THREAD = None
 # (it picks one item at a time across runs, so rebuilding per item would
 # re-parse every stored fingerprint for every folder). process() falls back to
 # building its own when this is None, i.e. when called directly.
-_dedup_cache = {"map": None}
+_dedup_cache = {"map": None, "unpub": None}
 
 # Run ids whose folder walk must be repeated even though the worker already
 # did it once: a finished Review First run started again over the same folder
@@ -257,11 +257,24 @@ def queue_runs():
     return listed_runs()
 
 
+def page_runs():
+    """The runs behind the Queue PAGE: every run not cleared by Reset Queue,
+    oldest first. Wider than queue_runs(): a finished source whose leftovers
+    are only failed or skipped rows, and its Imported tabs, stay on the page
+    until Reset, however many sources have started since. The worker, pause
+    and resume still act on listed_runs() only."""
+    return (db.session.query(BulkIngestRun)
+            .filter(BulkIngestRun.cleared_at.is_(None))
+            .order_by(BulkIngestRun.id.asc())
+            .all())
+
+
 def queued_paths(exclude_run_id=None):
     """Absolute path of every folder already in the Queue, so a second source
     that overlaps an earlier one (a Downloads folder, then all of Downloads)
-    never puts the same folder in the Queue twice."""
-    ids = [r.id for r in listed_runs() if r.id != exclude_run_id]
+    never puts the same folder in the Queue twice. Covers every run the page
+    shows, finished ones included."""
+    ids = [r.id for r in page_runs() if r.id != exclude_run_id]
     if not ids:
         return set()
     rows = (db.session.query(BulkIngestItem.rel_path, BulkIngestRun.root)
@@ -373,7 +386,8 @@ def discover(run):
     # outside source is judged by content (find_duplicates) at process time.
     existing_folder_paths = set() if not in_library else {
         _norm_rel(fp) for (fp,) in
-        db.session.query(Recording.folder_path).filter(Recording.folder_path.isnot(None)).all()
+        db.session.query(Recording.folder_path).filter(Recording.folder_path.isnot(None),
+                                                       Recording.location == "library").all()
     }
 
     def _rel_of(abs_path):
@@ -458,6 +472,42 @@ def _build_dedup_map():
     return hash_to_recording
 
 
+def _build_unpublished_map():
+    """{checksum_hex: recording_id} for every recording that is not in the library
+    (Queue, Workshop, Backlog): an exact duplicate of one of them is linked to it, not
+    read in again. Kept current as rows are created (_record_hashes)."""
+    out = {}
+    rows = (db.session.query(RecordingFingerprint.recording_id, RecordingFingerprint.content)
+            .join(Recording, Recording.id == RecordingFingerprint.recording_id)
+            .filter(RecordingFingerprint.fingerprint_type.in_(_DEDUP_FP_TYPES),
+                    Recording.location != "library")
+            .order_by(RecordingFingerprint.recording_id.asc()).all())
+    for recording_id, content in rows:
+        for entry in parse_checksum_file(content or ""):
+            out.setdefault(entry["checksum"], recording_id)
+    return out
+
+
+def recording_of_folder(folder_abs):
+    """The recording a Queue row's folder is: the one linked to a waiting item that
+    points at this folder, or None."""
+    want = os.path.realpath(str(folder_abs))
+    for r in page_runs():
+        rel = os.path.relpath(want, item_base(r.root))
+        if rel == ".." or rel.startswith(".." + os.sep):
+            continue
+        rp = _norm_rel(rel) if rel != "." else "."
+        it = (db.session.query(BulkIngestItem)
+              .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.rel_path == rp,
+                      BulkIngestItem.recording_id.isnot(None),
+                      BulkIngestItem.status.notin_(("ingested", "moved", "skipped"))).first())
+        if it is not None:
+            rec = db.session.get(Recording, it.recording_id)
+            if rec is not None and rec.location != "library":
+                return rec
+    return None
+
+
 def _record_hashes(recording_id, hash_to_recording):
     """
     After an item is ingested: fold its own FFP/ST5 hashes into the run's
@@ -498,6 +548,8 @@ def process(run, stop_flag):
     user_id = _owner_user_id()
     hash_to_recording = (_dedup_cache["map"] if _dedup_cache["map"] is not None
                          else _build_dedup_map())
+    if _dedup_cache["unpub"] is None:
+        _dedup_cache["unpub"] = _build_unpublished_map()
 
     while True:
         if stop_flag():
@@ -604,7 +656,8 @@ def _in_downloads(folder_abs):
     return parent == os.path.realpath(downloads_dir())
 
 
-def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_recording):
+def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_recording,
+                  hold_override=False):
     """
     Work one item: gate -> resolve -> dedup -> verdict, then ingest it (auto
     run, or a person's request) or park it as 'ready' (hold run).
@@ -619,7 +672,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
     library_root = base
     requested = bool(item.ingest_requested)
     force = requested and item.status in ("review", "pending")
-    hold = run.mode == "hold" and not requested
+    hold = hold_override or (run.mode == "hold" and not requested)
     applied = applied_values(run)
     item.status = "in_progress"
     db.session.commit()
@@ -632,7 +685,8 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         # source; an outside one is judged by content in auto_confirm.
         already = (in_library and
                    db.session.query(Recording.id)
-                   .filter(Recording.folder_path == item.rel_path)
+                   .filter(Recording.folder_path == item.rel_path,
+                           Recording.location == "library")
                    .first())
         if already:
             item.status = "skipped"
@@ -655,11 +709,15 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         outcome = auto_confirm(folder_abs, user_id,
                                hash_cache=hash_to_recording,
                                hold=hold, force=force, applied=applied,
-                               mb_release_id=_mb.get("mbid") if _mb.get("found") else None)
+                               mb_release_id=_mb.get("mbid") if _mb.get("found") else None,
+                               item=item, unpublished_cache=_dedup_cache["unpub"])
         status   = outcome["status"]
         reasons  = outcome["reasons"]
         resolved = outcome["resolved"]
         item.format = outcome.get("format")
+        # Set for an exact duplicate (skipped): the recording it duplicates, in the
+        # library, Queue, Workshop or Backlog. None for everything else.
+        item.duplicate_of = outcome.get("duplicate_of")
 
         # Live folders that wait for a person are scored now, before anything
         # enters the library, so the person sees the number while deciding.
@@ -698,6 +756,10 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             "meta_band": meta_band,
             "meta_band_v": 2,        # completeness band (schema_upgrades.ensure_bulk_meta_band skips these)
             "listening_quality": quality,
+            # Same artist and date as recordings already catalogued: a flag on
+            # the row, never a reason to hold it. {"id", "in"}: "in" is None
+            # for the library, else "workshop" / "backlog".
+            "same_show": _same_show_flags(resolved),
             "track_count":  track_count,
             "tracks":       track_titles,
             "duration_sec": duration_sec,
@@ -725,6 +787,7 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.status = "ready"
             item.reason = None
             item.kind = resolved.kind if resolved else None
+            _row_made(item, outcome)
             if run.id in _IMPORT_READY_ON_READ:
                 # Import All Ready was pressed during this read: import it too.
                 item.ingest_requested = True
@@ -736,13 +799,15 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
             item.kind = resolved.kind if resolved else None
             if {"incomplete_release", "incomplete_recording"} & set(reasons or []):
                 item.detail = outcome.get("detail")      # "1 of 91 tracks"
+            _row_made(item, outcome)
             _write_review_staging(folder_abs, library_root, item)
         elif status == "skipped":
             # Exact content duplicate (spec section 9, resolved
             # question 1) -- never ingested a second time.
             item.status = "skipped"
             item.reason = reason_str or "duplicate_content"
-            item.duplicate_of = outcome.get("duplicate_of")
+            item.detail = outcome.get("detail")          # where the recording it duplicates is
+            _drop_queue_row(item)
         else:  # "failed" -- no_audio / unreadable
             item.status = "failed"
             item.reason = reason_str
@@ -790,6 +855,77 @@ def _process_item(run, item, folder_abs, base, in_library, user_id, hash_to_reco
         item.ingest_requested = False
         db.session.commit()
         traceback.print_exc()
+
+
+def _row_made(item, outcome):
+    """The read made (or refreshed) this item's recording: link it and fold its
+    fingerprints into the worker's duplicate map."""
+    rid = outcome.get("recording_id")
+    if not rid:
+        return
+    item.recording_id = rid
+    if _dedup_cache["unpub"] is not None:
+        _record_hashes(rid, _dedup_cache["unpub"])
+
+
+def _drop_queue_row(item):
+    """The item turned out to be an exact duplicate: it has no recording of its own.
+    A queue row a person never touched is removed; one they edited is kept."""
+    if not item.recording_id:
+        return
+    rec = db.session.get(Recording, item.recording_id)
+    if rec is not None and rec.location == "queue":
+        from app.api.ingest import person_edited
+        if person_edited(rec):
+            return
+        from app.utils.recording_delete import remove_recording
+        remove_recording(rec.id)
+    item.recording_id = None
+
+
+def refresh_item_from_recording(item, rec, kind_set=False):
+    """After a person's save: re-run the row's verdict from what is now saved, so a
+    fixed Needs Review row becomes Ready (and the reverse). Reasons that are about the
+    folder rather than the values (incomplete, unsupported, move failed) stay; reasons
+    about the values are recomputed; conflict and tentative flags clear, the person
+    having looked at the values. The Queue row's summary follows the saved values.
+    Rows that are not waiting (ready/review) are left alone."""
+    if item is None or item.status not in _QUEUE_WAITING:
+        return
+    from app.api.ingest import has_artist
+    perf = rec.performance
+    prior = [r for r in (item.reason or "").split(",") if r]
+    drop = ("needs_artist", "needs_date", "needs_month", "needs_day", "conflict:", "tentative:")
+    keep = [r for r in prior if not r.startswith(drop) and not (r == "needs_type" and kind_set)]
+    reasons = list(keep)
+    if not has_artist(rec):
+        reasons.append("needs_artist")
+    if rec.kind == "live":
+        if not perf.start_year:
+            reasons.append("needs_date")
+        elif not perf.start_month:
+            reasons.append("needs_month")
+        elif not perf.start_day:
+            reasons.append("needs_day")
+    if kind_set:
+        item.kind = rec.kind
+    item.reason = ",".join(reasons) or None
+    item.status = "review" if reasons else "ready"
+    if item.status == "ready":
+        item.detail = None
+    venue = perf.venue
+    meta = _meta_dict(item)
+    meta.update({
+        "artist": perf.artist.name if has_artist(rec) else None,
+        "date_text": format_partial_date(perf.start_year, perf.start_month, perf.start_day),
+        "venue": venue.name if venue else None,
+        "event": perf.event.name if perf.event else None,
+        "city": venue.city if venue else perf.city,
+        "state": venue.state if venue else perf.state,
+        "country": venue.country if venue else perf.country,
+        "source": rec.source, "lineage": rec.lineage, "title": rec.title,
+    })
+    item.meta = json.dumps(meta)
 
 
 def relink_missing_folder_items():
@@ -1045,25 +1181,45 @@ def reread_waiting(run):
     return n
 
 
-def mark_folder_ingested(folder_path, rec):
-    """A folder imported through the Add Recording form: its Queue row (any
-    listed run) becomes ingested and points at the recording. Without this a
-    Ready row stayed Ready, and a later re-read found the folder gone."""
-    if not folder_path or rec is None:
-        return 0
-    want = os.path.realpath(str(folder_path))
-    n = 0
-    for r in listed_runs():
-        rel = os.path.relpath(want, item_base(r.root))
-        if rel == ".." or rel.startswith(".." + os.sep):
+def _same_show_flags(resolved):
+    """One entry per place the same show already exists (library, Workshop,
+    Backlog), newest recording id first. [] when none."""
+    seen, out = set(), []
+    for d in sorted((d for d in (resolved.duplicates if resolved else []) if d.kind == "show"),
+                    key=lambda d: -d.recording_id):
+        if d.location in seen:
             continue
-        rp = _norm_rel(rel) if rel != "." else "."
-        for it in (db.session.query(BulkIngestItem)
-                   .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.rel_path == rp,
-                           BulkIngestItem.status.notin_(("ingested", "moved")))):
-            it.status, it.reason, it.detail = "ingested", None, None
-            it.recording_id, it.kind, it.ingest_requested = rec.id, rec.kind, False
-            n += 1
+        seen.add(d.location)
+        out.append({"id": d.recording_id, "in": d.location})
+    return out
+
+
+def mark_folder_ingested(folder_path, rec):
+    """A recording was imported: every Queue row that is that recording (its own item,
+    and any waiting row that points at its folder) becomes ingested. Without this a
+    Ready row stayed Ready, and a later re-read found the folder gone."""
+    if rec is None:
+        return 0
+    n = 0
+    for it in (db.session.query(BulkIngestItem)
+               .filter(BulkIngestItem.recording_id == rec.id,
+                       BulkIngestItem.status.notin_(("ingested", "moved"))).all()):
+        it.status, it.reason, it.detail = "ingested", None, None
+        it.kind, it.ingest_requested = rec.kind, False
+        n += 1
+    if folder_path:
+        want = os.path.realpath(str(folder_path))
+        for r in listed_runs():
+            rel = os.path.relpath(want, item_base(r.root))
+            if rel == ".." or rel.startswith(".." + os.sep):
+                continue
+            rp = _norm_rel(rel) if rel != "." else "."
+            for it in (db.session.query(BulkIngestItem)
+                       .filter(BulkIngestItem.run_id == r.id, BulkIngestItem.rel_path == rp,
+                               BulkIngestItem.status.notin_(("ingested", "moved")))):
+                it.status, it.reason, it.detail = "ingested", None, None
+                it.recording_id, it.kind, it.ingest_requested = rec.id, rec.kind, False
+                n += 1
     if n:
         db.session.commit()
     return n
@@ -1263,6 +1419,7 @@ def _start_worker(run_id=None, app=None):
             discovered = set()
             try:
                 _dedup_cache["map"] = _build_dedup_map()
+                _dedup_cache["unpub"] = _build_unpublished_map()
                 while True:
                     _WAKE.clear()
                     try:
@@ -1306,6 +1463,7 @@ def _start_worker(run_id=None, app=None):
                 with _WORKER_LOCK:
                     if _WORKER_THREAD in (None, threading.current_thread()):
                         _dedup_cache["map"] = None
+                        _dedup_cache["unpub"] = None
 
     with _WORKER_LOCK:
         if _WORKER_THREAD is not None and _WORKER_THREAD.is_alive():
@@ -1391,8 +1549,9 @@ def resume_run(run):
 def reset_queue(run):
     """
     Empty a run's Queue and close the run. Removes every item that did not
-    become a recording (and was not sent to Backlog/Workshop); files on disk
-    are never touched. Idempotent.
+    become a library recording (and was not sent to Backlog/Workshop), together with
+    the queue recordings they own and the people, places and events those created
+    that nobody confirmed; files on disk are never touched. Idempotent.
 
     The run is marked done first, so the worker stops picking it between
     items. An item that is 'in_progress' right now is mid-ingest inside the
@@ -1403,6 +1562,17 @@ def reset_queue(run):
     if run.status != "done":
         run.status = "done"
         run.finished_at = datetime.now(timezone.utc)
+    # The rows still in the Queue are recordings (location 'queue'); they go with it,
+    # then whatever they created that nobody confirmed or enriched. Files are never touched.
+    from app.utils.recording_delete import remove_recording
+    gone = [(i.id, i.recording_id) for i in db.session.query(BulkIngestItem).filter(
+        BulkIngestItem.run_id == run.id,
+        BulkIngestItem.status.notin_(("ingested", "moved", "in_progress")))]
+    for _item_id, rid in gone:
+        if rid:
+            rec = db.session.get(Recording, rid)
+            if rec is not None and rec.location == "queue":
+                remove_recording(rid)
     removed = (db.session.query(BulkIngestItem)
                .filter(BulkIngestItem.run_id == run.id,
                        BulkIngestItem.status.notin_(("ingested", "moved", "in_progress")))

@@ -8,6 +8,10 @@ Routes:
   POST /api/system/library-recheck   drop the cache and probe immediately
   GET  /api/system/library-layout    is new material filed under an artist folder
   PUT  /api/system/library-layout    change that
+  GET  /api/system/update            update notifier status (admin)
+  PUT  /api/system/update            {enabled} turn the check on/off
+  POST /api/system/update/skip       {version}
+  POST /api/system/update/check      check now
 
 Note what is deliberately NOT here: an endpoint that mounts the drive. Mount
 ownership belongs to the LaunchAgent (tools/mount_library.py), which runs
@@ -20,12 +24,13 @@ drive-dependent endpoints wear so they fail cleanly instead of half-working.
 
 from functools import wraps
 
-from flask import Blueprint, jsonify, Response, current_app
+from flask import Blueprint, jsonify, Response, current_app, request
 from config import is_installed_app
 from flask_login import login_required
 
 from app.utils import library_mount
 from app.utils import node_settings
+from app.utils import update_check
 from app.utils.authz import admin_required
 
 bp = Blueprint("system", __name__)
@@ -155,6 +160,42 @@ def require_library(kind="json"):
 # It governs NEW material only. Recordings already in the library are never
 # relocated by changing it -- folder_path is what locates a recording, and
 # rename_recording_folder() renames the leaf under whatever parent it finds.
+
+# ── Update notifier (check-only) ─────────────────────────────────────────────
+
+@bp.route("/update", methods=["GET"])
+@admin_required
+def get_update():
+    return jsonify(update_check.status())
+
+
+@bp.route("/update", methods=["PUT"])
+@admin_required
+def put_update():
+    enabled = (request.get_json(silent=True) or {}).get("enabled")
+    if not isinstance(enabled, bool):
+        return jsonify({"error": "enabled must be true or false"}), 400
+    update_check.set_enabled(enabled)
+    return jsonify(update_check.status())
+
+
+@bp.route("/update/skip", methods=["POST"])
+@admin_required
+def skip_update():
+    version = (request.get_json(silent=True) or {}).get("version")
+    try:
+        update_check.skip_version(version)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(update_check.status())
+
+
+@bp.route("/update/check", methods=["POST"])
+@admin_required
+def check_update_now():
+    update_check.check(force=True)
+    return jsonify(update_check.status())
+
 
 @bp.route("/library-layout", methods=["GET"])
 @login_required

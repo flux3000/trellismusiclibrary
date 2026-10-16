@@ -243,8 +243,14 @@ def runs():
 
 
 def _queue_or_latest():
-    """The runs behind the Queue, or the most recent run when the Queue is
-    empty (so the page still has something to report right after it drains)."""
+    """The runs behind the Queue page: every run Reset Queue has not cleared
+    (see bulk_ingest_run.page_runs)."""
+    return bulk_ingest_run.page_runs()
+
+
+def _applied_runs():
+    """The runs Bulk Value Apply is stored on: the working Queue, or the most
+    recent uncleared run when the Queue is empty."""
     runs = bulk_ingest_run.queue_runs()
     if runs:
         return runs
@@ -258,6 +264,12 @@ def _serialize_queue(runs):
     tallies summed over its runs; status running if any run runs, else paused
     if any is paused; mode, root and Bulk Value Apply from the newest run."""
     parts = [_serialize_run(r) for r in runs]
+    # Skipped rows count only for the newest source (Ryan, 2026-10-15): they ask
+    # nothing of anyone, so an older source's skips drop off the page while its
+    # failed rows, which do need action, stay until Reset. Mirrors items().
+    for p in parts[:-1]:
+        p["counts"] = {k: v for k, v in (p.get("counts") or {}).items() if k != "skipped"}
+        p["skipped_reasons"] = {}
     out = dict(parts[-1])
     out["id"] = "queue"
     statuses = {p["status"] for p in parts}
@@ -456,6 +468,8 @@ def items(run_id):
         # progress, ready, review, skipped, failed. Discovery order. 'moved'
         # items went to Backlog/Workshop: terminal, not queued.
         q = q.filter(BulkIngestItem.status.notin_(("ingested", "moved")))
+        # Skipped rows only from the newest source; see _serialize_queue.
+        q = q.filter(or_(BulkIngestItem.status != "skipped", BulkIngestItem.run_id == max(ids or [0])))
         # Skipped rows (exact duplicates) sit at the bottom: they are out of
         # the work.
         order = (case((BulkIngestItem.status == "skipped", 1), else_=0), BulkIngestItem.id.asc())
@@ -587,6 +601,7 @@ def _item_meta_fields(it):
         "track_count": meta.get("track_count"),
         "duration_sec": meta.get("duration_sec"),
         "tracks":      meta.get("tracks") or [],
+        "same_show":   meta.get("same_show") or [],
         # Metadata band for the unified ingest queue table -- computed
         # once at extraction time (bulk_ingest_run.py::process), never
         # here, so listing a page of items is still one query.
@@ -750,26 +765,62 @@ def set_applied(run_id):
     return jsonify(_serialize_run(run))
 
 
+@bp.route("/items/<int:item_id>/review", methods=["POST"])
+@admin_required
+def review_item(item_id):
+    """POST /api/bulk-ingest/items/<id>/review
+    Returns: { recording_id } | { item, error }
+
+    Review on a Queue row. The row's recording is opened as it is; a waiting row that
+    has none yet (it predates recordings, or was never read) is read now, held, so it
+    gets one, and Review opens on that."""
+    item = db.session.get(BulkIngestItem, item_id)
+    if item is None:
+        return jsonify({"error": "item not found"}), 404
+    if item.recording_id and db.session.get(Recording, item.recording_id) is not None:
+        return jsonify({"recording_id": item.recording_id})
+    if item.status not in ("pending", "ready", "review"):
+        return jsonify({"error": f"item is {item.status}, not waiting"}), 409
+    if item.ingest_requested:
+        return jsonify({"error": "item is already queued for import"}), 409
+    run = item.run
+    base = bulk_ingest_run.item_base(run.root)
+    bulk_ingest_run._process_item(run, item, bulk_ingest_run.item_abs_path(item), base,
+                                  bulk_ingest_run.is_in_library(run.root),
+                                  bulk_ingest_run._owner_user_id(), bulk_ingest_run._build_dedup_map(),
+                                  hold_override=True)
+    db.session.refresh(item)
+    if not item.recording_id:
+        return jsonify({"error": "This folder cannot be reviewed", "status": item.status,
+                        "reason": item.reason}), 422
+    return jsonify({"recording_id": item.recording_id})
+
+
 @bp.route("/items/<int:item_id>/move", methods=["POST"])
 @admin_required
 def move_item(item_id):
     """
-    Send a waiting item's folder to Backlog or Workshop instead of ingesting it,
-    through the same guarded move Review & Ingest's Move uses (app/api/quality.py
-    ::move_folder_to_triage, which also refuses a folder still downloading and
-    takes FS_LOCK). Bring-in runs only: an in-place folder is the person's own
-    library and Trellis never moves it.
+    Send a waiting item's folder to Backlog or Workshop, or to the Trash, instead of
+    ingesting it, through the same guarded move Review's Move uses
+    (app/api/quality.py::move_folder_to_triage, which also refuses a folder still
+    downloading and takes FS_LOCK). Bring-in runs only: an in-place folder is the
+    person's own library and Trellis never moves it.
+
+    A failed row (unreadable, no audio, truncated, folder not found) has no recording
+    and its only action is Trash. A moved row's recording goes with the folder: its
+    location and folder_path change and the row leaves the Queue.
     """
-    from app.api.quality import move_folder_to_triage, trash_folder_path
+    from app.api.quality import trash_folder_path
+    from app.api.recordings import _relocate
+    from app.utils.recording_delete import remove_recording
 
     item = db.session.get(BulkIngestItem, item_id)
     if item is None:
         return jsonify({"error": "item not found"}), 404
     if bulk_ingest_run.is_in_library(item.run.root):
         return jsonify({"error": "Items in the library are never moved"}), 409
-    # A truncated folder can be moved aside too (2026-10-13).
-    if item.status not in ("ready", "review") and not (
-            item.status == "failed" and item.reason == "truncated_file"):
+    dest = ((request.get_json(silent=True) or {}).get("dest") or "").strip().lower()
+    if item.status not in ("ready", "review") and not (item.status == "failed" and dest == "trash"):
         return jsonify({"error": f"item is {item.status}, not ready or review"}), 409
     # Already handed to the worker for ingest: it moves the folder into the
     # library without FS_LOCK, so a Move now would race it for the same files.
@@ -778,15 +829,23 @@ def move_item(item_id):
     err = _converting_error([item])
     if err:
         return err
-    dest = ((request.get_json(silent=True) or {}).get("dest") or "").strip().lower()
+    rec = db.session.get(Recording, item.recording_id) if item.recording_id else None
+    if rec is not None and rec.location == "queue" and dest != "trash":
+        body, code = _relocate(rec, dest)
+        if code != 200:
+            return jsonify(body), code
+        db.session.refresh(item)
+        return jsonify({**_serialize_item(item), "moved_to": body["moved_to_name"]})
+    src = bulk_ingest_run.item_abs_path(item)
     if dest == "trash":
-        payload, status = trash_folder_path(bulk_ingest_run.item_abs_path(item),
-                                            stop_at=bulk_ingest_run.item_base(item.run.root))
+        payload, status = trash_folder_path(src, stop_at=bulk_ingest_run.item_base(item.run.root))
     else:
-        payload, status = move_folder_to_triage(bulk_ingest_run.item_abs_path(item), dest,
-                                                stop_at=bulk_ingest_run.item_base(item.run.root))
+        from app.api.quality import move_folder_to_triage
+        payload, status = move_folder_to_triage(src, dest, stop_at=bulk_ingest_run.item_base(item.run.root))
     if status != 200:
         return jsonify(payload), status
+    if rec is not None and rec.location == "queue":
+        remove_recording(rec.id)          # the folder is in the Trash: the record goes, then its orphans
     item.status = "moved"
     item.ingest_requested = False
     db.session.commit()
@@ -980,7 +1039,7 @@ def queue_ingest_ready():
 def queue_set_applied():
     """Bulk Value Apply for the whole Queue: stored on every run behind it
     (a source added later copies it, see start_run)."""
-    runs = _queue_or_latest()
+    runs = _applied_runs()
     for run in runs:
         resp = set_applied(run.id)
         if isinstance(resp, tuple) and resp[1] >= 400:

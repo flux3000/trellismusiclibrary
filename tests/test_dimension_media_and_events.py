@@ -334,7 +334,10 @@ def test_list_endpoints_carry_the_index_tile_fields(api, app, person, event):
     # conftest seeds no genre — nothing in the base graph needs one — so this
     # test supplies its own rather than asserting against an empty list, which
     # would pass whatever the payload shape turned out to be.
-    _db.session.add(Genre(name="Bluegrass", color="#7a8b99"))
+    genre = Genre(name="Bluegrass", color="#7a8b99")
+    _db.session.add(genre)
+    _db.session.flush()
+    perf.artist.genre_id = genre.id      # a genre is listed once an act of it has a library recording
     _db.session.commit()
 
     contract = {

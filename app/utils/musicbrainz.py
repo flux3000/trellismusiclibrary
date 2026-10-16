@@ -457,6 +457,9 @@ def _summarise_release(release):
         "country":          release.get("country") or None,
         "track_count":      track_count,
         "score":            release.get("score"),
+        "artist_credit":    "".join(
+            (ac.get("name") or (ac.get("artist") or {}).get("name") or "") + (ac.get("joinphrase") or "")
+            for ac in (release.get("artist-credit") or []) if isinstance(ac, dict)) or None,
         # Credited artist names, for the title-only fallback's own artist
         # check in search_release(). Not stored anywhere.
         "artist_names":     [ac.get("name") or (ac.get("artist") or {}).get("name") or ""

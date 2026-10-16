@@ -124,12 +124,22 @@ class Field:
 
 @dataclass
 class Duplicate:
-    """One duplicate hit. kind is 'folder' | 'content' | 'show'."""
+    """One duplicate hit. kind is 'folder' | 'content' | 'show' | 'unpublished'.
+
+    'content': an exact duplicate (every track's hash) of a recording in the library.
+    'unpublished': an exact duplicate of a recording that is not in the library (Queue,
+    Workshop or Backlog). `location` names where; it is also set on a 'show' hit whose
+    recording is not in the library (None = in the library).
+    """
     kind: str
     recording_id: int
+    location: str = None
 
     def to_dict(self):
-        return {"kind": self.kind, "recording_id": self.recording_id}
+        d = {"kind": self.kind, "recording_id": self.recording_id}
+        if self.location:
+            d["location"] = self.location
+        return d
 
 
 @dataclass
@@ -1390,7 +1400,27 @@ def _norm_rel_path(path):
     return p.strip("/")
 
 
-def find_duplicates(resolved, *, library_root=None, hash_cache=None):
+def recording_at_folder(folder_abs):
+    """The recording that is NOT in the library and whose folder is `folder_abs`
+    (Workshop or Backlog; a queue recording is found through its Queue row, not
+    here), or None. Candidates are found by folder name, then confirmed by absolute
+    path."""
+    import os
+    from app.extensions import db
+    from app.models.recording import Recording
+    from app.utils.paths import recording_folder_abs
+    want = os.path.realpath(str(folder_abs))
+    for rec in (db.session.query(Recording)
+                .filter(Recording.location.in_(("workshop", "backlog")),
+                        Recording.folder_path == os.path.basename(want)).all()):
+        have = recording_folder_abs(rec)
+        if have and os.path.realpath(have) == want:
+            return rec
+    return None
+
+
+def find_duplicates(resolved, *, library_root=None, hash_cache=None, own_recording_id=None,
+                    unpublished_cache=None):
     """
     Three of the four dedup mechanisms the spec catalogued as scattered
     (folder identity, content hash, same-show), unified here. Filesystem
@@ -1400,7 +1430,11 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
     hash_cache, when given, is an OPTIONAL {checksum: recording_id} map the
     caller can build once per run (see bulk_ingest_run._build_dedup_map) so
     this does not re-query RecordingFingerprint for every folder. Without
-    one, this queries the DB directly.
+    one, this queries the DB directly. `unpublished_cache` is the same kind of map
+    for recordings that are not in the library.
+
+    own_recording_id: the recording this folder already is (its Queue row, or a
+    Workshop/Backlog recording the Queue was pointed at): never a duplicate of itself.
     """
     from app.extensions import db
     from app.models.recording import Recording, RecordingFingerprint
@@ -1466,8 +1500,33 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
         if (n_audio and len(my_hashes) >= n_audio
                 and all(h in owners for h in my_hashes) and len(recording_ids) == 1):
             dups.append(Duplicate(kind="content", recording_id=next(iter(recording_ids))))
+        elif n_audio and len(my_hashes) >= n_audio:
+            # The same, against recordings not in the library (Queue, Workshop,
+            # Backlog): this folder is one of them, not a new recording.
+            if unpublished_cache is not None:
+                un_map = unpublished_cache
+            else:
+                rows = (db.session.query(RecordingFingerprint.recording_id,
+                                         RecordingFingerprint.content)
+                        .join(Recording, Recording.id == RecordingFingerprint.recording_id)
+                        .filter(RecordingFingerprint.fingerprint_type.in_(DEDUP_FP_TYPES),
+                                Recording.location != "library")
+                        .order_by(RecordingFingerprint.recording_id.asc())
+                        .all())
+                un_map = {}
+                for rid, content in rows:
+                    for entry in parse_checksum_file(content or ""):
+                        un_map.setdefault(entry["checksum"], rid)
+            un_owners = {un_map[h] for h in my_hashes if h in un_map}
+            if (all(h in un_map for h in my_hashes) and len(un_owners) == 1
+                    and next(iter(un_owners)) != own_recording_id):
+                rid = next(iter(un_owners))
+                loc = (db.session.query(Recording.location)
+                       .filter(Recording.id == rid, Recording.location != "library").scalar())
+                if loc:          # a cached entry for a recording since deleted or imported is ignored
+                    dups.append(Duplicate(kind="unpublished", recording_id=rid, location=loc))
 
-    # ── same show (informational -- never blocks) ────────────────────────
+    # ── same show (a flag -- never blocks, never changes the verdict) ────
     artist_name = resolved.artist.value
     date = resolved.date.value or {}
     year = date.get("year")
@@ -1483,8 +1542,12 @@ def find_duplicates(resolved, *, library_root=None, hash_cache=None):
                     q = q.filter(Performance.start_day == date["day"])
                 for p in q.all():
                     for rec in (p.recordings or []):
-                        if rec.is_published:
-                            dups.append(Duplicate(kind="show", recording_id=rec.id))
+                        if own_recording_id is not None and rec.id == own_recording_id:
+                            continue
+                        # Recordings out of the library count too, named by where they are.
+                        dups.append(Duplicate(
+                            kind="show", recording_id=rec.id,
+                            location=None if rec.location == "library" else rec.location))
         except Exception:  # noqa: BLE001 -- informational only, never fatal
             pass
 
@@ -1550,6 +1613,11 @@ def verdict(resolved):
     # Exact content duplicate short-circuits everything else: skipped, not
     # reviewed (spec section 9, resolved question 1).
     if any(d.kind == "content" for d in resolved.duplicates):
+        return "skipped", ["duplicate_content"]
+
+    # An exact duplicate of a recording in the Queue, Workshop or Backlog: no new
+    # recording; the row links to the one that exists.
+    if any(d.kind == "unpublished" for d in resolved.duplicates):
         return "skipped", ["duplicate_content"]
 
     if reasons:

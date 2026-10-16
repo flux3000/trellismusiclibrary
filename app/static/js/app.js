@@ -185,6 +185,10 @@ const App = (() => {
     // was opened from that page's per-item Review. Back and Add & Return land
     // there instead of the picker or the new recording's page.
     returnTo:   null,
+    // The recording this review is on (any location but the library), and where it is.
+    // Null for a folder opened from the Add Recording picker.
+    recordingId: null,
+    location:    null,
   }
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -410,8 +414,15 @@ const App = (() => {
   }
 
   // Compact "date added" (ingest timestamp) for the catalog column — ISO date only.
+  // "Oct 15, 2026", or "Today" (Ryan, 2026-10-15). The server's timestamps are UTC
+  // without an offset, so one is added before reading it as the viewer's local day.
   function fmtDateAdded(iso) {
-    return iso ? iso.slice(0, 10) : ''
+    if (!iso) return ''
+    const s = String(iso)
+    const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) || s.length <= 10 ? s : s + 'Z')
+    if (isNaN(d)) return s.slice(0, 10)
+    if (d.toDateString() === new Date().toDateString()) return 'Today'
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
   }
 
   // Studio vs live naming layer. Every render helper that decides how to
@@ -600,6 +611,8 @@ const App = (() => {
     'arrow-down':   '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>',
     'chevron-left':  '<path d="m15 18-6-6 6-6"/>',
     'chevron-right': '<path d="m9 18 6-6-6-6"/>',
+    // Lucide 'external-link', copied verbatim from lucide-static.
+    'external-link': '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
     'chevron-down':  '<path d="m6 9 6 6 6-6"/>',
     // Archive Downloads: the sidebar's Downloads link, and the drag handle on the
     // queue's Up next rows. Lucide 'download' and 'grip-vertical', copied verbatim
@@ -612,6 +625,8 @@ const App = (() => {
     'wrench':       '<path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"/>',
     'archive':      '<rect width=\"20\" height=\"5\" x=\"2\" y=\"3\" rx=\"1\"/><path d=\"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8\"/><path d=\"M10 12h4\"/>',
     'download':     '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+    'list': '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+    'layout-list': '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/><path d="M14 4h7"/><path d="M14 9h7"/><path d="M14 15h7"/><path d="M14 20h7"/>',
     'grip-vertical': '<circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/>',
   }
 
@@ -880,7 +895,7 @@ const App = (() => {
       const q = inputEl.value.trim()
       if (q.length < 2) { close(); return }
       let results = []
-      try { results = await API.venues.list(q) } catch (_) {}
+      try { results = await API.venues.pick(q) } catch (_) {}
       const rows = results.slice(0, 10).map(v => {
         const loc = [v.city, v.state, v.country].filter(Boolean).join(', ')
         return `<div class="venue-result" data-id="${v.id}" data-name="${esc(v.name)}">${esc(v.name)}${loc ? ` <span class="venue-result-loc">${esc(loc)}</span>` : ''}</div>`
@@ -1507,13 +1522,11 @@ const App = (() => {
 
   // Shared by FAVORITES and by an expanded collection.
   function navRecRowHtml(r, extraCls) {
-    // Studio: title leads, year in the date column. Live: the date as
-    // collectors write it (1977-05-04), then the artist.
+    // Studio: title leads, year in the date column. Live: the long date
+    // ("Mar 12, 2002"), then the artist.
     const id = recIdentity(r)
-    const p2 = n => String(n).padStart(2, '0')
     const date = id.isStudio ? id.dateText
-      : [r.start_year, r.start_year && r.start_month && p2(r.start_month),
-         r.start_year && r.start_month && r.start_day && p2(r.start_day)].filter(Boolean).join('-')
+      : (r.start_year ? fmtDateLong(r.start_year, r.start_month, r.start_day) : '')
     // One line, spelled out: an album is "Artist - Title", a live recording
     // "Artist - Date - Venue". A studio row with no title is just the artist,
     // which is what recIdentity puts in `lead`.
@@ -3264,6 +3277,160 @@ const App = (() => {
   }
 
   // Collection page — editable name/description in place + recording catalog.
+  // ── Show card ──────────────────────────────────────────────────────────────
+  // View Recording's header, compressed and read-only: the image, the artist,
+  // the date line, Members and Guests, the provenance facts, engineers, lineage
+  // and notes. Empty facts are left out rather than drawn as dashes, since
+  // nothing here can be filled in. The star is live. `tail` is an optional
+  // control in the top-right corner (the Collection page's remove button).
+  // The card is a div, not an anchor, because it holds links; a click anywhere
+  // else opens the recording (wireShowCards).
+  // opts.added: show the date added at the card's top right (Recently Added).
+  function showCardHtml(r, tail, opts = {}) {
+    const id = recIdentity(r)
+    const isStudio = id.isStudio
+    const on = viewerHasFavorited(r)
+    const star = `<button type="button" class="rec-fav-star rec-fav-star--sm${on ? ' is-fav' : ''}" data-rec-id="${r.id}"
+        aria-pressed="${on ? 'true' : 'false'}" title="${favStarTitle(on)}">${icon('star', null, on)}</button>`
+    const img = r.image_url
+      ? `<img class="scard-img" src="${esc(r.image_url)}" alt="" loading="lazy">`
+      : `<span class="scard-img scard-img--initials">${esc(recInitials(r))}</span>`
+    const dot = '<span class="rec-dot">·</span>'
+    const link = (href, text) => href ? `<a href="${href}">${esc(text)}</a>` : esc(text)
+    const mins = r.duration_sec ? Math.round(r.duration_sec / 60) : 0
+    const subParts = isStudio
+      ? [r.title ? `<span class="scard-lead">${esc(r.title)}</span>` : null,
+         r.start_year ? esc(String(r.start_year)) : null,
+         r.track_count ? `${r.track_count} track${r.track_count === 1 ? '' : 's'}` : null,
+         mins ? `${mins} min` : null]
+      : [`<span class="scard-lead">${esc(fmtDateLong(r.start_year, r.start_month, r.start_day))}</span>`,
+         r.venue ? link(r.venue_id ? `#/venue/${r.venue_id}` : null, r.venue) : null,
+         fmtLocation(r.city, r.state, r.country) ? esc(fmtLocation(r.city, r.state, r.country)) : null,
+         r.event_name ? link(r.event_id ? `#/event/${r.event_id}` : null, r.event_name) : null,
+         r.stage ? esc(r.stage) : null,
+         r.track_count ? `${r.track_count} track${r.track_count === 1 ? '' : 's'}` : null,
+         mins ? `${mins} min` : null]
+    const people = r.personnel || []
+    const names = list => list.map(m => link(m.musician_id ? `#/musician/${m.musician_id}` : null, m.name)).join(', ')
+    const members = people.filter(m => !m.is_guest)
+    const guests  = people.filter(m => m.is_guest)
+    const fact = (label, html) => html ? `<span class="scard-fact"><span class="mg-row-label">${label}</span>${html}</span>` : ''
+    const eng = e => e && e.name ? link(e.id ? `#/engineer/${e.id}` : null, e.name) : ''
+    const release = [r.mb_label, r.mb_catalog_number].filter(Boolean).join(' · ')
+    const facts = [
+      // Type and format, unlabelled: "Live Recording - FLAC" (Ryan, 2026-10-15).
+      `<span class="scard-fact">${[isStudio ? 'Album' : 'Live Recording', r.format ? esc(r.format) : ''].filter(Boolean).join(' - ')}</span>`,
+      isStudio ? fact('Release', esc(release))
+        : fact('Rating', r.quality ? `<span class="quality ${qualityClass(r.quality)}">${esc(r.quality)}</span>` : ''),
+      isStudio ? '' : fact('Source', sourceBadge(r.source)),
+      isStudio ? '' : fact('Source Tag', r.source_tag ? esc(r.source_tag) : ''),
+      isStudio ? '' : fact('SHNID', r.etree_shnid != null ? `<span class="mono">${esc(String(r.etree_shnid))}</span>` : ''),
+      isStudio ? '' : fact('Recording Engineer', eng(r.recording_engineer)),
+      isStudio ? '' : fact('Transfer Engineer', eng(r.transfer_engineer)),
+      isStudio ? '' : fact('Mastering Engineer', eng(r.mastering_engineer)),
+    ].join('')
+    return `
+      <div class="scard" data-rec-id="${r.id}" style="--genre-fg:${esc(genreColor(r))}">
+        ${img}
+        <div class="scard-body">
+          <div class="scard-name-row"><div class="scard-name">${link(r.artist_id ? `#/artist/${r.artist_id}` : null, r.artist || '')}</div>${
+            opts.added && r.created_at ? `<span class="scard-added">${esc(fmtDateAdded(r.created_at))}</span>` : ''}</div>
+          <div class="scard-line">${star}${subParts.filter(Boolean).join(dot)}</div>
+          ${members.length ? `<div class="scard-row">${fact('Members', names(members))}</div>` : ''}
+          ${guests.length ? `<div class="scard-row">${fact('Guests', names(guests))}</div>` : ''}
+          ${facts ? `<div class="scard-row scard-facts">${facts}</div>` : ''}
+          ${!isStudio && r.lineage ? `<div class="scard-row scard-clip">${fact('Lineage', esc(r.lineage))}</div>` : ''}
+          ${r.notes ? `<div class="scard-notes">${esc(r.notes)}</div>` : ''}
+        </div>
+        ${tail || ''}
+      </div>`
+  }
+
+  // Right-click "add to collection" and click-through to the recording. Both
+  // are delegated, so it wires once per container (re-calls are no-ops) and
+  // cards swapped in later need nothing. Stars are NOT wired here: each
+  // caller runs wireFavStars on the fresh elements it creates, since a second
+  // pass over the same star would double-toggle.
+  function wireShowCards(container) {
+    if (container.dataset.scWired) return
+    container.dataset.scWired = '1'
+    container.addEventListener('click', e => {
+      if (e.target.closest('a, button')) return
+      const el = e.target.closest('.scard[data-rec-id]')
+      if (el) window.location.hash = `#/recording/${el.dataset.recId}`
+    })
+    container.addEventListener('contextmenu', e => {
+      const el = e.target.closest('.scard[data-rec-id]')
+      if (!el) return
+      e.preventDefault()
+      openAddToCollectionMenu(parseInt(el.dataset.recId), e.clientX, e.clientY)
+    })
+  }
+
+  // ── List / Card view toggle (Live Recordings, Albums, Recently Added) ──────
+  function _listViewPref(key) {
+    try { return localStorage.getItem('trellis.listView.' + key) === 'card' ? 'card' : 'list' }
+    catch (_) { return 'list' }
+  }
+  function _setListViewPref(key, mode) {
+    try { localStorage.setItem('trellis.listView.' + key, mode) } catch (_) { /* per-viewer nicety only */ }
+  }
+  function _viewToggleHtml(key) {
+    const cur = _listViewPref(key)
+    const btn = (mode, ic, title) => `<button type="button" class="view-toggle-btn${cur === mode ? ' on' : ''}"
+        data-view="${mode}" aria-pressed="${cur === mode}" title="${title}">${icon(ic)}</button>`
+    return `<span class="view-toggle" data-key="${key}">${btn('list', 'list', 'List')}${btn('card', 'layout-list', 'Cards')}</span>`
+  }
+  // Binds the toggle inside `root`; `onChange` redraws the list.
+  function _wireViewToggle(root, key, onChange) {
+    const group = root.querySelector(`.view-toggle[data-key="${key}"]`)
+    if (!group) return
+    group.querySelectorAll('.view-toggle-btn').forEach(b => b.addEventListener('click', () => {
+      const mode = b.dataset.view
+      if (mode === _listViewPref(key)) return
+      _setListViewPref(key, mode)
+      group.querySelectorAll('.view-toggle-btn').forEach(x => {
+        x.classList.toggle('on', x === b)
+        x.setAttribute('aria-pressed', x === b ? 'true' : 'false')
+      })
+      onChange()
+    }))
+  }
+  // Column header row above a list. `labels`: strings, or [text, 'r'] for a
+  // right-aligned cell; one per grid cell, in order. `mod` is the row's grid
+  // modifier class ('' for Live Recordings).
+  function _listHeadHtml(mod, labels) {
+    const cells = labels.map(l => Array.isArray(l)
+      ? `<span class="brow-head-r">${l[0]}</span>` : `<span>${l}</span>`).join('')
+    return `<div class="brow brow-head${mod ? ' ' + mod : ''}">${cells}</div>`
+  }
+  // Card view shows the basics from the list row at once; the rest (lineup,
+  // engineers, event...) comes from one batched call and swaps the cards in
+  // place. Extras are merged into the row objects so a repaint keeps them.
+  // Skipped in a joined library (the endpoint is the local one); failures are
+  // silent since the cards already read fine without them.
+  async function _hydrateShowCards(container, rows) {
+    if (libraryState.activeId != null) return
+    const need = rows.filter(r => r.personnel === undefined)
+    for (let i = 0; i < need.length; i += 100) {
+      const chunk = need.slice(i, i + 100)
+      let extras
+      try { extras = await API.recordings.cardExtras(chunk.map(r => r.id)) }
+      catch (_) { return }
+      for (const r of chunk) {
+        const x = extras?.[r.id]
+        if (!x) continue
+        Object.assign(r, x)
+        const old = container.querySelector(`.scard[data-rec-id="${r.id}"]`)
+        if (!old) continue
+        const wrap = document.createElement('div')
+        wrap.innerHTML = showCardHtml(r)
+        wireFavStars(wrap)
+        old.replaceWith(wrap.firstElementChild)
+      }
+    }
+  }
+
   async function renderCollectionView(id) {
     setActiveNav('collections'); setActiveArtist(null); setLoading()
     let c
@@ -3283,13 +3450,14 @@ const App = (() => {
     //    trip to re-read the whole collection ──────────────────────────────
     let rows = c.recordings || []
 
+    // One show card per recording (showCardHtml); the remove control sits in
+    // the card's corner.
+    const removeBtn = r => editable
+      ? `<button type="button" class="col-row-x" data-remove="${r.id}"
+           title="Remove from this collection">${icon('x')}</button>`
+      : ''
     const cardsHtml = () => rows.length
-      ? `<div class="lib-module-grid">${rows.map(r => editable
-          ? `<div class="col-card-wrap">${recCardHtml(r)}
-               <button type="button" class="col-card-x" data-remove="${r.id}"
-                       title="Remove from this collection">${icon('x')}</button>
-             </div>`
-          : recCardHtml(r)).join('')}</div>`
+      ? `<div class="scards">${rows.map(r => showCardHtml(r, removeBtn(r))).join('')}</div>`
       : `<div class="empty-state" style="min-height:160px">
            <div class="empty-title">Empty collection</div>
            <div class="empty-sub">${editable
@@ -3351,6 +3519,7 @@ const App = (() => {
       const statLabel = mainContent.querySelector('.pp-stat-l')
       if (statLabel) statLabel.textContent = rows.length === 1 ? 'Recording' : 'Recordings'
       wireRemove()
+      if (box) wireFavStars(box)
     }
 
     function wireRemove() {
@@ -3396,6 +3565,9 @@ const App = (() => {
       })
     }
     wireRemove()
+    const colBox = document.getElementById('col-cards')
+    wireShowCards(colBox)
+    wireFavStars(colBox)
 
     document.getElementById('col-refresh')?.addEventListener('click', async () => {
       const btn = document.getElementById('col-refresh')
@@ -3586,9 +3758,6 @@ const App = (() => {
       titleId: 'pn-name',
       titleEditable: true,
       chips: artistCount ? `<span class="pp-hero-fact">Musician with ${artistCount} artist${artistCount !== 1 ? 's' : ''}</span>` : '',
-      stats: [
-        [totalRecordings, totalRecordings === 1 ? 'Recording' : 'Recordings'],
-      ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="pn-delete" title="Delete musician">Delete</button>`,
       tabs: [
         { id: 'recordings', label: 'Recordings', active: true, count: totalRecordings,
@@ -3726,7 +3895,6 @@ const App = (() => {
       title: esc(a.name),
       titleId: 'en-name',
       titleEditable: true,
-      stats: [[total, total === 1 ? 'Recording' : 'Recordings']],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="en-delete" title="Delete engineer">Delete</button>`,
       tabs: [
         { id: 'recordings', label: 'Recordings', active: true, count: total,
@@ -3875,8 +4043,10 @@ const App = (() => {
   // card and page agree.
   function perfPhotoHtml(r, cls) {
     if (!r) return ''
-    if (r.image_id) {
-      return `<img class="${cls}" src="${API.artists.imageUrl(r.image_id)}"
+    // Recording, then artist, then venue (image_url), as on View Recording.
+    const src = r.image_url || (r.image_id ? API.artists.imageUrl(r.image_id) : null)
+    if (src) {
+      return `<img class="${cls}" src="${esc(src)}"
                    alt="" loading="lazy">`
     }
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean)
@@ -3996,7 +4166,7 @@ const App = (() => {
       : `<span class="brow-av">${esc(initials)}</span>`
     const dateText = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
     const main = id.isStudio
-      ? `<span class="brow-title">${esc(r.title || '')}</span>`
+      ? `<span class="brow-venue">${esc(r.title || '')}</span>`
       : `<span class="brow-venue">${esc([r.venue || '(unknown venue)', fmtLocation(r.city, r.state, r.country)].filter(Boolean).join(', '))}</span>`
     const info = id.isStudio
       ? `<span class="brow-release">${esc([r.mb_label, r.mb_catalog_number].filter(Boolean).join(' · '))}</span>`
@@ -4407,6 +4577,46 @@ const App = (() => {
   let _browseVisibleCount = 0
   let _browseListIO = null
 
+  // The sort + filter row shared by Live Recordings, Albums and Recently
+  // Added. `ids` names the elements; `filters` picks which selects appear;
+  // `counts` adds "(n)" to the options. Options come from `rows`.
+  function _listBarHtml({ ids, sort, filters, rows, counts, viewKey }) {
+    const { common, rare, genres } = _browseFilterOptions(rows)
+    const opt = (v, label, n) =>
+      `<option value="${esc(v)}">${esc(label)}${counts && n != null ? ` (${n})` : ''}</option>`
+    const sortBtn = (k, label) =>
+      `<button class="sortb${sort === k ? ' on' : ''}" data-sort="${k}">${label}</button>`
+    const sel = (key, label, inner) => `
+            <label class="bfilter">${label}
+              <select id="${ids[key]}">
+                ${opt('any', 'Any')}
+                ${inner}
+              </select>
+            </label>`
+    return `
+        <div class="browse-bar">
+          <div class="browse-sorts" id="${ids.sorts}">
+            ${sortBtn('az', 'A–Z')}
+            ${sortBtn('newest', 'Newest')}
+            ${sortBtn('oldest', 'Oldest')}
+            ${sortBtn('added', 'Recently added')}
+          </div>
+          <div class="browse-filters">${filters.includes('type') ? sel('type', 'Type', `
+                ${opt('live', 'Live Recording', rows.filter(r => r.kind !== 'studio').length)}
+                ${opt('studio', 'Album', rows.filter(r => r.kind === 'studio').length)}`) : ''}${filters.includes('quality') ? sel('quality', 'Quality', `
+                ${opt('top', 'A and A+', rows.filter(r => ['A','A+'].includes(r.quality)).length)}
+                ${opt('graded', 'Graded only', rows.filter(r => r.quality).length)}`) : ''}${filters.includes('source') ? sel('source', 'Source', `
+                ${common.map(([v, n]) => opt(v, v, n)).join('')}
+                ${rare.length ? opt('__other', 'Other', rare.reduce((n, x) => n + x[1], 0)) : ''}
+                ${opt('__none', 'Unknown', rows.filter(r => !r.source).length)}`) : ''}${filters.includes('genre') ? sel('genre', 'Genre', `
+                ${genres.map(([v, n]) => opt(v, v, n)).join('')}`) : ''}
+            <button type="button" class="bfilter-clear" id="${ids.clear}">Clear</button>
+          </div>
+          <span class="browse-count" id="${ids.count}"></span>
+          ${_viewToggleHtml(viewKey)}
+        </div>`
+  }
+
   function _browseFilterOptions(rows) {
     // Options are derived from the DATA, not hardcoded: the source column has
     // 22 distinct values, 14 of which appear exactly once ("MR", "AM", "OSM"…).
@@ -4429,9 +4639,16 @@ const App = (() => {
   }
 
   function _browseApply(rows) {
-    const f = _browseFilters
-    const rare = _browseRareSources || new Set()
+    return _listApply(rows, _browseFilters, _browseSort, _browseRareSources || new Set())
+  }
+
+  // Filter + sort shared by Live Recordings and Recently Added. An Album has
+  // no quality grade or source, so setting either filter leaves it out.
+  function _listApply(rows, f, sort, rare) {
     let out = rows.filter(r => {
+      if (f.type === 'live' && r.kind === 'studio') return false
+      if (f.type === 'studio' && r.kind !== 'studio') return false
+      if (r.kind === 'studio' && (f.quality !== 'any' || f.source !== 'any')) return false
       if (f.quality === 'top'   && !['A', 'A+'].includes(r.quality)) return false
       if (f.quality === 'graded' && !r.quality) return false
       if (f.genre !== 'any' && r.genre !== f.genre) return false
@@ -4442,11 +4659,11 @@ const App = (() => {
     })
     // Nulls-last regardless of direction (compareByDate) — a dateless
     // studio row never jumps to the front of "Newest".
-    if (_browseSort === 'az')      out = out.slice().sort((a, b) =>
+    if (sort === 'az')      out = out.slice().sort((a, b) =>
       (a.artist || '').localeCompare(b.artist || '') || compareByDate(a, b, false))
-    if (_browseSort === 'newest')  out = out.slice().sort((a, b) => compareByDate(a, b, true))
-    if (_browseSort === 'oldest')  out = out.slice().sort((a, b) => compareByDate(a, b, false))
-    if (_browseSort === 'added')   out = out.slice().sort((a, b) =>
+    if (sort === 'newest')  out = out.slice().sort((a, b) => compareByDate(a, b, true))
+    if (sort === 'oldest')  out = out.slice().sort((a, b) => compareByDate(a, b, false))
+    if (sort === 'added')   out = out.slice().sort((a, b) =>
       String(b.created_at || '').localeCompare(String(a.created_at || '')))
     return out
   }
@@ -4478,8 +4695,10 @@ const App = (() => {
     // than an ungraded one. Studio: the venue cell carries the title,
     // location stays empty.
     const dateText  = id.isStudio ? (id.dateText || '—') : (handbillDate(r.start_year, r.start_month, r.start_day) || '—')
-    const venueText = id.isStudio ? id.lead : (r.venue || '(unknown venue)')
-    const locText   = id.isStudio ? '' : loc
+    // Venue and place share one cell, as on Recently Added. A studio row
+    // carries its title there and no place.
+    const venueText = id.isStudio ? id.lead
+      : [r.venue || '(unknown venue)', loc].filter(Boolean).join(', ')
     return `
       <a class="brow" href="#/recording/${r.id}" data-rec-id="${r.id}" style="--genre-fg:${esc(c)}">
         ${rowStarHtml(r)}
@@ -4487,7 +4706,6 @@ const App = (() => {
         <span class="brow-perf">${esc(r.artist || '')}</span>
         <span class="brow-date">${esc(dateText)}</span>
         <span class="brow-venue">${esc(venueText)}</span>
-        <span class="brow-loc">${esc(locText)}</span>
         <span class="brow-size">${esc(_rowSizeText(r))}</span>
         <span class="brow-grade">${id.isStudio ? '' : (r.quality ? esc(r.quality) : '')}</span>
         <span class="brow-srccell">${id.isStudio ? '' : (r.source ? `<span class="brow-src">${esc(r.source)}</span>` : '')}</span>
@@ -4505,6 +4723,10 @@ const App = (() => {
     _browseListIO?.disconnect()
     const rows = _browseApply(_browseRows)
     cntEl.textContent = `${rows.length} of ${_browseRows.length} recordings`
+    const cardMode = _listViewPref('live') === 'card'
+    listEl.className = cardMode ? 'scards scards--page' : 'brows'
+    const headEl = document.getElementById('browse-head')
+    if (headEl) headEl.hidden = cardMode
     if (!rows.length) {
       listEl.innerHTML = `<div class="empty-state" style="min-height:120px">
            <div class="empty-title">Nothing matches these filters</div>
@@ -4515,8 +4737,16 @@ const App = (() => {
       return
     }
     _browseVisibleCount = Math.min(BROWSE_LIST_INITIAL, rows.length)
-    listEl.innerHTML = rows.slice(0, _browseVisibleCount).map(_browseRowHtml).join('')
-    wireRecordingRows(listEl)
+    const first = rows.slice(0, _browseVisibleCount)
+    if (cardMode) {
+      listEl.innerHTML = first.map(r => showCardHtml(r)).join('')
+      wireShowCards(listEl)
+      wireFavStars(listEl)
+      _hydrateShowCards(listEl, first)
+    } else {
+      listEl.innerHTML = first.map(_browseRowHtml).join('')
+      wireRecordingRows(listEl)
+    }
     _browseSetMoreFurniture(_browseVisibleCount < rows.length)
   }
 
@@ -4533,9 +4763,11 @@ const App = (() => {
     const next = rows.slice(_browseVisibleCount, _browseVisibleCount + BROWSE_LIST_PAGE)
     if (!next.length) { _browseSetMoreFurniture(false); return }
     const wrap = document.createElement('div')
-    wrap.innerHTML = next.map(_browseRowHtml).join('')
-    wireRecordingRows(wrap)
+    const cardMode = _listViewPref('live') === 'card'
+    wrap.innerHTML = next.map(cardMode ? (r => showCardHtml(r)) : _browseRowHtml).join('')
+    if (cardMode) wireFavStars(wrap); else wireRecordingRows(wrap)
     while (wrap.firstChild) listEl.appendChild(wrap.firstChild)
+    if (cardMode) _hydrateShowCards(listEl, next)
     _browseVisibleCount += next.length
     _browseSetMoreFurniture(_browseVisibleCount < rows.length)
   }
@@ -4620,45 +4852,18 @@ const App = (() => {
       ${topsMount ? '' : topsHtml}
 
       <section class="lib-module" id="lib-mod-all">
-        <div class="browse-bar">
-          <div class="browse-sorts" id="browse-sorts">
-            <button class="sortb" data-sort="az">A–Z</button>
-            <button class="sortb" data-sort="newest">Newest</button>
-            <button class="sortb" data-sort="oldest">Oldest</button>
-            <button class="sortb on" data-sort="added">Recently added</button>
-          </div>
-          <div class="browse-filters">
-            <label class="bfilter">Quality
-              <select id="bf-quality">
-                ${opt('any', 'Any')}
-                ${opt('top', 'A and A+', _browseRows.filter(r => ['A','A+'].includes(r.quality)).length)}
-                ${opt('graded', 'Graded only', graded)}
-              </select>
-            </label>
-            <label class="bfilter">Source
-              <select id="bf-source">
-                ${opt('any', 'Any')}
-                ${common.map(([v, n]) => opt(v, v, n)).join('')}
-                ${rare.length ? opt('__other', 'Other', rare.reduce((n, x) => n + x[1], 0)) : ''}
-                ${opt('__none', 'Unknown', _browseRows.filter(r => !r.source).length)}
-              </select>
-            </label>
-            <label class="bfilter">Genre
-              <select id="bf-genre">
-                ${opt('any', 'Any')}
-                ${genres.map(([v, n]) => opt(v, v, n)).join('')}
-              </select>
-            </label>
-            <button type="button" class="bfilter-clear" id="bf-clear">Clear</button>
-          </div>
-          <span class="browse-count" id="browse-count"></span>
-        </div>
+        ${_listBarHtml({
+          ids: { sorts: 'browse-sorts', quality: 'bf-quality', source: 'bf-source', genre: 'bf-genre', clear: 'bf-clear', count: 'browse-count' },
+          sort: _browseSort, filters: ['quality', 'source', 'genre'], rows: _browseRows, counts: true, viewKey: 'live',
+        })}
+        <div class="brows brows-head" id="browse-head">${_listHeadHtml('', ['', 'Artist', 'Date', 'Venue', 'Tracks', ['Rating'], ['Source']])}</div>
         <div class="brows" id="browse-rows"></div>
         <div class="browse-more" id="browse-more"></div>
       </section>
     `
 
     _browseDrawList()
+    _wireViewToggle(mountEl, 'live', _browseDrawList)
     _wireTopsNav()
     _observeTops()
 
@@ -4709,8 +4914,11 @@ const App = (() => {
     const initials = String(r.artist || '?').split(/\s+/).filter(Boolean).slice(0, 2)
       .map(w => w[0]).join('').toUpperCase()
     const c = r.genre_color || 'var(--bg-4)'
-    const art = r.image_id
-      ? `<img class="top-img" src="${API.artists.imageUrl(r.image_id)}" alt="" loading="lazy">`
+    // image_url is the server's chain (recording, then artist, then venue),
+    // the same image View Recording shows; image_id is the artist's alone.
+    const src = r.image_url || (r.image_id ? API.artists.imageUrl(r.image_id) : null)
+    const art = src
+      ? `<img class="top-img" src="${esc(src)}" alt="" loading="lazy">`
       : `<span class="top-initials">${esc(initials)}</span>`
     return `
       <a class="top-tile" href="#/recording/${r.id}" style="--genre-fg:${esc(c)}">
@@ -4854,7 +5062,8 @@ const App = (() => {
   // Recently Added page size. 20 is about a screenful of row cards; the full
   // 50 is one click away and already in memory.
   const RECENT_INITIAL = 25
-  const RECENT_PAGE    = 25   // each subsequent page, fetched on scroll
+  const RECENT_PAGE    = 25   // each subsequent page, revealed on scroll
+  const RECENT_FETCH   = 200  // server page size when loading the whole list
 
   async function renderRecentView() {
     setActiveNav('recent')
@@ -4863,17 +5072,20 @@ const App = (() => {
     setNavCurrent('Recently Added')
     setLoading()
 
-    let rows
+    // Everything is fetched (in server pages) so sort and filters see the
+    // whole library, as on Live Recordings; the list itself reveals in pages.
+    const allRows = []
     try {
-      rows = await API.recordings.recent(RECENT_INITIAL, { card: true })
+      for (;;) {
+        const page = await API.recordings.recent(RECENT_FETCH, { card: true, offset: allRows.length })
+        allRows.push(...page)
+        if (page.length < RECENT_FETCH) break
+      }
     } catch (e) {
       setMainHTML(`<div class="empty-state"><div class="empty-title">Failed to load recent recordings</div></div>`)
       return
     }
 
-    // No count in the subtitle any more: it used to say "50 most recently
-    // added", which was only ever the size of the fetch, not a fact about the
-    // library. With paging it would be a number that changes as you scroll.
     const headerHtml = `
       <div class="artist-header">
         <div class="artist-header-row">
@@ -4881,70 +5093,99 @@ const App = (() => {
         </div>
       </div>`
 
+    const ids = { sorts: 'recent-sorts', type: 'recent-type', quality: 'recent-quality', source: 'recent-source', genre: 'recent-genre', clear: 'recent-clear', count: 'recent-count' }
     // This is a full version of the Browse page's Recently Added module — NOT
     // a call to renderBrowseModules, which is the entire global dashboard and
     // would make "Recently Added" show everything except a longer list of
     // recently added recordings. Same class of bug as the Collection view's.
     setMainHTML(`${headerHtml}
+      ${_listBarHtml({ ids, sort: 'added', filters: ['type', 'quality', 'source', 'genre'], rows: allRows, counts: true, viewKey: 'recent' })}
+      <div class="brows brows-head" id="recent-head">${_listHeadHtml('brow--recent', ['', 'Artist', 'Date', 'Venue / Album', ['Source / Release'], 'Tracks', ['Added']])}</div>
       <div class="brows" id="recent-rowcards"></div>
       <div class="recent-more" id="recent-more"></div>`)
 
-    // Endless scroll — was a hardcoded 50 with a "Show all" button. A
-    // sentinel below the list fetches the next page when it comes into
-    // view; the observer disconnects when the server returns a short
-    // page, which is how we know we have reached the end.
     const listEl = document.getElementById('recent-rowcards')
     const moreEl = document.getElementById('recent-more')
-    listEl.innerHTML = rows.map(_recentRowHtml).join('')
-    wireFavStars(listEl)
-    // Right-click to file into a collection, as the old row cards had.
-    listEl.addEventListener('contextmenu', e => {
-      const el = e.target.closest('[data-rec-id]')
-      if (!el) return
-      e.preventDefault()
-      openAddToCollectionMenu(parseInt(el.dataset.recId), e.clientX, e.clientY)
-    })
-
-    let loading = false, done = rows.length < RECENT_INITIAL
-    moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
-
-    const loadMore = async () => {
-      if (loading || done) return
-      loading = true
-      moreEl.innerHTML = '<div class="recent-loading">Loading more…</div>'
-      let next = []
-      try {
-        next = await API.recordings.recent(RECENT_PAGE, { card: true, offset: listEl.children.length })
-      } catch (_) {
-        moreEl.innerHTML = '<div class="recent-loading">Could not load more.</div>'
-        loading = false
-        return
-      }
-      const pageEl = document.createElement('div')
-      pageEl.innerHTML = next.map(_recentRowHtml).join('')
-      wireFavStars(pageEl)
-      while (pageEl.firstChild) listEl.appendChild(pageEl.firstChild)
-      // A short page means the end. Checking the RETURNED count rather than
-      // a total avoids a second endpoint and cannot disagree with it.
-      done = next.length < RECENT_PAGE
-      moreEl.innerHTML = done ? '' : '<div class="recent-sentinel" id="recent-sentinel"></div>'
-      loading = false
-      if (!done) observe()
-    }
-
+    const rare = new Set(_browseFilterOptions(allRows).rare.map(([v]) => v))
+    let filters = { type: 'any', quality: 'any', source: 'any', genre: 'any' }
+    let sort = 'added'
+    let shown = 0
     let io = null
-    const observe = () => {
+    const current = () => _listApply(allRows, filters, sort, rare)
+    const rowHtmlFor = () => _listViewPref('recent') === 'card' ? (r => showCardHtml(r, '', { added: true })) : _recentRowHtml
+
+    // Endless scroll over the filtered, sorted rows: a sentinel below the list
+    // reveals the next page when it comes into view.
+    const setMore = hasMore => {
+      io?.disconnect()
+      moreEl.innerHTML = hasMore ? '<div class="recent-sentinel" id="recent-sentinel"></div>' : ''
       const sentinel = document.getElementById('recent-sentinel')
       if (!sentinel) return
-      io?.disconnect()
-      // rootMargin starts the fetch before the sentinel is actually visible,
-      // so the next rows are usually there by the time the reader arrives.
       io = new IntersectionObserver(entries => {
         if (entries.some(e => e.isIntersecting)) loadMore()
       }, { root: mainContent, rootMargin: '400px' })
       io.observe(sentinel)
     }
-    observe()
+    const loadMore = () => {
+      const out = current()
+      const next = out.slice(shown, shown + RECENT_PAGE)
+      if (!next.length) { setMore(false); return }
+      const pageEl = document.createElement('div')
+      pageEl.innerHTML = next.map(rowHtmlFor()).join('')
+      wireFavStars(pageEl)
+      while (pageEl.firstChild) listEl.appendChild(pageEl.firstChild)
+      if (_listViewPref('recent') === 'card') _hydrateShowCards(listEl, next)
+      shown += next.length
+      setMore(shown < out.length)
+    }
+    const draw = () => {
+      const out = current()
+      document.getElementById(ids.count).textContent = `${out.length} of ${allRows.length} recordings`
+      const cardMode = _listViewPref('recent') === 'card'
+      listEl.className = cardMode ? 'scards scards--page' : 'brows'
+      document.getElementById('recent-head').hidden = cardMode
+      if (!out.length) {
+        listEl.innerHTML = `<div class="empty-state" style="min-height:120px"><div class="empty-title">Nothing matches these filters</div></div>`
+        shown = 0
+        setMore(false)
+        return
+      }
+      shown = Math.min(RECENT_INITIAL, out.length)
+      const first = out.slice(0, shown)
+      listEl.innerHTML = first.map(rowHtmlFor()).join('')
+      wireFavStars(listEl)
+      if (cardMode) { wireShowCards(listEl); _hydrateShowCards(listEl, first) }
+      setMore(shown < out.length)
+    }
+    draw()
+    _wireViewToggle(mainContent, 'recent', draw)
+
+    mainContent.querySelectorAll(`#${ids.sorts} .sortb`).forEach(b =>
+      b.addEventListener('click', () => {
+        sort = b.dataset.sort
+        mainContent.querySelectorAll(`#${ids.sorts} .sortb`).forEach(x => x.classList.toggle('on', x === b))
+        draw()
+      }))
+    ;['type', 'quality', 'source', 'genre'].forEach(key =>
+      document.getElementById(ids[key])?.addEventListener('change', e => {
+        filters[key] = e.target.value
+        draw()
+      }))
+    document.getElementById(ids.clear)?.addEventListener('click', () => {
+      filters = { type: 'any', quality: 'any', source: 'any', genre: 'any' }
+      ;['type', 'quality', 'source', 'genre'].forEach(key => {
+        const el = document.getElementById(ids[key]); if (el) el.value = 'any'
+      })
+      draw()
+    })
+    // Right-click to file into a collection, as the old row cards had. List
+    // rows only: show cards bring their own handler (wireShowCards).
+    listEl.addEventListener('contextmenu', e => {
+      const el = e.target.closest('.brow[data-rec-id]')
+      if (!el) return
+      e.preventDefault()
+      openAddToCollectionMenu(parseInt(el.dataset.recId), e.clientX, e.clientY)
+    })
   }
 
   /* Albums page — a grid of studio recordings, reached from the nav only
@@ -4975,9 +5216,6 @@ const App = (() => {
         </div>
       </div>`
 
-    const { genres } = _browseFilterOptions(rows)
-    const opt = (v, label) => `<option value="${esc(v)}">${esc(label)}</option>`
-
     // Cover carousel: a quick click-through of album covers. One cover at a time,
     // in the Artist-header fade, so it reads differently from the Live Recordings
     // tile shelf; the arrows are the shelf's own .tops-nav.
@@ -5002,24 +5240,11 @@ const App = (() => {
     // A-Z is artist then year: the discography order the backend already
     // returns, so it needs no re-sort.
     setMainHTML(`${headerHtml}${heroBlock}
-      <div class="browse-bar">
-        <div class="browse-sorts" id="albums-sorts">
-          <button class="sortb on" data-sort="az">A–Z</button>
-          <button class="sortb" data-sort="newest">Newest</button>
-          <button class="sortb" data-sort="oldest">Oldest</button>
-          <button class="sortb" data-sort="added">Recently added</button>
-        </div>
-        <div class="browse-filters">
-          <label class="bfilter">Genre
-            <select id="albums-genre">
-              ${opt('any', 'Any')}
-              ${genres.map(([v]) => opt(v, v)).join('')}
-            </select>
-          </label>
-          <button type="button" class="bfilter-clear" id="albums-clear">Clear</button>
-        </div>
-        <span class="browse-count" id="albums-count"></span>
-      </div>
+      ${_listBarHtml({
+        ids: { sorts: 'albums-sorts', genre: 'albums-genre', clear: 'albums-clear', count: 'albums-count' },
+        sort: 'az', filters: ['genre'], rows, counts: false, viewKey: 'albums',
+      })}
+      <div class="brows brows-head" id="albums-head">${_listHeadHtml('brow--album', ['', 'Artist', 'Year', 'Title', 'Tracks', ['Release']])}</div>
       <div class="brows" id="albums-rows"></div>`)
 
     let heroAt = 0
@@ -5040,12 +5265,17 @@ const App = (() => {
         String(b.created_at || '').localeCompare(String(a.created_at || '')))
       document.getElementById('albums-count').textContent = `${out.length} of ${rows.length} albums`
       const list = document.getElementById('albums-rows')
+      const cardMode = _listViewPref('albums') === 'card'
+      list.className = cardMode ? 'scards scards--page' : 'brows'
+      document.getElementById('albums-head').hidden = cardMode
       list.innerHTML = out.length
-        ? out.map(_albumRowHtml).join('')
+        ? out.map(cardMode ? (r => showCardHtml(r)) : _albumRowHtml).join('')
         : `<div class="empty-state" style="min-height:120px"><div class="empty-title">Nothing matches these filters</div></div>`
       wireFavStars(list)
+      if (cardMode) { wireShowCards(list); _hydrateShowCards(list, out) }
     }
     draw()
+    _wireViewToggle(mainContent, 'albums', draw)
 
     document.querySelectorAll('#albums-sorts .sortb').forEach(b =>
       b.addEventListener('click', () => {
@@ -5153,21 +5383,7 @@ const App = (() => {
     const descText = artist.bio && artist.bio.trim()
 
 
-    // ── Hero stat: recordings only ────────────────────────
-    // Venue count and total runtime were cut as uninteresting. Span was cut as
-    // potentially INCONSISTENT with our own data — it was derived from whatever
-    // dates happen to be filled in, so an act with one undated show would
-    // advertise a range that contradicts the recordings listed right below it.
-    // The derivations for all three are gone rather than left computed-unused.
-    // Album count joins it only when the act has any — most acts don't, and a
-    // stat that always read "0 Albums" would be worse than not being there. An
-    // albums-only act (no live recordings at all) shows only the Albums stat --
-    // a "0 Recordings" reading next to it would misdescribe a library that in
-    // fact has music, just none of it live.
-    const stats = (totalRecordings === 0 && studioCount)
-      ? []
-      : [[totalRecordings, totalRecordings === 1 ? 'Live Recording' : 'Live Recordings']]
-    if (studioCount) stats.push([studioCount, studioCount === 1 ? 'Album' : 'Albums'])
+    // No hero stats on dimension pages (Ryan, 2026-10-15): the Recordings tab already carries the count.
 
     // No MusicBrainz type/origin/active-years line beside the header (Ryan,
     // 2026-10-13); those facts stay on the MusicBrainz block.
@@ -5185,7 +5401,6 @@ const App = (() => {
       // of them responded to a click.
       chips: `<span class="pp-editable pp-genre-field" id="pp-genre"
                     title="Click to edit"></span>`,
-      stats,
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="pp-delete" title="Delete artist">Delete</button>`,
       // Recordings first and default across all five dimension pages. On an
       // artist that is emphatically what you came for; Overview led with
@@ -5301,7 +5516,7 @@ const App = (() => {
         } catch (e) { Notify.error('Failed: ' + e.message) }
         showGenre()
       }
-      wirePickerDropdown(input, dd, API.genres.list, commitGenre)   // no createLabel → no create row
+      wirePickerDropdown(input, dd, API.genres.pick, commitGenre)   // no createLabel → no create row
       input.addEventListener('keydown', e => {
         e.stopPropagation()
         if (e.key === 'Enter') { e.preventDefault(); const m = firstPickerResult(dd); if (m) commitGenre(m) }
@@ -5662,9 +5877,7 @@ const App = (() => {
           .filter(Boolean).join(' · ')
         box.innerHTML = `
           <div class="pp-mb-linked">
-            <a class="pp-mb-name" href="${esc(mbArtistUrl(mb.mbid))}"
-               target="_blank" rel="noopener"
-               title="View this entry on musicbrainz.org">${esc(mb.name || artist.name)} ↗</a>
+            <span class="pp-mb-name">${esc(mb.name || artist.name)}</span>${mbExtLink(mbArtistUrl(mb.mbid))}
             ${facts ? `<span class="pp-mb-facts">${esc(facts)}</span>` : ''}
           </div>
           <div class="pp-mb-foot">
@@ -5672,31 +5885,14 @@ const App = (() => {
             <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-change">Change match</button>
           </div>`
       } else {
-        const msg = mb.status === 'ambiguous'
-          ? 'More than one act goes by this name, please pick the right one.'
-          : mb.status === 'none'
-            ? 'Nothing found for this name.'
-            : 'Not looked up yet.'
         // Editable search term: a billing variant like "Aaron Parks Trio" is
         // the act's real name but often not what MusicBrainz indexed it under,
         // so the string actually sent to the API needs to be adjustable
         // without renaming the Artist. Pre-filled with the Artist's name;
-        // edits here are one-shot — nothing saved.
-        box.innerHTML = `
-          <div class="pp-mb-empty">${msg}</div>
-          <div class="pp-mb-searchrow">
-            <input type="text" class="pp-mb-input" id="pp-mb-term"
-                   value="${esc(artist.name)}" placeholder="Search term"
-                   title="Sent to MusicBrainz as the artist name. Edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
-            <button type="button" class="btn btn-primary btn-xs" id="pp-mb-lookup">
-              ${mb.status === 'ambiguous' ? 'Choose a match' : 'Look up'}</button>
-          </div>`
-        document.getElementById('pp-mb-term').addEventListener('keydown', e => {
-          if (e.key === 'Enter') { e.preventDefault(); runMbLookup() }
-        })
+        // edits here are one-shot -- nothing saved.
+        renderMbSearch({ term: artist.name, note: mb.status === 'none' ? 'Nothing found for this name.' : '', search: runMbLookup })
       }
       document.getElementById('pp-mb-change')?.addEventListener('click', openMbPicker)
-      document.getElementById('pp-mb-lookup')?.addEventListener('click', runMbLookup)
     }
 
     // Reads the editable search-term box when present, else falls back to the
@@ -5709,127 +5905,38 @@ const App = (() => {
       return v || artist.name
     }
 
-    // Look up, and LINK IT IF THE ANSWER IS OBVIOUS. Clicking through a
-    // candidate list to confirm a single 100-scoring result is busywork. The
-    // server applies the same confidence gate the creation-time pass uses; only
-    // a genuinely unclear result comes back as candidates.
-    async function runMbLookup() {
+    // One painter for every unmatched / candidate state: the shared search row,
+    // an optional note line, the candidate rows, and (on a matched act) the
+    // Cancel / Clear match footer.
+    function renderMbSearch({ term, busy = false, note = '', err = false, cands = null, search }) {
       const box = document.getElementById('pp-mb')
-      const term = currentMbTerm()
-      box.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
-      try {
-        const res = await API.artists.mbLookup(artistId, term)
-        if (res.status === 'matched') {
+      const matched = !!artist.musicbrainz?.mbid
+      const rows = (cands || []).map(c => ({
+        id: c.mbid, name: c.name, score: c.score,
+        meta: [c.type, c.area, c.begin ? `${c.begin}${c.end ? '–' + c.end : ''}` : '', c.disambiguation].filter(Boolean).join(' · '),
+        url: mbArtistUrl(c.mbid),
+      }))
+      box.innerHTML = `<div class="pp-mb-stack">
+        ${mbSearchRowHtml([{ key: 'term', label: 'Name', value: term, id: 'pp-mb-term' }], busy)}
+        ${note ? mbNoteHtml(note, err) : ''}
+        ${rows.length ? mbCandsHtml(rows, 'artist') : ''}
+        ${matched && !busy ? `<div class="pp-mb-foot">
+          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-cancel">Cancel</button>
+          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-clear">Clear match</button></div>` : ''}
+      </div>`
+      mbWireSearch(box, v => search(v.term))
+      mbWireCands(box, async mbid => {
+        box.innerHTML = '<div class="pp-mb-empty">Fetching…</div>'
+        try {
+          await API.artists.mbResolve(artistId, mbid)
           artist = await API.artists.get(artistId)
           renderMusicBrainz()
-          // The Photos tab gates its Wikimedia lookup on artist.musicbrainz
-          // .mbid. Its fetchTile is a function so it re-reads that on every
-          // render — but something still has to ASK for a render, or the tile
-          // keeps saying "match this act first" after the match succeeded.
-          ppGallery.refresh()
-          return
+          ppGallery.refresh()      // see note in runMbLookup
+        } catch (e) {
+          Notify.error('Failed: ' + e.message); renderMusicBrainz()
         }
-        renderMbCandidates(res.query, res.candidates || [])
-      } catch (e) {
-        box.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message)}
-          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-lookup">Try again</button></div>`
-        document.getElementById('pp-mb-lookup').addEventListener('click', runMbLookup)
-      }
-    }
-
-    // Candidate picker. Deliberately a manual step: automatic matching either
-    // wins outright or defers to a human — it never guesses, because a wrong
-    // entity attaches wrong facts to a page nobody re-checks.
-    async function openMbPicker() {
-      const box = document.getElementById('pp-mb')
-      const term = currentMbTerm()
-      box.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
-      let res
-      try { res = await API.artists.mbCandidates(artistId, term) }
-      catch (e) {
-        box.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message)}
-          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-change">Try again</button></div>`
-        document.getElementById('pp-mb-change').addEventListener('click', openMbPicker)
-        return
-      }
-      renderMbCandidates(res.query, res.candidates || [])
-    }
-
-    // Shared candidate list — used by both the explicit "Look up" (when the
-    // result wasn't clear-cut) and "Change match".
-    function renderMbCandidates(query, cands) {
-      const box = document.getElementById('pp-mb')
-      if (!cands.length) {
-        box.innerHTML = `
-          <div class="pp-mb-empty">Nothing found for “${esc(query || artist.name)}”.</div>
-          <div class="pp-mb-searchrow">
-            <input type="text" class="pp-mb-input" id="pp-mb-term"
-                   value="${esc(query || artist.name)}" placeholder="Search term"
-                   title="Sent to MusicBrainz as the artist name. Edit if a billing variant (e.g. “Trio”, “Quartet”) is causing a miss">
-            <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-lookup">Try again</button>
-          </div>`
-        document.getElementById('pp-mb-lookup').addEventListener('click', runMbLookup)
-        document.getElementById('pp-mb-term').addEventListener('keydown', e => {
-          if (e.key === 'Enter') { e.preventDefault(); runMbLookup() }
-        })
-        return
-      }
-      box.innerHTML = `
-        <div class="pp-mb-prompt">Click the right act to link it${
-          cands.length === 1 ? '' : ' (more than one goes by this name)'}.</div>
-        <div class="pp-mb-searchrow pp-mb-searchrow-sm">
-          <input type="text" class="pp-mb-input" id="pp-mb-term"
-                 value="${esc(query || artist.name)}" placeholder="Search term"
-                 title="Sent to MusicBrainz as the artist name. Edit and search again if none of these are right">
-          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-research">Search</button>
-        </div>
-        <div class="pp-mb-cands">
-          ${cands.map(c => `
-            <div class="pp-mb-cand" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
-              <span class="pp-mb-cand-name">${esc(c.name)}</span>
-              <span class="pp-mb-cand-meta">${[
-                c.type, c.area,
-                c.begin ? `${c.begin}${c.end ? '–' + c.end : ''}` : '',
-                c.disambiguation,
-              ].filter(Boolean).map(esc).join(' · ')}</span>
-              <span class="pp-mb-cand-score" title="MusicBrainz match score">${c.score ?? ''}</span>
-              <a class="pp-mb-cand-view" href="${esc(mbArtistUrl(c.mbid))}"
-                 target="_blank" rel="noopener"
-                 title="Open on musicbrainz.org">View ↗</a>
-            </div>`).join('')}
-        </div>
-        <div class="pp-mb-foot">
-          <button type="button" class="btn btn-ghost btn-xs" id="pp-mb-cancel">Cancel</button>
-          ${artist.musicbrainz?.mbid
-            ? `<button type="button" class="btn btn-ghost btn-xs" id="pp-mb-clear">Clear match</button>` : ''}
-        </div>`
-
-      box.querySelectorAll('.pp-mb-cand').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          // The View link lives inside the clickable row — following it must
-          // not also select the candidate.
-          if (e.target.closest('.pp-mb-cand-view')) return
-          box.innerHTML = `<div class="pp-mb-empty">Fetching…</div>`
-          try {
-            await API.artists.mbResolve(artistId, btn.dataset.mbid)
-            artist = await API.artists.get(artistId)
-            renderMusicBrainz()
-            ppGallery.refresh()      // see note in runMbLookup
-          } catch (e) {
-            Notify.error('Failed: ' + e.message); renderMusicBrainz()
-          }
-        })
-        // The row is a div (a <button> can't legally contain the View link),
-        // so keyboard activation has to be wired by hand.
-        btn.addEventListener('keydown', e => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click() }
-        })
       })
-      document.getElementById('pp-mb-research').addEventListener('click', openMbPicker)
-      document.getElementById('pp-mb-term').addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); openMbPicker() }
-      })
-      document.getElementById('pp-mb-cancel').addEventListener('click', renderMusicBrainz)
+      document.getElementById('pp-mb-cancel')?.addEventListener('click', renderMusicBrainz)
       document.getElementById('pp-mb-clear')?.addEventListener('click', async () => {
         try {
           await API.artists.mbResolve(artistId, null)
@@ -5837,6 +5944,55 @@ const App = (() => {
           renderMusicBrainz()
           ppGallery.refresh()        // clearing a match disables the lookup again
         } catch (e) { Notify.error('Failed: ' + e.message) }
+      })
+    }
+
+    // Look up, and LINK IT IF THE ANSWER IS OBVIOUS. Clicking through a
+    // candidate list to confirm a single 100-scoring result is busywork. The
+    // server applies the same confidence gate the creation-time pass uses; only
+    // a genuinely unclear result comes back as candidates.
+    async function runMbLookup(termArg) {
+      const term = (typeof termArg === 'string' && termArg) || currentMbTerm()
+      renderMbSearch({ term, busy: true, search: runMbLookup })
+      try {
+        const res = await API.artists.mbLookup(artistId, term)
+        if (res.status === 'matched') {
+          artist = await API.artists.get(artistId)
+          renderMusicBrainz()
+          // The Photos tab gates its Wikimedia lookup on artist.musicbrainz
+          // .mbid. Its fetchTile is a function so it re-reads that on every
+          // render, but something still has to ASK for a render, or the tile
+          // keeps saying "match this act first" after the match succeeded.
+          ppGallery.refresh()
+          return
+        }
+        showMbCandidates(res.query || term, res.candidates || [])
+      } catch (e) {
+        renderMbSearch({ term, note: 'Could not reach MusicBrainz.', err: true, search: runMbLookup })
+      }
+    }
+
+    // Candidate picker. Deliberately a manual step: automatic matching either
+    // wins outright or defers to a human -- it never guesses, because a wrong
+    // entity attaches wrong facts to a page nobody re-checks.
+    async function openMbPicker(termArg) {
+      const term = (typeof termArg === 'string' && termArg) || currentMbTerm()
+      renderMbSearch({ term, busy: true, search: openMbPicker })
+      let res
+      try { res = await API.artists.mbCandidates(artistId, term) }
+      catch (e) {
+        renderMbSearch({ term, note: 'Could not reach MusicBrainz.', err: true, search: openMbPicker })
+        return
+      }
+      showMbCandidates(res.query || term, res.candidates || [])
+    }
+
+    // Shared candidate list, used by both the explicit search (when the result
+    // wasn't clear-cut) and "Change match".
+    function showMbCandidates(query, cands) {
+      renderMbSearch({
+        term: query || artist.name, cands,
+        note: cands.length ? '' : 'Nothing found for this name.', search: openMbPicker,
       })
     }
     renderMusicBrainz()
@@ -6277,7 +6433,11 @@ const App = (() => {
         `<button type="button" class="lx-ic lx-ok" data-lx-act="accept" data-lx-ids="${ids}" aria-label="${opts.accept || 'Accept'}" title="${opts.accept || 'Accept'}">${icon('check')}</button>` +
         `<button type="button" class="lx-ic lx-no" data-lx-act="dismiss" data-lx-ids="${ids}" aria-label="Dismiss" title="Dismiss">${icon('x')}</button></span>`
     }
-    if (list.some(p => p.decision === 'accepted' && lxApplied(p, opts.o))) return '<span class="lx-done">Accepted</span>'
+    // Accepted stays clickable: it applies Lomax's value again, for a field
+    // cleared or reverted by accident (Ryan, 2026-10-15).
+    const accepted = list.filter(p => p.decision === 'accepted' && p.id && lxApplied(p, opts.o))
+    if (accepted.length) return `<button type="button" class="lx-done lx-reapply lx-edit" data-lx-act="reapply" ` +
+      `data-lx-ids="${accepted.map(p => p.id).join(',')}" title="Apply again">Accepted</button>`
     return list.some(p => lxAgrees(p, opts.o)) ? '<span class="lx-done">OK</span>' : ''
   }
 
@@ -6453,12 +6613,12 @@ const App = (() => {
     // Record the decision; the server applies an accepted value for a saved
     // subject. A folder subject is applied by the page (afterAccept), because
     // the database has nothing yet.
-    c.decide = async (ids, decision) => {
+    c.decide = async (ids, decision, reapply = false) => {
       const done = []
       c.error = null
       for (const id of ids.map(Number)) {
         try {
-          const p = await API.lomax.decide(id, decision)
+          const p = await API.lomax.decide(id, decision, reapply)
           for (const r of c.runs) {
             const props = r.result && r.result.proposals
             const i = props ? props.findIndex(x => x.id === p.id) : -1
@@ -6568,9 +6728,16 @@ const App = (() => {
       const question = (q ? q.value.trim() : '') || lxFirstPrompt(c)
       if (q) q.value = ''
       c.ask({ question, level: 'research' })
-    } else if (act === 'accept' || act === 'dismiss' || act === 'accept-all') {
+    } else if (act === 'accept' || act === 'dismiss' || act === 'accept-all' || act === 'reapply') {
       btn.disabled = true
-      c.decide(String(btn.dataset.lxIds || '').split(',').filter(Boolean), act === 'dismiss' ? 'rejected' : 'accepted')
+      c.decide(String(btn.dataset.lxIds || '').split(',').filter(Boolean), act === 'dismiss' ? 'rejected' : 'accepted',
+               act === 'reapply')
+    } else if (act === 'classify') {
+      // Type: Album. The decision is recorded first (a saved recording is reclassified by the
+      // server, an unsaved folder by the page), then the page's own Classify as Album runs.
+      btn.disabled = true
+      Promise.resolve(c.decide(String(btn.dataset.lxIds || '').split(',').filter(Boolean), 'accepted'))
+        .then(() => { if (!c.error && c.cfg.classify) return c.cfg.classify(c) })
     } else if (act === 'restore') {
       btn.disabled = true
       c.restore(Number(btn.dataset.lxRun))
@@ -6605,6 +6772,14 @@ const App = (() => {
   const lxPad2 = n => String(n).padStart(2, '0')
   const lxShown = p => !!p && p.decision !== 'rejected'
 
+  // The Classify as Album / Live Recording action of a saved recording (Actions menu, and the
+  // Lomax Type row). The Albums nav entry and its kind-counts depend on it.
+  async function recordingSetKind(recordingId, kind) {
+    try { await API.recordings.update(recordingId, { kind, change_note: 'Quick edit' }) }
+    catch (e) { Notify.error('Failed: ' + e.message) }
+    loadArtistList()
+  }
+
   function lxTrackSummary(props) {
     const n = re => props.filter(p => re.test(p.field)).length
     return [[n(/\.title$/), 'title'], [n(/\.songwriter$/), 'songwriter'], [n(/\.note$/), 'note']]
@@ -6627,14 +6802,23 @@ const App = (() => {
 
   function lxFieldCardHtml(run, o) {
     const fp = lxFieldProps(run)
-    const rows = LX_FIELDS.concat(LX_ALBUM_FIELDS, [['genre', 'Genre']]).filter(([k]) => fp[k] && lxShown(fp[k]))
+    // A recording run that finds an official release proposes the type first: Album.
+    const rows = [['kind', 'Type']].concat(LX_FIELDS, LX_ALBUM_FIELDS, [['genre', 'Genre']]).filter(([k]) => fp[k] && lxShown(fp[k]))
     if (!rows.length) return ''
-    const open = rows.map(([k]) => fp[k]).filter(p => lxOpen(p, o) && !(p.field === 'genre' && o.value && o.value('genre')))
+    const open = rows.map(([k]) => fp[k]).filter(p => p.field !== 'kind' && lxOpen(p, o) && !(p.field === 'genre' && o.value && o.value('genre')))
     const head = !o.readonly && open.length > 1 && canEditLibrary()
       ? `<div class="lx-card-h"><span class="lx-card-s"></span>` +
         `<button type="button" class="lx-link lx-edit" data-lx-act="accept-all" data-lx-ids="${open.map(p => p.id).join(',')}">Accept all</button></div>` : ''
     return `<div class="lx-card">${head}<table class="lx-tbl"><tbody>${rows.map(([k, label]) => {
       const p = fp[k]
+      if (k === 'kind') {
+        const done = p.decision === 'accepted' || !!(o.kind && o.kind() === 'studio')
+        const act = o.readonly || !canEditLibrary() ? '' : done
+          ? `<span class="lx-done">${p.decision === 'accepted' ? 'Accepted' : 'OK'}</span>`
+          : `<span class="lx-acts lx-edit"><button type="button" class="btn btn-ghost btn-xs lx-edit" data-lx-act="classify" data-lx-ids="${p.id}">Classify as Album</button>` +
+            `<button type="button" class="lx-ic lx-no" data-lx-act="dismiss" data-lx-ids="${p.id}" aria-label="Dismiss" title="Dismiss">${icon('x')}</button></span>`
+        return `<tr><th scope="row">${label}</th><td><span class="${done ? 'lx-same' : 'lx-val'}">Album</span></td><td class="lx-act-td">${act}</td></tr>`
+      }
       return `<tr><th scope="row">${label}</th><td>${p.current && !lxAgrees(p, o) ? `<div class="lx-was">${esc(p.current)}</div>` : ''}${lomaxSuggestionCell(p, { o })}</td>` +
         `<td class="lx-act-td">${o.readonly ? '' : lomaxActions(p, { o })}</td></tr>`
     }).join('')}</tbody></table></div>`
@@ -6992,7 +7176,10 @@ const App = (() => {
     const run = c.latest()
     const fp = lxFieldProps(run), tp = lxTrackProps(run)
     const plain = (o.resolved && o.resolved.sources_plain) || {}
-    let rows = LX_FIELDS.map(([k, label]) => {
+    // Short labels keep the narrow FIELD column on one line; display only, field keys are unchanged.
+    const RES_SHORT = { recording_engineer: 'Recording Eng.', transfer_engineer: 'Transfer Eng.', mastering_engineer: 'Mastering Eng.' }
+    let rows = LX_FIELDS.map(([k, fullLabel]) => {
+      const label = RES_SHORT[k] || fullLabel
       const f = (o.resolved && o.resolved[k]) || {}
       const tentative = f.confidence === 'tentative' ? ' <span class="lx-tent">Tentative</span>' : ''
       const p = fp[k]
@@ -7244,8 +7431,8 @@ const App = (() => {
     const trunc          = (s, n) => s && s.length > n ? s.slice(0, n) + '\u2026' : s
     const lineageDisplay = rec.lineage ? trunc(rec.lineage, 220) : null
 
-    const ENGINEER_FIELDS = [['recording_engineer', 'Recording Engineer'], ['transfer_engineer', 'Transfer Engineer'],
-                             ['mastering_engineer', 'Mastering Engineer']]
+    const ENGINEER_FIELDS = [['recording_engineer', 'Recording Eng.'], ['transfer_engineer', 'Transfer Eng.'],
+                             ['mastering_engineer', 'Mastering Eng.']]
     // A set name links to the Engineer page; the cell edit starts from a click anywhere but the link.
     const engineerCellHtml = e => e && e.name
       ? (e.id ? `<a href="#/engineer/${e.id}">${esc(e.name)}</a>` : esc(e.name)) : '\u2014'
@@ -7277,11 +7464,8 @@ const App = (() => {
     // static facts rendered here, since that wiring never runs for them.
     const releaseAdmin = isAdmin() && canEdit
     const showReleaseBlock = isStudioKind && (releaseAdmin || releaseIsLinked)
-    const releaseLinkHtml = () => `<div class="pp-mb-linked">
-              <a class="pp-mb-name" href="${esc(mbReleaseUrl(rec.mb_release_id))}" target="_blank" rel="noopener">${esc(
-                [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean).join(' · ') || rec.title || 'Release')} ↗</a>
-            </div>`
-    const releaseStaticHtml = (!releaseAdmin && releaseIsLinked) ? releaseLinkHtml() : ''
+    const releaseLinkHtml = () => `<div class="pp-mb-linked"><span class="hm-val">${esc(
+                [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean).join(' · ') || rec.title || 'Release')}</span>${mbExtLink(mbReleaseUrl(rec.mb_release_id))}</div>`
     const releaseItemHtml = releaseIsLinked && isStudioKind ? `
         <div class="rec-sl-item rec-sl-item--release">
           <span class="mg-row-label">Release</span>
@@ -7329,17 +7513,17 @@ const App = (() => {
         ${discsItemHtml}
         ${isStudioKind ? formatItemHtml : ''}${releaseItemHtml}
       </div>
-      ${!isStudioKind ? `<div class="rec-sl-row rec-sl-row--eng">
-        ${ENGINEER_FIELDS.map(([f, label]) => `<div class="rec-sl-item">
-          <span class="mg-row-label">${label}</span>
-          <span class="hm-val${qc}"${qa(f)}>${engineerCellHtml(rec[f])}</span>
-        </div>`).join('')}
-      </div>
-      <div class="rec-sl-row rec-sl-row--lineage">
+      ${!isStudioKind ? `<div class="rec-sl-row rec-sl-row--lineage">
         <div class="rec-sl-item rec-sl-item--lineage">
           <span class="mg-row-label">Lineage</span>
           <span class="hm-val${qc}"${qa('lineage')}>${esc(lineageDisplay || rec.lineage || '\u2014')}</span>
         </div>
+      </div>
+      <div class="rec-sl-row rec-sl-row--eng">
+        ${ENGINEER_FIELDS.map(([f, label]) => `<div class="rec-sl-item">
+          <span class="mg-row-label">${label}</span>
+          <span class="hm-val${qc}"${qa(f)}>${engineerCellHtml(rec[f])}</span>
+        </div>`).join('')}
       </div>` : ''}`
 
     // Analyze Audio lives in the Side Panel's tab strip with every other pane
@@ -7364,7 +7548,9 @@ const App = (() => {
     const statusNoteHtml = () => (rec.is_official && rec.kind !== 'studio')
       ? `<span class="rec-status-note" title="Contains officially released material">Official Release</span>`
       : (rec.is_published === false
-        ? `<span class="rec-status-note" title="This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact; playback will not work until it comes back.">Out of Library</span>`
+        ? `<span class="rec-status-note" title="${rec.location === 'queue'
+            ? 'This recording is in the Queue. It is not in the library yet.'
+            : "This recording's folder was moved out of the library to Workshop or Backlog. The library record is intact."}">Out of Library</span>`
         : '')
     const collectionArea = `
       ${canEdit ? `
@@ -7381,14 +7567,14 @@ const App = (() => {
             <button class="actions-item actions-item--lead" role="menuitem" data-act="coll-toggle" aria-expanded="false">Add to Collection ${chevronIcon()}</button>
             <div class="actions-submenu" id="rec-coll-sub" hidden></div>` : ''}
             ${rec.is_published === false ? `
-            <div class="actions-note">Out of the library, in Workshop or Backlog</div>` : `
-            ${triageDests().length ? `
+            <button class="actions-item" role="menuitem" data-act="review">Review</button>` : ''}
+            ${triageDests().some(d => d !== rec.location) ? `
             <button class="actions-item" role="menuitem" data-act="move-toggle" aria-expanded="false">Move to ${chevronIcon()}</button>
             <div class="actions-submenu" id="rec-move-sub" hidden>
-              ${triageDestButtons('actions')}
-            </div>` : ''}`}
+              ${triageDestButtons('actions', undefined, rec.location)}
+            </div>` : ''}
             <div class="actions-sep"></div>
-            <button class="actions-item actions-item--danger" role="menuitem" data-act="delete">Delete Recording</button>
+            <button class="actions-item actions-item--danger" role="menuitem" data-act="trash">Move to Trash</button>
           </div>
         </div>
         <div class="rec-collections" id="rec-collections">
@@ -7434,6 +7620,35 @@ const App = (() => {
             ${headerStarHtml}${studioSubParts.join('<span class="rec-dot">·</span>')}
           </div>`
 
+    // Live date line as an ordered list so the track count and length can sit
+    // right after the last item that has a value, ahead of any trailing empty
+    // "Add event" / "Add stage" placeholders. Empty items with no markup (a
+    // listener sees no placeholders) drop out.
+    const liveLineItems = [
+      { filled: !!dateStr,
+        html: `<span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>` },
+      { filled: !!venueStr || (!canEdit && !!venueHtml),
+        html: canEdit
+          ? `<span class="rec-f rec-f-venue pp-editable" id="rec-f-venue">${venueStr ? esc(venueStr) : '<span class="pp-empty">Add venue</span>'}</span>${venueNavLink}`
+          : (venueHtml || '') },
+      { filled: !!locStr, html: locStr ? `<span class="rec-f-loc">${esc(locStr)}</span>` : '' },
+      { filled: !!eventStr,
+        html: canEdit
+          ? `<span class="rec-f rec-f-event pp-editable${eventStr ? '' : ' pp-empty'}" id="rec-f-event" title="Click to set the festival/event this show is part of">${eventStr ? esc(eventStr) : 'Add event'}</span>`
+          : (eventStr ? `<span class="rec-f-loc">${esc(eventStr)}</span>` : '') },
+      { filled: !!stageStr,
+        html: canEdit
+          ? `<span class="rec-f rec-f-stage pp-editable${stageStr ? '' : ' pp-empty'}" id="rec-f-stage">${stageStr ? esc(stageStr) : 'Add stage'}</span>`
+          : (stageStr ? `<span class="rec-f-loc">${esc(stageStr)}</span>` : '') },
+    ].filter(it => it.html)
+    const liveLastFilled = liveLineItems.reduce((n, it, k) => it.filled ? k : n, -1)
+    liveLineItems.splice(liveLastFilled + 1, 0,
+      ...[studioTrackCountStr, studioLengthStr].filter(Boolean).map(t => ({ filled: true, html: esc(t) })))
+    const liveDateLineHtml = `
+          <div class="rec-date-line" id="rec-date-line">
+            ${headerStarHtml}${liveLineItems.map(it => it.html).join('<span class="rec-dot">·</span>')}
+          </div>`
+
     // Playback is !canEdit, which also covers a listener and a joined library.
     const pbMode = !canEdit
 
@@ -7452,21 +7667,7 @@ const App = (() => {
             <h2 class="rec-perf-name${canEdit ? ' pp-editable' : ''}" id="rec-perf-name"${canEdit ? ' title="Click to reassign artist"' : ''}>${esc(perfName) || (canEdit ? '<span class="pp-empty">Set artist</span>' : '')}</h2>
             ${perfNavLink}
           </div>
-          ${isStudioKind ? studioSubLineHtml : `
-          <div class="rec-date-line" id="rec-date-line">
-            ${headerStarHtml}<span class="rec-f rec-f-date${canEdit ? ' pp-editable' : ''}" id="rec-f-date">${dateStr ? esc(dateStr) : (canEdit ? '<span class="pp-empty">Add date</span>' : '')}</span>
-            <span class="rec-dot">·</span>
-            ${canEdit
-              ? `<span class="rec-f rec-f-venue pp-editable" id="rec-f-venue">${venueStr ? esc(venueStr) : '<span class="pp-empty">Add venue</span>'}</span>${venueNavLink}`
-              : (venueHtml || '')}
-            ${locStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(locStr)}</span>` : ''}
-            ${canEdit
-              ? `<span class="rec-dot">·</span><span class="rec-f rec-f-event pp-editable${eventStr ? '' : ' pp-empty'}" id="rec-f-event" title="Click to set the festival/event this show is part of">${eventStr ? esc(eventStr) : 'Add event'}</span>`
-              : (eventStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(eventStr)}</span>` : '')}
-            ${canEdit
-              ? `<span class="rec-dot">·</span><span class="rec-f rec-f-stage pp-editable${stageStr ? '' : ' pp-empty'}" id="rec-f-stage">${stageStr ? esc(stageStr) : 'Add stage'}</span>`
-              : (stageStr ? `<span class="rec-dot">·</span><span class="rec-f-loc">${esc(stageStr)}</span>` : '')}
-          </div>`}
+          ${isStudioKind ? studioSubLineHtml : liveDateLineHtml}
           <div class="rec-musicians-row" id="rec-musicians"></div>
           ${sourceLineageRow}
           <div class="rec-header-notes${canEdit ? ' pp-editable' : ''}${rec.notes ? '' : ' pp-empty'}" id="rec-notes"${canEdit ? ' title="Click to edit notes"' : ''}>${rec.notes ? esc(rec.notes) : (canEdit ? 'Add notes…' : '')}</div>
@@ -7537,8 +7738,7 @@ const App = (() => {
 
             ${isStudioKind ? `
             <div class="slide-pane" id="sp-mb">
-              <div class="slide-pane-scroll"><div class="rev-raw-section"><div id="rec-release">${releaseStaticHtml}</div>
-                <div id="rec-release-detail"></div></div></div>
+              <div class="slide-pane-scroll"><div class="rev-raw-section"><div id="rec-release"></div></div></div>
             </div>` : ''}
 
             ${showResolver && !isStudioKind ? `
@@ -8057,6 +8257,14 @@ const App = (() => {
           if (e.key === 'Enter') { e.preventDefault(); commitVenue({ id: null, name: input.value.trim() }) }
           else if (e.key === 'Escape') { committed = true; reload() }
         })
+        // Outside click / another field: save only a changed value, else just close.
+        // Delay lets a dropdown pick (mousedown) win; `committed` guards the rest.
+        const origName = (perf.venue_name || '').trim()
+        input.addEventListener('blur', () => setTimeout(() => {
+          if (committed) return
+          if (input.value.trim() !== origName) commitVenue({ id: null, name: input.value.trim() })
+          else { committed = true; reload() }
+        }, 150))
       })
 
       // Festival / Event → picker (search existing / create new / clear)
@@ -8086,6 +8294,12 @@ const App = (() => {
           if (e.key === 'Enter') { e.preventDefault(); commitEvent({ id: null, name: input.value.trim() }) }
           else if (e.key === 'Escape') { committed = true; reload() }
         })
+        const origEvent = (perf.event_name || '').trim()
+        input.addEventListener('blur', () => setTimeout(() => {
+          if (committed) return
+          if (input.value.trim() !== origEvent) commitEvent({ id: null, name: input.value.trim() })
+          else { committed = true; reload() }
+        }, 150))
       })
 
       // Stage → inline text (optional, Performance.stage)
@@ -8124,140 +8338,49 @@ const App = (() => {
         },
       })
 
-      // Same .pp-mb-* styling and state machine as the Artist page's
-      // MusicBrainz block: matched (confidence gate chose it, no human
-      // involved), linked (a human picked it), ambiguous/none/null (nothing
-      // to show yet). "Matched automatically" / "Linked by you" are the
-      // exact strings that block already renders — reused verbatim (S2/S3).
-      function releaseFactsLine() {
-        // Label, catalog number, country only — title and year are the
-        // header's job now, one row up, so this stopped repeating them.
-        // Falls back to the title only when none of the three
-        // release-specific facts are known.
-        const facts = [rec.mb_label, rec.mb_catalog_number, rec.mb_release_country].filter(Boolean)
-        return facts.length ? facts.join(' · ') : (rec.title || '')
-      }
-      // The release facts under the link, as on Add Recording's MusicBrainz tab.
-      let _relDetailFor = null
-      function renderReleaseDetail() {
-        const det = document.getElementById('rec-release-detail')
+      // The release panel is the shared mbReleasePanelHtml (also Add Recording's
+      // MusicBrainz tab); this only feeds it the recording and handles its events.
+      const relUi = { phase: 'idle', cands: [], artist: null, title: null, detailFor: null, detail: null, err: false }
+      const relEditable = isAdmin() && canEdit
+      function renderReleaseBlock() {
+        const box = document.getElementById('rec-release')
         const linked = rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked'
         const head = document.getElementById('rec-release-head')
         if (head) head.innerHTML = linked ? releaseLinkHtml() : ''
-        if (!det) return
-        if (!linked) { det.innerHTML = ''; _relDetailFor = null; return }
-        if (_relDetailFor === rec.mb_release_id) return
-        _relDetailFor = rec.mb_release_id
-        const want = rec.mb_release_id
-        det.innerHTML = '<div class="pp-mb-empty">Fetching…</div>'
-        API.ingest.releaseDetail(want)
-          .then(r => {
-            if (_relDetailFor !== want) return
-            det.innerHTML = r && r.release ? mbReleaseDetailsHtml(r.release)
-              : '<div class="pp-mb-empty">Lookup failed: release not found</div>'
-          })
-          .catch(e => { if (_relDetailFor === want) det.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message || String(e))}</div>` })
-      }
-
-      function renderReleaseBlock() {
-        renderReleaseDetail()
-        const box = document.getElementById('rec-release')
         if (!box) return
-        // canEditLibrary() on every mutating control (S7) -- an admin in
-        // Playback mode, or on a remote library, must not see Unlink/Find
-        // release any more than any other edit control on this page.
-        const admin = isAdmin() && canEdit
-        if (rec.mb_release_status === 'matched' || rec.mb_release_status === 'linked') {
-          const how = rec.mb_release_status === 'matched' ? 'Matched automatically' : 'Linked by you'
-          box.innerHTML = `
-            <div class="pp-mb-linked">
-              <a class="pp-mb-name" href="${esc(mbReleaseUrl(rec.mb_release_id))}"
-                 target="_blank" rel="noopener"
-                 title="View this release on musicbrainz.org">${esc(releaseFactsLine() || rec.title || 'Release')} ↗</a>
-            </div>
-            <div class="pp-mb-foot">
-              <span class="pp-mb-dot"></span>${how}
-              ${admin ? `<button type="button" class="btn btn-ghost btn-xs" id="rec-release-unlink">Unlink</button>` : ''}
-            </div>`
-        } else if (admin) {
-          // 'unlinked' (a human explicitly removed a link) is not "never
-          // looked up" -- rendering it that way claims something that never
-          // happened (N1). No status text for it at all, just the action.
-          const msg = rec.mb_release_status === 'ambiguous'
-            ? 'More than one release matches this recording, please pick the right one.'
-            : rec.mb_release_status === 'none'
-              ? 'Nothing found for this recording.'
-              : (rec.mb_release_status === 'unlinked' || rec.mb_release_status === 'error')
-                ? ''
-                : 'Not looked up yet.'
-          box.innerHTML = mbFindHtml('rec-release-find', 'Find release', msg)
-        } else {
-          box.innerHTML = ''
+        if (linked && relUi.detailFor !== rec.mb_release_id) {
+          const want = rec.mb_release_id
+          relUi.detailFor = want; relUi.detail = null; relUi.err = false
+          API.ingest.releaseDetail(want)
+            .then(r => { if (relUi.detailFor === want) { relUi.detail = (r && r.release) || null; relUi.err = !relUi.detail; renderReleaseBlock() } })
+            .catch(() => { if (relUi.detailFor === want) { relUi.err = true; renderReleaseBlock() } })
         }
-        document.getElementById('rec-release-unlink')?.addEventListener('click', async () => {
-          try {
-            await API.recordings.releaseUnlink(recordingId)
-            rec.mb_release_status    = 'unlinked'
-            rec.mb_release_id        = null
-            rec.mb_release_group_id  = null
-            rec.mb_release_type      = null
-            rec.mb_label             = null
-            rec.mb_catalog_number    = null
-            rec.mb_release_country   = null
-            renderReleaseBlock()
-          } catch (e) { Notify.error('Failed: ' + e.message) }
+        if (relUi.artist == null) relUi.artist = perfName
+        if (relUi.title == null) relUi.title = rec.title || ''
+        box.innerHTML = mbReleasePanelHtml({
+          editable: relEditable,
+          linked: linked ? {
+            mbid: rec.mb_release_id,
+            how: rec.mb_release_status === 'matched' ? 'Matched automatically' : 'Linked by you',
+            detail: relUi.detail, err: relUi.err,
+          } : null,
+          artist: relUi.artist, title: relUi.title, phase: relUi.phase, cands: relUi.cands,
         })
-        document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
-      }
-
-      async function openReleasePicker() {
-        const box = document.getElementById('rec-release')
-        if (!box) return
-        box.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
-        let res
-        try { res = await API.recordings.releaseCandidates(recordingId) }
-        catch (e) {
-          box.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(e.message)}
-            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-find">Try again</button></div>`
-          document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
-          return
-        }
-        renderReleaseCandidates(res.candidates || [])
-      }
-
-      function renderReleaseCandidates(cands) {
-        const box = document.getElementById('rec-release')
-        if (!box) return
-        if (!cands.length) {
-          box.innerHTML = `
-            <div class="pp-mb-empty">Nothing found for “${esc(rec.title || '')}”.</div>
-            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-find">Try again</button>`
-          document.getElementById('rec-release-find')?.addEventListener('click', openReleasePicker)
-          return
-        }
-        box.innerHTML = `
-          <div class="pp-mb-prompt">Click the right release to link it${
-            cands.length === 1 ? '' : ' (more than one matches)'}.</div>
-          <div class="pp-mb-cands">
-            ${cands.map(c => `
-              <div class="pp-mb-cand" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
-                <span class="pp-mb-cand-name">${esc(c.title || '')}</span>
-                <span class="pp-mb-cand-meta">${[
-                  c.label, c.catalog_number, c.country, c.date,
-                ].filter(Boolean).map(esc).join(' · ')}</span>
-                <a class="pp-mb-cand-view" href="${esc(mbReleaseUrl(c.mbid))}"
-                   target="_blank" rel="noopener" title="Open on musicbrainz.org">View ↗</a>
-              </div>`).join('')}
-          </div>
-          <div class="pp-mb-foot">
-            <button type="button" class="btn btn-ghost btn-xs" id="rec-release-cancel">Cancel</button>
-          </div>`
-        box.querySelectorAll('.pp-mb-cand').forEach(btn => {
-          btn.addEventListener('click', async e => {
-            if (e.target.closest('.pp-mb-cand-view')) return
-            box.innerHTML = `<div class="pp-mb-empty">Fetching…</div>`
+        mbReleasePanelWire(box, {
+          search: async v => {
+            relUi.artist = v.artist; relUi.title = v.title; relUi.phase = 'searching'
+            renderReleaseBlock()
             try {
-              const res = await API.recordings.releaseLink(recordingId, btn.dataset.mbid)
+              const res = await API.recordings.releaseCandidates(recordingId, v.artist, v.title)
+              relUi.cands = res.candidates || []
+              relUi.phase = relUi.cands.length ? 'results' : 'none'
+            } catch (e) { relUi.phase = 'error' }
+            renderReleaseBlock()
+          },
+          pick: async mbid => {
+            relUi.phase = 'fetching'; renderReleaseBlock()
+            try {
+              const res = await API.recordings.releaseLink(recordingId, mbid)
               rec.mb_release_status   = res.status
               rec.mb_release_id       = res.mb_release_id
               rec.mb_release_group_id = res.mb_release_group_id
@@ -8265,18 +8388,28 @@ const App = (() => {
               rec.mb_label            = res.mb_label
               rec.mb_catalog_number   = res.mb_catalog_number
               rec.mb_release_country  = res.mb_release_country
+              relUi.phase = 'idle'
+            } catch (e) { Notify.error('Failed: ' + e.message); relUi.phase = 'results' }
+            renderReleaseBlock()
+          },
+          unlink: async () => {
+            try {
+              await API.recordings.releaseUnlink(recordingId)
+              rec.mb_release_status    = 'unlinked'
+              rec.mb_release_id        = null
+              rec.mb_release_group_id  = null
+              rec.mb_release_type      = null
+              rec.mb_label             = null
+              rec.mb_catalog_number    = null
+              rec.mb_release_country   = null
+              relUi.detailFor = null; relUi.phase = 'idle'; relUi.cands = []
               renderReleaseBlock()
-            } catch (e) { Notify.error('Failed: ' + e.message); renderReleaseBlock() }
-          })
-          btn.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click() }
-          })
+            } catch (e) { Notify.error('Failed: ' + e.message) }
+          },
         })
-        document.getElementById('rec-release-cancel').addEventListener('click', renderReleaseBlock)
       }
 
-      if (showReleaseBlock) renderReleaseBlock()
-      else if (isStudioKind) renderReleaseDetail()
+      if (isStudioKind) renderReleaseBlock()
 
       // ── Info File: locked → Edit File → Save to File ────────────────────
       // Replaces the old always-hot textarea that autosaved on blur (see the
@@ -8425,6 +8558,7 @@ const App = (() => {
         skill: isStudioKind ? 'album' : 'recording', subjectType: 'recording', subjectId: recordingId,
         alive: () => document.body.contains(resRoot || document.getElementById('sp-ai')),
         afterAccept: async () => { await autoWriteNow(); renderRecordingView(recordingId) },
+        classify: () => recordingSetKind(recordingId, 'studio'),
       }) : null
       if (lxc) {
         if (resRoot) {
@@ -8743,67 +8877,16 @@ const App = (() => {
     // not. Checking it turns a reversible mistake into an unrecoverable one, so
     // it is opt-in, it is spelled out in red, and the confirm button changes
     // its own label to say which of the two things is about to happen.
-    function actDeleteRecording() {
-      const shown = [perfName, dateStr, venueStr].filter(Boolean).join(' · ')
-      const wrap = document.createElement('div')
-      wrap.className = 'modal-overlay'
-      wrap.innerHTML = `
-        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="del-title">
-          <div class="modal-header"><h3 id="del-title">Delete recording</h3></div>
-          <div class="modal-body">
-            <p class="del-subject">${esc(shown || 'This recording')}</p>
-            <p class="del-note">Removes the library record, its tracks, checksums and history.
-              Any artist or venue left with nothing attached is pruned too.</p>
-            <label class="del-files-row">
-              <input type="checkbox" id="del-files-cb" />
-              <span>Also delete the audio files from disk</span>
-            </label>
-            <p class="del-warn" id="del-warn" hidden>The folder and everything in it is removed permanently. This cannot be undone.</p>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-sm btn-ghost" id="del-cancel">Cancel</button>
-            <button class="btn btn-sm btn-danger" id="del-confirm">Delete record</button>
-          </div>
-        </div>`
-      document.body.appendChild(wrap)
-
-      const cb      = wrap.querySelector('#del-files-cb')
-      const warn    = wrap.querySelector('#del-warn')
-      const confirmBtn = wrap.querySelector('#del-confirm')
-      const close   = () => { wrap.remove(); document.removeEventListener('keydown', onKey) }
-      const onKey   = e => { if (e.key === 'Escape') close() }
-      document.addEventListener('keydown', onKey)
-
-      cb.addEventListener('change', () => {
-        warn.hidden = !cb.checked
-        confirmBtn.textContent = cb.checked ? 'Delete record and files' : 'Delete record'
-      })
-      wrap.querySelector('#del-cancel').addEventListener('click', close)
-      wrap.addEventListener('click', e => { if (e.target === wrap) close() })
-
-      confirmBtn.addEventListener('click', async () => {
-        confirmBtn.disabled = true
-        confirmBtn.textContent = 'Deleting…'
+    // Move to Trash: the same confirm and wording as the working-folder pages.
+    // The folder goes to the system Trash, then the record is deleted.
+    function actTrashRecording() {
+      _confirmDialog(_TRASH_RECORD_MSG, 'Move to Trash', async () => {
         try {
-          const res = await API.recordings.delete(recordingId, cb.checked)
-          // The row goes even when the folder could not be removed — the server
-          // says so rather than failing the whole delete, so surface that here
-          // instead of letting the user assume the disk is clean.
-          if (cb.checked && !res?.files_deleted) {
-            Notify.error('The library record was deleted, but the files were not: ' +
-                  (res?.files_error || 'unknown reason'))
-          }
-          // Deleting a recording can prune its artist / venue / musicians.
-          invalidateDims('artists', 'venues', 'musicians')
-          close()
-          // Navigate back to wherever the user came from (falls back to
-          // Library if this recording was reached with nothing preceding it).
-          window.location.hash = state.navBack ? state.navBack.hash : '#/'
-        } catch (err) {
-          confirmBtn.disabled = false
-          confirmBtn.textContent = cb.checked ? 'Delete record and files' : 'Delete record'
-          Notify.error('Delete failed: ' + err.message)
-        }
+          await API.recordings.trash(recordingId)
+        } catch (err) { Notify.error('Move failed: ' + err.message); return }
+        // Removing a recording can prune its artist / venue / musicians.
+        invalidateDims('artists', 'venues', 'musicians')
+        window.location.hash = state.navBack ? state.navBack.hash : '#/'
       })
     }
 
@@ -8815,9 +8898,8 @@ const App = (() => {
     async function actMoveOut(item) {
       const dest = item.dataset.dest
       const label = dest === 'workshop' ? 'Workshop' : 'Backlog'
-      if (!confirm(`Move this recording's folder out of the library into ${label}?\n\n` +
-                   'The library record, its metadata and its history are kept. ' +
-                   'The show stops being playable until it comes back.')) return
+      if (rec.is_published !== false && !confirm(`Move this recording's folder out of the library into ${label}?\n\n` +
+                   'The library record, its metadata and its history are kept.')) return
       item.disabled = true
       const original = item.textContent
       item.textContent = 'Moving…'
@@ -8833,6 +8915,12 @@ const App = (() => {
         item.textContent = original
         Notify.error('Move failed: ' + e.message)
       }
+    }
+
+    // Review: the Review form on this recording, and back here when it closes.
+    async function actReview() {
+      try { await openRecordingReview(recordingId, window.location.hash) }
+      catch (e) { Notify.error('Review failed: ' + e.message) }
     }
 
     // One action row, five panes: show the controls tagged for the pane being
@@ -8890,12 +8978,7 @@ const App = (() => {
         if (act === 'official') return actToggleOfficial(item)
         if (act === 'kind') {
           setOpen(false)
-          const nextKind = rec.kind === 'studio' ? 'live' : 'studio'
-          try { await API.recordings.update(recordingId, { kind: nextKind, change_note: 'Quick edit' }) }
-          catch (e) { Notify.error('Failed: ' + e.message) }
-          // The Albums nav entry and its kind-counts depend on this -- refresh
-          // the sidebar the same way other kind-affecting actions do.
-          loadArtistList()
+          await recordingSetKind(recordingId, rec.kind === 'studio' ? 'live' : 'studio')
           return renderRecordingView(recordingId)
         }
         if (act === 'coll-toggle') {
@@ -8932,9 +9015,10 @@ const App = (() => {
           return
         }
         if (act === 'move') return actMoveOut(item)
+        if (act === 'review') { setOpen(false); return actReview() }
         setOpen(false)
         if (act === 'reveal') actRevealFolder()
-        if (act === 'delete') actDeleteRecording()
+        if (act === 'trash') actTrashRecording()
       })
     })()
 
@@ -9285,8 +9369,8 @@ const App = (() => {
   /** Destination buttons for one of the two Move menu shapes.
    *  One builder, three call sites — the three had drifted into two different
    *  markups already, and a fourth copy is how the next one drifts. */
-  function triageDestButtons(shape, path) {
-    return triageDests().map(dest => {
+  function triageDestButtons(shape, path, exclude) {
+    return triageDests().filter(d => d !== exclude).map(dest => {
       const label = TRIAGE_LABELS[dest] || dest
       return shape === 'actions'
         ? `<button class="actions-item actions-item--indent" role="menuitem"
@@ -9301,6 +9385,172 @@ const App = (() => {
     try { appPrefs = await API.preferences.get() } catch (_) { appPrefs = {} }
     return appPrefs
   }
+
+  // ── Review on a recording: open, autosave, leave ─────────────────────────────
+  // The Review form works on a recording id for any non-library location. Every change
+  // saves about 800ms after the last one through PUT /api/recordings/<id>/draft
+  // (incomplete data is allowed); the "person confirmed" signals fire only when the
+  // person leaves, imports or moves (the same call with confirm: true).
+
+  const _AS_QUIET_MS = 800
+
+  /** Open Review on a recording. `returnTo` is the hash of the page it was opened from
+   *  (default: the page showing now); Import & Return and Move go back there. */
+  async function openRecordingReview(recordingId, returnTo, pane) {
+    const origin = returnTo || window.location.hash || '#/'
+    const scan = await API.recordings.review(recordingId)
+    resetIngestState()
+    ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = scan.folder_path
+    ingest.recordingId = scan.recording_id; ingest.location = scan.location
+    ingest.form = {}; ingest.tracks = []
+    ingest.returnTo = origin; ingest._resume = true
+    if (pane) { ingest._keepPane = pane; state.ingestPanelOpen = true }
+    window.location.hash = '#/ingest'
+    renderIngestStep()
+  }
+
+  /** The form's payload. `full` is the Import payload; otherwise the autosave's: no
+   *  fingerprint files, resolver result or AI result (the row already has them), and no
+   *  form-internal keys. */
+  function _ingestReviewPayload(full) {
+    const f = ingest.form
+    const payload = {
+      ...(full ? { source_folder_path: ingest.folderPath } : {}),
+      ...f,
+      tracks: ingest.tracks,
+      info_file_content: ingest.scan.info_file_content || null,
+      genre_id:   f.genre_id   || null,
+      genre_name: f.genre_name || null,
+      genre_source: f.genre_source || null,
+      kind: ingest.kind === 'studio' ? 'studio' : 'live',
+    }
+    if (full) {
+      Object.assign(payload, {
+        fingerprints: ingest.scan.fingerprints || [],
+        members: (f.members || []).map(m => m.name),
+        guests:  (f.guests  || []).map(m => m.name),
+        ai_result: ingest.lxc?.latest()?.result || null,
+        ai_accepted: Object.keys(ingest.aiApplied || {}),
+        resolver_result: ingest.scan?.resolved || null,
+      })
+      if (ingest.recordingId) payload.recording_id = ingest.recordingId
+    } else {
+      for (const k of Object.keys(payload)) if (k[0] === '_') delete payload[k]
+      // The lineup goes only once it has loaded: an empty list would clear it.
+      if (f._membersInit && Array.isArray(f.members)) {
+        payload.members = f.members.map(m => m.name)
+        payload.guests  = (f.guests || []).map(m => m.name)
+      }
+      if (ingest._kindSet) payload.kind_set = true
+    }
+    delete payload.album_title
+    payload.mb_release_id = (payload.kind === 'studio' && ingest.mb && ingest.mb.picked) ? ingest.mb.picked.mbid : null
+    delete payload._genreText
+    if (payload.kind === 'studio') {
+      payload.title = f.album_title || null
+      Object.assign(payload, {
+        start_month: null, start_day: null, end_year: null, end_month: null, end_day: null,
+        venue_name: '', venue_id: null, event_name: '', event_id: null, stage: '',
+        city: '', state: '', country: '', quality: '', source: '', lineage: '',
+        source_tag: '', etree_shnid: '',
+        recording_engineer: '', transfer_engineer: '', mastering_engineer: '',
+      })
+    }
+    return payload
+  }
+
+  function _asStop() {
+    if (ingest._asTimer) { clearInterval(ingest._asTimer); ingest._asTimer = null }
+  }
+
+  // The form as the autosave sees it, read off the page. Null when the page is not there.
+  function _asBody() {
+    try { _syncIngestFormFromDom(); return JSON.stringify(_ingestReviewPayload(false)) }
+    catch (_) { return null }
+  }
+
+  // Watches the form while Review is open on a recording. A change that has stood still
+  // for 800ms is saved. The first render only takes the baseline, so opening saves nothing,
+  // and a re-render (Rescan, Classify) keeps the last saved one, so its result is saved.
+  function _asStart() {
+    _asStop()
+    if (!ingest.recordingId) return
+    const body = _asBody()
+    if (ingest._asBase !== ingest.recordingId) { ingest._asBase = ingest.recordingId; ingest._asSent = body }
+    ingest._asSeen = body; ingest._asSince = Date.now()
+    ingest._asTimer = setInterval(_asTick, 300)
+  }
+
+  function _asTick() {
+    if (!ingest.recordingId || ingest.step !== 'review' || !document.getElementById('f-artist')) { _asStop(); return }
+    if (ingest._asBusy) return
+    const body = _asBody()
+    if (body == null || body === ingest._asSent) { ingest._asSeen = body; return }
+    if (body !== ingest._asSeen) { ingest._asSeen = body; ingest._asSince = Date.now(); return }
+    if (Date.now() - ingest._asSince < _AS_QUIET_MS) return
+    _ingestSaveNow(false)
+  }
+
+  // Shown twice (Ryan, 2026-10-15): beside the footer buttons and beside the
+  // recording name in the header, where it is hard to miss.
+  function _asNote(text, error) {
+    const els = document.querySelectorAll('[data-autosave-note]')
+    if (!els.length) return
+    els.forEach(el => {
+      el.textContent = text
+      el.classList.toggle('is-error', !!error)
+      el.classList.add('is-on')
+    })
+    clearTimeout(ingest._asNoteT)
+    if (!error) ingest._asNoteT = setTimeout(() => els.forEach(el => el.classList.remove('is-on')), 1800)
+  }
+
+  /** Save the form now. `confirm` is the person leaving: it also fires the confirmed
+   *  signals. The id and the body are taken at the call, so a page that is being torn
+   *  down still saves what it showed. Resolves true when the server has it. */
+  function _ingestSaveNow(confirm) {
+    const id = ingest.recordingId
+    if (!id) return Promise.resolve(true)
+    let body = _asBody()
+    if (body == null) { try { body = JSON.stringify(_ingestReviewPayload(false)) } catch (_) { return Promise.resolve(false) } }
+    if (!confirm && body === ingest._asSent) return Promise.resolve(true)
+    const run = async () => {
+      ingest._asBusy = true
+      try {
+        const payload = JSON.parse(body)
+        if (confirm) payload.confirm = true
+        await API.recordings.saveDraft(id, payload)
+        if (ingest.recordingId === id) ingest._asSent = body
+        _asNote('Saved')
+        return true
+      } catch (e) {
+        _asNote('Save failed: ' + e.message, true)
+        return false
+      } finally { ingest._asBusy = false }
+    }
+    ingest._asChain = (ingest._asChain || Promise.resolve()).then(run, run)
+    return ingest._asChain
+  }
+
+  // The person is leaving the form for some other page.
+  function _ingestLeaving() {
+    if (!ingest.recordingId || ingest.step !== 'review') return
+    _asStop()
+    _ingestSaveNow(true)
+    ingest.recordingId = null
+  }
+
+  // Leave Review for the recording's own page, with Back returning to where Review was
+  // opened from.
+  function _ingestGoToRecording(recordingId) {
+    const origin = ingest.returnTo
+    resetIngestState()
+    const target = `#/recording/${recordingId}`
+    if (origin) { history.replaceState(null, '', origin); _navRewrite(origin) }
+    if (window.location.hash === target) route(); else window.location.hash = target
+  }
+
+  const _TRASH_RECORD_MSG = 'Moves the folder to the Trash and deletes its record.'
 
   function renderIngestView() {
     setActiveNav('ingest')
@@ -9385,6 +9635,12 @@ const App = (() => {
     ingest.aiApplied  = {}
     ingest.returnTo   = null
     ingest.kindFolder = null
+    _asStop()
+    ingest.recordingId = null
+    ingest.location    = null
+    ingest._kindSet    = false
+    ingest._asBase     = null
+    ingest._asSent     = null
   }
 
   /* Header Back, while standing inside the Add Recordings wizard.
@@ -9921,10 +10177,15 @@ const App = (() => {
     if (row.needs_review) {
       const issues = (row.review_issues && row.review_issues.length)
         ? row.review_issues : (row.review_reason ? [row.review_reason] : [])
+      const shown = issues.concat(row.flags || [])
       return `<span class="iq-status iq-status--issue lq-tip">${icon('alert', 'iq-status-ic')}<span>Needs Review</span>
-        ${issues.length ? `<span class="lq-tipbox">${issues.map(i => `<div class="ab">${esc(i)}</div>`).join('')}</span>` : ''}</span>`
+        ${shown.length ? `<span class="lq-tipbox">${shown.map(i => `<div class="ab">${esc(i)}</div>`).join('')}</span>` : ''}</span>`
     }
-    if (row.status === 'ready') return `<span class="iq-status iq-status--ready">${icon('check', 'iq-status-ic')}<span>Ready</span></span>`
+    if (row.status === 'ready') {
+      const flags = row.flags || []
+      return `<span class="iq-status iq-status--ready${flags.length ? ' lq-tip' : ''}">${icon('check', 'iq-status-ic')}<span>Ready</span>${
+        flags.length ? `<span class="lq-tipbox">${flags.map(i => `<div class="ab">${esc(i)}</div>`).join('')}</span>` : ''}</span>`
+    }
     return ''
   }
 
@@ -9980,6 +10241,7 @@ const App = (() => {
             ${metaLine ? `<div class="lq-brow-sub">${metaLine}</div>` : ''}
           </div>
         </div>
+        <span class="iq-col-tracks">${!skipped && row.detail && row.detail.tracksText ? esc(row.detail.tracksText) : ''}</span>
         <span class="iq-col-marks">${skipped ? '' : _iqMarksHtml(row)}</span>
         <span class="iq-col-format">${!skipped && row.format ? esc(row.format) : ''}</span>
         <span class="iq-col-type">${!skipped && row.kind ? (_KIND_LABEL[row.kind] || '') : ''}</span>
@@ -10412,7 +10674,7 @@ const App = (() => {
         clearTimeout(debounce)
         if (q.length < 2) { closeDropdown(); return }
         debounce = setTimeout(async () => {
-          try { showResults(await API.venues.list(q), q) } catch (_) { closeDropdown() }
+          try { showResults(await API.venues.pick(q), q) } catch (_) { closeDropdown() }
         }, 220)
       })
       nameEl.addEventListener('blur', () => cx.repaintSoon(200))
@@ -10538,21 +10800,104 @@ const App = (() => {
     }
   }
 
-  // Release facts of the MusicBrainz release picked on the Add Recording album form, under the
-  // album title (label, catalog number, country; the same line View Recording shows).
-  function ingestMbFactsHtml() {
-    const p = ingest.mb && ingest.mb.picked
-    if (!p) return ''
-    const facts = [p.label, p.catalog_number, p.country].filter(Boolean).join(' · ') || p.title || 'Release'
-    return `<a class="pp-mb-name" href="${esc(mbReleaseUrl(p.mbid))}" target="_blank" rel="noopener">${esc(facts)} ↗</a>`
+  // ── Shared MusicBrainz UI pieces ──────────────────────────────────────────
+  // One set of parts for the release panel (View Recording + Add Recording) and the
+  // Artist page's MusicBrainz block: search row, note line, count + candidate rows, the
+  // icon-only link out to musicbrainz.org.
+  function mbExtLink(url) {
+    return `<a class="pp-mb-ext" href="${esc(url)}" target="_blank" rel="noopener" aria-label="View on MusicBrainz" title="View on MusicBrainz">${icon('external-link')}</a>`
+  }
+  // fields: [{ key, label, value, id? }]. One text input each plus a Search button.
+  function mbSearchRowHtml(fields, busy) {
+    return `<div class="pp-mb-searchrow">${fields.map(f =>
+      `<input type="text" class="pp-mb-input" data-mbq="${esc(f.key)}"${f.id ? ` id="${esc(f.id)}"` : ''} value="${esc(f.value || '')}" placeholder="${esc(f.label)}" aria-label="${esc(f.label)}">`).join('')}` +
+      `<button type="button" class="btn btn-ghost btn-xs" data-mbq-go${busy ? ' disabled' : ''}>${busy ? 'Searching…' : 'Search'}</button></div>`
+  }
+  function mbNoteHtml(text, isErr) {
+    return `<div class="pp-mb-note${isErr ? ' is-err' : ''}">${esc(text)}</div>`
+  }
+  // rows: [{ id, name, code?, meta, score?, url }]. Line one: name, release code, then the
+  // link-out icon at the far right (the only thing that leaves the app). Line two: the rest.
+  function mbCandsHtml(rows, noun = 'release', hint = '') {
+    const n = rows.length
+    return `<div class="pp-mb-count">${n} ${n === 1 ? noun : noun + 's'}${hint ? ' - ' + esc(hint) : ''}</div>
+      <div class="pp-mb-cands">${rows.map(r => `
+        <div class="pp-mb-cand" data-mbid="${esc(r.id)}" role="button" tabindex="0">
+          <div class="pp-mb-cand-top">
+            <span class="pp-mb-cand-name">${esc(r.name || '')}</span>
+            ${r.code ? `<span class="pp-mb-cand-code">${esc(r.code)}</span>` : ''}
+            ${r.score === undefined ? '' : `<span class="pp-mb-cand-score" title="MusicBrainz match score">${esc(r.score == null ? '' : String(r.score))}</span>`}
+            ${mbExtLink(r.url)}
+          </div>
+          <span class="pp-mb-cand-meta">${esc(r.meta || '')}</span>
+        </div>`).join('')}</div>`
+  }
+  // onSearch(values) gets { key: trimmed value }; Enter in any input searches too.
+  function mbWireSearch(root, onSearch) {
+    const go = root.querySelector('[data-mbq-go]')
+    if (!go) return
+    const run = () => {
+      if (go.disabled) return
+      const v = {}
+      root.querySelectorAll('[data-mbq]').forEach(i => { v[i.dataset.mbq] = i.value.trim() })
+      onSearch(v)
+    }
+    go.addEventListener('click', run)
+    root.querySelectorAll('[data-mbq]').forEach(i => i.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); run() }
+    }))
+  }
+  function mbWireCands(root, onPick) {
+    root.querySelectorAll('.pp-mb-cand').forEach(el => {
+      el.addEventListener('click', e => { if (!e.target.closest('.pp-mb-ext')) onPick(el.dataset.mbid) })
+      // The icon opens musicbrainz.org and nothing else: it never links the candidate.
+      el.querySelector('.pp-mb-ext')?.addEventListener('click', e => e.stopPropagation())
+      el.addEventListener('keydown', e => {
+        if (e.target !== el) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() }
+      })
+    })
+  }
+  function mbReleaseMeta(c) {
+    return [c.artist_credit, (c.date || '').slice(0, 4), c.country, c.label,
+      c.track_count != null ? `${c.track_count} ${c.track_count === 1 ? 'track' : 'tracks'}` : '',
+    ].filter(Boolean).join(' · ')
   }
 
-  // Before a release is linked, on both MusicBrainz tabs: a line saying what
-  // MusicBrainz is, then a normal-size Find release button.
-  function mbFindHtml(btnId, label = 'Find release', msg = '') {
-    return `<p class="mb-intro">MusicBrainz is an open music encyclopedia kept up by its community. Linking this album to its release there brings in the label, catalog number, release date and track list.</p>
-      ${msg ? `<div class="pp-mb-empty">${msg}</div>` : ''}
-      <div class="mb-find-row"><button type="button" class="btn btn-ghost" id="${btnId}">${esc(label)}</button></div>`
+  // The release panel, one component for View Recording and Add Recording.
+  //   s.editable   false: no inputs or buttons, linked facts still show, nothing when unlinked
+  //   s.linked     null, or { mbid, how: 'Linked by you' | 'Matched automatically', detail, err }
+  //   s.artist, s.title   search field values
+  //   s.phase      'idle' | 'searching' | 'results' | 'none' | 'error' | 'fetching'
+  //   s.cands      candidates from the release-candidates endpoints
+  // Wire it with mbReleasePanelWire(root, { search({artist,title}), pick(mbid), unlink() }).
+  function mbReleasePanelHtml(s) {
+    let h
+    if (s.linked) {
+      const L = s.linked
+      h = (L.detail ? mbReleaseDetailsHtml(L.detail)
+        : L.err ? mbNoteHtml('Could not reach MusicBrainz.', true)
+        : '<div class="pp-mb-empty">Fetching…</div>') +
+        `<div class="pp-mb-foot"><span class="pp-mb-dot"></span>${esc(L.how)}${mbExtLink(mbReleaseUrl(L.mbid))}` +
+        `${s.editable ? '<button type="button" class="btn btn-ghost btn-xs" data-mb-unlink>Unlink</button>' : ''}</div>`
+    } else if (!s.editable) {
+      return ''
+    } else {
+      h = mbSearchRowHtml([{ key: 'artist', label: 'Artist', value: s.artist }, { key: 'title', label: 'Title', value: s.title }], s.phase === 'searching')
+      if (s.phase === 'fetching') h += '<div class="pp-mb-empty">Fetching…</div>'
+      else if (s.phase === 'none') h += mbNoteHtml('No releases found.')
+      else if (s.phase === 'error') h += mbNoteHtml('Could not reach MusicBrainz.', true)
+      else if (s.phase === 'results' && (s.cands || []).length) {
+        h += mbCandsHtml(s.cands.map(c => ({ id: c.mbid, name: c.title, code: c.catalog_number, meta: mbReleaseMeta(c), url: mbReleaseUrl(c.mbid) })),
+          'release', 'pick an option to link the recording')
+      }
+    }
+    return `<div class="pp-mb-stack">${h}</div>`
+  }
+  function mbReleasePanelWire(root, h) {
+    mbWireSearch(root, v => h.search({ artist: v.artist || '', title: v.title || '' }))
+    mbWireCands(root, h.pick)
+    root.querySelector('[data-mb-unlink]')?.addEventListener('click', h.unlink)
   }
 
   // What MusicBrainz knows about a picked release, as a short fact table: enough
@@ -11224,6 +11569,7 @@ const App = (() => {
    *
    *  Shared by the in-page back link and the header Back button. */
   function ingestBackFromReview() {
+    _ingestLeaving()
     if (ingest.returnTo) {
       _ingestReturnToRun()
       return
@@ -11316,7 +11662,8 @@ const App = (() => {
     // Held on ingest (not ingest.form) so Rescan, which rebuilds the form, keeps it.
     if (ingest.kindFolder !== ingest.folderPath) {
       ingest.mb = null   // a MusicBrainz pick belongs to one folder
-      ingest.kind = ingest.scan.resolved?.kind === 'studio' ? 'studio' : 'live'   // the scan carries kind on resolved, not at top level
+      ingest.kind = ingest.scan.draft ? (ingest.scan.draft.kind === 'studio' ? 'studio' : 'live')
+        : ingest.scan.resolved?.kind === 'studio' ? 'studio' : 'live'   // the scan carries kind on resolved, not at top level
       ingest.kindFolder = ingest.folderPath
     }
     const studio = ingest.kind === 'studio'
@@ -11331,7 +11678,7 @@ const App = (() => {
     if (!ingest.tracks.length) {
       // Resolver-built -- title-cased, flagged, scan-index numbered. The
       // human can still edit this list before it posts.
-      ingest.tracks = ingest.scan?.resolved?.tracks || []
+      ingest.tracks = (ingest.scan?.draft?.tracks?.length ? ingest.scan.draft.tracks : ingest.scan?.resolved?.tracks) || []
       // Bulk Value Apply's "Clear disc numbers": the form's tracks carry none.
       if (_biApplied && _biApplied.clear_disc_numbers) {
         ingest.tracks.forEach(t => { t.disc_number = null; t.disc_track_number = null })
@@ -11400,6 +11747,22 @@ const App = (() => {
       // common case (fix the info file, rescan immediately) has nothing typed
       // and should not cost a dialog.
       f._inferred = _ingestFormSnapshot(f)
+      // A recording opens as it is saved: the draft replaces the folder's reading.
+      const d = ingest.scan.draft
+      if (d) {
+        Object.assign(f, {
+          artist_name: d.artist_name, start_year: d.start_year, start_month: d.start_month, start_day: d.start_day,
+          end_year: d.end_year, end_month: d.end_month, end_day: d.end_day,
+          venue_name: d.venue_name, venue_id: d.venue_id, city: d.city, state: d.state, country: d.country,
+          event_name: d.event_name, event_id: d.event_id, stage: d.stage,
+          source: d.source, quality: d.quality, lineage: d.lineage, source_tag: d.source_tag, etree_shnid: d.etree_shnid,
+          recording_engineer: d.recording_engineer, transfer_engineer: d.transfer_engineer,
+          mastering_engineer: d.mastering_engineer, notes: d.notes, is_official: d.is_official,
+          album_title: d.title || '', genre_id: d.genre_id, genre_name: d.genre_name || '', genre_source: null,
+          members: (d.members || []).slice(), guests: (d.guests || []).slice(), _membersInit: true,
+        })
+        f._inferred = _ingestFormSnapshot(f)
+      }
     }
 
     const studioHealth = studio ? _studioCompleteness(f.artist_name, f.start_year, ingest.tracks) : null
@@ -11587,10 +11950,11 @@ const App = (() => {
       <div class="ingest-review-outer">
       <div class="ingest-review-topbar">
         <a href="#" id="ingest-back-link" class="ingest-back-link">${
-          ingest.returnTo ? 'Back to Add Recordings' : 'Back'}</a>
+          ingest.returnTo && !ingest.recordingId ? 'Back to Add Recordings' : 'Back'}</a>
         <div class="ingest-topbar-line">
           <h2 class="ingest-topbar-title">Add Recording: <span class="rev-header-folder">${esc(ingest.folderPath?.split('/').pop() || '')}${
-            { workshop: ' (In Workshop)', backlog: ' (In Backlog)' }[ingest.scan?.working_folder] || ''}</span></h2>
+            { workshop: ' (In Workshop)', backlog: ' (In Backlog)' }[ingest.scan?.working_folder] || ''}</span>` +
+            `<span class="autosave-note autosave-note--head" data-autosave-note aria-hidden="true"></span></h2>
           <div class="meta-readout" id="iq-score"
                title="How much of the metadata this form has filled in">
             <span class="meta-readout-label">Metadata Completeness</span>
@@ -11762,10 +12126,13 @@ const App = (() => {
           </div>
           <div class="ingest-actions ingest-actions--form">
             <div class="ingest-actions-right">
+              <span class="autosave-note" id="autosave-note" data-autosave-note role="status" aria-live="polite"></span>
+              ${ingest.recordingId ? triageDests().filter(d => d !== ingest.location).map(d =>
+                `<button class="btn btn-ghost btn-ingest-move" data-dest="${esc(d)}">Move to ${esc(TRIAGE_LABELS[d] || d)}</button>`).join('') : ''}
               <button class="btn btn-ingest-secondary" id="btn-confirm"
-                      data-after="return" title="Add to library and return to the list">Add &amp; Return ↵</button>
+                      data-after="return" title="Add to library and return to the list">Import &amp; Return</button>
               <button class="btn btn-ghost" id="btn-confirm-view"
-                      data-after="view" title="Add to library and open the finished record">Add &amp; View →</button>
+                      data-after="view" title="Add to library and open the finished record">Import &amp; View</button>
             </div>
           </div>
           <div class="ingest-foot">
@@ -12316,6 +12683,7 @@ const App = (() => {
     document.getElementById('btn-classify-kind')?.addEventListener('click', () => {
       _syncIngestFormFromDom()
       ingest.kind = ingest.kind === 'studio' ? 'live' : 'studio'
+      ingest._kindSet = true       // a person's choice: a re-read keeps it
       ingest._keepPane = state.ingestLastPane
       renderIngestStep()
     })
@@ -12444,7 +12812,7 @@ const App = (() => {
       // filter here costs one cached round trip and no new server surface.
       wirePickerDropdown(input, dd,
         async q => {
-          const all = await API.genres.list()
+          const all = await API.genres.pick()
           const ql = q.toLowerCase()
           return all.filter(g => g.name.toLowerCase().includes(ql))
         },
@@ -12523,6 +12891,9 @@ const App = (() => {
       const warnEl   = document.getElementById('dup-warn')
       const bodyEl   = document.getElementById('dup-warn-body')
       if (!artistEl || !yearEl || !warnEl) return
+      // Only a new import (Queue item or a fresh folder scan with no recording yet) can be a
+      // duplicate; a recording already in Workshop/Backlog/Library is itself the library copy.
+      if (ingest.recordingId && ingest.location !== 'queue') return
 
       let debounce = null
       async function runCheck() {
@@ -12532,14 +12903,14 @@ const App = (() => {
         const day   = parseInt(dayEl.value)   || null
         if (!artist_name || !year) { warnEl.style.display = 'none'; return }
         try {
-          const res   = await API.ingest.checkExisting({ artist_name, year, month, day })
+          const res   = await API.ingest.checkExisting({ artist_name, year, month, day, exclude_id: ingest.recordingId })
           const perfs = res.performances || []
           if (!perfs.length) { warnEl.style.display = 'none'; return }
           bodyEl.innerHTML = perfs.map(p => `
             <div class="dup-warn-perf">
               <span class="dup-warn-perf-head">${esc(p.date)}${p.venue ? ' · ' + esc(p.venue) : ''}</span>
               ${p.recordings.map(r => `
-                <div class="dup-warn-rec">${esc(r.source || 'Unknown source')}${r.quality ? ' · ' + esc(r.quality) : ''} \
+                <div class="dup-warn-rec">${esc(r.source || 'Unknown source')}${r.location ? ' · in ' + esc(TRIAGE_LABELS[r.location] || r.location) : ''}${r.quality ? ' · ' + esc(r.quality) : ''} \
 · ${r.track_count} track${r.track_count !== 1 ? 's' : ''}${r.created_at ? ' · added ' + esc(r.created_at.slice(0, 10)) : ''}</div>`).join('')}
             </div>`).join('')
           warnEl.style.display = ''
@@ -12609,7 +12980,7 @@ const App = (() => {
         API.venues.get(ingest.form.venue_id).then(v => lockLocation(v)).catch(() => {})
       } else if (nameEl.value.trim().length >= 2) {
         const typed = nameEl.value.trim()
-        API.venues.list(typed).then(venues => {
+        API.venues.pick(typed).then(venues => {
           if (idEl.value) return   // user already picked something while this was in flight
           const exact = venues.find(v => v.name.toLowerCase() === typed.toLowerCase())
           if (exact) {
@@ -12670,7 +13041,7 @@ const App = (() => {
         clearTimeout(debounce)
         if (q.length < 2) { closeDropdown(); return }
         debounce = setTimeout(async () => {
-          try { showResults(await API.venues.list(q), q) }
+          try { showResults(await API.venues.pick(q), q) }
           catch (_) { closeDropdown() }
         }, 220)
       })
@@ -12782,15 +13153,21 @@ const App = (() => {
         if (f.genre_id || f.genre_name || !ingest.setFormGenre || !name) return false
         let g = null
         try {
-          g = (await API.genres.list()).find(x => (id && x.id === id) || x.name.toLowerCase() === String(name).toLowerCase())
+          g = (await API.genres.pick()).find(x => (id && x.id === id) || x.name.toLowerCase() === String(name).toLowerCase())
         } catch (_) { /* the vocabulary could not be read: the name is offered as a new genre */ }
         ingest.setFormGenre(g ? { id: g.id, name: g.name } : { id: null, name }, 'suggestion')
         return true
+      }
+      // The Classify as Album button of this page, clicked: the one classify path.
+      const classifyFolder = () => {
+        if (ingest.kind !== 'studio') document.getElementById('btn-classify-kind')?.click()
       }
       const applyLocal = async props => {
         ingest.aiApplied = ingest.aiApplied || {}
         const done = ingest.form._lxApplied = ingest.form._lxApplied || {}
         for (const p of props) {
+          // The album's own fields belong to an Album: classify first (the page's own action).
+          if (ingest.kind !== 'studio' && LX_ALBUM_FIELDS.some(([k]) => k === p.field)) classifyFolder()
           const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(p.field)
           if (m) {
             const i = ingest.tracks.findIndex(t => String(t.track_number) === m[1])
@@ -12804,6 +13181,8 @@ const App = (() => {
             refreshIngestTrackRow(i)
           } else if (p.field === 'genre') {
             await applyGenre(p.proposed)
+          } else if (p.field === 'kind') {
+            classifyFolder()
           } else if (ingest.kind === 'studio' && LX_ALBUM_FIELDS.some(([k]) => k === p.field)) {
             // An album's own fields: title -> the album title input, year -> Year, notes -> Notes.
             const id = { title: 'f-album-title', year: 'f-year', notes: 'f-notes' }[p.field]
@@ -12826,6 +13205,7 @@ const App = (() => {
       // as it is.
       const formValue = field => {
         const m = /^track\.(\d+)\.(title|songwriter|note)$/.exec(field)
+        if (field === 'kind') return 'album'      // never re-applied from a stored decision
         if (ingest.kind === 'studio' && field === 'title') return document.getElementById('f-album-title')?.value || ''
         if (ingest.kind === 'studio' && field === 'year') return document.getElementById('f-year')?.value || ''
         if (ingest.kind === 'studio' && field === 'notes') return document.getElementById('f-notes')?.value || ''
@@ -12862,6 +13242,7 @@ const App = (() => {
       const c = lomaxController({
         skill: ingest.kind === 'studio' ? 'album' : 'recording', subjectType: 'folder', subjectKey: ingest.folderPath,
         current: ingest.kind === 'studio' ? collectAlbumMeta : collectCurrentMeta, alive, onLoaded: reapplyAccepted,
+        classify: classifyFolder,
         afterAccept: async props => { await applyLocal(props); scheduleGenre() },
         onAct: async (act, btn, ctl) => {
           const mb = ingest.form._mbGenre
@@ -12943,7 +13324,6 @@ const App = (() => {
       if (!root) return
       const m = () => (ingest.mb = ingest.mb || { state: 'idle', cands: [], picked: null, error: '' })
       const val = id => (document.getElementById(id)?.value || '').trim()
-      const findBtn = label => `<button type="button" class="btn ${label === 'Find release' ? 'btn-primary' : 'btn-ghost'} btn-xs" id="ingest-mb-find">${label}</button>`
       // The act's genre from MusicBrainz, offered while the form has none
       // (an Album has no Resolver tab to carry it). Ryan, 2026-10-13.
       function genreHtml() {
@@ -12977,56 +13357,31 @@ const App = (() => {
             .then(r => { if (m().picked === picked) { picked.detail = (r && r.release) || null; picked._err = r && r.release ? '' : 'release not found'; paint() } })
             .catch(e => { if (m().picked === picked) { picked._err = e.message || String(e); paint() } })
         }
-        if (st.picked) {
-          root.innerHTML = `
-            <div class="pp-mb-linked">${ingestMbFactsHtml()}</div>
-            <div class="pp-mb-foot">
-              <span class="pp-mb-dot"></span>Linked by you
-              <button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-unlink">Unlink</button>
-            </div>
-            ${st.picked.detail ? mbReleaseDetailsHtml(st.picked.detail)
-              : st.picked._err ? `<div class="pp-mb-empty">Lookup failed: ${esc(st.picked._err)}</div>`
-              : '<div class="pp-mb-empty">Fetching…</div>'}`
-        } else if (st.state === 'loading') {
-          root.innerHTML = `<div class="pp-mb-empty">Searching MusicBrainz…</div>`
-        } else if (st.state === 'fetching') {
-          root.innerHTML = `<div class="pp-mb-empty">Fetching…</div>`
-        } else if (st.state === 'error') {
-          root.innerHTML = `<div class="pp-mb-empty">Lookup failed: ${esc(st.error)} ${findBtn('Try again')}</div>`
-        } else if (st.state === 'list' && !st.cands.length) {
-          root.innerHTML = `<div class="pp-mb-empty">Nothing found for “${esc(st.title || '')}”.</div>${findBtn('Try again')}`
-        } else if (st.state === 'list') {
-          root.innerHTML = `
-            <div class="pp-mb-prompt">Click the right release to link it${st.cands.length === 1 ? '' : ' (more than one matches)'}.</div>
-            <div class="pp-mb-cands">
-              ${st.cands.map(c => `
-                <div class="pp-mb-cand pp-mb-cand--noscore" data-mbid="${esc(c.mbid)}" role="button" tabindex="0">
-                  <span class="pp-mb-cand-name">${esc(c.title || '')}</span>
-                  <span class="pp-mb-cand-meta">${[c.label, c.catalog_number, c.country, c.date].filter(Boolean).map(esc).join(' · ')}</span>
-                  <a class="pp-mb-cand-view" href="${esc(mbReleaseUrl(c.mbid))}" target="_blank" rel="noopener" title="Open on musicbrainz.org">View ↗</a>
-                </div>`).join('')}
-            </div>
-            <div class="pp-mb-foot"><button type="button" class="btn btn-ghost btn-xs" id="ingest-mb-cancel">Cancel</button></div>`
-        } else {
-          root.innerHTML = mbFindHtml('ingest-mb-find')
-        }
-        document.getElementById('ingest-mb-find')?.addEventListener('click', search)
-        document.getElementById('ingest-mb-cancel')?.addEventListener('click', () => { m().state = 'idle'; paint() })
-        document.getElementById('ingest-mb-unlink')?.addEventListener('click', () => {
-          const st2 = m(); st2.picked = null; st2.state = 'idle'; st2.cands = []
-          paint()
+        const phase = st.state === 'loading' ? 'searching' : st.state === 'fetching' ? 'fetching'
+          : st.state === 'error' ? 'error' : st.state === 'list' ? (st.cands.length ? 'results' : 'none') : 'idle'
+        root.innerHTML = mbReleasePanelHtml({
+          editable: canEditLibrary(),
+          linked: st.picked ? { mbid: st.picked.mbid, how: 'Linked by you', detail: st.picked.detail, err: !!st.picked._err } : null,
+          artist: st.artist != null ? st.artist : val('f-artist'),
+          title: st.title != null ? st.title : val('f-album-title'),
+          phase, cands: st.cands,
         })
-        root.querySelectorAll('.pp-mb-cand').forEach(el => {
-          el.addEventListener('click', e => { if (!e.target.closest('.pp-mb-cand-view')) pick(el.dataset.mbid) })
-          el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click() } })
+        mbReleasePanelWire(root, {
+          search,
+          pick,
+          unlink: () => {
+            const st2 = m(); st2.picked = null; st2.state = 'idle'; st2.cands = []; st2.artist = st2.title = null
+            paint()
+          },
         })
       }
-      async function search() {
+      async function search(v) {
         const st = m()
-        if (!val('f-album-title')) { document.getElementById('f-album-title')?.focus(); return }
-        st.state = 'loading'; st.title = val('f-album-title'); paint()
+        st.artist = v.artist; st.title = v.title
+        if (!v.title) { root.querySelector('[data-mbq="title"]')?.focus(); return }
+        st.state = 'loading'; paint()
         try {
-          const res = await API.ingest.releaseCandidates(val('f-artist'), st.title, (ingest.tracks || []).length)
+          const res = await API.ingest.releaseCandidates(v.artist, v.title, (ingest.tracks || []).length)
           st.cands = (res && res.candidates) || []
           st.state = 'list'
         } catch (e) { st.state = 'error'; st.error = e.message || String(e) }
@@ -13129,6 +13484,7 @@ const App = (() => {
       const errEl = document.getElementById('review-submit-error')
       btn.disabled = true
       if (otherBtn) otherBtn.disabled = true
+      mainContent.querySelectorAll('.btn-ingest-move').forEach(b => { b.disabled = true })
       // The LABEL DOES NOT CHANGE. It used to become "Adding to library…", a
       // wider string, so the button grew at the exact moment it was clicked
       // and pushed the pair sideways — and with the Files select unable to
@@ -13140,42 +13496,10 @@ const App = (() => {
       btn.classList.add('is-busy')
       errEl.style.display = 'none'
 
-      const payload = {
-        source_folder_path: ingest.folderPath,
-        ...f,
-        tracks: ingest.tracks,
-        fingerprints: ingest.scan.fingerprints || [],
-        info_file_content: ingest.scan.info_file_content || null,
-        members: (f.members || []).map(m => m.name),
-        guests:  (f.guests  || []).map(m => m.name),
-        // Written to the ARTIST, not the recording — see api/ingest.py.
-        // Both are sent: an id links an existing genre, a name creates one.
-        genre_id:   f.genre_id   || null,
-        genre_name: f.genre_name || null,
-        // 'hand' when a person picked the genre (may replace the act's genre); anything else fills only an empty one.
-        genre_source: f.genre_source || null,
-        // Lomax may already have run on this draft (a run on the folder moves to
-        // the recording on confirm; the result rides along as the fallback).
-        ai_result: ingest.lxc?.latest()?.result || null,
-        // Fields whose value the person applied from an AI proposal (they may learn aliases).
-        ai_accepted: Object.keys(ingest.aiApplied || {}),
-        resolver_result: ingest.scan?.resolved || null,
-        kind: ingest.kind === 'studio' ? 'studio' : 'live',
-      }
-      // An album sends its title and none of the live-only fields; a live recording sends no title.
-      delete payload.album_title
-      payload.mb_release_id = (payload.kind === 'studio' && ingest.mb && ingest.mb.picked) ? ingest.mb.picked.mbid : null
-      delete payload._genreText
-      if (payload.kind === 'studio') {
-        payload.title = f.album_title || null
-        Object.assign(payload, {
-          start_month: null, start_day: null, end_year: null, end_month: null, end_day: null,
-          venue_name: '', venue_id: null, event_name: '', event_id: null, stage: '',
-          city: '', state: '', country: '', quality: '', source: '', lineage: '',
-          source_tag: '', etree_shnid: '',
-          recording_engineer: '', transfer_engineer: '', mastering_engineer: '',
-        })
-      }
+      // A Review on a recording stops watching the form and lets a save in flight land first.
+      _asStop()
+      if (ingest.recordingId) await (ingest._asChain || Promise.resolve())
+      const payload = _ingestReviewPayload(true)
       // ⚠ NO blanket-value fallback here any more.
       //
       // This used to re-apply `lq.applyAll` field by field to anything the
@@ -13218,8 +13542,7 @@ const App = (() => {
           await loadArtistList()   // new artist/venue/musician may exist
 
           if (after === 'view') {
-            resetIngestState()
-            window.location.hash = `#/recording/${result.recording_id}`
+            _ingestGoToRecording(result.recording_id)
           } else if (ingest.returnTo) {
             // "Add & Return": back to the run's import page.
             _ingestReturnToRun()
@@ -13237,15 +13560,43 @@ const App = (() => {
         errEl.style.display = 'block'
         btn.disabled = false
         if (otherBtn) otherBtn.disabled = false
+        mainContent.querySelectorAll('.btn-ingest-move').forEach(b => { b.disabled = false })
         btn.classList.remove('is-busy')
         if (prog) prog.hidden = true
         document.getElementById('ingest-fh-strip')?.removeAttribute('hidden')
+        _asStart()
       }
     }
 
     document.getElementById('btn-confirm').addEventListener('click', _submitReview)
     document.getElementById('btn-confirm-view')?.addEventListener('click', _submitReview)
     _wireFhStrip('ingest-fh-strip')
+
+    // Move: saves what is on the form (and counts as leaving it), moves the whole folder,
+    // and goes back to where Review was opened from.
+    mainContent.querySelectorAll('.btn-ingest-move').forEach(btn => btn.addEventListener('click', async () => {
+      const dest = btn.dataset.dest
+      const errEl = document.getElementById('review-submit-error')
+      const all = mainContent.querySelectorAll('.ingest-actions-right .btn')
+      all.forEach(b => { b.disabled = true })
+      errEl.style.display = 'none'
+      _asStop()
+      const saved = await _ingestSaveNow(true)
+      try {
+        if (!saved) throw new Error('the form could not be saved')
+        const res = await API.recordings.moveOut(ingest.recordingId, dest)
+        invalidateDims('artists', 'venues', 'musicians')
+        Notify.info(`Moved to ${TRIAGE_LABELS[dest] || dest} as "${res.moved_to_name}".`)
+        if (ingest.returnTo) { _ingestReturnToRun() }
+        else { resetIngestState(); window.location.hash = '#/' }
+      } catch (e) {
+        errEl.textContent = `Move failed: ${e.message}`
+        errEl.style.display = 'block'
+        all.forEach(b => { b.disabled = false })
+        _asStart()
+      }
+    }))
+    _asStart()
 
     // Resize handle
     // The DETAILS panel is the sized side now, so it can be animated open and
@@ -13442,10 +13793,6 @@ const App = (() => {
       titleId: 'vn-name',
       titleEditable: true,
       chips: loc ? `<span class="pp-hero-fact">${esc(loc)}</span>` : '',
-      stats: [
-        [venueRows.length, venueRows.length === 1 ? 'Recording' : 'Recordings'],
-        [v.performance_count || 0, (v.performance_count === 1) ? 'Show' : 'Shows'],
-      ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="vn-delete" title="Delete venue">Delete</button>`,
       // TAB ORDER, all five dimension pages: Recordings first and default,
       // then About, then Photos. What you came for is the shows; "Overview"
@@ -13646,10 +13993,6 @@ const App = (() => {
       chips: [dates ? `<span class="pp-hero-fact">${esc(dates)}</span>` : '',
               e.venue_name ? `<a class="pp-hero-fact" href="#/venue/${e.venue_id}">${esc(e.venue_name)}</a>`
                            : (loc ? `<span class="pp-hero-fact">${esc(loc)}</span>` : '')].join(''),
-      stats: [
-        [rows.length, rows.length === 1 ? 'Recording' : 'Recordings'],
-        [e.performance_count || 0, (e.performance_count === 1) ? 'Show' : 'Shows'],
-      ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="ev-delete" title="Delete event">Delete</button>`,
       tabs: [
         { id: 'recordings', label: 'Recordings', count: rows.length, active: true,
@@ -13838,7 +14181,7 @@ const App = (() => {
         } catch (err) { Notify.error('Failed: ' + err.message) }
         showVenue()
       }
-      wirePickerDropdown(input, dd, q => API.venues.list(q), commit)   // no createLabel → no create row
+      wirePickerDropdown(input, dd, q => API.venues.pick(q), commit)   // no createLabel → no create row
       input.addEventListener('keydown', ev => {
         ev.stopPropagation()
         if (ev.key === 'Enter') {
@@ -13926,10 +14269,6 @@ const App = (() => {
       title: esc(g.name),
       titleId: 'gn-name',
       titleEditable: true,
-      stats: [
-        [g.artist_count || 0, (g.artist_count === 1) ? 'Artist' : 'Artists'],
-        [g.recording_count || 0, (g.recording_count === 1) ? 'Recording' : 'Recordings'],
-      ],
       actions: `<button class="btn btn-ghost btn-sm pp-delete" id="gn-delete" title="Delete genre">Delete</button>`,
       // No Photos tab — a genre has nothing to photograph.
       tabs: [
@@ -13992,7 +14331,7 @@ const App = (() => {
     setLoading()
 
     let artists = []
-    try { artists = await API.artists.list() } catch (_) {}
+    try { artists = await API.artists.listAll() } catch (_) {}
     const sorted = artists.slice().sort((a, b) => (b.recording_count || 0) - (a.recording_count || 0))
 
     let showAll = false
@@ -14058,7 +14397,7 @@ const App = (() => {
             statusEl.textContent = 'Failed: ' + e.message
           }
         }
-        wirePickerDropdown(input, dd, API.genres.list, commit)   // no createLabel → existing genres only
+        wirePickerDropdown(input, dd, API.genres.pick, commit)   // no createLabel → existing genres only
         input.addEventListener('keydown', e => {
           if (e.key === 'Enter') {
             e.preventDefault()
@@ -14125,7 +14464,6 @@ const App = (() => {
   //   sorts      [{id, label, cmp}] — first is the default
   //   group      {sort, key(row), label(row)} | null — a gutter label beside
   //                                 each run of rows while `sort` is active
-  //   stats      fn(rows) -> [[n,label], …]
   //   extraActionsPlayback html | ''  — e.g. Genres' "Bulk assign"
   //
   // Rows, not tiles. One shared row (picture slot, body, counts column) with a
@@ -14168,7 +14506,6 @@ const App = (() => {
 
     setMainHTML(entityShellHtml({
       title: esc(cfg.title),
-      stats: cfg.stats ? cfg.stats(rows) : [],
       // Creating is an admin verb, so it rides `actions` and the shell drops it
       // in Playback mode on its own — see entityShellHtml. Nothing here may
       // wire it with a bare getElementById; onAdminClick exists for that.
@@ -14293,8 +14630,7 @@ const App = (() => {
   // Numbers are the identity of a row, set the way a handbill sets a date.
   function _dxSide(count, span) {
     return `<span class="dx-side">
-      ${count == null ? '' : `<div class="dx-n">${count}</div>
-        <div class="dx-nl">${count === 1 ? 'Recording' : 'Recordings'}</div>`}
+      ${count == null ? '' : `<div class="dx-n">${count} ${count === 1 ? 'Recording' : 'Recordings'}</div>`}
       ${span ? `<div class="dx-span">${esc(span)}</div>` : ''}</span>`
   }
 
@@ -14350,11 +14686,6 @@ const App = (() => {
       sorts: [
         { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
         { id: 'recs',  label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
-        { id: 'shows', label: 'Show Count',      icon: 'arrow-up-down', cmp: _byCount('performance_count') },
-      ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Venue' : 'Venues'],
-        [rows.reduce((n, v) => n + (v.recording_count || 0), 0), 'Recordings'],
       ],
     })
   }
@@ -14370,8 +14701,8 @@ const App = (() => {
       // reads as designed and colour-coded.
       row: p => {
         const color = p.genre_color || null
-        const sub = [p.genre_name ? `<span class="dx-sw"></span>${esc(p.genre_name)}` : '',
-                     p.area ? esc(p.area) : ''].filter(Boolean).join(' · ')
+        // Genre only: the MusicBrainz area (city/state) was removed (Ryan, 2026-10-15).
+        const sub = p.genre_name ? `<span class="dx-sw"></span>${esc(p.genre_name)}` : ''
         return `
           <a class="dx-row dx-row--artist" href="#/artist/${p.id}"
              ${color ? `style="--dx-fg:${esc(color)}"` : ''}>
@@ -14389,10 +14720,6 @@ const App = (() => {
       sorts: [
         { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
         { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
-      ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Artist' : 'Artists'],
-        [rows.reduce((n, p) => n + (p.recording_count || 0), 0), 'Recordings'],
       ],
     })
   }
@@ -14428,10 +14755,6 @@ const App = (() => {
         { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
         { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
       ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Musician' : 'Musicians'],
-        [rows.filter(a => a.recording_count).length, 'On record'],
-      ],
     })
   }
 
@@ -14441,7 +14764,7 @@ const App = (() => {
       nav: 'engineers', title: 'Engineers', singular: 'Engineer',
       load: () => API.engineers.listIndex(),
       row: a => `
-        <a class="dx-row dx-row--musician" href="#/engineer/${a.id}">
+        <a class="dx-row dx-row--musician dx-row--engineer" href="#/engineer/${a.id}">
           <span class="dx-body">
             <div class="dx-name">${esc(a.name)}</div>
             ${a.excerpt ? `<div class="dx-text">${esc(a.excerpt)}</div>` : ''}
@@ -14449,14 +14772,9 @@ const App = (() => {
           ${_dxSide(a.recording_count ? a.recording_count : null)}
         </a>`,
       searchable: a => [a.name, a.sort_name].filter(Boolean).join(' '),
-      group: { sort: 'name', key: _dxLetter, label: _dxLetter },
-      sorts: [
+            sorts: [
         { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
         { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
-      ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Engineer' : 'Engineers'],
-        [rows.reduce((n, a) => n + (a.recording_count || 0), 0), 'Recordings'],
       ],
     })
   }
@@ -14487,10 +14805,6 @@ const App = (() => {
         { id: 'name', label: 'A–Z', labelRev: 'Z–A', icon: 'arrow-up-down', defAsc: true, cmp: _byName },
         { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
         { id: 'acts', label: 'Artist Count', icon: 'arrow-up-down', cmp: _byCount('artist_count') },
-      ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Genre' : 'Genres'],
-        [rows.reduce((n, g) => n + (g.recording_count || 0), 0), 'Recordings'],
       ],
       // Bulk assign is the actual population mechanism for this dimension, so
       // it belongs on the index rather than buried. It IS admin-only — it
@@ -14616,10 +14930,6 @@ const App = (() => {
             if (!ka !== !kb) return ka ? -1 : 1
             return ka - kb || _byName(a, b) } },
         { id: 'recs', label: 'Recording Count', icon: 'arrow-up-down', cmp: _byCount('recording_count') },
-      ],
-      stats: rows => [
-        [rows.length, rows.length === 1 ? 'Event' : 'Events'],
-        [rows.reduce((n, e) => n + (e.recording_count || 0), 0), 'Recordings'],
       ],
     })
   }
@@ -14783,12 +15093,30 @@ const App = (() => {
     // stale. Same class of issue as the documented fromBatch case on the
     // in-page back-link below; fixed the same way, by not depending on the
     // hash actually changing.
+    // Review (the Add Recording form) also sits on #/ingest, while the link
+    // points at the Queue (#/bulk-ingest) whenever the Queue holds anything.
+    // Repainting #/ingest there showed the empty picker (Ryan, 2026-10-15):
+    // leave the form the way Back does, then go where the link says.
     document.getElementById('sidebar-nav')?.addEventListener('click', e => {
-      if (!e.target.closest('.lnav-add')) return
-      if (window.location.hash === '#/ingest') {
+      const link = e.target.closest('.lnav-add')
+      if (!link || window.location.hash !== '#/ingest') return
+      const target = link.getAttribute('href') || '#/ingest'
+      if (ingest.step === 'review' && ingest.returnTo === target) {
         e.preventDefault()
-        renderIngestView()
+        ingestBackFromReview()
+        return
       }
+      if (target === '#/ingest') {
+        e.preventDefault()
+        _ingestLeaving()
+        resetIngestState()
+        ingest._resume = false
+        renderIngestView()
+        return
+      }
+      _ingestLeaving()           // a different page: the hashchange renders it
+      resetIngestState()
+      ingest._resume = false
     })
 
     // Sidebar collapse toggle. Plain localStorage flag, same idiom as
@@ -15104,8 +15432,8 @@ const App = (() => {
   }
 
   const _BI_SKIPPED_REASON_PHRASE = {
-    already_in_library: 'already in your library',
-    rejected:           'rejected earlier',
+    already_in_library: 'Already in your library',
+    rejected:           'Rejected earlier',
     duplicate_content:  'exact duplicate',
   }
 
@@ -15162,6 +15490,8 @@ const App = (() => {
       const i = reviewIssues.indexOf(_INGEST_REASON_LABEL[code])
       if (i >= 0 && it.detail) reviewIssues[i] += `, ${it.detail}`
     }
+    // The same show already catalogued (library, Workshop, Backlog): a note, not a hold.
+    const flags = (it.same_show || []).map(s => `Same show in ${s.in ? (TRIAGE_LABELS[s.in] || s.in) : 'the library'}`)
     if (needsReview && !reviewIssues.length) reviewIssues.push('Needs review')
     const reviewLabel = reviewIssues[0] || null
     // Same fragment-map style as before ("Skipped already in your library"),
@@ -15169,8 +15499,9 @@ const App = (() => {
     const skippedCodes = it.status === 'skipped' ? String(it.reason || '').split(',').filter(Boolean) : []
     const skippedPhrases = skippedCodes.map(c => _BI_SKIPPED_REASON_PHRASE[c]).filter(Boolean)
     const statusText = it.status === 'skipped'
-      ? (skippedCodes.includes('duplicate_content') ? 'Exact duplicate in the library, skipped.'
-        : `Skipped${skippedPhrases.length ? ' ' + skippedPhrases.join(', ') : ''}`)
+      ? (skippedCodes.includes('duplicate_content')
+          ? `Exact duplicate in ${TRIAGE_LABELS[it.detail] || (it.detail === 'queue' ? 'the Queue' : 'the library')}, skipped.`
+        : (skippedPhrases.length ? `${skippedPhrases.join(', ')}, skipped.` : 'Skipped.'))
       : it.status === 'failed'
         // The reason's own label when it has one (never a raw code like "no_audio").
         ? (_ingestReasonLabel(String(it.reason || '').split(',')[0]) || it.detail || 'Could not be read') : null
@@ -15209,6 +15540,7 @@ const App = (() => {
       needs_review: needsReview,
       review_reason: reviewLabel,
       review_issues: reviewIssues,
+      flags,
       status,
       recording_id: it.recording_id,
       // Completed tabs only: the recording's image at the left.
@@ -15499,7 +15831,7 @@ const App = (() => {
     const lx = _lxColShown()
     return `<div class="lq-brow-head iq-brow${sq ? '' : ' iq-brow--nosq'}${lx ? ' iq-brow--lx' : ''}">
       <span></span><span>Recording</span>
-      <span></span><span>Format</span><span>Type</span>
+      <span>Tracks</span><span></span><span>Format</span><span>Type</span>
       ${sq ? '<span>Quality</span>' : ''}
       <span>Metadata</span><span class="iq-head-status">Status</span>${lx ? `<span>${lomaxMark()}</span>` : ''}<span></span>
     </div>`
@@ -15510,9 +15842,10 @@ const App = (() => {
   function _biActionsHtml(row) {
     const it = row._it
     if (row.status === 'moved') return ''
-    // A truncated folder keeps Move (2026-10-13), after its status.
-    if (it && row.status === 'failed' && it.reason === 'truncated_file') {
-      return _iqDefaultActions(row, {}) + (canEditLibrary() ? _biMoveHtml(it) : '')
+    // A folder that could not be read has no recording: its only action is Trash.
+    if (it && row.status === 'failed') {
+      return _iqDefaultActions(row, {}) + (canEditLibrary() && it.placement === 'bring_in'
+        ? `<button type="button" class="lq-act lq-act--trash" data-path="${esc(it.id)}">Move to Trash</button>` : '')
     }
     if (!it || (row.status !== 'ready' && row.status !== 'review')) return _iqDefaultActions(row, {})
     if (!canEditLibrary()) return ''
@@ -15838,17 +16171,11 @@ const App = (() => {
   // safely one-click auto-ingested, so both buttons land on the same form a
   // human finishes.
   async function _biOpenReviewFor(it, btn, pane) {
-    const root = (_biRun && _biRun.root) || ''
-    const abs = it.abs_path || (root.replace(/\/+$/, '') + '/' + it.rel_path)
     if (btn) { btn.disabled = true; btn.textContent = '…' }
     try {
-      const scan = await API.recordings.scan(abs)
-      ingest.scan = scan; ingest.step = 'review'; ingest.folderPath = abs
-      ingest.form = {}; ingest.tracks = []
-      ingest.returnTo = _biRun ? '#/bulk-ingest' : null; ingest._resume = true
-      if (pane) { ingest._keepPane = pane; state.ingestPanelOpen = true }
-      window.location.hash = '#/ingest'
-      renderIngestStep()
+      // The row's recording (read now when it has none yet), opened on the Review form.
+      const { recording_id } = await API.bulkIngest.reviewItem(it.id)
+      await openRecordingReview(recording_id, _biRun ? '#/bulk-ingest' : null, pane)
     } catch (e) {
       if (btn) { btn.disabled = false; btn.textContent = 'Review' }
       Notify.error(`Scan failed: ${e.message}`)
@@ -16082,7 +16409,18 @@ const App = (() => {
     const moveOpt = ev.target.closest('.lq-move-opt')
     if (moveOpt) {
       const it = itemOf(moveOpt)
-      if (it) _biMoveItem(it, moveOpt.dataset.dest, moveOpt)
+      if (!it) return
+      // A row that is a recording loses its record with the folder: ask first.
+      if (moveOpt.dataset.dest === 'trash' && it.recording_id) {
+        mainContent.querySelectorAll('.lq-move-menu').forEach(m => { m.hidden = true })
+        _confirmDialog(_TRASH_RECORD_MSG, 'Move to Trash', () => _biMoveItem(it, 'trash', moveOpt))
+      } else _biMoveItem(it, moveOpt.dataset.dest, moveOpt)
+      return
+    }
+    const trashBtn = ev.target.closest('.lq-act--trash')
+    if (trashBtn) {
+      const it = itemOf(trashBtn)
+      if (it) _biMoveItem(it, 'trash', trashBtn)
       return
     }
     const ingestBtn = ev.target.closest('.lq-act--ingest')
@@ -17104,12 +17442,14 @@ const App = (() => {
     })
     const actions = busy
       ? `<span class="dl-prog"><span class="dl-bar"><span class="dl-bar-fill" style="width:${_dlPct(job)}%"></span></span>${_dlPct(job)}%</span>`
-      : `${noAudio ? '' : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Add to Library</button>`}
+      : `${noAudio ? '' : ('recording_id' in f)
+          ? `<button type="button" class="lq-act dl-review" data-name="${esc(f.name)}" data-rid="${esc(f.recording_id || '')}">Review</button>`
+          : `<button type="button" class="lq-act dl-ingest" data-name="${esc(f.name)}">Add to Queue</button>`}
          <div class="lq-move-wrap">
            <button type="button" class="lq-act dl-move" data-name="${esc(f.name)}">Move ${chevronIcon('caret-ic--down lq-act-chev')}</button>
            <div class="lq-move-menu" hidden>
-             ${sorted.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
-             <button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-trash="1">Move to Trash</button>
+             ${sorted.map(d => `<button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-rid="${esc(f.recording_id || '')}" data-dest="${esc(d)}">${esc(TRIAGE_LABELS[d] || d)}</button>`).join('')}
+             <button type="button" class="lq-move-opt" data-name="${esc(f.name)}" data-rid="${esc(f.recording_id || '')}" data-trash="1">Move to Trash</button>
            </div>
          </div>`
     const middle = noAudio
@@ -17144,7 +17484,14 @@ const App = (() => {
     rows._html = html
     rows.innerHTML = html
     const path = document.getElementById('dl-path')
-    if (path) path.textContent = DL.folder.path || ''
+    if (path) { path.dataset.path = DL.folder.path || ''; path.textContent = tildePath(DL.folder.path) }
+  }
+
+  // A folder path as shown on screen: the home folder reads "~", so the account
+  // name stays out of view and out of screenshots (Ryan, 2026-10-15). The real
+  // path rides on data-path for anything that needs it.
+  function tildePath(p) {
+    return String(p || '').replace(/^\/(?:Users|home)\/[^/]+(?=\/|$)/, '~').replace(/^[A-Za-z]:\\Users\\[^\\]+(?=\\|$)/, '~')
   }
 
   function _dlCloseMenus() {
@@ -17158,7 +17505,7 @@ const App = (() => {
       <div class="dl-page">
         <div class="arc-head">
           <h1 class="arc-title">${esc(title)}</h1>
-          <span class="dl-path" id="dl-path">${esc(path || '')}</span>
+          <span class="dl-path" id="dl-path" data-path="${esc(path || '')}">${esc(tildePath(path))}</span>
           <button type="button" class="btn btn-ghost btn-sm arc-refresh" id="dl-refresh">${icon('rotate-cw', 'lq-browse-ic')} Refresh</button>
         </div>
         <div class="dl-list">
@@ -17186,14 +17533,27 @@ const App = (() => {
       const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
       paint()
     })
-    const dir = name => `${String(document.getElementById('dl-path')?.textContent || '').replace(/\/+$/, '')}/${name}`
+    const dir = name => `${String(document.getElementById('dl-path')?.dataset.path || '').replace(/\/+$/, '')}/${name}`
     document.getElementById('dl-rows').addEventListener('click', async e => {
       const ingest = e.target.closest('.dl-ingest')
       if (ingest) {
-        // Add to Library: opens Add Recordings with the folder queued and the
+        // Add to Queue: opens Add Recordings with the folder queued and the
         // scan paused; the person starts it. Outside the library: the
         // remembered outside mode, Review First by default.
         _biStartAndOpen(dir(ingest.dataset.name), _biMode(false), true).catch(err => Notify.error(err.message))
+        return
+      }
+      const review = e.target.closest('.dl-review')
+      if (review) {
+        review.disabled = true
+        try {
+          // A folder with no recording is read first, which gives it one.
+          const rid = Number(review.dataset.rid) || (await API.recordings.openFolder(which, review.dataset.name)).recording_id
+          await openRecordingReview(rid, window.location.hash)
+        } catch (err) {
+          review.disabled = false
+          Notify.error('Review failed: ' + err.message)
+        }
         return
       }
       const mv = e.target.closest('.dl-move')
@@ -17209,15 +17569,23 @@ const App = (() => {
       if (!opt) return
       const name = opt.dataset.name
       _dlCloseMenus()
-      // Move to another working folder, or to the system Trash. Nothing
-      // is deleted outright from a working folder.
-      try {
-        if (opt.dataset.trash) await API.downloads.trash(which, name)
-        else await API.quality.move(dir(name), opt.dataset.dest)
-      } catch (err) { Notify.error(`Move failed: ${err.message}`); return }
-      try { await load() } catch (_) { /* keep what is on screen */ }
-      const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
-      paint()
+      // Move to another working folder, or to the system Trash. Nothing is deleted
+      // outright from a working folder; a folder that is a recording moves with its
+      // record, or loses it (after a confirm) when it is trashed.
+      const rid = Number(opt.dataset.rid) || null
+      const go = async () => {
+        try {
+          if (opt.dataset.trash) await API.downloads.trash(which, name)
+          else if (rid) await API.recordings.moveOut(rid, opt.dataset.dest)
+          else await API.recordings.moveFolder(which, name, opt.dataset.dest)
+        } catch (err) { Notify.error(`Move failed: ${err.message}`); return }
+        invalidateDims('artists', 'venues', 'musicians')
+        try { await load() } catch (_) { /* keep what is on screen */ }
+        const rows = document.getElementById('dl-rows'); if (rows) rows._html = null
+        paint()
+      }
+      if (opt.dataset.trash && rid) _confirmDialog(_TRASH_RECORD_MSG, 'Move to Trash', go)
+      else go()
     })
   }
 
@@ -17287,6 +17655,8 @@ const App = (() => {
       return
     }
 
+    // Leaving a Review that is open on a recording by any door but its own buttons.
+    if (ingest.recordingId && hash.split('?')[0] !== '#/ingest') _ingestLeaving()
     _navRecord(hash)
     _biRefreshRunsOnNav()
     // Any handler belongs to the view we are leaving. The incoming view
@@ -17473,9 +17843,19 @@ const App = (() => {
     appShell.classList.remove('hidden')
   }
 
+  // The header's user badge: the Settings picture when there is one, else
+  // the initials. Settings calls it again after a picture or name change.
+  function paintUserAvatar(user) {
+    if (!user) return
+    if (user.has_avatar && user.avatar_url) {
+      userAvatar.innerHTML = `<img src="${esc(user.avatar_url)}" alt="" class="user-avatar-img">`
+    } else {
+      userAvatar.textContent = String(user.username || '').slice(0, 2).toUpperCase()
+    }
+  }
+
   function setUserUI(user) {
-    const initials = user.username.slice(0,2).toUpperCase()
-    userAvatar.textContent = initials
+    paintUserAvatar(user)
     userName.textContent   = user.username
     // The view mode depends on the role, so it can only be resolved once we
     // know who this is. Both entry points (init and login) call setUserUI, so
@@ -17697,7 +18077,7 @@ const App = (() => {
 
     const keySet     = prefs.has_api_key
     const noKeychain = prefs.keychain_available === false
-    const model      = prefs.ai_model || 'claude-sonnet-5'
+    const model      = prefs.ai_model || 'claude-sonnet-5-5'
     const editable   = canEditLibrary()
 
     // Files, Folders and Sharing are install-level and admin-only, so in Playback mode
@@ -17747,7 +18127,12 @@ const App = (() => {
         <div id="set-sharing"></div>` : '',
 
       lomax: `
-        <p class="set-intro">${esc(LX_IMPORT_TIP)}</p>
+        <p class="set-intro set-intro--full">${esc(LX_IMPORT_TIP)} You will need to bring your own Anthropic Key.</p>
+        ${keySet ? '' : `<ol class="set-steps">
+          <li>Create an account at <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>. This is separate from a Claude subscription.</li>
+          <li>Add credits under Billing. Lomax runs are paid from these credits.</li>
+          <li>Create a key under Settings, API Keys, and paste it below.</li>
+        </ol>`}
         <div class="set-field">
           <label class="set-label" for="set-key">Anthropic API Key</label>
           <div class="set-actions">
@@ -17763,8 +18148,7 @@ const App = (() => {
           <label class="set-label" for="set-model">Model</label>
           <div class="set-actions">
             <select class="set-input" id="set-model">
-              <option value="claude-sonnet-5" ${model === 'claude-sonnet-5' ? 'selected' : ''}>Sonnet: stronger research</option>
-              <option value="claude-haiku-4-5" ${model === 'claude-haiku-4-5' ? 'selected' : ''}>Haiku: faster and cheaper</option>
+              ${(prefs.ai_models || []).map(m => `<option value="${esc(m.id)}" ${model === m.id ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}
             </select>
             <span class="set-flash" id="set-model-flash"></span>
           </div>
@@ -17908,6 +18292,8 @@ const App = (() => {
       if (!f) return
       try {
         const updated = await API.auth.uploadAvatar(f)
+        state.user = { ...(state.user || {}), ...updated }
+        paintUserAvatar(state.user)
         $('set-avatar').innerHTML = `<img src="${esc(updated.avatar_url)}" alt="" class="set-avatar-img">`
         _settingsSaved($('set-avatar-flash'))
         renderSettingsPage()          // repaint so Remove appears
@@ -17915,7 +18301,12 @@ const App = (() => {
       finally { file.value = '' }
     })
     $('set-avatar-clear')?.addEventListener('click', async () => {
-      try { await API.auth.removeAvatar(); renderSettingsPage() }
+      try {
+        const updated = await API.auth.removeAvatar()
+        state.user = { ...(state.user || {}), ...updated }
+        paintUserAvatar(state.user)
+        renderSettingsPage()
+      }
       catch (e) { _settingsSaved($('set-avatar-flash'), e.message) }
     })
 

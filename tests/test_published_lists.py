@@ -104,9 +104,22 @@ def test_working_folder_name(app):
     assert working_folder_name(os.path.join(root, "Artist", "Show")) is None
 
 
-def test_check_existing_ignores_moved_out_recordings(app, client):
+def test_check_existing_names_moved_out_recordings_by_location(app, client):
+    """Reverses 2026-10-13: a show in Workshop/Backlog is mentioned, named by where it is."""
     rec = _recording("Moved")
-    rec.is_published = False
+    rec.is_published, rec.location = False, "workshop"
     _db.session.commit()
     got = client.get("/api/ingest/check-existing?artist_name=Moved%20Band&year=1999&month=1&day=1").get_json()
-    assert got["performances"] == []
+    recs = [r for p in got["performances"] for r in p["recordings"]]
+    assert [(r["id"], r["location"]) for r in recs] == [(rec.id, "workshop")]
+
+
+def test_card_extras_keyed_by_id_and_skips_unpublished(app, client):
+    shelf = _recording("Shelf")
+    gone = _recording("Gone")
+    gone.is_published = False
+    _db.session.commit()
+    body = client.get(f"/api/recordings/card-extras?ids={shelf.id},{gone.id},abc").get_json()
+    assert str(shelf.id) in body and str(gone.id) not in body
+    assert "personnel" in body[str(shelf.id)] and "venue_id" in body[str(shelf.id)]
+    assert client.get("/api/recordings/card-extras?ids=").get_json() == {}

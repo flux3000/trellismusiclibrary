@@ -69,28 +69,27 @@ def create_app(config_class=Config):
     login_manager.init_app(app)
     login_manager.login_view = "auth.login"
 
-    # Additive, idempotent, one transaction each; every mode, before anything queries Artist.
+    # Schema: Alembic (app/utils/db_upgrade.py), every mode, before anything queries the
+    # database. Skipped under TESTING: tests build their schema with create_all() and ask
+    # for the upgrade explicitly. A database that cannot be upgraded raises
+    # DatabaseUpgradeError here, which stops the app from starting; its message says why.
     with app.app_context():
-        from app.utils.schema_upgrades import (ensure_artist_confirmed_at, ensure_bulk_meta_band, ensure_lomax,
-                                              ensure_venue_history, ensure_event_history, ensure_full_library_grants,
-                                              ensure_invite_code, ensure_bulk_run_cleared_at,
-                                              ensure_recording_completeness_checked_at,
-                                              ensure_recording_engineer_columns,
-                                              ensure_lomax_easter_eggs, ensure_genre_colors,
-                                              ensure_download_job)
-        ensure_artist_confirmed_at(db.engine)
-        ensure_bulk_run_cleared_at(db.engine)
-        ensure_recording_completeness_checked_at(db.engine)
-        ensure_recording_engineer_columns(db.engine)
-        ensure_venue_history(db.engine)
-        ensure_event_history(db.engine)
+        if not app.config.get("TESTING"):
+            from app.utils.db_upgrade import upgrade_for_app
+            from datetime import datetime, timezone
+            _res = upgrade_for_app(app)
+            app.config["DB_UPGRADE_RESULT"] = {
+                "action": _res.get("action"), "from": _res.get("from"), "to": _res.get("to"),
+                "backup": str(_res["backup"]) if _res.get("backup") else None,
+                "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        # Data-only passes, not schema: each is idempotent and a no-op on an empty database.
+        from app.utils.schema_upgrades import (ensure_bulk_meta_band, ensure_lomax,
+                                              ensure_full_library_grants, ensure_genre_colors)
         ensure_lomax(db.engine)
-        ensure_lomax_easter_eggs(db.engine)
         ensure_bulk_meta_band(db.engine)
         ensure_full_library_grants(db.engine)
         ensure_genre_colors(db.engine)
-        ensure_invite_code(db.engine)
-        ensure_download_job(db.engine)
         from app.utils.bulk_ingest_run import relabel_truncated_items, relink_missing_folder_items
         relabel_truncated_items()
         relink_missing_folder_items()
@@ -226,6 +225,11 @@ def create_app(config_class=Config):
     # what happens to its in-progress item).
     from app.utils.bulk_ingest_run import resume_on_boot
     resume_on_boot(app)
+
+    # Check-only update notifier: one daemon thread, silent on failure, off
+    # under TESTING. Never reached in SERVER_MODE (returned above).
+    from app.utils.update_check import start_background as _start_update_check
+    _start_update_check(app)
 
     # The download queue is resumed by run.py / run_headless.py instead, after
     # the Downloads config has been patched (see download_queue.resume_on_boot).

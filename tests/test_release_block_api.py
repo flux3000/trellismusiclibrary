@@ -105,6 +105,25 @@ def test_candidates_returns_ranked_list(app, monkeypatch, seeded_ids):
     assert cands[0]["mbid"] == "rel-mbid-1"
 
 
+def test_candidates_use_artist_title_overrides_and_carry_credit(app, monkeypatch, seeded_ids):
+    rec = _make_studio_recording()
+    monkeypatch.setattr(mb, "enabled", lambda: True)
+    seen = {}
+    resp = {"releases": [dict(_SEARCH_RESPONSE["releases"][0],
+                              **{"artist-credit": [{"name": "Herbie Hancock", "joinphrase": ""}]})]}
+
+    def fake_get(path, params):
+        seen["query"] = params["query"]
+        return resp
+    monkeypatch.setattr(mb, "_get", fake_get)
+    client = app.test_client()
+    _login_as(client)
+    res = client.get(f"/api/recordings/{rec.id}/release-candidates?artist=Herbie%20Hancock&title=Thrust")
+    cands = res.get_json()["candidates"]
+    assert 'artist:"Herbie Hancock"' in seen["query"] and 'release:"Thrust"' in seen["query"]
+    assert cands[0]["artist_credit"] == "Herbie Hancock" and cands[0]["track_count"] == 1
+
+
 def test_candidates_admin_only(app, monkeypatch, seeded_ids):
     rec = _make_studio_recording()
     monkeypatch.setattr(mb, "enabled", lambda: True)

@@ -1,19 +1,21 @@
-"""app/utils/schema_upgrades.py -- additive schema upgrades that run at every start.
+"""app/utils/schema_upgrades.py -- the ensure_* functions that used to change the schema at every start.
 
-create_all() cannot add a column to a table that exists, and first_run_setup() runs only
-when the database file is absent, so a column added to an existing model needs a check
-here. Each upgrade is idempotent, runs in one transaction, and is a no-op on a database
-that already has it or has no table yet (a fresh one: create_all() builds it complete).
+Schema changes are Alembic revisions now (app/migrations/, run by app/utils/db_upgrade.py from
+create_app; see the developer note in app/migrations/env.py). Everything here that added a column
+or a table is folded into revision 0001_baseline and is NO LONGER CALLED at start:
+ensure_artist_confirmed_at, ensure_bulk_run_cleared_at, ensure_recording_completeness_checked_at,
+ensure_recording_location, ensure_recording_engineer_columns, ensure_venue_history,
+ensure_event_history, ensure_lomax_easter_eggs, ensure_invite_code, ensure_download_job. They stay
+because tests import them; do not add new ones. Add a revision instead.
 
-ensure_artist_confirmed_at: artist.confirmed_at, backfilled on every existing
-row with created_at, else the migration time.
-scripts/migrate_add_artist_confirmed.py does the same by hand; the app does not
-depend on it.
+Still called by create_app, as data-only startup passes (idempotent, never raise on a missing
+table): ensure_lomax (relabels runs, copies the legacy JSON columns into runs, marks runs left
+running as interrupted; it still creates its tables if they are missing, which after the upgrade
+they never are), ensure_bulk_meta_band, ensure_full_library_grants, ensure_genre_colors.
 
 Failure behaviour: a database that does not exist yet (no file, or no folder) is left alone and
-never created here; first_run_setup() and create_all() build it. A real migration error (read-only
-file, a lock held past the 60 s timeout, a failed ALTER) is logged with the database path and
-raised as RuntimeError: an app that errors on every Artist query is worse than a clear stop.
+never created here. A real error (read-only file, a lock held past the 60 s timeout, a failed ALTER)
+is logged with the database path and raised as RuntimeError where the function says so.
 """
 import logging
 import os
@@ -291,6 +293,30 @@ def ensure_recording_completeness_checked_at(engine):
         return True
     except SQLAlchemyError as e:
         msg = f"Could not add the recording.completeness_checked_at column to the database at {path}: {e}"
+        log.error("schema: %s", msg)
+        raise RuntimeError(msg) from e
+
+
+def ensure_recording_location(engine):
+    """Add recording.location ('library' | 'workshop' | 'backlog') when missing.
+    Every existing row is 'library'. Returns True when added, None when nothing
+    was needed (no file, no table, or already there)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+    path = _sqlite_path(engine)
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with engine.begin() as con:
+            cols = {r[1] for r in con.execute(text("PRAGMA table_info(recording)"))}
+            if not cols or "location" in cols:
+                return None
+            con.execute(text("ALTER TABLE recording ADD COLUMN location VARCHAR(16) "
+                             "NOT NULL DEFAULT 'library'"))
+        log.warning("schema: added recording.location in %s", path)
+        return True
+    except SQLAlchemyError as e:
+        msg = f"Could not add the recording.location column to the database at {path}: {e}"
         log.error("schema: %s", msg)
         raise RuntimeError(msg) from e
 

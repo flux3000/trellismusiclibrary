@@ -116,6 +116,25 @@ def test_accepting_applies_the_value_and_records_the_decision(api, fake, seeded_
     assert any("Lomax proposal accepted: date" in (n or "") for n in notes)
 
 
+def test_accepted_applies_again_only_when_asked(api, fake, seeded_ids):
+    """Clicking "Accepted" puts Lomax's value back after the field was changed (Ryan, 2026-10-15);
+    a plain second accept still does not re-apply."""
+    rid = seeded_ids["recording_id"]
+    run = _make_run(fake, "recording", "recording", rid, {"thinking": "t", "proposals": [
+        {"field": "stage", "proposed": "Main", "confidence": "low", "source": "web"}]})
+    p = _proposals(run.id)["stage"]
+    pid = seeded_ids["performance_id"]
+    api.post("/api/lomax/proposals/%d" % p.id, json={"decision": "accepted"})
+    assert db.session.get(Performance, pid).stage == "Main"
+    db.session.get(Performance, pid).stage = "Side"
+    db.session.commit()
+    api.post("/api/lomax/proposals/%d" % p.id, json={"decision": "accepted"})
+    assert db.session.get(Performance, pid).stage == "Side"
+    r = api.post("/api/lomax/proposals/%d" % p.id, json={"decision": "accepted", "reapply": True})
+    assert r.status_code == 200
+    assert db.session.get(Performance, pid).stage == "Main"
+
+
 def test_rejecting_records_the_decision_and_changes_nothing(api, fake, seeded_ids):
     run = _make_run(fake, "recording", "recording", seeded_ids["recording_id"], {
         "thinking": "t", "proposals": [

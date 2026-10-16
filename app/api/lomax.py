@@ -92,7 +92,8 @@ def latest():
 def decide(proposal_id):
     data = request.get_json(silent=True) or {}
     try:
-        return jsonify(lomax.decide(proposal_id, data.get("decision"), current_user.id))
+        return jsonify(lomax.decide(proposal_id, data.get("decision"), current_user.id,
+                                    reapply=bool(data.get("reapply"))))
     except (lomax.LomaxError, lomax.ApplyError) as e:
         return _err(e)
 

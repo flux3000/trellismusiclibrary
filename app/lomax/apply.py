@@ -28,6 +28,9 @@ def apply_proposal(prop: LomaxProposal, run: LomaxRun, user_id=None):
     if run.skill == "album" and run.subject_type == "recording":
         _apply_album(prop, run, user_id)
         return
+    if run.subject_type == "recording" and prop.field in ("kind", "title", "year", "notes"):
+        _apply_reclassify(prop, run, user_id)      # a recording run that found an official release
+        return
     handler = {"recording": _apply_recording, "artist": _apply_artist, "venue": _apply_venue,
                "event": _apply_event}.get(run.subject_type)
     if handler is None:
@@ -142,6 +145,34 @@ def _apply_recording(prop, run, user_id):
                 path.unlink()
         except OSError:
             pass
+
+
+def _classify_studio(rec, run, user_id):
+    """Reclassify a live recording as an Album: the same change the Recording PUT makes for
+    {"kind": "studio"} and the Classify as Album action sends."""
+    from app.models.recording_event import RecordingEvent
+    if rec.kind == "studio":
+        return
+    rec.kind = "studio"
+    db.session.add(RecordingEvent(recording_id=rec.id, user_id=user_id or run.created_by,
+                                  event_type="metadata_updated", note="Lomax proposal accepted: kind"))
+
+
+def _apply_reclassify(prop, run, user_id):
+    """'kind' from a recording run sets the recording to studio; its title, year and notes are the
+    album's, so they classify first and then apply as an album run's would."""
+    from app.models.recording import Recording
+    rec = db.session.get(Recording, run.subject_id)
+    if rec is None:
+        raise ApplyError("The recording no longer exists.")
+    if prop.field == "kind":
+        if (prop.proposed or "").strip().lower() not in ("album", "studio"):
+            raise ApplyError("Lomax cannot apply a %r kind." % prop.proposed)
+        _classify_studio(rec, run, user_id)
+        db.session.commit()
+        return
+    _classify_studio(rec, run, user_id)
+    _apply_album(prop, run, user_id)
 
 
 def _apply_album(prop, run, user_id):

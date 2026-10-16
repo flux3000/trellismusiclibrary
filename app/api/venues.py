@@ -18,7 +18,7 @@ from app.models.venue_image import VenueImage
 from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.serialize import recording_row
-from app.utils.published import on_shelf
+from app.utils.published import on_shelf, list_all_requested, entity_listed
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
 from app.api.system import require_library
@@ -70,6 +70,13 @@ def list_venues():
     ):
         image_ids.setdefault(vid, iid)
 
+    total_counts = dict(
+        db.session.query(Performance.venue_id, func.count(Recording.id))
+        .join(Recording, Recording.performance_id == Performance.id)
+        .filter(Performance.venue_id.isnot(None))
+        .group_by(Performance.venue_id).all()
+    )
+    show_all = list_all_requested(request.args)
     # ?index=1: who played there, year span and excerpt for the Venues INDEX.
     extra = {}
     if request.args.get("index"):
@@ -89,6 +96,7 @@ def list_venues():
             "image_id":          image_ids.get(v.id),
         }
         for v in venues
+        if entity_listed(rec_counts.get(v.id), total_counts.get(v.id), show_all)
     ])
 
 

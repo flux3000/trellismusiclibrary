@@ -1388,6 +1388,22 @@ def move_folder_to_triage(folder_path, destination, stop_at=None):
             return {"error": f"Move failed: {e}"}, 500
         _trash_emptied_parents(src, stop_at)
 
+    # A recording that lived in this working folder follows its folder, so its
+    # files stay playable and Restore to Library still finds them.
+    from app.models.recording import Recording
+    from app.utils.paths import location_root
+    moved_rows = False
+    for rec in (db.session.query(Recording)
+                .filter(Recording.location.in_(("workshop", "backlog")),
+                        Recording.folder_path == base).all()):
+        root = location_root(rec.location)
+        if root and os.path.realpath(os.path.join(root, base)) == src:
+            rec.location = destination
+            rec.folder_path = os.path.basename(target)
+            moved_rows = True
+    if moved_rows:
+        db.session.commit()
+
     # Keep the analysis, repointed at the new location: re-scanning Backlog or
     # Working later shows the existing score instead of paying to redo it.
     row = qs.get_staging(folder_path)

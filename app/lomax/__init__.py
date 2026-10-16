@@ -217,7 +217,7 @@ def get_run(run_id):
 def list_runs(skill, subject_type, subject_id=None, subject_key=None, limit=50):
     """Every run on one subject, oldest first, whatever its status: the chat history, the
     Questions list, and the way a page finds a run still working when it was left."""
-    skills = ("recording", "resolution") if skill in ("recording", "resolution") else (skill,)
+    skills = core.skill_family(skill)
     q = db.session.query(LomaxRun).filter(LomaxRun.subject_type == subject_type, LomaxRun.skill.in_(list(skills)))
     if subject_type == "folder":
         q = q.filter(LomaxRun.subject_key == norm_key((subject_key or "").strip()))
@@ -255,9 +255,11 @@ def latest_result(subject_type, subject_id, skills, *, not_mode=None):
     return None
 
 
-def decide(proposal_id, decision, user_id=None):
+def decide(proposal_id, decision, user_id=None, reapply=False):
     """Record accept or reject. Accepting applies the value through the field's normal save path
-    (not again if it was already accepted); a failed apply leaves the decision unrecorded."""
+    (not again if it was already accepted, unless reapply: a person clicking "Accepted" to put
+    Lomax's value back after clearing or reverting the field); a failed apply leaves the decision
+    unrecorded."""
     if decision not in ("accepted", "rejected"):
         raise LomaxError("decision must be accepted or rejected.")
     prop = db.session.get(LomaxProposal, proposal_id)
@@ -265,7 +267,7 @@ def decide(proposal_id, decision, user_id=None):
         raise LomaxNotFound("Proposal not found.")
     if prop.agrees:      # "agrees" was true when the run was made; the page offers a decision only once the live value differs
         prop.agrees = False
-    if decision == "accepted" and prop.decision != "accepted":
+    if decision == "accepted" and (prop.decision != "accepted" or reapply):
         apply_proposal(prop, prop.run, user_id)
     prop.decision, prop.decided_at = decision, datetime.now(timezone.utc)
     db.session.commit()

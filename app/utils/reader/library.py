@@ -171,12 +171,35 @@ class LibraryIndex:
             cf = [r[0] for r in q("select id from artist where confirmed_at is not null")]
         except Exception:  # noqa: BLE001 -- a database from before artist.confirmed_at
             cf = []
+        artists = q("select id, name from artist")
+        venues = q("select id, name, city, state, country from venue")
+        events = q("select id, name, venue_id from event")
+        perfs = q("select id, artist_id, venue_id, event_id from performance")
+        # What only a Queue recording knows is not "the library" yet: a folder waiting to
+        # be reviewed must not lend its guessed artist or venue to the next folder's
+        # reading. A performance counts once any recording of it is out of the Queue (or
+        # it has none); an act a person confirmed always counts.
+        try:
+            queue_only = {r[0] for r in q(
+                "select p.id from performance p "
+                "where exists (select 1 from recording r where r.performance_id = p.id and r.location = 'queue') "
+                "and not exists (select 1 from recording r where r.performance_id = p.id and r.location <> 'queue')")}
+        except Exception:  # noqa: BLE001 -- a database from before recording.location
+            queue_only = set()
+        if queue_only:
+            kept = [p for p in perfs if p[0] not in queue_only]
+            real_a = {p[1] for p in kept} | set(cf)
+            real_v = {p[2] for p in kept}
+            real_e = {p[3] for p in kept}
+            gone = [p for p in perfs if p[0] in queue_only]
+            gone_a, gone_v, gone_e = ({p[i] for p in gone} - real for i, real in ((1, real_a), (2, real_v), (3, real_e)))
+            artists = [a for a in artists if a[0] not in gone_a]
+            venues = [v for v in venues if v[0] not in gone_v]
+            events = [e for e in events if e[0] not in gone_e]
+            perfs = kept
         return cls.from_rows(
-            q("select id, name from artist"), q("select id, name from musician"),
-            q("select artist_id, musician_id from membership"),
-            q("select id, name, city, state, country from venue"),
-            q("select id, name, venue_id from event"),
-            q("select id, artist_id, venue_id, event_id from performance"), va, aa, cf)
+            artists, q("select id, name from musician"),
+            q("select artist_id, musician_id from membership"), venues, events, perfs, va, aa, cf)
 
     @classmethod
     def from_snapshot(cls, path):
@@ -396,7 +419,9 @@ def current_library():
             # an alias written for an existing row changes no row count above
             token += tuple(s.execute(text(
                 "select (select count(*) || ':' || coalesce(max(id), 0) from venue_alias), "
-                "(select count(*) || ':' || coalesce(max(id), 0) from artist_alias)")).fetchone())
+                "(select count(*) || ':' || coalesce(max(id), 0) from artist_alias), "
+                # a recording leaving the Queue changes what counts as the library
+                "(select coalesce(sum(id * (case location when 'queue' then 1 else 2 end)), 0) from recording)")).fetchone())
         except Exception:  # noqa: BLE001 -- no alias tables yet
             pass
         if _cache["token"] != token:

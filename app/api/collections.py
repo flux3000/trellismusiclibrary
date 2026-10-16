@@ -9,7 +9,7 @@ from flask_login import login_required
 from app.extensions import db
 from app.models.collection import Collection, CollectionRecording
 from app.models.recording import Recording
-from app.utils.serialize import recording_row
+from app.utils.serialize import recording_row, show_card_extras
 from app.utils.published import on_shelf
 
 bp = Blueprint("collections", __name__)
@@ -59,8 +59,8 @@ def get_collection(collection_id):
     c = db.session.get(Collection, collection_id)
     if not c:
         return jsonify({"error": "Not found"}), 404
-    # card=True: the collection page renders handbill cards, which need the
-    # artist's genre colour and primary photo. Collections are small — a few
+    # card=True: the collection page's rows need the artist's genre colour
+    # and primary photo. Collections are small — a few
     # dozen rows — so the extra joins are cheap here in a way they would not be
     # on the 544-row flat List.
     #
@@ -69,7 +69,11 @@ def get_collection(collection_id):
     # NOT cheap. The frontend should route a system collection to Browse rather
     # than render it as a collection page; this endpoint stays honest rather
     # than lying about its contents, but it is not a page to link casually.
-    rows = [recording_row(r, card=True) for r in on_shelf(c.recordings)]
+    # The show-card extras are skipped for a system collection: that is the
+    # whole library, and a resolved lineup per row is the cost the note above
+    # warns about. Its cards draw with what recording_row carries.
+    rows = [recording_row(r, card=True) | ({} if c.is_system else show_card_extras(r))
+            for r in on_shelf(c.recordings)]
     rows.sort(key=lambda r: ((r["artist"] or "").lower(),
                              r["start_year"] or 0, r["start_month"] or 0, r["start_day"] or 0))
     return jsonify({"id": c.id, "name": c.name, "description": c.description,

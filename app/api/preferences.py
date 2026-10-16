@@ -14,13 +14,15 @@ from app.utils import top_shelf
 
 bp = Blueprint("preferences", __name__)
 
-from app.lomax.core import MODEL_FALLBACK  # the one default model
-_ALLOWED_MODELS = {MODEL_FALLBACK, "claude-haiku-4-5"}
+from app.lomax.core import MODEL_FALLBACK, MODEL_ALIASES, MODELS  # the one default model
+_ALLOWED_MODELS = {m for m, _label in MODELS}
 
 
 def _snapshot(uid):
     return {
-        "ai_model":             get_pref(uid, "ai_model", MODEL_FALLBACK),
+        "ai_model":             MODEL_ALIASES.get(get_pref(uid, "ai_model", MODEL_FALLBACK),
+                                              get_pref(uid, "ai_model", MODEL_FALLBACK)),
+        "ai_models":            [{"id": m, "label": label} for m, label in MODELS],
         "has_api_key":          has_api_key(uid),
         "keychain_available":   _HAS_KEYRING,
         # Server-owned, not a user preference — surfaced here so the frontend

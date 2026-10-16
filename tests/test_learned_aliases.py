@@ -312,7 +312,10 @@ def test_confirming_an_artist_clears_queued_rows_with_the_same_reading_auto(env)
     a2, b1 = _item(run, "A2"), _item(run, "B1")
     assert a2.status == "ingested" and a2.recording_id
     assert b1.status == "review" and "tentative:artist" in b1.reason
-    assert _db.session.query(Recording).count() == n_before + 2    # A1 by the person, A2 by the run
+    # Every row already was a recording: A1 (the person) and A2 (the run) are promoted, none added.
+    assert _db.session.query(Recording).count() == n_before
+    assert sorted(r.location for r in _db.session.query(Recording).filter(Recording.id.in_(
+        [_item(run, "A1").recording_id, a2.recording_id, b1.recording_id]))) == ["library", "library", "queue"]
 
 
 def test_review_first_marks_the_rechecked_rows_ready_not_ingested(env):
@@ -326,7 +329,7 @@ def test_review_first_marks_the_rechecked_rows_ready_not_ingested(env):
     bir._SKIP_DISCOVER.discard(run.id)
     bir.process(_db.session.get(BulkIngestRun, run.id), lambda: False)
     a2 = _item(run, "A2")
-    assert a2.status == "ready" and a2.recording_id is None
+    assert a2.status == "ready" and _db.session.get(Recording, a2.recording_id).location == "queue"
     assert _item(run, "B1").status == "review"
     assert _db.session.query(Recording).count() == n_after_confirm
 

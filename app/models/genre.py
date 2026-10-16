@@ -25,7 +25,7 @@ class Genre(db.Model):
     # else utils.genre_color.default_genre_color() at creation, and an update
     # cannot clear it. The column stays nullable at the DB level only because
     # SQLite cannot drop NOT NULL without a table rebuild; ensure_genre_colors
-    # fills any NULL at startup. An artist with no genre has no colour to
+    # (a startup data pass) fills any NULL. An artist with no genre has no colour to
     # inherit and renders neutral grey in the frontend.
     color       = db.Column(db.String(7), nullable=True)
     created_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))

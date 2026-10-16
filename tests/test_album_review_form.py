@@ -24,7 +24,9 @@ def _fn(name):
 def _review():
     i = APP_JS.index("function renderIngestReview()")
     j = APP_JS.index("function fmtDur(", i)
-    return APP_JS[i:j]
+    # The Import payload is built by _ingestReviewPayload, shared with the autosave.
+    k = APP_JS.index("function _ingestReviewPayload(")
+    return APP_JS[i:j] + APP_JS[k:APP_JS.index("function _asStop()", k)]
 
 
 def test_form_reads_scan_kind_and_title():

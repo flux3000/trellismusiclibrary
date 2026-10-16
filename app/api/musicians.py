@@ -17,7 +17,7 @@ from app.models.recording import Recording
 from app.models.performance_personnel import PerformancePersonnel
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_summary
-from app.utils.published import on_shelf
+from app.utils.published import on_shelf, list_all_requested, entity_listed
 from app.utils.artists import mark_artist_confirmed, resolve_or_create_artist
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
@@ -84,6 +84,13 @@ def list_musicians():
         .filter(Recording.is_published.is_(True))
         .group_by(Membership.musician_id).all()
     )
+    total_counts = dict(
+        db.session.query(Membership.musician_id, func.count(Recording.id))
+        .join(Performance, Performance.artist_id == Membership.artist_id)
+        .join(Recording, Recording.performance_id == Performance.id)
+        .group_by(Membership.musician_id).all()
+    )
+    show_all = list_all_requested(request.args)
     perf_counts = dict(
         db.session.query(Membership.musician_id,
                          func.count(func.distinct(Membership.artist_id)))
@@ -106,6 +113,7 @@ def list_musicians():
             "artist_count": perf_counts.get(a.id, 0),
         }
         for a in rows
+        if entity_listed(rec_counts.get(a.id), total_counts.get(a.id), show_all)
     ])
 
 

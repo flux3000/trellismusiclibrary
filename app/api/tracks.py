@@ -33,6 +33,7 @@ from app.models.track import Track
 from app.models.play_log import PlayLog
 from app.utils.folder_naming import unique_file_name
 from app.utils import node_settings
+from app.utils.paths import location_root, recording_folder_abs
 
 bp  = Blueprint("tracks", __name__)
 log = logging.getLogger(__name__)
@@ -98,8 +99,8 @@ def update_track(track_id):
     # ever changes the DB row -- the file on disk is untouched, no warning.
     new_title = data.get("title", "").strip() or None
     if new_title and new_title != t.title and file_handling["rename_files"]:
-        library_root  = current_app.config.get("LIBRARY_ROOT", "")
         rec           = t.recording
+        library_root  = location_root(rec.location)
         t.title       = new_title   # read live by _build_track_filename() -> rename_plan()
         new_file_path = _build_track_filename(
             t, file_handling["naming_scheme"], file_handling["naming_template"] or None)
@@ -175,10 +176,8 @@ def track_spectrogram(track_id):
     if not t:
         return jsonify({"error": "Not found"}), 404
 
-    library_root = str(current_app.config["LIBRARY_ROOT"])
     # Eagerly grab the relationship values while session is open
-    folder_path  = t.recording.folder_path
-    abs_path     = os.path.join(library_root, folder_path, t.file_path)
+    abs_path     = os.path.join(recording_folder_abs(t.recording), t.file_path)
 
     if not os.path.exists(abs_path):
         return jsonify({"error": f"File not found: {abs_path}"}), 404

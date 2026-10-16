@@ -329,3 +329,30 @@ def derive_set_track_numbers(tracks):
         for i, t in enumerate(ordered, start=1):
             result[t.id] = i
     return result
+
+
+def show_card_extras(rec):
+    """The rest of what View Recording's header shows, for the Collection
+    page's show cards (and the list pages' card view): event, stage, the provenance facts, engineers, notes
+    and the resolved lineup (members and guests, in order)."""
+    # Local imports: these modules import serialize, so top-level would cycle.
+    from app.utils.engineers import recording_engineer_payload
+    from app.utils.personnel import resolve_performance_personnel
+    from app.utils.bulk_ingest import recording_format
+    p = rec.performance
+    people = resolve_performance_personnel(p) if p else []
+    return {
+        "venue_id":    p.venue_id if p else None,
+        "event_id":    p.event_id if p else None,
+        "event_name":  p.event.name if (p and p.event) else None,
+        "stage":       p.stage if p else None,
+        "format":      recording_format(rec),
+        "source_tag":  rec.source_tag,
+        "etree_shnid": rec.etree_shnid,
+        "lineage":     rec.lineage,
+        "notes":       rec.notes,
+        **recording_engineer_payload(rec),
+        "personnel": [{"musician_id": m.get("musician_id"), "name": m.get("name"),
+                       "instrument": m.get("instrument"), "is_guest": bool(m.get("is_guest"))}
+                      for m in people],
+    }

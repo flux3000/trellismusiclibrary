@@ -30,7 +30,7 @@ const stubs = `
   const _lxImportLevelChanged = () => {}
 `
 const section = src.slice(a, b)
-const names = ['lxRecordingResolverOpts', 'lxFingerprint', 'lomaxResolverHtml', 'lxSyncResolver', 'lxAcceptedToReapply', 'lomaxAskBar', 'lxFieldProps', 'lxTrackProps']
+const names = ['lxRecordingResolverOpts', 'lxFingerprint', 'lomaxResolverHtml', 'lxSyncResolver', 'lxAcceptedToReapply', 'lomaxAskBar', 'lxFieldProps', 'lxTrackProps', 'lxFieldCardHtml']
 const api = new Function(stubs + section + `\nreturn { ${names.join(', ')}, setEdit: v => { _edit = v } }`)()
 const normBilling = new Function(grabFn('_normBilling') + '\nreturn _normBilling')()
 const iqBandPill = new Function("const esc = s => String(s)\nconst _LQ_BAND_TEXT = { red: 'Low', green: 'High' }\n" + grabFn('_iqBandPill') + '\nreturn _iqBandPill')()
@@ -87,13 +87,13 @@ const run2 = JSON.parse(JSON.stringify(run))
 run2.result.proposals[1].decision = 'accepted'; run2.result.proposals[2].decision = 'accepted'; run2.result.proposals[3].decision = 'rejected'
 const held = [{ track_number: 1, title: 'Nardis', songwriter: 'Miles Davis', notes: '' }, tracks[1]]
 h = api.lomaxResolverHtml(ctl(run2), opts({ tracks: held }))
-chk(count(h, /Accepted<\/span>/g) === 2 && !h.includes('pedal steel'), 'accepted pieces say Accepted; the dismissed note is gone')
+chk(count(h, /Accepted<\/(span|button)>/g) === 2 && !h.includes('pedal steel'), 'accepted pieces say Accepted; the dismissed note is gone')
 chk(!/data-lx-act="accept-all" data-lx-ids="2/.test(h), 'no tracks Accept all once nothing is open')
 // Accepted but the form no longer holds the value (a reopened folder): the controls come back.
 h = api.lomaxResolverHtml(ctl(run2), opts({}))
-chk(count(h, /data-lx-act="accept" data-lx-ids="2"/g) === 1 && count(h, /Accepted<\/span>/g) === 0, 'accepted but not applied is open again')
+chk(count(h, /data-lx-act="accept" data-lx-ids="2"/g) === 1 && count(h, /Accepted<\/(span|button)>/g) === 0, 'accepted but not applied is open again')
 h = api.lomaxResolverHtml(ctl(run2), opts({ tracks: held, saved: true }))
-chk(count(h, /Accepted<\/span>/g) === 2, 'a saved recording reads Accepted')
+chk(count(h, /Accepted<\/(span|button)>/g) === 2, 'a saved recording reads Accepted')
 
 // "agrees" is only true while the live value matches: Lomax says Ahmad Jamal and agreed when the run was
 // made, but the form now reads "Ahmad Jamal- P". That row is an open proposal, with controls and no OK.
@@ -238,6 +238,24 @@ chk(/f\._mbCache\[key\] = got/.test(src) && /setTimeout\(offerGenre, 600\)/.test
 chk(/addEventListener\('input', scheduleGenre\)/.test(src) && /await applyLocal\(props\); scheduleGenre\(\)/.test(src), 'genre lookup re-queries when the artist is typed or accepted')
 // The page itself must build the table through the shared renderer and keep the old pane out.
 chk(/lomaxResolverHtml\(ctl, lxRecordingResolverOpts\(rec, perf\)\)/.test(src) && !/buildResolverPaneHtml/.test(src), 'View Recording mounts the shared renderer')
+
+// A recording run that found an official release: Type / Album is the first row, with a Classify as Album
+// button and a dismiss X instead of the check; an Album page or an accepted proposal reads as done.
+{
+  const kr = { id: 9, status: 'done', result: { proposals: [P(20, 'artist', 'Herbie Hancock'), P(21, 'kind', 'album'), P(22, 'title', 'In Concert')] } }
+  const o = { value: () => '', kind: () => 'live' }
+  const k = api.lxFieldCardHtml(kr, o)
+  chk(k.indexOf('>Type</th>') > 0 && k.indexOf('>Type</th>') < k.indexOf('>Artist</th>'), 'Type is the first row')
+  chk(/<span class="lx-val">Album<\/span>/.test(k), 'Type shows Album')
+  chk(/class="btn btn-ghost btn-xs lx-edit" data-lx-act="classify" data-lx-ids="21">Classify as Album</.test(k), 'Classify as Album button')
+  chk(!/data-lx-act="accept" data-lx-ids="21"/.test(k) && !/accept-all" data-lx-ids="[^"]*21/.test(k), 'no check for the kind row')
+  chk(/data-lx-act="dismiss" data-lx-ids="21"/.test(k), 'kind row can be dismissed')
+  const done = api.lxFieldCardHtml(kr, { value: () => '', kind: () => 'studio' })
+  chk(!done.includes('Classify as Album') && done.includes('lx-same">Album'), 'an Album page reads the Type row as done')
+  api.setEdit(false)
+  chk(!api.lxFieldCardHtml(kr, o).includes('Classify as Album'), 'no button when the library is read-only')
+  api.setEdit(true)
+}
 
 console.log(bad ? 'FAILED' : 'lomax resolver ok')
   process.exit(bad ? 1 : 0)

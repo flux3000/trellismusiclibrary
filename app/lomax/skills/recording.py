@@ -10,6 +10,9 @@ from app.lomax.sources import trusted_section
 
 FIELDS = list(ev.CURRENT_FIELDS + ev.ENGINEER_FIELDS)   # the ten Resolver fields and the three engineer credits
 TRACK_PIECES = (("title", "title"), ("songwriter", "songwriter"), ("note", "notes"))
+# Proposed only when the audio is an official release: 'kind' (always 'album') reclassifies, the
+# rest are the album's own fields and ride along with it.
+OFFICIAL_FIELDS = ("kind", "title", "year", "notes")
 
 INSTRUCTIONS = """SKILL: Recording.
 One job for this recording: its details, then its track listing with songwriters and notes.
@@ -80,6 +83,15 @@ genre for that artist, the filed name may be a misread). The genre comes from ge
 knowledge and needs no search: if the act is well known, propose its primary genre. Choose \
 from the Trellis genres listed when one fits, and a short plain name (at most four words) only \
 when none does. Never propose a genre for an act that already has one.
+- Official release: when the evidence shows the audio IS an official release (a studio album, or \
+a live album compiled or released officially, for example when the track list and timings match a \
+released album), propose field 'kind' with proposed 'album' and say why in 'thinking'. Alongside \
+that 'kind' proposal, and only then, also propose the album fields 'title' (the release title), \
+'year' (the four-digit release year) and, when well sourced, 'notes' (the album story: a few \
+short paragraphs of plain prose about the making of the record, its personnel and reception, every \
+statement traceable to a source you found, no marketing tone, no em dashes, no markdown), and \
+still give tracks and songwriters as above. Never propose 'kind', 'title', 'year' or 'notes' for \
+an ordinary taper, audience or broadcast recording of a show.
 - verify_items are things the archivist should check by ear (transient). provenance_notes \
 are lasting facts worth keeping in the info file (date disputes, broadcast or remaster \
 context, source anomalies, lineup annotations)."""
@@ -95,7 +107,7 @@ SUBMIT = {
             "answer": {"type": "string", "description": "Direct answer to the archivist's question, if one was asked."},
             "reply": REPLY_PROP,
             "proposals": {"type": "array", "items": {"type": "object", "properties": {
-                "field": {"type": "string", "enum": [f for f in FIELDS if f != "lineage"] + ["genre"]},
+                "field": {"type": "string", "enum": [f for f in FIELDS if f != "lineage"] + ["genre"] + list(OFFICIAL_FIELDS)},
                 "current": {"type": "string"},
                 "proposed": {"type": "string"},
                 "agrees": {"type": "boolean", "description": "True when this equals the filed value."},
@@ -222,6 +234,29 @@ def _field_proposal(p, cur, scope, genre_open, country=""):
                 challenge=(not agrees) and f in ev.RESOLVER_FIELDS and f not in scope)
 
 
+def _official_props(raw, cur):
+    """The reclassification and the album fields that ride with it. Nothing at all unless the run
+    proposed kind 'album': title, year and notes are meaningless for a live recording."""
+    from app.lomax.skills import album
+    items = [p for p in raw.get("proposals") or [] if isinstance(p, dict) and p.get("proposed")]
+    k = next((p for p in items if p.get("field") == "kind"
+              and str(p["proposed"]).strip().lower() in ("album", "studio")), None)
+    if k is None or (cur.get("kind") or "live") == "studio":
+        return []
+    out = [dict(k, field="kind", proposed="album", current="Live Recording", agrees=False, challenge=False)]
+    seen = set()
+    for p in items:
+        f = p.get("field")
+        if f not in ("title", "year", "notes") or f in seen:
+            continue
+        val = (album._year(p["proposed"]) if f == "year" else album.clean_notes(p["proposed"], False)
+               if f == "notes" else re.sub(r"\s*\u2014\s*", ", ", " ".join(str(p["proposed"]).split())))
+        if val:
+            seen.add(f)
+            out.append(dict(p, proposed=val, current=cur.get(f) or "", agrees=False, challenge=False))
+    return out
+
+
 def normalize(raw, subject):
     scope = set(subject.scratch.get("scope") or [])
     genre_open = bool(subject.scratch.get("genre_open"))
@@ -238,15 +273,17 @@ def normalize(raw, subject):
     cur = subject.current
     info_text = cur.get("info_file_content") or ""
     props = []
+    official = _official_props(raw, cur)
     # The country decides which state list applies: the filed one, else the one Lomax proposes.
     country = cur.get("country") or next((str(p.get("proposed") or "") for p in raw.get("proposals") or []
                                           if isinstance(p, dict) and p.get("field") == "country"), "")
     for p in raw.get("proposals") or []:
-        if not (isinstance(p, dict) and (p.get("field") in FIELDS or p.get("field") == "genre") and p.get("proposed")):
+        if not (isinstance(p, dict) and (p.get("field") in FIELDS or p.get("field") == "genre") and p.get("proposed")):  # kind/title/year/notes: see _official_props
             continue
         q = _field_proposal(p, cur, scope, genre_open, country)
         if q is not None:
             props.append(q)
+    props += official
     # Lineage arrives as a list of chain steps; a lineage proposal in the old string form is cleaned the
     # same way. One lineage proposal at most, and the list wins.
     steps = raw.get("lineage")

@@ -25,7 +25,7 @@ from app.models.performance import Performance
 from app.models.recording import Recording
 from app.utils.format import format_partial_date
 from app.utils.serialize import recording_row
-from app.utils.published import on_shelf
+from app.utils.published import on_shelf, list_all_requested, entity_listed
 from app.utils.ingest import _sanitize_path
 from app.utils import entity_images as ei
 from app.api.system import require_library
@@ -102,6 +102,13 @@ def list_events():
         .filter(Performance.event_id.isnot(None), Recording.is_published.is_(True))
         .group_by(Performance.event_id).all()
     )
+    total_counts = dict(
+        db.session.query(Performance.event_id, func.count(Recording.id))
+        .join(Recording, Recording.performance_id == Performance.id)
+        .filter(Performance.event_id.isnot(None))
+        .group_by(Performance.event_id).all()
+    )
+    show_all = list_all_requested(request.args)
     image_ids = {}
     for eid, iid, _p in (
         db.session.query(EventImage.event_id, EventImage.id, EventImage.is_primary)
@@ -122,6 +129,7 @@ def list_events():
          "recording_count": rec_counts.get(e.id, 0),
          "image_id":        image_ids.get(e.id)}
         for e in events
+        if entity_listed(rec_counts.get(e.id), total_counts.get(e.id), show_all)
     ])
 
 

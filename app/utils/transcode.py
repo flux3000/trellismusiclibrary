@@ -114,8 +114,8 @@ def get_or_create_transcode(track, fmt=DEFAULT_FORMAT, bitrate=DEFAULT_BITRATE):
     if recording is None:
         raise SourceMissing("recording not found")
 
-    library_root = current_app.config["LIBRARY_ROOT"]
-    src = os.path.join(library_root, recording.folder_path, track.file_path)
+    from app.utils.paths import recording_folder_abs
+    src = os.path.join(recording_folder_abs(recording), track.file_path)
     if not os.path.isfile(src):
         raise SourceMissing(src)
 

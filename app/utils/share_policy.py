@@ -5,6 +5,9 @@ install. Everything else is invisible to every peer, whatever collections or
 grants say.
 
 A recording is shareable iff ALL of:
+  0. It is in the library (location == 'library'). A recording in the Queue,
+     Workshop or Backlog is not on the shelf and never leaves this install,
+     whatever collection holds it.
   1. kind == 'live'. A studio record never shares.
   2. is_official is False (the owner's own designation).
   3. It is not linked to a MusicBrainz release, OR the linked release's stored
@@ -36,6 +39,7 @@ def shareable_clause():
     """SQL predicate over Recording for the rule above."""
     from app.models.recording import Recording as R
     return and_(
+        R.location == "library",
         R.kind == "live",
         R.is_official.is_(False),
         or_(R.mb_release_id.is_(None),
@@ -45,7 +49,7 @@ def shareable_clause():
 
 def is_shareable(rec):
     """Python form of the rule, for one Recording row."""
-    if rec is None or rec.kind != "live" or rec.is_official:
+    if rec is None or rec.location != "library" or rec.kind != "live" or rec.is_official:
         return False
     if not rec.mb_release_id:
         return True

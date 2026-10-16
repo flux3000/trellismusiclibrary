@@ -29,7 +29,18 @@ except ImportError:
 
 log = logging.getLogger("trellis.lomax")
 
-MODEL_FALLBACK = "claude-sonnet-5"
+MODEL_FALLBACK = "claude-sonnet-5-5"
+# Saved preferences naming a retired model id resolve to its successor, so an
+# existing install moves to the current model without anyone re-picking it.
+MODEL_ALIASES = {"claude-sonnet-5": MODEL_FALLBACK, "claude-haiku-4-5": "claude-haiku-5-5"}
+# The models offered in Settings, in display order. The one list: the
+# preferences API validates against it and the Settings page renders from it.
+MODELS = (
+    ("claude-fable-5-1",  "Fable 5.1"),
+    ("claude-opus-5-5",   "Opus 5.5"),
+    ("claude-sonnet-5-5", "Sonnet 5.5"),
+    ("claude-haiku-5-5",  "Haiku 5.5"),
+)
 LEVELS = ("study", "research")
 LEVEL_ALIASES = {"read": "study"}     # accepted on input for one release
 
@@ -68,7 +79,8 @@ def _now():
 def default_model(user_id=None):
     """The one model default: preference `ai_model`, else the constant above."""
     from app.utils.prefs import get_pref
-    return (get_pref(user_id, "ai_model") if user_id else None) or MODEL_FALLBACK
+    m = (get_pref(user_id, "ai_model") if user_id else None) or MODEL_FALLBACK
+    return MODEL_ALIASES.get(m, m)
 
 
 def search_budget(question):
@@ -206,8 +218,18 @@ def load_subject(run):
                    current=current_from_recording(obj) if t == "recording" else {})
 
 
+# A live recording and an Album are one subject seen two ways: a person can reclassify it
+# after Lomax has read it (Ryan, 2026-10-15). Its chat history and the recap handed to the
+# next run therefore span both skills, so switching to Album never loses what was found.
+_RECORDING_FAMILY = ("recording", "resolution", "album")
+
+
+def skill_family(skill):
+    return _RECORDING_FAMILY if skill in _RECORDING_FAMILY else (skill,)
+
+
 def _same_subject(q, run):
-    q = q.filter(LomaxRun.skill == run.skill, LomaxRun.subject_type == run.subject_type)
+    q = q.filter(LomaxRun.skill.in_(list(skill_family(run.skill))), LomaxRun.subject_type == run.subject_type)
     if run.subject_type == "folder":
         return q.filter(LomaxRun.subject_key == run.subject_key)
     return q.filter(LomaxRun.subject_id == run.subject_id)
@@ -235,7 +257,9 @@ def prior_for(run):
                   "confidence": p.get("confidence"), "decision": None}
                  for p in (result.get("proposals") or []) if isinstance(p, dict) and not p.get("agrees")]
     rejected = [_proposal_dict(p) for r in runs for p in r.proposals if p.decision == "rejected"]
-    return {"proposals": props, "verify_items": result.get("verify_items") or [], "rejected": rejected}
+    return {"proposals": props, "verify_items": result.get("verify_items") or [], "rejected": rejected,
+            "provenance_notes": result.get("provenance_notes") or [],
+            "as_album": runs[0].skill == "album", "now_album": run.skill == "album"}
 
 
 # ── running ──────────────────────────────────────────────────────────────────

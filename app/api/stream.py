@@ -99,15 +99,17 @@ def stream_track(track_id):
     if not recording:
         abort(404)
 
-    library_root      = current_app.config["LIBRARY_ROOT"]
-    real_library_root = os.path.realpath(library_root)
-    full_path         = os.path.realpath(
-        os.path.join(library_root, recording.folder_path, track.file_path)
-    )
+    from app.utils.paths import location_root, recording_folder_abs
+    folder_abs        = recording_folder_abs(recording)
+    real_library_root = os.path.realpath(location_root(recording.location))
+    if not folder_abs:
+        abort(404)
+    full_path         = os.path.realpath(os.path.join(folder_abs, track.file_path))
 
     # Defense in depth: folder_path/file_path come from the DB, not directly
     # from the request, but a corrupted or maliciously-written row should
-    # still not be able to serve a file outside LIBRARY_ROOT.
+    # still not be able to serve a file outside the root its location names
+    # (LIBRARY_ROOT, or the Workshop / Backlog folder).
     if not _path_within(full_path, real_library_root):
         abort(403)
 

@@ -17,6 +17,8 @@ this).
  GET /api/recordings/<id>/tags.)
 """
 
+from pathlib import Path
+
 from flask import Blueprint, jsonify, request, current_app, abort
 from flask_login import login_required, current_user
 
@@ -89,6 +91,89 @@ def debug_info():
             "recordings": db.session.query(Recording).count(),
             "tracks":     db.session.query(Track).count(),
         },
+        "app":     _app_info(),
+        "schema":  _schema_info(),
+        "startup": current_app.config.get("DB_UPGRADE_RESULT"),
+        "backups": _backups_info(),
+        "update":  _update_info(),
+        "paths": {
+            "data_dir":     str(current_app.config.get("DATA_DIR")),
+            "database":     str(current_app.config.get("DB_PATH")),
+            "library_root": str(current_app.config.get("LIBRARY_ROOT")),
+        },
     })
+
+
+def _db_file():
+    from app.utils.db_upgrade import sqlite_path_from_uri
+    return sqlite_path_from_uri(current_app.config.get("SQLALCHEMY_DATABASE_URI", ""))
+
+
+def _app_info():
+    import sqlite3
+    import sys
+    import alembic
+    from config import is_installed_app
+    from version import __version__, APP_NAME
+    return {
+        "version": __version__,
+        "name": APP_NAME,
+        "installed": is_installed_app(),
+        "python": sys.version.split()[0],
+        "sqlite": sqlite3.sqlite_version,
+        "alembic": alembic.__version__,
+    }
+
+
+def _schema_info():
+    """Stored vs head revision and the revisions between. Read-only."""
+    out = {"stored": None, "head": None, "pending": []}
+    try:
+        from app.utils.db_upgrade import alembic_config, head_and_known, read_state
+        path = _db_file()
+        if not path:
+            out["error"] = "not a file database"
+            return out
+        cfg = alembic_config(path)
+        head, _known = head_and_known(cfg)
+        out["head"] = head
+        _tables, stored = read_state(path)
+        out["stored"] = stored
+        if stored != head:
+            from alembic.script import ScriptDirectory
+            script = ScriptDirectory.from_config(cfg)
+            revs = script.iterate_revisions(head, stored) if stored else script.walk_revisions()
+            out["pending"] = [r.revision for r in revs if r.revision != stored]
+    except Exception as e:
+        out["error"] = str(e) or e.__class__.__name__
+    return out
+
+
+def _backups_info():
+    from datetime import datetime, timezone
+    path = _db_file()
+    if not path:
+        return []
+    folder = Path(path).parent / "backups"
+    rows = []
+    try:
+        for f in folder.glob("trellis-*.db"):
+            st = f.stat()
+            rows.append({
+                "name": f.name, "size": st.st_size,
+                "modified": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(timespec="seconds"),
+            })
+    except OSError:
+        return []
+    rows.sort(key=lambda r: r["modified"], reverse=True)
+    return rows
+
+
+def _update_info():
+    try:
+        from app.utils import update_check
+        return update_check.status()
+    except Exception as e:
+        return {"error": str(e) or e.__class__.__name__}
 
 

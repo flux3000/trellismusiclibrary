@@ -224,7 +224,8 @@ def ingest_recording_images(rec, library_root):
     """
     from app.models.recording_image import RecordingImage
 
-    folder_abs = os.path.join(str(library_root), rec.folder_path)
+    from app.utils.paths import recording_folder_abs
+    folder_abs = recording_folder_abs(rec, library_root)
 
     existing_refs = {
         img.source_ref for img in

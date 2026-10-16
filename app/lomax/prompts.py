@@ -126,6 +126,13 @@ def recap_text(prior):
                          % (p.get("field"), p.get("proposed")))
     for v in (prior.get("verify_items") or [])[:6]:
         lines.append("  unresolved: %s" % v)
+    for v in (prior.get("provenance_notes") or [])[:6]:
+        lines.append("  you noted: %s" % v)
+    if prior.get("as_album") != prior.get("now_album") and lines:
+        lines.append("  (That run treated this as %s; the archivist has since classified it as %s. "
+                     "Your earlier findings still describe the same audio.)"
+                     % ("an album" if prior.get("as_album") else "a live recording",
+                        "an album" if prior.get("now_album") else "a live recording"))
     if not lines:
         return ""
     return ("A PREVIOUS RUN of yours on this same subject proposed the following. That was "

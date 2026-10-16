@@ -350,12 +350,12 @@ def test_owner_favorites_do_not_reach_a_peer(app):
             f"{path} leaked the owner's star: {values}")
 
 
-def test_share_door_has_no_favorites_endpoint(app):
-    """Removed deliberately rather than left dormant.
-
-    An unused endpoint that exposes owner-side data is precisely what gets
-    wired up later by someone who does not know why it existed.
+def test_share_door_favorites_is_the_one_read_only_list(app):
+    """Host Favorites (Ryan, 2026-10-13) reversed the old "no favorites on the
+    share door" rule. The owner's list travels as one read-only GET; anything
+    else on the share door mentioning favorites is a regression.
     """
-    rules = {str(r) for r in app.url_map.iter_rules()}
-    assert not any("share" in r and "favorites" in r for r in rules), (
-        "a favorites route reappeared on the share door")
+    rules = {(str(r), tuple(sorted(r.methods - {"HEAD", "OPTIONS"})))
+             for r in app.url_map.iter_rules()
+             if "share" in str(r) and "favorites" in str(r)}
+    assert rules == {("/api/share/recordings/favorites", ("GET",))}, rules

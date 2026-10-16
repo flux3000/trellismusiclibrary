@@ -44,7 +44,8 @@ def test_venue_list_is_not_capped_at_200(app, client):
         _db.session.commit()
         total = _db.session.query(Venue).count()
 
-    res = client.get("/api/venues/")
+    # all=1: these venues have no recording, and the plain list shows only venues with one.
+    res = client.get("/api/venues/?all=1")
     assert res.status_code == 200
     names = [v["name"] for v in res.get_json()]
     assert len(names) == total, (

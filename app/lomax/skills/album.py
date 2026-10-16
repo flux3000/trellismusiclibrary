@@ -36,6 +36,12 @@ ordered as listed. Give the title as released (the filed one when you agree) and
 songwriter or songwriters when you can establish them from the release credits. Never invent \
 titles or songwriters. If the number of tracks differs from the released track list, still \
 return your best match and flag the difference in verify_items. Do not write track notes.
+- When the title is empty (the record came over from a live classification, or has only a \
+placeholder title), identify the release first: from the artist, the track titles and durations, \
+and the earlier findings in the recap, work out which official release this is, then propose its \
+'title' and 'year'. Earlier findings in the recap are leads to verify, not corroboration: confirm \
+them against a source before you rely on them. Search for the release rather than returning \
+nothing. Only if no release fits the artist and tracks, say so in 'thinking'.
 - Weigh the evidence in this order: the archivist's filed values, then MusicBrainz release \
 facts when listed, then the info file when one is present, then trusted sources (MusicBrainz, \
 Discogs, the label, the artist's own pages), then the open web. An info file, when present, \
@@ -102,7 +108,19 @@ def _current(subject):
         cur = current_from_album(subject.obj)
     for k in ("artist", "title", "year", "notes"):
         cur[k] = str(cur.get(k) or "").strip()
+    if not cur["year"]:    # a live-shaped payload carries the year inside its date
+        cur["year"] = _year(cur.get("date"))
+    if is_placeholder_title(cur["title"]):
+        cur["title"] = ""
     return cur
+
+
+_PLACEHOLDER = re.compile(r"^(untitled|unknown|unknown album|new album|album|tbd|n/?a|\?+|-+)$", re.I)
+
+
+def is_placeholder_title(title):
+    t = str(title or "").strip()
+    return not t or bool(_PLACEHOLDER.match(t))
 
 
 def _known_section(cur):
@@ -110,6 +128,8 @@ def _known_section(cur):
     for label, key in (("artist", "artist"), ("title", "title"), ("year", "year")):
         if cur.get(key):
             lines.append("  %s: %s" % (label, cur[key]))
+    if not cur.get("title"):
+        lines.append("  title: (none filed)")
     mb = [("label", "mb_label"), ("catalog number", "mb_catalog_number"),
           ("release country", "mb_release_country"), ("MusicBrainz release id", "mb_release_id")]
     mb_lines = ["  %s: %s" % (l, cur[k]) for l, k in mb if cur.get(k)]
@@ -151,8 +171,15 @@ def gather(subject, ctx):
     subject.scratch["question"] = ctx.question
     subject.scratch["current"] = cur
     artist = ev.artist_row(cur.get("artist"))
-    task = ["Research this studio album: confirm its title and year, establish the track titles "
-            "and songwriters, and write the album story for the notes."]
+    if not cur.get("title"):
+        task = ["This record has no title filed. Identify the release first: from the artist, the "
+                "track titles and durations listed below, and the earlier findings in the recap "
+                "(leads to verify, not corroboration), work out which official release it is and "
+                "propose its title and year. Then establish the track titles and songwriters and "
+                "write the album story for the notes."]
+    else:
+        task = ["Research this studio album: confirm its title and year, establish the track titles "
+                "and songwriters, and write the album story for the notes."]
     # Genre, as the recording skill does it (Ryan, 2026-10-13): only for an act with none.
     filed_genre = ev.act_genre_name(cur)
     subject.scratch["genre_open"] = not filed_genre

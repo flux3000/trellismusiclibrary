@@ -44,7 +44,7 @@ def test_boot_pass_relabels_old_unreadable_rows(app, tmp_path):
     assert (it.reason, it.detail) == ("truncated_file", "01 a.mp3")
 
 
-def test_truncated_row_can_be_moved(app, tmp_path, monkeypatch):
+def test_failed_row_cannot_be_moved_only_trashed(app, tmp_path, monkeypatch):
     from app.extensions import db
     from app.models.bulk_ingest import BulkIngestRun, BulkIngestItem
     from app.api import quality
@@ -55,7 +55,9 @@ def test_truncated_row_can_be_moved(app, tmp_path, monkeypatch):
     from tests.test_studio_sharing import _login_as
     c = app.test_client(); _login_as(c)
     r = c.post(f"/api/bulk-ingest/items/{it.id}/move", json={"dest": "workshop"})
-    assert r.status_code == 200 and r.get_json()["status"] == "moved"
+    # A failed row has no recording: its only action is Trash (Move was removed from it).
+    assert r.status_code == 409
+    assert db.session.get(BulkIngestItem, it.id).status == "failed"
 
 
 def test_queue_row_to_trash(app, tmp_path, monkeypatch):

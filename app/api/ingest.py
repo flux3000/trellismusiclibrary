@@ -48,6 +48,8 @@ from app.utils.resolve import resolve, find_duplicates, verdict, Field as Resolv
 from app.utils.file_naming import flattens
 from app.utils.folder_naming import build_folder_name
 from app import lomax
+from app.models.lomax import LomaxRun
+from app.utils.paths import recording_folder_abs
 from app.utils import node_settings
 from app.utils.health import compute_health
 from app.utils.checksums import (
@@ -101,6 +103,7 @@ def check_existing():
     year  = request.args.get("year",  type=int)
     month = request.args.get("month", type=int)
     day   = request.args.get("day",   type=int)
+    exclude_id = request.args.get("exclude_id", type=int)   # the recording being reviewed never matches itself
     if not artist_name or not year:
         return jsonify({"artist_found": False, "performances": []})
 
@@ -119,11 +122,11 @@ def check_existing():
 
     performances = []
     for p in q.all():
-        # Only recordings in the library: one moved out to Workshop or Backlog
-        # is not "already in your library" (2026-10-13).
-        recs = [r for r in p.recordings if r.is_published]
+        # Recordings in Workshop or Backlog count too, named by where they are
+        # (`location` is None for the library).
+        recs = [r for r in p.recordings if r.id != exclude_id]
         if not recs:
-            continue   # nothing in the library against it — no duplicate risk
+            continue   # nothing against it — no duplicate risk
         v = p.venue
         performances.append({
             "id":    p.id,
@@ -136,6 +139,7 @@ def check_existing():
             "recordings": [
                 {
                     "id":          r.id,
+                    "location":    None if r.is_published else (r.location or "library"),
                     "source":      r.source,
                     "quality":     r.quality,
                     "track_count": len(r.tracks),
@@ -521,6 +525,9 @@ def _run_audio_pass(recording_id, score=True, reanalyze=False):
         return out
     library_root = current_app.config.get("LIBRARY_ROOT", "")
     folder_path = rec.folder_path or ""
+    # Where the folder actually is: library, Workshop or Backlog.
+    from app.utils.paths import location_root, recording_folder_abs
+    folder_root = location_root(rec.location, library_root)
 
     # 1. Listening Quality. Same scorer chain as manual triage; unreadable
     # audio returns an {"error"} dict and no row is written, so the recording
@@ -530,7 +537,7 @@ def _run_audio_pass(recording_id, score=True, reanalyze=False):
             from app.utils.quality import (extract_recording_features, score_recording,
                                            guess_source_from_name)
             from app.utils.quality_store import upsert_for_recording
-            features = extract_recording_features(os.path.join(library_root, folder_path))
+            features = extract_recording_features(os.path.join(folder_root, folder_path))
             if "error" in features:
                 out["score"] = "failed"
                 out["errors"].append(f"score: {features['error']}")
@@ -554,7 +561,7 @@ def _run_audio_pass(recording_id, score=True, reanalyze=False):
                               TrackAnalysis.non_music_score.isnot(None))
                       .first())
         if reanalyze or not has_signal:
-            _store_non_music_signal(rec.tracks, library_root, folder_path)
+            _store_non_music_signal(rec.tracks, folder_root, folder_path)
             db.session.commit()   # the helper only flushes
             out["signals"] = "ok"
     except Exception as e:  # noqa: BLE001
@@ -673,13 +680,14 @@ def _handle_images(recording_id):
     from datetime import datetime, timezone
     from app.models.recording import Recording
     from app.utils.recording_images import ingest_recording_images
+    from app.utils.paths import recording_folder_abs
 
     rec = db.session.get(Recording, recording_id)
     if not rec or rec.images_checked_at is not None:
         return
     library_root = current_app.config.get("LIBRARY_ROOT", "")
-    folder_abs = os.path.join(str(library_root), rec.folder_path or "")
-    if rec.folder_path and os.path.isdir(folder_abs):
+    folder_abs = recording_folder_abs(rec, library_root)
+    if folder_abs and os.path.isdir(folder_abs):
         ingest_recording_images(rec, library_root)
     rec.images_checked_at = datetime.now(timezone.utc)
     # Release already matched before this scan ran: fetch the cover now if
@@ -817,6 +825,9 @@ def enqueue_followups():
       images      every recording (any kind) with no recording_image rows and
                   images_checked_at still null.
 
+    Recordings still in the Queue are left out of all of it (and so are acts only they
+    know): nothing is analysed or looked up until a person imports one.
+
     Deduped against what is already queued, so calling this twice enqueues
     nothing new. Each item is tagged with its Bulk Ingest run (via
     BulkIngestItem.recording_id) so small runs are served first.
@@ -854,7 +865,7 @@ def enqueue_followups():
     audio_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
         .outerjoin(RecordingQuality, RecordingQuality.recording_id == Recording.id)
-        .filter(Recording.kind == "live",
+        .filter(Recording.kind == "live", Recording.location != "queue",
                 or_(RecordingQuality.id.is_(None),
                     ~Recording.id.in_(signalled_recording_ids)))
         .order_by(Recording.id).all())]
@@ -865,15 +876,26 @@ def enqueue_followups():
                   & Artist.genre_id.is_(None) & Artist.mbid.isnot(None)
                   & func.json_extract(func.coalesce(Artist.mb_extra_json, "{}"),
                                       "$.genres_checked").is_(None))
+    # Not for an act only a Queue recording knows: nothing is looked up, and so nothing
+    # becomes "enriched", for a guess nobody has imported or confirmed.
+    queue_acts = (db.session.query(Performance.artist_id)
+                  .join(Recording, Recording.performance_id == Performance.id)
+                  .filter(Recording.location == "queue"))
+    off_queue_acts = (db.session.query(Performance.artist_id)
+                      .join(Recording, Recording.performance_id == Performance.id)
+                      .filter(Recording.location != "queue"))
     artist_ids = [aid for (aid,) in (
-        db.session.query(Artist.id).filter(or_(Artist.mb_status.is_(None), owes_genre))
+        db.session.query(Artist.id).filter(or_(Artist.mb_status.is_(None), owes_genre),
+                                           or_(Artist.id.in_(off_queue_acts), Artist.confirmed_at.isnot(None),
+                                               ~Artist.id.in_(queue_acts)))
         .order_by(Artist.id).all())]
     mb_n = sum(1 for aid in artist_ids
                if _enqueue(app, "mb_artist", aid, run_of_artist.get(aid)))
 
     release_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
-        .filter(Recording.kind == "studio", Recording.mb_release_status.is_(None))
+        .filter(Recording.kind == "studio", Recording.location != "queue",
+                Recording.mb_release_status.is_(None))
         .order_by(Recording.id).all())]
     mb_release_n = sum(1 for rid in release_ids
                        if _enqueue(app, "mb_release", rid, run_of_rec.get(rid)))
@@ -894,7 +916,8 @@ def enqueue_followups():
     # After the release lookup, so a release it links is the one compared.
     completeness_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
-        .filter(Recording.kind == "studio", Recording.mb_release_status.isnot(None),
+        .filter(Recording.kind == "studio", Recording.location != "queue",
+                Recording.mb_release_status.isnot(None),
                 Recording.completeness_checked_at.is_(None))
         .order_by(Recording.id).all())]
     completeness_n = sum(1 for rid in completeness_ids
@@ -903,7 +926,8 @@ def enqueue_followups():
     image_ids = [rid for (rid,) in (
         db.session.query(Recording.id)
         .outerjoin(RecordingImage, RecordingImage.recording_id == Recording.id)
-        .filter(RecordingImage.id.is_(None), Recording.images_checked_at.is_(None))
+        .filter(RecordingImage.id.is_(None), Recording.images_checked_at.is_(None),
+                Recording.location != "queue")
         .order_by(Recording.id).all())]
     images_n = sum(1 for rid in image_ids
                    if _enqueue(app, "images", rid, run_of_rec.get(rid)))
@@ -1133,10 +1157,20 @@ def apply_blanket_values(resolved, payload, applied):
 
 def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                   progress_cb=None, cancel_cb=None, phase_cb=None,
-                  hold=False, force=False, applied=None, mb_release_id=None):
+                  hold=False, force=False, applied=None, mb_release_id=None, item=None,
+                  unpublished_cache=None):
     """
     The one server function that turns a folder into an ingested (or
     reviewed, or skipped) recording via the resolver -- spec section 4.
+
+    Every folder that reads successfully gets its recording row here (location
+    'queue', linked to `item` by the caller) before anything else happens to it:
+    a Ready or Needs Review row IS a recording. A folder that fails to read gets
+    none, and neither does an exact duplicate (a library duplicate is skipped; a
+    duplicate of a recording in the Queue, Workshop or Backlog is skipped and
+    points at it). A folder that already is a recording (its Queue row's, or one
+    in Workshop/Backlog) is read again against that recording: values a person
+    saved from the Review form are kept. Import is promote_to_library().
     Bulk Ingest's worker and POST /api/ingest/auto-confirm (Batch Import)
     both call this, so an auto-ingest is identical whichever door it came
     through.
@@ -1161,7 +1195,8 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     status "ready" with nothing copied, moved or written. force=True (the
     person chose "Ingest anyway") ingests a folder the verdict flagged for
     review, but still refuses what cannot be ingested at all: no artist (it
-    stays "review") and an exact content duplicate (stays "skipped").
+    stays "review"), an exact content duplicate (stays "skipped") and a folder
+    that is a recording in Workshop/Backlog (stays "review", duplicate_of names it).
     applied is the run's blanket values (see apply_blanket_values).
 
     The has_audio / unsupported-format / all-unreadable gate that used to
@@ -1223,17 +1258,33 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
     if applied and applied.get("clear_disc_numbers"):
         from app.utils.resolve import clear_disc_numbers
         clear_disc_numbers(scan)
+    own = (db.session.get(Recording, item.recording_id) if item is not None and item.recording_id else None)
+    if own is None:
+        from app.utils.resolve import recording_at_folder
+        own = recording_at_folder(folder_abs)
+    if own is not None and own.location == "library":
+        own = None
+    # A recording a person edited (or one that came back from the library) keeps what is saved.
+    keep_saved = own is not None and (own.location != "queue" or person_edited(own))
+    if own is not None and own.location != "queue":
+        hold = True                      # a Workshop/Backlog recording is imported by a person, never by the worker
+
     resolved = resolve(scan, library_root=library_root, placement=placement)
-    apply_blanket_values(resolved, None, applied)
-    resolved.duplicates = find_duplicates(resolved, library_root=library_root,
-                                          hash_cache=hash_cache)
+    if keep_saved:
+        _overlay_saved(resolved, own)
+    else:
+        apply_blanket_values(resolved, None, applied)
+    resolved.duplicates = find_duplicates(resolved, library_root=library_root, hash_cache=hash_cache,
+                                          own_recording_id=own.id if own is not None else None,
+                                          unpublished_cache=unpublished_cache)
     status, reasons = verdict(resolved)
     resolved.status, resolved.reasons = status, reasons
 
     if status == "skipped":
         dup = next((d for d in resolved.duplicates if d.kind == "content"), None)
-        return {"status": "skipped", "reasons": reasons, "format": fmt, "detail": None,
-                "resolved": resolved, "result": None,
+        dup = dup or next((d for d in resolved.duplicates if d.kind == "unpublished"), None)
+        return {"status": "skipped", "reasons": reasons, "format": fmt, "detail": dup.location if dup else None,
+                "resolved": resolved, "result": None, "recording_id": None,
                 "duplicate_of": dup.recording_id if dup else None}
 
     # Albums only: is this folder an incomplete part of a longer official
@@ -1273,36 +1324,99 @@ def auto_confirm(folder_abs, user_id, *, hash_cache=None,
                 status = "review"
             resolved.status, resolved.reasons = status, reasons
 
+    # The recording row. Nothing is learned from it: no person confirmed these values.
+    payload = _confirm_payload_from_resolved(resolved, scan)
+    payload["unattended"] = not force
+    if resolved.kind == "studio" and mb_release_id:
+        payload["mb_release_id"] = mb_release_id
+        payload["mb_release_status"] = "matched"
+    if resolved.kind == "studio":
+        payload["completeness_checked"] = True
+    if "incomplete_release" in reasons or "incomplete_recording" in reasons:
+        payload["is_complete"] = False
+    if not keep_saved:
+        apply_blanket_values(resolved, payload, applied)
+    payload["resolver_result"] = resolved.to_dict()
+    # A kind of "unknown" is stored as live; the row's reason (needs_type) keeps it open.
+    if payload.get("kind") not in ("live", "studio"):
+        payload["kind"] = "live"
+    rel = (item.rel_path if item is not None else os.path.basename(folder_abs.rstrip("/\\")))
+    if keep_saved:
+        rec = own
+    else:
+        rec = save_recording_payload(payload, user_id, own, location="queue", folder_path=rel,
+                                     source_folder=folder_abs)
+    if item is not None and item.recording_id != rec.id:
+        item.recording_id = rec.id          # linked before anything can fail below
+    db.session.commit()
+
     # "Ingest anyway" still refuses a folder with no artist or no type.
     if status == "review" and not (force and "needs_artist" not in reasons
                                    and "needs_type" not in reasons):
         return {"status": "review", "reasons": reasons, "format": fmt, "detail": detail,
-                "resolved": resolved, "result": None, "duplicate_of": None}
+                "resolved": resolved, "result": None, "recording_id": rec.id, "duplicate_of": None}
 
     if hold:
         return {"status": "ready", "reasons": reasons, "format": fmt, "detail": None,
-                "resolved": resolved, "result": None, "duplicate_of": None}
+                "resolved": resolved, "result": None, "recording_id": rec.id, "duplicate_of": None}
 
-    payload = _confirm_payload_from_resolved(resolved, scan)
-    # No person confirmed these values, so nothing is learned from the save (aliases,
-    # queue re-check). "Ingest anyway" is a person's decision to take them as read.
-    payload["unattended"] = not force
-    if resolved.kind == "studio" and mb_release_id:
-        # The release the Queue's MusicBrainz lookup found is linked at import.
-        payload["mb_release_id"] = mb_release_id
-        payload["mb_release_status"] = "matched"
-    if resolved.kind == "studio":
-        # The Queue already ran the completeness check; "Ingest anyway" on an
-        # incomplete Album imports it marked incomplete.
-        payload["completeness_checked"] = True
-    if "incomplete_release" in reasons or "incomplete_recording" in reasons:
-        payload["is_complete"] = False
-    apply_blanket_values(resolved, payload, applied)
-    payload["resolver_result"] = resolved.to_dict()
-    result = _do_confirm(payload, user_id, progress_cb, cancel_cb=cancel_cb,
-                         phase_cb=phase_cb)
+    result = promote_to_library(rec, user_id, payload, source_folder=folder_abs,
+                                progress_cb=progress_cb, cancel_cb=cancel_cb, phase_cb=phase_cb)
     return {"status": "ingested", "reasons": reasons, "format": fmt, "detail": None,
-            "resolved": resolved, "result": result, "duplicate_of": None}
+            "resolved": resolved, "result": result, "recording_id": rec.id, "duplicate_of": None}
+
+
+def read_folder_into_recording(folder_abs, location, user_id):
+    """Read a folder that has no recording and give it one at `location` ('workshop' or
+    'backlog'): the Review form and a Move both start from a recording. Held, so nothing
+    is imported. Returns (recording, outcome); recording is None when the folder fails
+    to read, or is an exact duplicate (outcome carries the reasons and `duplicate_of`).
+    A folder that already is a recording at that folder is returned as it is."""
+    from app.utils.resolve import recording_at_folder
+    existing = recording_at_folder(folder_abs)
+    if existing is not None and existing.location != "library":
+        return existing, {"status": "ready", "reasons": []}
+    out = auto_confirm(folder_abs, user_id, hold=True)
+    rec = db.session.get(Recording, out["recording_id"]) if out.get("recording_id") else None
+    if rec is None:
+        return None, out
+    rec.location = location
+    rec.folder_path = os.path.basename(folder_abs.rstrip("/\\"))
+    db.session.commit()
+    return rec, out
+
+
+def _overlay_saved(resolved, rec):
+    """The values saved on a recording replace the folder's reading, the way staged
+    blanket values do, so the verdict is about what a person left there."""
+    perf, venue = rec.performance, rec.performance.venue
+
+    def put(name, value):
+        setattr(resolved, name, ResolvedField(value=value, source="applied", candidates={}, conflict=False))
+    put("artist", perf.artist.name if has_artist(rec) else None)
+    put("date", {"year": perf.start_year, "month": perf.start_month, "day": perf.start_day})
+    put("venue", venue.name if venue else None)
+    put("city", venue.city if venue else perf.city)
+    put("state", venue.state if venue else perf.state)
+    put("country", venue.country if venue else perf.country)
+    put("event", perf.event.name if perf.event else None)
+    put("stage", perf.stage)
+    put("source", rec.source)
+    put("lineage", rec.lineage)
+    put("source_tag", rec.source_tag)
+    put("shnid", rec.etree_shnid)
+    put("album", rec.title)
+    if rec.location != "queue" or kind_chosen(rec):
+        resolved.kind = rec.kind
+
+
+KIND_EVENT = "kind_chosen"
+
+
+def kind_chosen(rec):
+    """True once a person has picked Album or Live Recording on this recording's form."""
+    return db.session.query(RecordingEvent.id).filter(
+        RecordingEvent.recording_id == rec.id, RecordingEvent.event_type == KIND_EVENT).first() is not None
 
 
 @bp.route("/confirm", methods=["POST"])
@@ -1315,6 +1429,20 @@ def confirm_ingest():
     data          = request.get_json() or {}
     source_folder = (data.get("source_folder_path") or "").strip()
     artist_name   = (data.get("artist_name") or "").strip()
+    if data.get("recording_id"):
+        # Import of a recording that already exists: the folder comes from the
+        # recording, never from the client.
+        from app.utils.paths import queue_item_for
+        from app.utils import bulk_ingest_run as _bir
+        rec = db.session.get(Recording, data["recording_id"])
+        if rec is None or rec.location == "library":
+            return jsonify({"error": "Recording not found, or already in the library"}), 404
+        if rec.location == "queue":
+            qi = queue_item_for(rec)
+            source_folder = _bir.item_abs_path(qi) if qi is not None else ""
+        else:
+            source_folder = recording_folder_abs(rec) or ""
+        data["source_folder_path"] = source_folder
     if not source_folder or not os.path.isdir(source_folder):
         return jsonify({"error": f"Source folder not found: {source_folder!r}"}), 400
     from app.utils.download_queue import downloading_here
@@ -1497,70 +1625,223 @@ def _find_event(name):
     return None
 
 
-def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
-    """Resolve or create the full object chain, then ingest the recording.
-    Runs inside an app context (background thread). Returns a result dict;
-    raises on failure.
+# ── A recording's life before the library ──────────────────────────────────────
+# A recording row exists from the moment its folder is first read into the Queue
+# (location 'queue'), is edited in place by the Review form (save_recording_payload,
+# autosaved), and becomes a library recording when imported (promote_to_library).
+# _do_confirm is those two steps in a row, for a caller that has a payload and a
+# folder.
 
-    Expected payload:
-    {
-      "source_folder_path": "/absolute/path/to/source",
-      "artist_name":        "Grateful Dead",
-      "start_year":         1972,
-      "start_month":        9,
-      "start_day":          3,
-      "venue_name":         "CU Events Center",   # optional
-      "city":               "Boulder",
-      "state":              "CO",
-      "country":            "US",                 # optional
-      "source":             "SBD",
-      "quality":            "B+",
-      "lineage":            "...",
-      "recording_engineer": "Bornfree",   # optional names; also transfer_engineer, mastering_engineer (live only)
-      "notes":              "",
-      "is_complete":        true,
-      "info_file_content":  "...",
-      "event_name":         "Bonnaroo 2009",  # optional — name-resolved to Event record
-      "event_id":           null,             # optional — use existing Event ID directly
-      "stage":              "Harbor Stage",   # optional — Performance.stage (new performances)
-      "resolver_result":    {...},  # optional -- the scan's `resolved` dict, stored
-                                     # (minus tracks) on recording.resolver_json
-      "ai_result":          {...},  # optional — a research result the page holds, filed as a done
-                                     # Lomax run when no run on this folder exists (see app.lomax)
-      "fingerprints":       [{"type":"ffp","filename":"...","content":"..."}],
-      "tracks": [
-        {"track_number":1,"title":"Dark Star","set_number":"Set 1","duration":1200,"filename":"t01.flac"}
-      ]
+from app.utils.orphans import UNKNOWN_ARTIST_NAME
+DRAFT_EVENT = "draft_edited"
+
+
+def person_edited(rec):
+    """True once a person has saved this recording from the Review form."""
+    return db.session.query(RecordingEvent.id).filter(
+        RecordingEvent.recording_id == rec.id, RecordingEvent.event_type == DRAFT_EVENT).first() is not None
+
+
+def mark_person_edited(rec, user_id):
+    if not person_edited(rec):
+        db.session.add(RecordingEvent(recording_id=rec.id, user_id=user_id, event_type=DRAFT_EVENT,
+                                      note="Edited in the Review form"))
+
+
+def has_artist(rec):
+    perf = rec.performance
+    return bool(perf is not None and perf.artist is not None
+                and perf.artist.name and perf.artist.name != UNKNOWN_ARTIST_NAME)
+
+
+def _unknown_artist():
+    """The stand-in act of a queue row whose folder named none. Never confirmed, and
+    removed again with the last row that uses it (app.utils.orphans)."""
+    a = db.session.query(Artist).filter(func.lower(Artist.name) == UNKNOWN_ARTIST_NAME.lower()).first()
+    if a is None:
+        a = Artist(name=UNKNOWN_ARTIST_NAME)
+        db.session.add(a)
+        db.session.flush()
+    return a
+
+
+def _delete_track_rows(track_ids):
+    from app.models.track_analysis import TrackAnalysis
+    from app.models.play_log import PlayLog
+    if not track_ids:
+        return
+    db.session.query(TrackAnalysis).filter(TrackAnalysis.track_id.in_(track_ids)).delete(synchronize_session=False)
+    db.session.query(PlayLog).filter(PlayLog.track_id.in_(track_ids)).delete(synchronize_session=False)
+    db.session.query(Track).filter(Track.id.in_(track_ids)).delete(synchronize_session=False)
+
+
+def _sync_tracks(rec, tracks_in):
+    """Make rec's tracks match the form's list. A track is matched by the file it
+    names (its current path, else the path it had when ingested); new ones are added,
+    ones no longer listed are removed. file_path is never changed here."""
+    existing = list(rec.tracks)
+    by_file = {t.file_path: t for t in existing}
+    by_orig = {t.original_file_path: t for t in existing if t.original_file_path}
+    seen = set()
+    for t in tracks_in:
+        fn = t.get("filename", "") or ""
+        tr = by_file.get(fn) or by_orig.get(fn)
+        if tr is not None and tr.id in seen:
+            tr = None
+        flags_raw = t.get("flags") or []
+        vals = dict(
+            track_number      = t.get("track_number"),
+            title             = t.get("title") or f"Track {t.get('track_number', '?')}",
+            set_number        = t.get("set_number") or None,
+            disc_number       = t.get("disc_number"),
+            disc_track_number = t.get("disc_track_number"),
+            duration          = t.get("duration"),
+            is_official       = bool(rec.is_official or t.get("is_official", False)),
+            flags             = json.dumps(flags_raw) if flags_raw else None,
+            songwriter        = t.get("songwriter") or None,
+            notes             = t.get("notes") or None,
+        )
+        if tr is None:
+            tr = Track(recording_id=rec.id, file_path=fn, original_file_path=fn or None, **vals)
+            db.session.add(tr)
+            db.session.flush()
+        else:
+            for k, v in vals.items():
+                setattr(tr, k, v)
+        seen.add(tr.id)
+    _delete_track_rows([t.id for t in existing if t.id not in seen])
+    db.session.flush()
+    db.session.expire(rec, ["tracks"])
+
+
+def _match_fingerprints(rec, *, verify, folder_abs=None):
+    """Match rec's stored fingerprint files to its tracks (expected checksum and type).
+    With verify, a track still lacking a status is checked now: FFP/ST5 against the
+    FLAC header, MD5 left 'unverified' (never re-hashed here). Never overwrites a
+    status a track already has."""
+    tracks = list(rec.tracks)
+    if not tracks:
+        return
+    now = datetime.now(timezone.utc)
+    origs = {t: (t.original_file_path or t.file_path) for t in tracks}
+    for fp in sorted(rec.fingerprints, key=lambda f: FINGERPRINT_TYPE_PRIORITY.get(f.fingerprint_type, 9)):
+        if not fp.content:
+            continue
+        fp_dir = os.path.dirname(fp.rel_path or "").replace(os.sep, "/")
+        cands = [t for t in tracks
+                 if os.path.dirname(origs[t]).replace(os.sep, "/") == fp_dir] if fp_dir else tracks
+        cands = cands or tracks
+        proxies = [ChecksumMatchProxy(t, origs[t]) for t in cands]
+        for proxy, expected in match_entries_to_tracks(parse_checksum_file(fp.content), proxies).items():
+            t = proxy.real
+            if t.checksum_status is not None and t.expected_checksum:
+                continue
+            t.checksum_type, t.expected_checksum = fp.fingerprint_type, expected
+    if verify:
+        root = folder_abs or recording_folder_abs(rec)
+        for t in tracks:
+            if t.expected_checksum and t.checksum_status is None:
+                if t.checksum_type == "md5":
+                    t.checksum_status = "unverified"
+                else:
+                    t.checksum_status = verify_track_checksum(os.path.join(root, t.file_path),
+                                                              t.checksum_type, t.expected_checksum)
+                t.checksum_verified_at = now
+
+
+def _store_fingerprints(rec, fingerprints, source_folder):
+    """Archive the folder's fingerprint files on a recording that has none yet."""
+    if rec.fingerprints or not fingerprints:
+        return
+    from app.utils.checksums import read_checksum_text
+    for fp in sorted(fingerprints, key=lambda f: FINGERPRINT_TYPE_PRIORITY.get(f.get("type"), 9)):
+        rel_path = fp.get("rel_path") or os.path.basename(fp.get("filename") or "")
+        content = None
+        if source_folder:
+            try:
+                content = read_checksum_text(os.path.join(source_folder, rel_path))
+            except OSError:
+                content = None
+        db.session.add(RecordingFingerprint(
+            recording_id=rec.id, fingerprint_type=fp.get("type"), filename=fp.get("filename"),
+            content=content if content is not None else fp.get("content"), rel_path=rel_path))
+    db.session.flush()
+    db.session.expire(rec, ["fingerprints"])
+
+
+def _form_tracks(rec):
+    out = []
+    for t in rec.tracks:
+        try:
+            flags = json.loads(t.flags) if t.flags else []
+        except ValueError:
+            flags = []
+        out.append({"track_number": t.track_number, "title": t.title, "set_number": t.set_number,
+                    "disc_number": t.disc_number, "disc_track_number": t.disc_track_number,
+                    "duration": t.duration, "filename": t.file_path, "flags": flags,
+                    "is_official": bool(t.is_official), "songwriter": t.songwriter, "notes": t.notes})
+    return out
+
+
+def recording_draft(rec):
+    """The recording as the Review form holds it (the keys of its payload)."""
+    perf = rec.performance
+    venue, event, artist = perf.venue, perf.event, perf.artist
+    eng = lambda e: e.name if e is not None else ""
+    from app.utils.personnel import resolve_performance_personnel
+    lineup = resolve_performance_personnel(perf) if has_artist(rec) else []
+    return {
+        "artist_name": artist.name if has_artist(rec) else "",
+        "start_year": perf.start_year or "", "start_month": perf.start_month or "",
+        "start_day": perf.start_day or "",
+        "end_year": perf.end_year or "", "end_month": perf.end_month or "", "end_day": perf.end_day or "",
+        "venue_name": venue.name if venue else "", "venue_id": venue.id if venue else None,
+        "city": (venue.city if venue else perf.city) or "",
+        "state": (venue.state if venue else perf.state) or "",
+        "country": (venue.country if venue else perf.country) or "",
+        "event_name": event.name if event else "", "event_id": event.id if event else None,
+        "stage": perf.stage or "",
+        "source": rec.source or "", "quality": rec.quality or "", "lineage": rec.lineage or "",
+        "source_tag": rec.source_tag or "",
+        "etree_shnid": str(rec.etree_shnid) if rec.etree_shnid is not None else "",
+        "recording_engineer": eng(rec.recording_engineer), "transfer_engineer": eng(rec.transfer_engineer),
+        "mastering_engineer": eng(rec.mastering_engineer),
+        "notes": rec.notes or "", "is_official": bool(rec.is_official), "title": rec.title or "",
+        "kind": rec.kind, "info_file_content": rec.info_file_content,
+        "genre_id": artist.genre_id if artist.genre_id and has_artist(rec) else None,
+        "genre_name": artist.genre.name if artist.genre_id and has_artist(rec) else "",
+        "members": [{"id": r["musician_id"], "name": r["name"]} for r in lineup if not r["is_guest"]],
+        "guests":  [{"id": r["musician_id"], "name": r["name"]} for r in lineup if r["is_guest"]],
+        "tracks": _form_tracks(rec),
     }
 
-    MusicBrainz and the non-music signal never run inline, bulk or not: the
-    new artist is created with lookup=False and everything audio/network is a
-    follow-up (enqueue_followups(): "audio", "mb_artist", "mb_release",
-    "images").
-    The tag write (step 12) follows write_tags_on_ingest for a source brought
-    in from outside, bulk or not, and is skipped whenever the source is in-root
-    -- since an in-root source's files are the collector's own,
-    wherever the confirm call came from.
 
-    MD5 checksum verification (a full re-hash per file) is NEVER run here, bulk
-    or interactive alike. FFP/ST5 header verification still runs at confirm,
-    and every fingerprint file is still parsed, matched and stored regardless
-    of type; only the MD5 recompute-and-compare step is skipped, leaving those
-    entries `unverified`.
 
-    Everything else -- the move, the Recording/Track rows, tag reads --
-    is identical to an interactive confirm.
-    """
-    # No-op when nobody is listening, so every call site below stays unguarded.
-    def _phase(key, detail=None):
-        if phase_cb:
-            phase_cb(key, detail)
 
-    # R3: validated again here, before ANYTHING else in this function
-    # (including step 6's move), for a direct caller that skips the /confirm
-    # route's own check above (tests, or a future caller). A stray non-digit
-    # in the free-text shnid field must never surface only after the source
-    # folder is already gone.
+def save_recording_payload(data, user_id, rec=None, *, location="queue", folder_path=None,
+                           source_folder=None):
+    """Create or update a recording and the chain above it (Artist, Venue, Event,
+    Performance, personnel, Engineers) and its Tracks from a Review-form payload.
+    Flushes; the caller commits. A recording that exists is updated in place: only
+    keys the payload carries are written, so a partial payload is fine (the Workshop
+    is a workspace; nothing here requires a complete recording).
+
+    Nothing here is a person's confirmation: Artist.confirmed_at, learned aliases and
+    the Queue re-check belong to confirm_signals().
+
+    Returns the Recording."""
+    if rec is not None:
+        # A key the payload leaves out keeps what the recording has (a partial autosave).
+        cur_draft = recording_draft(rec)
+        for k in ("artist_name", "start_year", "start_month", "start_day", "end_year", "end_month",
+                  "end_day", "city", "state", "country", "stage"):
+            data.setdefault(k, cur_draft[k])
+        if "venue_id" not in data and "venue_name" not in data:
+            data["venue_id"], data["venue_name"] = cur_draft["venue_id"], cur_draft["venue_name"]
+        if "event_id" not in data and "event_name" not in data:
+            data["event_id"], data["event_name"] = cur_draft["event_id"], cur_draft["event_name"]
+        if "etree_shnid" not in data:
+            data["etree_shnid"] = rec.etree_shnid
     _raw_shnid = data.get("etree_shnid")
     if _raw_shnid not in (None, ""):
         try:
@@ -1570,240 +1851,243 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
     else:
         data["etree_shnid"] = None
 
-    source_folder = (data.get("source_folder_path") or "").strip()
-    artist_name   = (data.get("artist_name")        or "").strip()
+    from app.utils.orphans import collect_ids, cleanup as _cleanup_orphans
+    before = collect_ids(rec)
 
-    _phase("resolving", artist_name or None)
-
+    artist_name = (data.get("artist_name") or "").strip()
     city        = (data.get("city")       or "").strip() or None
     state       = (data.get("state")      or "").strip() or None
     country     = (data.get("country")    or "").strip() or None
     venue_name  = (data.get("venue_name") or "").strip() or None
     event_name  = (data.get("event_name") or "").strip() or None
     stage       = (data.get("stage") or "").strip() or None
-    start_year  = data.get("start_year")
-    start_month = data.get("start_month")
-    start_day   = data.get("start_day")
-    end_year    = data.get("end_year")
-    end_month   = data.get("end_month")
-    end_day     = data.get("end_day")
+    start_year, start_month, start_day = (data.get("start_year") or None, data.get("start_month") or None,
+                                          data.get("start_day") or None)
+    end_year, end_month, end_day = (data.get("end_year") or None, data.get("end_month") or None,
+                                    data.get("end_day") or None)
 
-    # title/kind: Recording has carried both columns since before this
-    # function existed. kind defaults to "live" and is validated against the
-    # column's two known values so a bad payload fails loudly here rather
-    # than writing a third, silently-unrecognised kind. Resolved this early
-    # (rather than just before Recording below) because step 4's Performance
-    # lookup also needs to know it (B1, immediately below).
-    rec_kind = data.get("kind") or "live"
+    rec_kind = data.get("kind") or (rec.kind if rec is not None else "live")
     if rec_kind not in ("live", "studio"):
         raise ValueError(f"kind must be 'live' or 'studio': {rec_kind!r}")
 
-    # ── 1. Find or create Artist (the act) ─────────────────────────────────
-    # `members`/`guests` are the Add Recording form's two personnel rows — see
-    # app/utils/personnel.py::sync_performance_personnel for what they mean at
-    # the PERFORMANCE level. Historically this block also used member_names to
-    # seed/overwrite the act's ROSTER via set_artist_members, unconditionally,
-    # for an existing Artist too — that's the same act-roster-corruption bug
-    # Phase 1 already fixed for the recording page's PUT endpoint, just never
-    # ported to ingest. resolve_or_create_artist(name, member_names) already
-    # has the correct behavior baked in — it only seeds member_names as the
-    # roster when the Artist is BRAND NEW, and leaves an existing act's roster
-    # alone — so passing member_names straight through here fixes it with no
-    # new code. Two different needs for the same payload key, so two variables:
-    #  - member_names/guest_names (never None) for resolve_or_create_artist,
-    #    which just wants "what to seed a BRAND NEW artist's roster with,
-    #    if anything."
-    #  - member_names_sync/guest_names_sync (RAW, preserves None) for
-    #    sync_performance_personnel below, which treats None as "leave this
-    #    bucket exactly as currently resolved" vs. [] as "the user cleared
-    #    it, wipe it" (see that function's docstring). Batch Import's
-    #    Auto-Ingest path (_batchIngestOne in app.js) never visits the review
-    #    wizard, so it never sends "members"/"guests" at all — collapsing
-    #    that omission to [] here made sync_performance_personnel think every
-    #    inherited roster member had just been removed, which trips its
-    #    case-5 safeguard: flip to 'explicit' and snapshot nothing, since
-    #    nothing was in the list to keep. Net effect: the recording's
-    #    Members row came out blank even though the artist's own roster
-    #    Trischka). Only the manual Add Recording/Batch Review form pre-fills
-    #    and always sends both keys (even an intentionally-emptied one), so
-    #    that path's behavior is unchanged by this fix.
+    # 1. Artist. members/guests: None means "leave that bucket as it is" (see sync_performance_personnel).
     member_names_sync = data.get("members")
     guest_names_sync  = data.get("guests")
-    member_names = member_names_sync or []
-    guest_names  = guest_names_sync  or []
-    artist = resolve_or_create_artist(artist_name, member_names, lookup=False)
-    if not data.get("unattended"):
-        mark_artist_confirmed(artist)       # a person's save (wizard, review, "Ingest anyway") confirms the act
+    if artist_name:
+        artist = resolve_or_create_artist(artist_name, member_names_sync or [], lookup=False)
+        _apply_artist_genre(artist, data)
+    else:
+        artist = _unknown_artist()
 
-    # ── 2. Genre, on the ARTIST ───────────────────────────────
-    _apply_artist_genre(artist, data)
-
-    # ── 3. Find or create Venue (optional) ────────────────────────────────────
-    # Placeholder names ("Unknown Venue", "TBD", ...) are never linked as a real
-    # Venue — they aren't one canonical physical place, they're a stand-in every
-    # show without a known venue reuses. Linking them shares one row's
-    # city/state/country across unrelated shows. Treat exactly like no venue was
-    # given: venue stays None, and city/state/ country fall through to the
-    # Performance's own fallback fields below.
+    # 2. Venue (placeholder names are never a venue).
     venue = None
     venue_id_in = data.get("venue_id")
     if venue_id_in:
-        # User selected an existing venue by id — use it, unless it resolves
-        # to a placeholder row.
         candidate = db.session.get(Venue, int(venue_id_in))
         if candidate and not is_placeholder_venue_name(candidate.name):
             venue = candidate
     elif venue_name and not is_placeholder_venue_name(venue_name):
-        # No id — look up by name or create new
-        venue = db.session.query(Venue).filter(
-            func.lower(Venue.name) == venue_name.lower()
-        ).first()
+        venue = db.session.query(Venue).filter(func.lower(Venue.name) == venue_name.lower()).first()
         if not venue:
-            venue = Venue(
-                name    = venue_name,
-                city    = city    or None,
-                state   = state   or None,
-                country = country or None,
-            )
+            venue = Venue(name=venue_name, city=city, state=state, country=country)
             db.session.add(venue)
             db.session.flush()
 
-    # ── 3.5. Find or create Event (optional) ─────────────────────────────────
+    # 3. Event
     event = None
     event_id_in = data.get("event_id")
     if event_id_in:
         event = db.session.get(Event, int(event_id_in))
     elif event_name:
         event = _find_event(event_name)
-        # A person reviewed the wizard form, so it may create. An unattended ingest
-        # (auto_confirm) only links to an Event that exists, until the reader has a
-        # confidence to gate creation on.
         if not event and data.get("event_create", True) and clean_event_name(event_name):
-            event = Event(
-                name    = clean_event_name(event_name),
-                city    = city    or None,
-                state   = state   or None,
-                country = country or None,
-            )
+            event = Event(name=clean_event_name(event_name), city=city, state=state, country=country)
             db.session.add(event)
             db.session.flush()
 
-    # ── 3.6. Learned aliases ──────────────────────────
-    # A person's save that differs from what the resolver read teaches the library
-    # the text it quoted. Written in this transaction; never fails the save.
-    from app.utils.aliases import learn_aliases
-    learn_aliases(data, artist, venue)
-
-    # ── 4. Find or create Performance ─────────────────────────────────────────
-    # A studio recording always gets its OWN Performance: never reuse one found
-    # by artist/date, unlike a live show, where sharing a Performance across
-    # recordings of the same night is the whole point. Reusing one here is
-    # exactly how B1 happened -- two studio albums by one artist tagged the same
-    # year, no month, share a Performance whose date fields then get filled from
-    # whichever album's release lookup runs first, so the second album silently
-    # inherits the first one's release day. scripts/migrate_studio_records.py
-    # splits apart any Performance an earlier build already shared this way.
-    performance = None
-    if rec_kind != "studio":
-        perf_q = db.session.query(Performance).filter(
-            Performance.artist_id == artist.id,
-            Performance.start_year  == start_year,
-            Performance.start_month == start_month,
-            Performance.start_day   == start_day,
-        )
+    # 4. Performance: the show this recording belongs to. A live show shared with
+    # another recording is joined; a recording that is alone on its Performance
+    # keeps it and edits it in place, so each autosave does not mint a new one.
+    cur = db.session.get(Performance, rec.performance_id) if rec is not None and rec.performance_id else None
+    sole = cur is not None and db.session.query(Recording.id).filter(
+        Recording.performance_id == cur.id, Recording.id != rec.id).first() is None
+    matching = []
+    if rec_kind != "studio" and artist_name:         # an unknown act never joins another show
+        q = db.session.query(Performance).filter(
+            Performance.artist_id == artist.id, Performance.start_year == start_year,
+            Performance.start_month == start_month, Performance.start_day == start_day)
         if venue:
-            perf_q = perf_q.filter(Performance.venue_id == venue.id)
-        performance = perf_q.first()
-
-    if not performance:
-        performance = Performance(
-            artist_id = artist.id,
-            venue_id     = venue.id  if venue  else None,
-            event_id     = event.id  if event  else None,
-            stage        = stage,
-            start_year   = start_year,
-            start_month  = start_month,
-            start_day    = start_day,
-            end_year     = end_year,
-            end_month    = end_month,
-            end_day      = end_day,
-            # Location fallback when no venue record
-            city    = city    if not venue else None,
-            state   = state   if not venue else None,
-            country = country if not venue else None,
-            # New performances start in the act's default resolution mode
-            # (e.g. "Acoustic All-Stars" set to 'explicit' means every future
-            # ingest starts explicit, not inherit) — see personnel.py.
-            personnel_mode = artist.default_personnel_mode,
-        )
+            q = q.filter(Performance.venue_id == venue.id)
+        matching = q.order_by(Performance.id).all()
+    performance = None
+    if cur is not None and cur in matching:
+        performance = cur
+    elif matching:
+        performance = matching[0]
+    elif cur is not None and sole:
+        performance = cur
+    fields = dict(artist_id=artist.id, venue_id=venue.id if venue else None,
+                  event_id=event.id if event else None, stage=stage,
+                  start_year=start_year, start_month=start_month, start_day=start_day,
+                  end_year=end_year, end_month=end_month, end_day=end_day,
+                  city=city if not venue else None, state=state if not venue else None,
+                  country=country if not venue else None)
+    if performance is None:
+        performance = Performance(personnel_mode=artist.default_personnel_mode, **fields)
         db.session.add(performance)
-        db.session.flush()
-
-    # Apply the Add Recording form's Members/Guests rows to THIS performance.
-    # For the common case (new act, or an existing act's roster left
-    # untouched in the form) this is a no-op — sync_performance_personnel
-    # diffs against what's already resolved, and the form was pre-populated
-    # from that same resolved state. It only actually writes rows when the
-    # user edited something (added a guest, or removed a roster member for
-    # this one show). Runs whether the Performance is brand new or an
-    # already-existing one being re-confirmed with a second recording.
+    elif performance is cur and sole:
+        for k, v in fields.items():
+            setattr(performance, k, v)
+    db.session.flush()
     sync_performance_personnel(performance, member_names_sync, guest_names_sync)
 
-    # ── 5. Build canonical folder name ────────────────────────────────────────
-    # rename_folders governs this (spec section 1.1): off keeps the source
-    # folder's own name (still deduped like any other by move_to_library's
-    # unique_folder_name()); on names it from the recording's own details.
+    # 5. Recording
+    created = rec is None
+    if created:
+        rec = Recording(performance_id=performance.id, location=location,
+                        folder_path=folder_path or "",
+                        original_folder_name=os.path.basename((source_folder or "").rstrip("/\\")) or None,
+                        kind=rec_kind)
+        db.session.add(rec)
+    rec.performance_id = performance.id
+    rec.kind = rec_kind
+    if folder_path:
+        rec.folder_path = folder_path
+    for key, attr, conv in (("source", "source", None), ("lineage", "lineage", None),
+                            ("quality", "quality", None), ("notes", "notes", None),
+                            ("info_file_content", "info_file_content", None),
+                            ("title", "title", lambda v: v or None),
+                            ("source_tag", "source_tag", lambda v: (v or None)),
+                            ("etree_shnid", "etree_shnid", None),
+                            ("is_complete", "is_complete", bool), ("is_official", "is_official", bool)):
+        if key in data or (created and key == "is_complete"):
+            v = data.get(key, True if key == "is_complete" else None)
+            setattr(rec, attr, conv(v) if conv else v)
+    if "resolver_result" in data:
+        rec.resolver_json = resolver_json_for_storage(data.get("resolver_result"))
+    if data.get("completeness_checked"):
+        rec.completeness_checked_at = datetime.now(timezone.utc)
+    db.session.flush()
+    from app.utils.engineers import apply_engineer_names
+    apply_engineer_names(rec, data)
+    if created and source_folder:
+        lomax.repoint_folder(source_folder, rec.id)
+
+    # 6. Tracks and the folder's fingerprint files
+    if "tracks" in data:
+        _sync_tracks(rec, data.get("tracks") or [])
+    _store_fingerprints(rec, data.get("fingerprints") or [], source_folder)
+    _match_fingerprints(rec, verify=False)
+    db.session.flush()
+
+    # What this save left with nothing on it (a half-typed venue, the old Performance,
+    # the stand-in act) goes, unless somebody confirmed or enriched it.
+    _cleanup_orphans(before)
+    db.session.flush()
+    return rec
+
+
+def confirm_signals_pre(rec, data):
+    """A person's save settles the act and teaches the aliases it quoted. Before the commit."""
+    if data.get("unattended"):
+        return
+    perf = rec.performance
+    if perf is None:
+        return
+    if has_artist(rec):
+        mark_artist_confirmed(perf.artist)
+    from app.utils.aliases import learn_aliases
+    learn_aliases(data, perf.artist if has_artist(rec) else None, perf.venue)
+
+
+def confirm_signals_post(rec, data, source_folder):
+    """After the commit: the other waiting Queue rows that quote the same act, venue or
+    event are looked at again."""
+    if data.get("unattended"):
+        return
+    try:
+        from app.utils.aliases import confirmed_keys
+        from app.utils import bulk_ingest_run as _bir
+        perf = rec.performance
+        ev = perf.event.name if perf is not None and perf.event is not None else data.get("event_name")
+        _bir.recheck_queue(source_folder, confirmed_keys(
+            data, perf.artist if perf is not None and has_artist(rec) else None,
+            perf.venue if perf is not None else None, ev))
+    except Exception:  # noqa: BLE001 -- never fails a save that already succeeded
+        db.session.rollback()
+
+
+def recording_for_folder(folder_abs, data=None):
+    """The recording a folder already is: the id the payload names, else the Queue row
+    linked to this folder, else the Workshop/Backlog recording sitting in it. None
+    when the folder has no recording."""
+    rid = (data or {}).get("recording_id")
+    if rid:
+        r = db.session.get(Recording, int(rid))
+        if r is not None:
+            return r
+    from app.utils import bulk_ingest_run as _bir
+    r = _bir.recording_of_folder(folder_abs)
+    if r is not None:
+        return r
+    from app.utils.resolve import recording_at_folder
+    return recording_at_folder(folder_abs)
+
+
+def promote_to_library(rec, user_id, data=None, *, source_folder=None, progress_cb=None,
+                       cancel_cb=None, phase_cb=None):
+    """Import: move the recording's folder into the library under the File Handling
+    mode (flatten and rename as set; nothing is moved when the folder already sits in
+    the library outside a working folder), then make it a library recording: location
+    'library', track paths, checksums, the 'ingested' event, artwork, the tag write.
+    Commits. Returns the result dict _do_confirm has always returned.
+
+    The files move BEFORE the database changes are committed; a failed move leaves
+    the recording where it was."""
+    from app.utils.ingest import IngestCancelled
+    from app.utils.published import in_working_folder
+    data = data or {}
+
+    def _phase(key, detail=None):
+        if phase_cb:
+            phase_cb(key, detail)
+
+    source_folder = (source_folder or recording_folder_abs(rec) or "").strip()
+    if not source_folder or not os.path.isdir(source_folder):
+        raise ValueError(f"Source folder not found: {source_folder!r}")
+    if rec.location == "library":
+        raise ValueError("This recording is already in the library")
+
+    perf = rec.performance
+    artist_name = perf.artist.name if has_artist(rec) else ""
+    venue = perf.venue
+    venue_name = venue.name if venue else None
+    city = (venue.city if venue else perf.city)
+    state = (venue.state if venue else perf.state)
+    country = (venue.country if venue else perf.country)
+    rec_kind = rec.kind
+
     file_handling = node_settings.get_file_handling()
     if file_handling["rename_folders"]:
         folder_name = build_folder_name(
-            artist_name     = artist_name,
-            start_year      = start_year,
-            start_month     = start_month,
-            start_day       = start_day,
-            venue_name      = venue_name,
-            city            = city,
-            state           = state,
-            country         = country,
-            source          = data.get("source"),
-            kind            = rec_kind,
-            title           = data.get("title"),
-        )
+            artist_name=artist_name, start_year=perf.start_year, start_month=perf.start_month,
+            start_day=perf.start_day, venue_name=venue_name, city=city, state=state, country=country,
+            source=rec.source, kind=rec_kind, title=rec.title)
     else:
         folder_name = os.path.basename(source_folder.rstrip("/\\")) or "Untitled"
 
-    # ── 6. Move folder into library ─────────────────────────────────────────
     library_root = str(current_app.config["LIBRARY_ROOT"])
-    # Library LAYOUT is an install-level setting, read here rather than inside
-    # move_to_library, which has no app context. Off means the show lands flat
-    # at the library root -- for a collector who pointed Trellis at a library
-    # they built themselves.
     under_artist = node_settings.file_under_artist_folder()
-
-    # A source whose realpath is
-    # already inside LIBRARY_ROOT is ingested exactly as it sits on disk --
-    # never moved, renamed, flattened or deduped, in either file_handling
-    # mode or placement. move_to_library enforces the move/rename/dedupe
-    # half of that; this flag makes the Track.file_path computation below
-    # match it, forcing the identity map + no-flatten regardless of
-    # rename_files/naming_scheme.
     try:
-        in_root_source = Path(source_folder).resolve().is_relative_to(
-            Path(library_root).resolve())
+        in_library = Path(source_folder).resolve().is_relative_to(Path(library_root).resolve())
     except OSError:
-        in_root_source = False
+        in_library = False
+    # Catalogued in place: inside the library and not in a working folder that lives there.
+    in_root_source = in_library and not in_working_folder(source_folder)
 
-    tracks_in = data.get("tracks", [])
-    # rename_files governs both the filename scheme and whether a multi-
-    # disc/-set source flattens into the recording folder's root (spec
-    # section 1.1: off means "names and nesting preserved"). Off: every file
-    # keeps its own basename via the engine's identity ('original') preset.
-    # On: the active naming_scheme decides both the names AND (through
-    # flattens()) whether the source's disc/set nesting collapses — the same
-    # rule the Rename Files action and the Settings preview use. Map is keyed
-    # by each track's ORIGINAL rel_path/filename as scanned; move_to_library()
-    # applies it while moving. Fingerprint files (step 9) list the ORIGINAL
-    # names too, so matching happens against the original name and only the
-    # final DB/verification path uses the new one.
+    tracks_in = [{"track_number": t.track_number, "title": t.title, "filename": t.file_path,
+                  "disc_number": t.disc_number, "disc_track_number": t.disc_track_number,
+                  "set_number": t.set_number} for t in rec.tracks]
     naming_scheme   = file_handling["naming_scheme"]
     naming_template = file_handling["naming_template"] or None
     if in_root_source:
@@ -1811,270 +2095,74 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         flatten = False
     elif file_handling["rename_files"]:
         audio_rename_map = compute_audio_rename_map(
-            tracks_in, naming_scheme, naming_template,
-            performance = performance,
-            source      = data.get("source"),
-            source_tag  = data.get("source_tag"),
-            etree_shnid = data.get("etree_shnid"),
-        )
+            tracks_in, naming_scheme, naming_template, performance=perf,
+            source=rec.source, source_tag=rec.source_tag, etree_shnid=rec.etree_shnid)
         flatten = flattens(naming_scheme, naming_template)
     else:
         audio_rename_map = compute_audio_rename_map(tracks_in, "original")
         flatten = False
 
-    # The long one.
     _phase("moving", folder_name)
-
     try:
         new_folder_path = move_to_library(
-            source_folder    = source_folder,
-            library_root     = library_root,
-            artist_name      = artist_name,
-            folder_name      = folder_name,
-            progress_cb      = progress_cb,
-            audio_rename_map = audio_rename_map,
-            cancel_cb        = cancel_cb,
-            under_artist_folder = under_artist,
-            flatten          = flatten,
-        )
+            source_folder=source_folder, library_root=library_root, artist_name=artist_name,
+            folder_name=folder_name, progress_cb=progress_cb, audio_rename_map=audio_rename_map,
+            cancel_cb=cancel_cb, under_artist_folder=under_artist, flatten=flatten,
+            force_move=in_library and not in_root_source)
     except IngestCancelled:
-        # A cancel is not a failure. move_to_library has already undone its own
-        # filesystem work; re-raise unchanged so the job reports "cancelled"
-        # rather than a scary "File operation failed".
         db.session.rollback()
         raise
     except Exception as e:
         db.session.rollback()
-        # An OS-level failure of the move gets its own type so Bulk Ingest can
-        # park the folder for review; it is still a RuntimeError for every
-        # other caller.
         if isinstance(e, OSError):
             raise MoveFailed(f"File operation failed: {e}")
         raise RuntimeError(f"File operation failed: {e}")
-
-    # move_to_library() may have deduped folder_name against a same-named
-    # folder already on disk (see unique_folder_name()) — resync so the
-    # "cataloging" phase message and the final response report the name
-    # actually written, not the pre-dedup one computed in step 5.
     folder_name = os.path.basename(new_folder_path)
 
     _phase("cataloging", f"{len(tracks_in)} track{'' if len(tracks_in) == 1 else 's'}")
-
-    # ── 7. Create Recording ───────────────────────────────────────────────────
-    rec_is_official = bool(data.get("is_official", False))
-    # Research may already have been run pre-confirm (Add Recording's own button, before the
-    # recording exists). The run is a Lomax folder run, re-pointed below; "ai_result" is the
-    # page's copy, filed only when no run on this folder was found.
-    ai_result = data.get("ai_result")
-    # etree_shnid was already validated/coerced to int-or-None at the top of
-    # this function -- reads straight through here. rec_kind was resolved
-    # and validated earlier (step 4 needs it too).
-    from app.utils.published import is_published_location
-    rec = Recording(
-        performance_id       = performance.id,
-        source               = data.get("source"),
-        source_tag           = (data.get("source_tag") or None),
-        etree_shnid          = data.get("etree_shnid"),
-        lineage              = data.get("lineage"),
-        quality              = data.get("quality"),
-        is_complete          = data.get("is_complete", True),
-        is_official          = rec_is_official,
-        folder_path          = new_folder_path,
-        original_folder_name = os.path.basename(source_folder),
-        info_file_content    = data.get("info_file_content"),
-        notes                = data.get("notes"),
-        title                = data.get("title") or None,
-        kind                 = rec_kind,
-        resolver_json        = resolver_json_for_storage(data.get("resolver_result")),
-        # Catalogued where it sits inside Backlog/Workshop: not on the shelf.
-        is_published         = is_published_location(new_folder_path),
-        completeness_checked_at = (datetime.now(timezone.utc)
-                                   if data.get("completeness_checked") else None),
-    )
-    db.session.add(rec)
+    was = rec.location
+    rec.location, rec.folder_path = "library", new_folder_path
+    for tr in rec.tracks:
+        tr.file_path = resolve_ingest_file_path(tr.file_path, audio_rename_map, flatten)
     db.session.flush()
-    # Engineers by name (found by name/alias or created); live recordings only.
-    from app.utils.engineers import apply_engineer_names
-    apply_engineer_names(rec, data)
-    # Lomax runs made on this folder before it was saved now belong to the recording; a result the
-    # page holds from a run it never filed is kept as a done run (replaces ai_research_json).
-    if not lomax.repoint_folder(source_folder, rec.id) and ai_result:
+
+    # Fingerprints: verify at the new location, the copy the app streams from.
+    if rec.fingerprints:
+        _phase("checksums", ", ".join(sorted({(f.fingerprint_type or "?").upper() for f in rec.fingerprints})))
+        from app.utils.checksums import read_checksum_text
+        for fp in rec.fingerprints:
+            try:
+                fp.content = read_checksum_text(os.path.join(library_root, new_folder_path,
+                                                             fp.rel_path or "")) or fp.content
+            except OSError:
+                pass
+    _match_fingerprints(rec, verify=True, folder_abs=os.path.join(library_root, new_folder_path))
+
+    db.session.add(RecordingEvent(
+        recording_id=rec.id, user_id=user_id, event_type="ingested",
+        note=f"behavior=move original={os.path.basename(source_folder)}"
+             + (f" from={was}" if was != "queue" else "")))
+
+    # Lomax runs filed against this folder while it was being reviewed belong to the recording.
+    lomax.repoint_folder(source_folder, rec.id)
+    ai_result = data.get("ai_result")
+    if ai_result and not db.session.query(LomaxRun).filter_by(
+            subject_type="recording", subject_id=rec.id).first():
         lomax.adopt_result(rec.id, ai_result, user_id)
 
-    # ── 8. Create Tracks ──────────────────────────────────────────────────────
-    # file_path stores the NEW flattened+renamed name (what move_to_library
-    # actually wrote to disk), never the original subdir-nested scan name —
-    # original names are kept around only for fingerprint matching (step 9).
-    created_tracks     = []
-    original_filenames = {}   # Track (by identity, filled in below) → original filename
-    for t in tracks_in:
-        # If recording is marked official, cascade to all tracks
-        track_official = rec_is_official or bool(t.get("is_official", False))
-        flags_raw      = t.get("flags") or []
-        orig_filename  = t.get("filename", "")
-        new_filename   = resolve_ingest_file_path(orig_filename, audio_rename_map, flatten)
-        track = Track(
-            recording_id       = rec.id,
-            track_number       = t.get("track_number"),
-            title              = t.get("title") or f"Track {t.get('track_number', '?')}",
-            set_number         = t.get("set_number") or None,
-            disc_number        = t.get("disc_number"),
-            disc_track_number  = t.get("disc_track_number"),
-            original_file_path = orig_filename or None,
-            duration           = t.get("duration"),
-            file_path          = new_filename,
-            is_official        = track_official,
-            flags              = json.dumps(flags_raw) if flags_raw else None,
-            songwriter         = t.get("songwriter") or None,
-            notes              = t.get("notes") or None,
-        )
-        db.session.add(track)
-        created_tracks.append(track)
-        original_filenames[track] = orig_filename
-
-    # ── 9. Fingerprint files: archive raw content, parse, match to tracks, and
-    #       auto-verify. The files already sit in the library folder at this
-    #       point (move_to_library has copied/moved the whole source tree, not
-    #       just audio), so verification reads the exact copy the app streams
-    #       from — no continued dependence on the original source folder.
-    #
-    #       Matching happens against tracks' ORIGINAL (pre-flatten/rename)
-    #       filenames, since that's what the fingerprint file itself lists —
-    #       a lightweight proxy stands in for each Track during the match so
-    #       match_entries_to_tracks() (which reads `.file_path`/`.track_number`)
-    #       sees the original name, then `.real` routes the matched checksum
-    #       back to the actual Track, whose `.file_path` and on-disk location
-    #       already reflect the new flattened name. Renaming doesn't affect
-    #       the checksum itself — FFP/MD5/ST5 are content hashes.
-    #
-    #       Processed in FINGERPRINT_TYPE_PRIORITY order (ffp, then md5, then
-    #       st5) so that when a folder has more than one fingerprint file,
-    #       each track's stored status reflects the type most worth trusting
-    #       rather than whichever happened to be listed last.
-    fingerprints = sorted(
-        data.get("fingerprints", []),
-        key=lambda fp: FINGERPRINT_TYPE_PRIORITY.get(fp.get("type"), 9),
-    )
-    # Worth naming as its own phase: an ffp/st5 folder reads a FLAC header per
-    # track and is instant, but an .md5 folder re-hashes every byte of every
-    # file. Same phase, two very different waits — and until now both looked
-    # like the copy having stalled at 100%.
-    if fingerprints:
-        _phase("checksums", ", ".join(sorted(
-            {(fp.get("type") or "?").upper() for fp in fingerprints})))
-    for fp in fingerprints:
-        fp_type  = fp.get("type")
-        rel_path = fp.get("rel_path") or os.path.basename(fp.get("filename") or "")
-        fp_abs_path = os.path.join(library_root, new_folder_path, rel_path)
-        content = None
-        try:
-            from app.utils.checksums import read_checksum_text
-            content = read_checksum_text(fp_abs_path)
-        except OSError:
-            content = fp.get("content")
-        db.session.add(RecordingFingerprint(
-            recording_id     = rec.id,
-            fingerprint_type = fp_type,
-            filename         = fp.get("filename"),
-            content          = content,
-            rel_path         = rel_path,
-        ))
-        if content and created_tracks:
-            # A fingerprint file nested inside a disc/set subdir (e.g.
-            # "CD1/checksum.md5") almost always lists filenames scoped to
-            # that disc only ("01.flac", "02.flac", ...). When the active
-            # naming scheme flattens audio, those bare names can collide
-            # across discs —
-            # every disc's own "01.flac" — so matching against ALL tracks
-            # could hand a CD1 checksum to a CD2 track that happens to share
-            # a basename. Restrict candidates to tracks whose ORIGINAL path
-            # was under that same subdir; a root-level fingerprint file
-            # (fp_dir == "") still considers every track, same as before.
-            fp_dir = os.path.dirname(rel_path).replace(os.sep, "/")
-            if fp_dir:
-                candidates = [
-                    t for t in created_tracks
-                    if os.path.dirname(original_filenames.get(t, "")).replace(os.sep, "/") == fp_dir
-                ]
-                if not candidates:   # scoping found nothing usable — fall back
-                    candidates = created_tracks
-            else:
-                candidates = created_tracks
-            proxies = [
-                ChecksumMatchProxy(track, original_filenames.get(track, track.file_path))
-                for track in candidates
-            ]
-            matches = match_entries_to_tracks(parse_checksum_file(content), proxies)
-            now = datetime.now(timezone.utc)
-            for proxy, expected in matches.items():
-                track          = proxy.real
-                track_abs_path = os.path.join(library_root, new_folder_path, track.file_path)
-                track.checksum_type        = fp_type
-                track.expected_checksum    = expected
-                # MD5 is NEVER computed automatically at confirm, bulk or
-                # interactive alike. A full re-hash of every byte of every
-                # file is minutes rather than seconds across a whole-library
-                # pass, and even for one interactive ingest it is
-                # unasked-for work the confirm click never promised. FFP/ST5
-                # still verify here -- both only read a FLAC header and cost
-                # nothing extra. The fingerprint file itself is still
-                # parsed, matched and stored above regardless of type --
-                # only the recompute-and-compare step is conditional.
-                if fp_type == "md5":
-                    track.checksum_status = "unverified"
-                else:
-                    track.checksum_status = verify_track_checksum(track_abs_path, fp_type, expected)
-                track.checksum_verified_at = now
-
-    # ── 10. Irrevocable ingest event ──────────────────────────────────────────
-    db.session.add(RecordingEvent(
-        recording_id = rec.id,
-        user_id      = user_id,
-        event_type   = "ingested",
-        note         = f"behavior=move original={os.path.basename(source_folder)}",
-    ))
-
-    # ── 11. Carry the Listening Quality analysis across ───────────────────────
-    # MUST happen here, inside the ingest commit, and not lazily afterwards:
-    # the staging row is keyed by the SOURCE folder path, and on a Move ingest
-    # that folder no longer exists by now (move_to_library removed it, and the
-    # empty-parent cleanup may have taken its parent too). This is the last
-    # moment the association can be made.
-    #
-    # A no-op when the folder was never analysed — ingest does not require a
-    # quality pass, and never failing an ingest over a score is deliberate.
-    # ── 9.5. Non-music signal: NOT here ───────────────────────────────────────
-    # It, the Listening Quality score and Full analysis are the "audio"
-    # follow-up now, for every ingest path (bulk or not), so the ingest
-    # itself stays I/O-only and finishes first.
-
     _phase("saving")
-    # N5: promote_to_recording's own flush can raise (e.g. no admin user for
-    # RecordingEvent.user_id) -- that used to be swallowed here and printed,
-    # after which the very next line's db.session.commit() raised a SEPARATE,
-    # unrelated PendingRollbackError from the dirty session, and THAT is what
-    # every caller (including process()'s per-item except) reported as the
-    # failure. Let the real exception propagate instead: the caller's own
-    # rollback + failure handling is exactly what an ingest error already
-    # goes through, so nothing is lost by not catching it a second time here.
     from app.utils.quality_store import promote_to_recording
     promote_to_recording(source_folder, rec.id, commit=False)
-
+    confirm_signals_pre(rec, data)
     db.session.commit()
 
-    # A release the person picked on the Add Recording form (never auto-picked):
-    # linked with status 'linked', fill-only-null, so the background MusicBrainz
-    # follow-up (which only takes status IS NULL) leaves it alone. A lookup that
-    # fails leaves the status untouched and never fails the save.
     mb_release_id = (data.get("mb_release_id") or "").strip() if isinstance(data.get("mb_release_id"), str) else ""
     if rec_kind == "studio" and mb_release_id:
         try:
             from app.utils import musicbrainz as _mbr
-            _mbr.reset_breaker()   # a human pick: background failures must not silently drop it
+            _mbr.reset_breaker()
             details = _mbr.lookup_release(mb_release_id)
             if details:
-                # "matched" when the Queue's own lookup found it (no person
-                # picked it), else "linked" (the form's MusicBrainz tab).
                 how = "matched" if data.get("mb_release_status") == "matched" else "linked"
                 _mbr.apply_to_recording(rec, details, status=how)
                 _mbr.enrich_from_release(rec)
@@ -2084,30 +2172,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             import traceback as _tb6
             _tb6.print_exc()
 
+    created_tracks = list(rec.tracks)
     checksum_mismatches = sum(1 for t in created_tracks if t.checksum_status == "mismatch")
 
-    # ── 12. Ingest tag write ────────────────────────────────────────────────
-    # write_tags_on_ingest gates this; off by default under 'keep'. Runs
-    # after the move, after the rename map, and after the main commit above,
-    # so it writes to the tracks' FINAL path with FINAL track_number/title —
-    # the same write_flac_tags() the View Recording action uses (spec
-    # section 3.2). Per-file errors are reported on the job result, not
-    # rolled back; the ingest itself already succeeded. Step 9's stored
-    # checksum status is not recomputed.
     tag_errors = []
-    # Unified import: bulk no longer suppresses this. A source brought in
-    # from outside is ours to tag (when write_tags_on_ingest); only an
-    # in-root source, cataloged in place, is never touched. Any
-    # in-root source skips the ingest tag write, not only a bulk (bulk=True)
-    # bulk_ingest run. in_root_source already means "this folder sits inside
-    # the collector's own library, exactly where discover found it" (spec
-    # section 1.1) -- Review & Ingest's Accept action reaches here with
-    # bulk=False for an in-root show too (it is a deliberate click, not an
-    # unattended pass), but the page it's clicked from says "Your files are
-    # not moved or changed," and step 12 writing tags into the collector's
-    # own file directly contradicts that. A source arriving from OUTSIDE the
-    # root still follows the write_tags_on_ingest switch exactly as before,
-    # whether bulk or not.
     if file_handling["write_tags_on_ingest"] and not in_root_source:
         _phase("tags", f"{len(created_tracks)} tracks")
         n_written, tag_errors = write_flac_tags(rec, library_root)
@@ -2115,24 +2183,10 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
             note = f"{n_written} file(s) written"
             if tag_errors:
                 note += f"; {len(tag_errors)} error(s): " + "; ".join(f[0] for f in tag_errors)
-            db.session.add(RecordingEvent(
-                recording_id = rec.id,
-                user_id      = user_id,
-                event_type   = "tags_written",
-                note         = note,
-            ))
+            db.session.add(RecordingEvent(recording_id=rec.id, user_id=user_id,
+                                          event_type="tags_written", note=note))
             db.session.commit()
 
-    # ── 13. Recording artwork ─────────────
-    # After the recording/tracks are committed and after step 12's (skipped
-    # or not) tag write, so it reads the tracks' FINAL on-disk names exactly
-    # like step 12 does. Runs for both doors -- bulk_ingest_run.process()
-    # calls this same _do_confirm(bulk=True), so a step in here covers both
-    # without a separate bulk path. Never fatal: a bad or unreadable image
-    # must not fail an otherwise-successful ingest, so any exception here is
-    # caught and reported on the job result rather than raised. (The helper
-    # itself already swallows every per-image error; this is a second, wider
-    # net for anything unexpected -- e.g. the folder having vanished.)
     image_errors = []
     _phase("images")
     try:
@@ -2145,36 +2199,69 @@ def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
         _tb4.print_exc()
         image_errors.append(str(e))
 
-    # A person has settled this act, venue and event: the other review rows of the same
-    # import run that quote the same reading are looked at again.
-    if not data.get("unattended"):
-        try:
-            from app.utils.aliases import confirmed_keys
-            from app.utils import bulk_ingest_run as _bir
-            _bir.recheck_queue(source_folder, confirmed_keys(
-                data, artist, venue, event.name if event else event_name))
-        except Exception:  # noqa: BLE001 -- never fails a save that already succeeded
-            db.session.rollback()
-        # The folder's own Queue row is now imported (2026-10-13). After the
-        # re-check, which finds the run through this row.
-        try:
-            from app.utils import bulk_ingest_run as _bir
-            _bir.mark_folder_ingested(source_folder, rec)
-        except Exception:  # noqa: BLE001
-            db.session.rollback()
-            import traceback as _tb5
-            _tb5.print_exc()
+    confirm_signals_post(rec, data, source_folder)
+    try:
+        from app.utils import bulk_ingest_run as _bir
+        _bir.mark_folder_ingested(source_folder, rec)
+    except Exception:  # noqa: BLE001
+        db.session.rollback()
+        import traceback as _tb5
+        _tb5.print_exc()
 
     return {
         "recording_id":        rec.id,
-        "artist_id":        artist.id,
+        "artist_id":           perf.artist_id,
         "folder_name":         folder_name,
-        "event_id":            event.id if event else None,
-        "stage":               performance.stage,
+        "event_id":            perf.event_id,
+        "stage":               perf.stage,
         "checksum_mismatches": checksum_mismatches,
         "tag_errors":          tag_errors,
         "image_errors":        image_errors,
     }
+
+
+def _do_confirm(data, user_id, progress_cb=None, cancel_cb=None, phase_cb=None):
+    """Import a folder from a payload: save the payload onto the folder's recording
+    (creating the recording when the folder has none, so a folder never gets a
+    second one) and promote it to the library. Runs inside an app context
+    (background thread). Returns a result dict; raises on failure.
+
+    Payload keys (all optional except source_folder_path and artist_name):
+      recording_id, source_folder_path, artist_name, start_year/month/day,
+      end_year/month/day, venue_name, venue_id, city, state, country, event_name,
+      event_id, event_create, stage, source, source_tag, etree_shnid, quality,
+      lineage, notes, is_complete, is_official, title, kind, info_file_content,
+      resolver_result, ai_result, mb_release_id, members, guests, genre_id,
+      genre_name, recording_engineer, transfer_engineer, mastering_engineer,
+      unattended (no person confirmed it: nothing is learned from the save),
+      fingerprints [{type, filename, content, rel_path}],
+      tracks [{track_number, title, set_number, disc_number, disc_track_number,
+               duration, filename, flags, is_official, songwriter, notes}].
+
+    MusicBrainz and the non-music signal never run inline: the follow-ups do
+    (enqueue_followups). MD5 is never re-hashed here; FFP/ST5 headers are checked.
+    """
+    def _phase(key, detail=None):
+        if phase_cb:
+            phase_cb(key, detail)
+
+    source_folder = (data.get("source_folder_path") or "").strip()
+    _phase("resolving", (data.get("artist_name") or "").strip() or None)
+    rec = recording_for_folder(source_folder, data)
+    created = rec is None
+    if rec is not None and rec.location == "library":
+        raise ValueError("This recording is already in the library")
+    try:
+        rec = save_recording_payload(
+            data, user_id, rec, location="queue",
+            folder_path=os.path.basename(source_folder.rstrip("/\\")) if created else None,
+            source_folder=source_folder)
+        return promote_to_library(rec, user_id, data, source_folder=source_folder,
+                                  progress_cb=progress_cb, cancel_cb=cancel_cb, phase_cb=phase_cb)
+    except Exception:
+        db.session.rollback()          # a recording created by this call leaves no trace
+        raise
+
 
 
 import re as _re
@@ -2357,7 +2444,7 @@ def batch_scan():
     # Already-ingested folder paths (relative or basename match)
     ingested_paths = {
         os.path.basename(r.folder_path)
-        for r in db.session.query(Recording.folder_path).all()
+        for r in db.session.query(Recording.folder_path).filter(Recording.location == "library").all()
     }
 
     results = []

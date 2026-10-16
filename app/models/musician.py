@@ -57,7 +57,7 @@ class Membership(db.Model):
     # Instrument(s) played during THIS stint, comma-separated free text
     # ("fiddle, banjo"). Aggregate over the stint, not broken out
     # per-appearance, because that is the granularity the source data
-    # itself has. See migrate_add_membership_instrument.py.
+    # itself has.
     instrument   = db.Column(db.String(128), nullable=True)
 
     # Stint bounds — nullable partial dates. NULL/NULL/NULL on both ends means

@@ -46,6 +46,18 @@ elif os.environ.get("TRELLIS_ALLOW_NO_ATLAS") != "1":
         "(or set TRELLIS_ALLOW_NO_ATLAS=1 for a bundle that ships without it)"
     )
 
+# Artist taping/sharing policy reference (etree, DIME). Small, committed, read-only.
+datas += [("assets/reference", "assets/reference")]
+
+# Alembic migrations (app/migrations: env.py, script.py.mako, versions/*.py). Alembic
+# finds and executes these as FILES at start (app/utils/db_upgrade.py reads them from
+# resource_dir()/app/migrations), so they ship as data at the same relative path, not as
+# modules inside the archive. app/migrations has no __init__.py on purpose, so the
+# collect_submodules("app") below never tries to import env.py outside an Alembic run.
+datas += [(str(p), str(p.parent.relative_to(SPECPATH)))
+          for p in sorted((Path(SPECPATH) / "app" / "migrations").rglob("*"))
+          if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"]
+
 # soundfile ships its OWN copy of libsndfile, loaded through ctypes rather than
 # imported — PyInstaller follows Python imports and cannot see it. Without it
 # the app dies on first launch complaining about a library nobody has heard of.
@@ -98,6 +110,13 @@ hiddenimports = [
     # bundle, so it is filtered out by name.
     *[m for m in collect_submodules("app")
       if not m.startswith("app.utils.copyreview")],
+
+    # The revision files and env.py are loaded by path at run time, and import these
+    # (a static scan of run.py never sees them): app.utils.baseline_schema and
+    # app.utils.db_upgrade come in with collect_submodules("app") above.
+    *collect_submodules("alembic"),
+    *collect_submodules("mako"),
+    "markupsafe",
 
     # keyring picks its backend at runtime by platform. Both are named so one
     # spec serves both platforms; the wrong one simply never loads.

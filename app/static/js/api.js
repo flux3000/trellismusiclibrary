@@ -272,6 +272,7 @@ const API = (() => {
     artists: {
       search:        (q)         => get(`/api/artists/search?q=${encodeURIComponent(q)}`),
       list:          ()          => get('/api/artists/'),
+      listAll:       ()          => get('/api/artists/?all=1'),   // editing screens: acts with no library recording too
       listIndex:     ()          => get('/api/artists/?index=1'),
       allRecordings: ()          => get('/api/artists/all-recordings'),
       get:           (id)        => get(`/api/artists/${id}`),
@@ -352,6 +353,8 @@ const API = (() => {
     // ── Recordings ───────────────────────────────────────────────────────────
     recordings: {
       get:        (id)       => get(`/api/recordings/${id}`),
+      // Show-card extras for list rows in Card view (ids: array of recording ids).
+      cardExtras: ids        => get(`/api/recordings/card-extras?ids=${ids.join(',')}`),
       // Sidebar Albums entry + Browse/Top Shelf's kind split -- counts
       // of live vs studio recordings.
       kindCounts: ()          => get('/api/recordings/kind-counts'),
@@ -414,6 +417,14 @@ const API = (() => {
       // Move the folder out of the library to Workshop/Backlog and unpublish
       // the row. Destination is a key, not a path — the server owns the paths.
       moveOut:    (id, destination) => post(`/api/recordings/${id}/move`, { destination }),
+      // The Review form on a recording that is not in the library: its scan and saved
+      // draft, the autosave (confirm: true when the person leaves the form), Trash, and
+      // the two folder doors for a folder with no recording yet.
+      review:     (id)       => get(`/api/recordings/${id}/review`),
+      saveDraft:  (id, body) => put(`/api/recordings/${id}/draft`, body),
+      trash:      (id)       => post(`/api/recordings/${id}/trash`, {}),
+      openFolder: (which, name)              => post('/api/recordings/open-folder', { which, name }),
+      moveFolder: (which, name, destination) => post('/api/recordings/move-folder', { which, name, destination }),
       fileTags:   (id)       => get(`/api/recordings/${id}/tags`),
       reprocess:  (id)       => post(`/api/recordings/${id}/reprocess`),
       verifyChecksums: (id)  => post(`/api/recordings/${id}/verify-checksums`),
@@ -423,7 +434,7 @@ const API = (() => {
         post(`/api/recordings/${id}/rename-files`, { scheme, template }),
 
       // Release lookup — studio kind only.
-      releaseCandidates: (id)       => get(`/api/recordings/${id}/release-candidates`),
+      releaseCandidates: (id, artist, title) => get(`/api/recordings/${id}/release-candidates?artist=${encodeURIComponent(artist || '')}&title=${encodeURIComponent(title || '')}`),
       releaseLink:       (id, mbid) => post(`/api/recordings/${id}/release-link`, { mbid }),
       releaseUnlink:     (id)       => post(`/api/recordings/${id}/release-unlink`, {}),
 
@@ -447,6 +458,7 @@ const API = (() => {
     // ── Venues ───────────────────────────────────────────────────────────────
     venues: {
       list:   (q)        => get(`/api/venues/${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      pick:   (q)        => get(`/api/venues/?all=1${q ? '&q=' + encodeURIComponent(q) : ''}`),   // forms: every venue
       listIndex: ()      => get('/api/venues/?index=1'),
       get:    (id)       => get(`/api/venues/${id}`),
       create: (data)     => post('/api/venues/', data),
@@ -462,6 +474,7 @@ const API = (() => {
     // ── Genres ───────────────────────────────────────────────────────────────
     genres: {
       list:   (q)        => get(`/api/genres/${q ? '?q=' + encodeURIComponent(q) : ''}`),
+      pick:   (q)        => get(`/api/genres/?all=1${q ? '&q=' + encodeURIComponent(q) : ''}`),   // pickers: every genre
       listIndex: ()      => get('/api/genres/?index=1'),
       get:    (id)       => get(`/api/genres/${id}`),
       create: (data)     => post('/api/genres/', data),
@@ -507,7 +520,7 @@ const API = (() => {
       run:      (id)    => get(`/api/lomax/runs/${id}`),
       runs:     (q)     => get('/api/lomax/runs?' + new URLSearchParams(q).toString()),
       latest:   (q)     => get('/api/lomax/latest?' + new URLSearchParams(q).toString()),
-      decide:   (id, decision) => post(`/api/lomax/proposals/${id}`, { decision }),
+      decide:   (id, decision, reapply = false) => post(`/api/lomax/proposals/${id}`, { decision, reapply }),
       restore:  (id)    => post(`/api/lomax/runs/${id}/restore`),
       usage:    (limit, offset) => get(`/api/lomax/usage?limit=${limit || 50}&offset=${offset || 0}`),
       estimate: (q)     => get('/api/lomax/estimate?' + new URLSearchParams(q).toString()),
@@ -524,8 +537,9 @@ const API = (() => {
       confirm:       (data)  => post('/api/ingest/confirm', data),
       confirmStatus: (jobId) => get(`/api/ingest/confirm/${jobId}`),
       saveInfoFile:   (payload) => post('/api/ingest/save-info-file', payload),
-      checkExisting:  ({ artist_name, year, month, day }) => {
+      checkExisting:  ({ artist_name, year, month, day, exclude_id }) => {
         const p = new URLSearchParams({ artist_name })
+        if (exclude_id) p.set('exclude_id', exclude_id)
         p.set('year', year)
         if (month) p.set('month', month)
         if (day)   p.set('day', day)
@@ -591,6 +605,7 @@ const API = (() => {
       convertUnsupported: () => post('/api/bulk-ingest/queue/convert-unsupported', {}),
       reanalyzeItem: (itemId) => post(`/api/bulk-ingest/items/${itemId}/reanalyze`, {}),
       moveItem:      (itemId, dest) => post(`/api/bulk-ingest/items/${itemId}/move`, { dest }),
+      reviewItem:    (itemId) => post(`/api/bulk-ingest/items/${itemId}/review`, {}),
       setApplied:    (_runId, values) => put('/api/bulk-ingest/queue/applied', values || {}),
       pause:   () => post('/api/bulk-ingest/queue/pause', {}),
       resume:  () => post('/api/bulk-ingest/queue/resume', {}),

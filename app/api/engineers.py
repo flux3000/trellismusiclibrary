@@ -14,6 +14,7 @@ from app.models.engineer import Engineer, EngineerImage
 from app.models.alias import EngineerAlias
 from app.models.recording import Recording
 from app.utils.serialize import recording_row
+from app.utils.published import list_all_requested, entity_listed
 from app.utils import entity_images as ei
 from app.utils.engineers import engineer_key, find_engineer, engineer_role_rows
 from app.api.system import require_library
@@ -62,13 +63,17 @@ def list_engineers():
 
     # Live recordings credited in any role, grouped (the sidebar reads this on
     # every render, so no per-row queries).
-    counts = {}
-    for r in (db.session.query(Recording.recording_engineer_id,
-                               Recording.transfer_engineer_id,
-                               Recording.mastering_engineer_id)
-              .filter(Recording.is_published.is_(True), Recording.kind != "studio")):
+    counts, totals = {}, {}
+    for *r, pub in (db.session.query(Recording.recording_engineer_id,
+                                     Recording.transfer_engineer_id,
+                                     Recording.mastering_engineer_id,
+                                     Recording.is_published)
+                    .filter(Recording.kind != "studio")):
         for eid in {x for x in r if x is not None}:
-            counts[eid] = counts.get(eid, 0) + 1
+            totals[eid] = totals.get(eid, 0) + 1
+            if pub:
+                counts[eid] = counts.get(eid, 0) + 1
+    show_all = list_all_requested(request.args)
 
     extra = {}
     if request.args.get("index"):
@@ -80,6 +85,7 @@ def list_engineers():
          "id": e.id, "name": e.name, "sort_name": e.sort_name,
          "recording_count": counts.get(e.id, 0)}
         for e in rows
+        if entity_listed(counts.get(e.id), totals.get(e.id), show_all)
     ])
 
 

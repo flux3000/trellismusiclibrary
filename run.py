@@ -17,6 +17,26 @@ import sys
 import threading
 from pathlib import Path
 
+# Any uncaught startup exception becomes a log entry plus a native alert
+# (packaged app, or TRELLIS_SHOW_STARTUP_ERRORS=1 from source), then a
+# non-zero exit. Only when run as the program, never when imported by tests.
+if __name__ == "__main__":
+    try:
+        try:
+            from app.utils.startup_error import install_excepthook
+        except Exception:
+            # The app package itself failed to import; load the module alone.
+            import importlib.util
+            _spec = importlib.util.spec_from_file_location(
+                "startup_error",
+                Path(__file__).resolve().parent / "app" / "utils" / "startup_error.py")
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            install_excepthook = _mod.install_excepthook
+        install_excepthook()
+    except Exception:
+        pass
+
 import webview
 from app import create_app
 from config import Config
@@ -219,8 +239,10 @@ def _unpublish_working_folders():
     once config is final (boot) and after a working folder changes. Never
     blocks start-up."""
     try:
-        from app.utils.published import unpublish_working_folder_recordings
+        from app.utils.published import (backfill_working_folder_locations,
+                                         unpublish_working_folder_recordings)
         with app.app_context():
+            backfill_working_folder_locations()
             unpublish_working_folder_recordings()
     except Exception:                                        # noqa: BLE001
         import traceback
@@ -489,10 +511,11 @@ def first_run_setup(create_default_user=True):
     library.
 
     Runs ONLY when the database file is absent. An existing checkout is left
-    completely alone: this must never become a substitute for a migration
-    script, and create_all() cannot add a column to a table that already
-    exists anyway. If it fired every boot it would quietly conjure tables for
-    half-finished models and hide the fact that a migration was skipped.
+    completely alone: schema changes to a database that exists are Alembic
+    revisions (app/migrations, run by create_app through app/utils/db_upgrade.py),
+    and create_all() cannot add a column to a table that already exists anyway.
+    A database built here is stamped at the current revision, so no revision
+    ever runs on it.
 
     The owner's password is random and thrown away. Nobody types it: the
     desktop app signs the owner in automatically because there is nothing to
@@ -533,6 +556,9 @@ def first_run_setup(create_default_user=True):
     Config.DB_PATH.resolve().parent.mkdir(parents=True, exist_ok=True)
     with app.app_context():
         db.create_all()
+        # A new library starts at the current schema version; no migration runs on it.
+        from app.utils.db_upgrade import stamp_new_database
+        stamp_new_database(Config.DB_PATH)
         if create_default_user and db.session.query(User).first() is None:
             try:
                 who = (getpass.getuser() or "").strip() or "owner"

@@ -260,10 +260,14 @@ def _cols(path):
         con.close()
 
 
-def test_startup_migrates_an_old_schema_db_once(tmp_path):
+def test_ensure_migrates_an_old_schema_db_once(tmp_path):
+    # create_app no longer calls this at start (Alembic's 0001_baseline does the same work; see
+    # tests/test_db_upgrade.py). The function stays for by-hand use.
+    from sqlalchemy import create_engine
+    from app.utils.schema_upgrades import ensure_artist_confirmed_at
     db = str(tmp_path / "old.db")
     _old_db(db, [(1, "A", "2024-01-02 03:04:05"), (2, "B", None)])
-    _app_on(db)
+    ensure_artist_confirmed_at(create_engine(f"sqlite:///{db}"))
     assert "confirmed_at" in _cols(db)
     con = sqlite3.connect(db)
     got = dict(con.execute("SELECT id, confirmed_at FROM artist"))
@@ -271,7 +275,7 @@ def test_startup_migrates_an_old_schema_db_once(tmp_path):
     con.execute("UPDATE artist SET confirmed_at = NULL WHERE id = 2")   # an unattended row, later
     con.commit()
     con.close()
-    _app_on(db)                                    # second start: nothing is touched
+    ensure_artist_confirmed_at(create_engine(f"sqlite:///{db}"))        # second call: nothing is touched
     con = sqlite3.connect(db)
     assert dict(con.execute("SELECT id, confirmed_at FROM artist"))[2] is None
     con.close()

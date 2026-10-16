@@ -229,6 +229,11 @@ def get_folder():
         if not path:
             return jsonify({"error": "Not set"}), 404
         folders = []
+        # Folders that ARE a catalogued recording (location + folder_path), so the
+        # row can open Review on it and Trash can delete its record.
+        from app.models.recording import Recording
+        known = {fp_: rid for rid, fp_ in db.session.query(Recording.id, Recording.folder_path)
+                 .filter(Recording.location == which).all()}
         if os.path.isdir(path):
             for name in sorted(os.listdir(path), key=str.lower):
                 full = os.path.join(path, name)
@@ -240,6 +245,7 @@ def get_folder():
                     continue
                 fp = _fingerprints(full, None)
                 folders.append({
+                    "recording_id": known.get(name),
                     "checksums": None, "checksum_errors": [],
                     "fingerprints": fp["state"], "fingerprint_detail": fp["detail"],
                     "name": name, "files": files, "size_bytes": size, "format": fmt, "has_audio": fmt is not None,
@@ -317,10 +323,29 @@ def trash_folder():
                 .filter(DownloadJob.status.in_(("queued", "active"))).all()}
         if name in busy:
             return jsonify({"error": "This folder is still downloading."}), 409
+    # The recording this folder is, if it has one: its Queue row (Downloads) or its
+    # Workshop/Backlog record. The folder goes to the Trash FIRST; only then is the
+    # record deleted, and then whatever it created that nobody confirmed or enriched.
+    from app.models.recording import Recording
+    from app.utils import bulk_ingest_run
+    if which == "downloads":
+        rec = bulk_ingest_run.recording_of_folder(full)
+    else:
+        rec = (db.session.query(Recording)
+               .filter(Recording.location == which, Recording.folder_path == name).first())
     try:
         move_to_trash(full)
     except TrashUnavailable as e:
         return jsonify({"error": str(e)}), 501
     except OSError as e:
         return jsonify({"error": str(e)}), 500
+    if rec is not None:
+        from app.models.bulk_ingest import BulkIngestItem
+        from app.utils.recording_delete import remove_recording
+        for row in (db.session.query(BulkIngestItem)
+                    .filter(BulkIngestItem.recording_id == rec.id,
+                            BulkIngestItem.status.notin_(("ingested", "moved")))):
+            row.status, row.ingest_requested = "moved", False
+        remove_recording(rec.id)
+        db.session.commit()
     return jsonify({"ok": True})

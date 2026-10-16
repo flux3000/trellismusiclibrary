@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 from app.utils.format import format_partial_date
 from app.utils import track_flag_lexicon as _FLAG_LEXICON
+from app.utils.paths import recording_folder_abs
 from app.utils.reader.dates import best_show_date as _best_show_date, date_evidence as _date_evidence
 from app.utils.reader.place import peel as _peel_place
 from app.utils.health import compute_health
@@ -1342,7 +1343,7 @@ def read_recording_tags(recording, library_root):
     """
     out = []
     for track in sorted(recording.tracks, key=lambda t: t.track_number):
-        abs_path = os.path.join(library_root, recording.folder_path, track.file_path)
+        abs_path = os.path.join(recording_folder_abs(recording, library_root), track.file_path)
         entry = {"track_id": track.id, "track_number": track.track_number,
                  "title": track.title, "tags": None, "error": None}
         try:
@@ -1418,7 +1419,7 @@ def write_flac_tags(recording, library_root):
     errors    = []
 
     for track, tags in desired_track_tags(recording):
-        abs_path = os.path.join(library_root, recording.folder_path, track.file_path)
+        abs_path = os.path.join(recording_folder_abs(recording, library_root), track.file_path)
         try:
             audio = open_tags(abs_path)
             if audio is None:
@@ -3071,7 +3072,7 @@ def resolve_ingest_file_path(orig_rel_path, audio_rename_map, flatten):
 
 def move_to_library(source_folder, library_root, artist_name, folder_name,
                     progress_cb=None, audio_rename_map=None,
-                    cancel_cb=None, under_artist_folder=True, flatten=True):
+                    cancel_cb=None, under_artist_folder=True, flatten=True, force_move=False):
     """Move a source folder into the library. A source outside LIBRARY_ROOT is
     always moved; there is no copy behavior.
 
@@ -3138,6 +3139,10 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
     (under_artist_folder) only governs where a source arriving from OUTSIDE the
     root gets filed.
 
+    force_move: the source sits inside LIBRARY_ROOT but is not part of the shelf (a
+    Workshop or Backlog folder that lives under the library), so it is moved like any
+    other outside source instead of being catalogued where it is.
+
     Cancellation is handled HERE rather than by the caller because this is the
     only place that knows what has been written where — it means putting the
     files already moved back where they came from, which no caller could do.
@@ -3154,7 +3159,7 @@ def move_to_library(source_folder, library_root, artist_name, folder_name,
             in_root = True
         except ValueError:
             in_root = False
-    if in_root:
+    if in_root and not force_move:
         # the on-disk relative path can be NFD bytes (an rsync from an
         # HFS+-era source, or a byte-exact Linux filesystem) even though
         # every other identity key for this folder (BulkIngestItem.rel_path,
